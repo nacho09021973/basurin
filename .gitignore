@@ -10,3 +10,5 @@ venv/
 runs/
 *.h5
 *.hdf5
+
+*:Zone.Identifier
