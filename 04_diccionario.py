@@ -88,7 +88,7 @@ class Config:
     
     # C3 Noise floor adaptativo
     c3_noise_floor_eps: float = 0.001
-    c3_noise_floor_metric: Optional[str] = None  # None = igual a c3_metric
+    c3_noise_floor_metric: Optional[str] = None  # None/"same" = igual a c3_metric
     c3_adaptive_threshold: bool = False
     c3_threshold_factor: float = 5.0
     
@@ -140,10 +140,10 @@ def parse_args() -> Config:
     p.add_argument("--c3-noise-floor-eps", type=float, default=0.001,
                    dest="c3_noise_floor_eps",
                    help="Epsilon para cálculo de noise floor (default: 0.001)")
-    p.add_argument("--c3-noise-floor-metric", type=str, default=None,
+    p.add_argument("--c3-noise-floor-metric", type=str, default="same",
                    dest="c3_noise_floor_metric",
-                   choices=["rmse", "rmse_log", "rmse_rel", None],
-                   help="Métrica para noise floor (default: igual a --c3-metric)")
+                   choices=["same", "rmse", "rmse_log", "rmse_rel"],
+                   help="Métrica para noise floor (default: same = igual a --c3-metric)")
     p.add_argument("--c3-adaptive-threshold", action="store_true",
                    dest="c3_adaptive_threshold",
                    help="Usar umbral adaptativo basado en noise floor")
@@ -946,7 +946,9 @@ def evaluate_c3_full(
     
     k = cfg.k_features
     metric = cfg.c3_metric
-    noise_floor_metric = cfg.c3_noise_floor_metric or metric
+    noise_floor_metric = metric
+    if cfg.c3_noise_floor_metric not in (None, "same"):
+        noise_floor_metric = cfg.c3_noise_floor_metric
     
     # Invariantes defensivos
     verify_invariants(X, y, name="X_ratios")
