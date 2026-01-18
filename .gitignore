@@ -14,3 +14,7 @@ runs/
 *:Zone.Identifier
 
 *:Zone.Identifier
+
+# No subir papers/PDFs
+papers/
+*.pdf
