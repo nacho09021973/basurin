@@ -2,12 +2,15 @@
 """
 Bloque C: Diccionario holográfico inverso λ_SL → Δ
 
+v1.4.0 - Diagnóstico causal C3 con separación C3a/C3b, pesos, noise floor adaptativo
+
 Aprende la relación inversa: dado un espectro de masas M_n², predice Δ_UV.
 Usa features invariantes de escala (ratios r_n = M_n²/M_0²).
 
 Uso:
     python 04_diccionario.py --run mi_experimento
-    python 04_diccionario.py --run mi_experimento --k-features 5 --n-bootstrap 500
+    python 04_diccionario.py --run mi_experimento --enable-c3
+    python 04_diccionario.py --run mi_experimento --enable-c3 --c3-weights inv_n4 --c3-adaptive-threshold on
 
 Salida:
     runs/<run>/dictionary/
@@ -21,7 +24,9 @@ Salida:
 Contratos:
     C1: Compatibilidad puntual con Ising (τ_Δ=0.02 o 2σ)
     C2: Consistencia interna (CV RMSE, ciclo Δ→r→Δ)
-    C3: Compatibilidad espectral (RMSE en ratios)
+    C3: Compatibilidad espectral con diagnóstico causal
+        C3a (decoder): evalúa modelo directo Δ→r
+        C3b (cycle): evalúa ciclo completo r→Δ̂→r̂
 """
 
 from __future__ import annotations
@@ -31,15 +36,17 @@ import hashlib
 import json
 import sys
 import warnings
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 import numpy as np
 
 # Silenciar warnings de convergencia en CV con pocos datos
 warnings.filterwarnings("ignore", category=UserWarning)
+
+__version__ = "1.4.1"
 
 
 # =============================================================================
@@ -50,30 +57,43 @@ warnings.filterwarnings("ignore", category=UserWarning)
 class Config:
     """Configuración del Bloque C."""
     run: str
+    test_mode: bool = False  # Ejecuta self-tests deterministas y sale
     spectrum_file: str = "spectrum.h5"
     
     # Features
     k_features: int = 3              # Número de ratios r_n (n=1..K)
     
-    # Modelos a evaluar
+    # Modelos a evaluar (inverso: r→Δ)
     models: tuple = ("linear", "poly2")
+    
+    # Modelo directo (Δ→r) para C3
+    direct_model: str = "poly"       # "linear" o "poly"
+    direct_degree: int = 4           # Grado del polinomio directo
     
     # Validación
     cv_folds: int = 5
     n_bootstrap: int = 200
     random_seed: int = 42
     
-    # Contratos
+    # Contratos C1
     tau_delta: float = 0.02          # Tolerancia absoluta para C1
     sigma_factor: float = 2.0        # Factor para criterio 2σ
     sigma_cap: float = 0.1           # Techo para σ usable en C1
-    enable_c3: bool = False          # Activar C3 completo (modelo directo)
     
-    # C3 tuning (auditable)
-    direct_model: str = "poly"       # "linear" o "poly" para modelo directo Î"â†'ratios
-    direct_degree: int = 2           # Grado del polinomio si direct_model="poly"
-    c3_metric: str = "rmse"          # "rmse" | "rmse_log" | "rmse_rel"
-    c3_threshold: float = 0.05       # Umbral configurable para C3
+    # Contrato C3
+    enable_c3: bool = False          # Activar C3 completo
+    c3_metric: str = "rmse"          # rmse, rmse_log, rmse_rel
+    c3_threshold: float = 0.05       # Umbral base para C3
+    c3_weights: str = "none"         # none, inv_n, inv_n2, inv_n4, inv_r2
+    
+    # C3 Noise floor adaptativo
+    c3_noise_floor_eps: float = 0.001
+    c3_noise_floor_metric: Optional[str] = None  # None = igual a c3_metric
+    c3_adaptive_threshold: bool = False
+    c3_threshold_factor: float = 5.0
+    
+    # C3 Oracle test
+    c3_oracle: bool = False
     
     # Targets Ising 3D (bootstrap precision, arXiv:2411.15300)
     delta_sigma: float = 0.518148806
@@ -82,9 +102,11 @@ class Config:
 
 def parse_args() -> Config:
     p = argparse.ArgumentParser(
-        description="Bloque C: Diccionario holográfico inverso"
+        description="Bloque C: Diccionario holográfico inverso (v1.4.1)"
     )
-    p.add_argument("--run", type=str, required=True, help="Nombre del run")
+    p.add_argument("--run", type=str, default=None, help="Nombre del run")
+    p.add_argument("--test", action="store_true", dest="test_mode",
+                   help="Ejecuta self-tests deterministas (T1/T2) y sale")
     p.add_argument("--spectrum-file", type=str, default="spectrum.h5",
                    dest="spectrum_file", help="Archivo H5 del espectro")
     p.add_argument("--k-features", type=int, default=3, dest="k_features",
@@ -95,22 +117,50 @@ def parse_args() -> Config:
     p.add_argument("--tau-delta", type=float, default=0.02, dest="tau_delta")
     p.add_argument("--sigma-cap", type=float, default=0.1, dest="sigma_cap",
                    help="Techo máximo de σ para WEAK_PASS en C1 (default: 0.1)")
+    
+    # C3 básico
     p.add_argument("--enable-c3", action="store_true", dest="enable_c3",
-                   help="Activar C3 completo con modelo directo")
+                   help="Activar C3 completo con modelo directo Δ→ratios")
     p.add_argument("--direct-model", type=str, default="poly", dest="direct_model",
-                   choices=["linear", "poly"],
-                   help="Modelo directo para C3 (default: poly)")
-    p.add_argument("--direct-degree", type=int, default=2, dest="direct_degree",
-                   help="Grado del polinomio para el modelo directo (default: 2)")
+                   choices=["linear", "poly"], help="Tipo de modelo directo (default: poly)")
+    p.add_argument("--direct-degree", type=int, default=4, dest="direct_degree",
+                   help="Grado del polinomio para modelo directo (default: 4)")
     p.add_argument("--c3-metric", type=str, default="rmse", dest="c3_metric",
                    choices=["rmse", "rmse_log", "rmse_rel"],
-                   help="Metrica para C3 (default: rmse)")
+                   help="Métrica para C3 (default: rmse)")
     p.add_argument("--c3-threshold", type=float, default=0.05, dest="c3_threshold",
-                   help="Umbral para C3 (default: 0.05)")
+                   help="Umbral base para C3 (default: 0.05)")
+    
+    # C3 pesos
+    p.add_argument("--c3-weights", type=str, default="none", dest="c3_weights",
+                   choices=["none", "inv_n", "inv_n2", "inv_n4", "inv_r2"],
+                   help="Esquema de pesos para C3 (default: none)")
+    
+    # C3 noise floor adaptativo
+    p.add_argument("--c3-noise-floor-eps", type=float, default=0.001,
+                   dest="c3_noise_floor_eps",
+                   help="Epsilon para cálculo de noise floor (default: 0.001)")
+    p.add_argument("--c3-noise-floor-metric", type=str, default=None,
+                   dest="c3_noise_floor_metric",
+                   choices=["rmse", "rmse_log", "rmse_rel", None],
+                   help="Métrica para noise floor (default: igual a --c3-metric)")
+    p.add_argument("--c3-adaptive-threshold", action="store_true",
+                   dest="c3_adaptive_threshold",
+                   help="Usar umbral adaptativo basado en noise floor")
+    p.add_argument("--c3-threshold-factor", type=float, default=5.0,
+                   dest="c3_threshold_factor",
+                   help="Factor multiplicador para umbral adaptativo (default: 5.0)")
+    
+    # C3 oracle
+    p.add_argument("--c3-oracle", action="store_true", dest="c3_oracle",
+                   help="Activar oracle test (comparación forward real vs aproximado)")
     
     args = p.parse_args()
+    if not getattr(args, "test_mode", False) and args.run is None:
+        p.error("--run es requerido salvo cuando se usa --test")
     return Config(
-        run=args.run,
+        run=(args.run if args.run is not None else ("__selftest__" if getattr(args, "test_mode", False) else None)),
+        test_mode=getattr(args, "test_mode", False),
         spectrum_file=args.spectrum_file,
         k_features=args.k_features,
         cv_folds=args.cv_folds,
@@ -123,6 +173,12 @@ def parse_args() -> Config:
         direct_degree=args.direct_degree,
         c3_metric=args.c3_metric,
         c3_threshold=args.c3_threshold,
+        c3_weights=args.c3_weights,
+        c3_noise_floor_eps=args.c3_noise_floor_eps,
+        c3_noise_floor_metric=args.c3_noise_floor_metric,
+        c3_adaptive_threshold=args.c3_adaptive_threshold,
+        c3_threshold_factor=args.c3_threshold_factor,
+        c3_oracle=args.c3_oracle,
     )
 
 
@@ -152,6 +208,31 @@ def load_spectrum(h5_path: Path) -> dict:
     return data
 
 
+def verify_invariants(X: np.ndarray, y: Optional[np.ndarray] = None, *, name: str = "X") -> None:
+    """Asserts defensivos: shapes y finitud (NaN/Inf).
+
+    Objetivo: evitar debugging silencioso cuando cambie la geometría o el solver.
+    """
+    if not isinstance(X, np.ndarray):
+        raise TypeError(f"{name} debe ser np.ndarray, recibido {type(X)}")
+    if X.ndim != 2:
+        raise ValueError(f"{name} debe ser (n_samples, k), recibido {X.shape}")
+    if not np.isfinite(X).all():
+        bad = np.argwhere(~np.isfinite(X))
+        raise ValueError(f"{name} contiene NaNs/Infs en indices {bad[:5].tolist()} (mostrando hasta 5).")
+
+    if y is not None:
+        if not isinstance(y, np.ndarray):
+            raise TypeError(f"y debe ser np.ndarray, recibido {type(y)}")
+        if y.ndim != 1:
+            raise ValueError(f"y debe ser (n_samples,), recibido {y.shape}")
+        if X.shape[0] != y.shape[0]:
+            raise ValueError(f"Mismatch dimensional: {name}={X.shape}, y={y.shape}")
+        if not np.isfinite(y).all():
+            bad = np.argwhere(~np.isfinite(y))
+            raise ValueError(f"y contiene NaNs/Infs en indices {bad[:5].tolist()} (mostrando hasta 5).")
+
+
 def compute_ratio_features(M2: np.ndarray, k: int) -> np.ndarray:
     """Calcula features invariantes de escala: r_n = M_n² / M_0².
     
@@ -174,15 +255,17 @@ def compute_ratio_features(M2: np.ndarray, k: int) -> np.ndarray:
     
     # Ratios r_1, r_2, ..., r_k
     X = M2[:, 1:k+1] / M0_safe
-    
+
+    verify_invariants(X, name="X_ratios")
+
     return X
 
 
 # =============================================================================
-# Modelos paramétricos
+# Modelos paramétricos (inverso: r → Δ)
 # =============================================================================
 
-def build_design_matrix(X: np.ndarray, model_type: str) -> np.ndarray:
+def build_design_matrix(X: np.ndarray, model_type: str) -> tuple[np.ndarray, list]:
     """Construye matriz de diseño para el modelo especificado.
     
     Args:
@@ -231,10 +314,12 @@ def build_design_matrix(X: np.ndarray, model_type: str) -> np.ndarray:
 
 def fit_model(Phi: np.ndarray, y: np.ndarray, ridge_lambda: float = 1e-8) -> np.ndarray:
     """Ajusta modelo por mínimos cuadrados (con ridge mínimo para estabilidad).
-    
+
     Returns:
         beta: coeficientes (n_params,)
     """
+
+    verify_invariants(Phi, y, name="Phi")
     n_params = Phi.shape[1]
     
     # Normal equations con ridge: (Φᵀ Φ + λI)⁻¹ Φᵀ y
@@ -278,15 +363,9 @@ def compute_information_criteria(y: np.ndarray, y_pred: np.ndarray, n_params: in
     residuals = y - y_pred
     ss_res = np.sum(residuals ** 2)
     
-    # Log-likelihood (asumiendo errores gaussianos)
-    # L = -n/2 * log(2π) - n/2 * log(σ²) - SS_res/(2σ²)
-    # Con σ² = SS_res/n (MLE): log(L) = -n/2 * (log(2π) + log(SS_res/n) + 1)
-    
     sigma2_mle = ss_res / n
-    log_likelihood = -n/2 * (np.log(2 * np.pi) + np.log(sigma2_mle) + 1)
+    log_likelihood = -n/2 * (np.log(2 * np.pi) + np.log(sigma2_mle + 1e-10) + 1)
     
-    # AIC = -2 log(L) + 2k
-    # BIC = -2 log(L) + k log(n)
     aic = -2 * log_likelihood + 2 * n_params
     bic = -2 * log_likelihood + n_params * np.log(n)
     
@@ -314,21 +393,17 @@ def cross_validate(X: np.ndarray, y: np.ndarray, model_type: str,
     cv_predictions = np.zeros(n_samples)
     
     for fold in range(n_folds):
-        # Índices de test
         start = fold * fold_size
         end = start + fold_size if fold < n_folds - 1 else n_samples
         test_idx = indices[start:end]
         train_idx = np.concatenate([indices[:start], indices[end:]])
         
-        # Split
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
         
-        # Fit
         Phi_train, _ = build_design_matrix(X_train, model_type)
         beta = fit_model(Phi_train, y_train)
         
-        # Predict
         Phi_test, _ = build_design_matrix(X_test, model_type)
         y_pred = predict(Phi_test, beta)
         
@@ -354,36 +429,30 @@ def bootstrap_uncertainty(X: np.ndarray, y: np.ndarray, model_type: str,
     np.random.seed(seed)
     n_samples = len(y)
     
-    # Ajustar modelo completo para predicciones base
     Phi_full, _ = build_design_matrix(X, model_type)
     beta_full = fit_model(Phi_full, y)
     y_pred_full = predict(Phi_full, beta_full)
     
-    # Bootstrap: re-muestreo de filas
     bootstrap_predictions = np.zeros((n_bootstrap, n_samples))
     bootstrap_betas = []
     
     for b in range(n_bootstrap):
-        # Muestreo con reemplazo
         idx = np.random.choice(n_samples, size=n_samples, replace=True)
         X_b, y_b = X[idx], y[idx]
         
-        # Fit
         Phi_b, _ = build_design_matrix(X_b, model_type)
         beta_b = fit_model(Phi_b, y_b)
         bootstrap_betas.append(beta_b)
         
-        # Predict en datos originales
         y_pred_b = predict(Phi_full, beta_b)
         bootstrap_predictions[b] = y_pred_b
     
-    # Estadísticas
-    sigma_delta = np.std(bootstrap_predictions, axis=0)  # Por punto
+    sigma_delta = np.std(bootstrap_predictions, axis=0)
     beta_mean = np.mean(bootstrap_betas, axis=0)
     beta_std = np.std(bootstrap_betas, axis=0)
     
     return {
-        "sigma_delta": sigma_delta,                    # (n_samples,)
+        "sigma_delta": sigma_delta,
         "sigma_delta_mean": float(np.mean(sigma_delta)),
         "sigma_delta_max": float(np.max(sigma_delta)),
         "beta_mean": beta_mean,
@@ -402,12 +471,10 @@ def select_best_model(X: np.ndarray, y: np.ndarray, models: tuple,
     results = {}
     
     for model_type in models:
-        # Fit completo
         Phi, feature_names = build_design_matrix(X, model_type)
         beta = fit_model(Phi, y)
         y_pred = predict(Phi, beta)
         
-        # Métricas
         metrics = compute_metrics(y, y_pred)
         info_criteria = compute_information_criteria(y, y_pred, len(beta))
         cv_results = cross_validate(X, y, model_type, cv_folds, seed)
@@ -421,7 +488,6 @@ def select_best_model(X: np.ndarray, y: np.ndarray, models: tuple,
             "cv": cv_results,
         }
     
-    # Seleccionar por BIC (menor es mejor)
     best_model = min(results.keys(), key=lambda m: results[m]["info_criteria"]["bic"])
     
     return {
@@ -432,32 +498,21 @@ def select_best_model(X: np.ndarray, y: np.ndarray, models: tuple,
 
 
 # =============================================================================
-# Contratos
+# Contratos C1 y C2
 # =============================================================================
 
 def evaluate_c1_ising(delta_pred: np.ndarray, sigma_delta: np.ndarray,
                       delta_target: float, tau: float, sigma_factor: float,
                       target_name: str, sigma_cap: float = 0.1,
                       delta_range: tuple[float, float] = None) -> dict:
-    """Contrato C1: compatibilidad puntual con Ising.
-    
-    Criterios:
-    - OUT_OF_DOMAIN: target fuera del rango [delta_min, delta_max] del dataset
-    - STRONG_PASS: |Δ̂ - Δ*| ≤ τ (tolerancia absoluta)
-    - WEAK_PASS: |Δ̂ - Δ*| ≤ 2σ AND σ ≤ sigma_cap (incertidumbre acotada)
-    - FAIL: ninguno de los anteriores
-    
-    El sigma_cap evita "pasar por incertidumbre gigante".
-    """
+    """Contrato C1: compatibilidad puntual con Ising."""
     errors = np.abs(delta_pred - delta_target)
     
-    # Verificar si el target está en dominio
     in_domain = True
     if delta_range is not None:
         delta_min, delta_max = delta_range
         in_domain = delta_min <= delta_target <= delta_max
     
-    # Si está fuera de dominio, no evaluamos pass/fail
     if not in_domain:
         best_idx = np.argmin(errors)
         return {
@@ -482,22 +537,15 @@ def evaluate_c1_ising(delta_pred: np.ndarray, sigma_delta: np.ndarray,
             "n_sigma_too_large": 0,
         }
     
-    # Criterio fuerte: tolerancia absoluta
     pass_tau = errors <= tau
-    
-    # Criterio débil: dentro de 2σ, pero solo si σ es razonable
     sigma_usable = sigma_delta <= sigma_cap
     pass_sigma_raw = errors <= sigma_factor * sigma_delta
     pass_sigma = pass_sigma_raw & sigma_usable
     
-    # Mejor candidato: primero por pass_tau, luego por pass_sigma, luego por error mínimo
-    # Construir score: 0 si pass_tau, 1 si pass_sigma, 2 si ninguno, luego desempatar por error
     scores = np.where(pass_tau, 0, np.where(pass_sigma, 1, 2))
-    # Combinar score con error normalizado para desempate
     combined_score = scores + errors / (errors.max() + 1e-10)
     best_idx = np.argmin(combined_score)
     
-    # Status del mejor candidato
     if pass_tau[best_idx]:
         status = "STRONG_PASS"
     elif pass_sigma[best_idx]:
@@ -507,7 +555,6 @@ def evaluate_c1_ising(delta_pred: np.ndarray, sigma_delta: np.ndarray,
     else:
         status = "FAIL"
     
-    # Status global
     if np.any(pass_tau):
         global_status = "STRONG_PASS"
     elif np.any(pass_sigma):
@@ -544,8 +591,6 @@ def evaluate_c2_consistency(y_true: np.ndarray, y_pred: np.ndarray,
                             cv_rmse: float) -> dict:
     """Contrato C2: consistencia interna del diccionario."""
     metrics = compute_metrics(y_true, y_pred)
-    
-    # Criterio de fallo: CV RMSE > 0.05
     consistency_ok = cv_rmse < 0.05
     
     return {
@@ -558,54 +603,53 @@ def evaluate_c2_consistency(y_true: np.ndarray, y_pred: np.ndarray,
     }
 
 
-def fit_direct_model(y: np.ndarray, X: np.ndarray, model_type: str, degree: int = 2) -> tuple[np.ndarray, list]:
-    """Ajusta modelo directo Delta -> ratios (para C3).
+# =============================================================================
+# Contrato C3: Modelo directo y métricas
+# =============================================================================
+
+# =============================================================================
+# Modelo Directo (Proxy para C3)
+# NOTA: Este modelo polinomial NO es la física real. Es un proxy suave local
+# usado para evaluar la invertibilidad del mapeo.
+# Si C3a falla, significa que el proxy es malo, no que la física esté rota.
+# =============================================================================
+
+
+def build_direct_design_matrix(y: np.ndarray, degree: int) -> np.ndarray:
+    """Construye matriz de diseño polinomial para modelo directo Δ→r."""
+    n_samples = len(y)
+    # [1, Δ, Δ², ..., Δ^degree]
+    Phi = np.column_stack([y**p for p in range(degree + 1)])
+    return Phi
+
+
+def fit_direct_model(y: np.ndarray, X: np.ndarray, degree: int) -> list[np.ndarray]:
+    """Ajusta modelo directo Δ → ratios.
     
     Args:
-        y: array (n_samples,) con Delta
+        y: array (n_samples,) con Δ
         X: array (n_samples, k) con ratios objetivo
-        model_type: "linear" o "poly"
-        degree: grado del polinomio si model_type="poly"
+        degree: grado del polinomio
     
     Returns:
         betas: lista de coeficientes, uno por ratio
-        feature_names: nombres de features del modelo
     """
     n_samples, k = X.shape
+    Phi = build_direct_design_matrix(y, degree)
+    
     betas = []
-    
-    # Para el modelo directo, las features son funciones de Delta
-    if model_type == "linear":
-        Phi = np.column_stack([np.ones(n_samples), y])
-        names = ["1", "Delta"]
-    elif model_type == "poly":
-        # [1, Delta, Delta^2, ..., Delta^degree]
-        cols = [np.ones(n_samples)] + [y**p for p in range(1, degree + 1)]
-        Phi = np.column_stack(cols)
-        names = ["1"] + [f"Delta^{p}" for p in range(1, degree + 1)]
-    else:
-        raise ValueError(f"model_type desconocido: {model_type}")
-    
-    # Ajustar un modelo por cada ratio
     for j in range(k):
         beta_j = fit_model(Phi, X[:, j])
         betas.append(beta_j)
     
-    return betas, names
+    return betas
 
 
-def predict_ratios(y: np.ndarray, betas: list, model_type: str, degree: int = 2) -> np.ndarray:
-    """Predice ratios desde Delta usando modelo directo."""
+def predict_ratios(y: np.ndarray, betas: list[np.ndarray], degree: int) -> np.ndarray:
+    """Predice ratios desde Δ usando modelo directo."""
     n_samples = len(y)
     k = len(betas)
-    
-    if model_type == "linear":
-        Phi = np.column_stack([np.ones(n_samples), y])
-    elif model_type == "poly":
-        cols = [np.ones(n_samples)] + [y**p for p in range(1, degree + 1)]
-        Phi = np.column_stack(cols)
-    else:
-        raise ValueError(f"model_type desconocido: {model_type}")
+    Phi = build_direct_design_matrix(y, degree)
     
     X_pred = np.zeros((n_samples, k))
     for j, beta_j in enumerate(betas):
@@ -614,99 +658,385 @@ def predict_ratios(y: np.ndarray, betas: list, model_type: str, degree: int = 2)
     return X_pred
 
 
-def evaluate_c3_spectral(X: np.ndarray, X_pred: np.ndarray,
-                         metric: str = "rmse", threshold: float = 0.05,
-                         is_placeholder: bool = False) -> dict:
-    """Contrato C3: compatibilidad espectral (error en ratios).
+def compute_weights(k: int, scheme: str, X: np.ndarray = None) -> np.ndarray:
+    """Calcula pesos para métricas C3.
     
     Args:
-        X: ratios originales
-        X_pred: ratios reconstruidos
-        metric: "rmse" | "rmse_log" | "rmse_rel"
-        threshold: umbral para PASS/FAIL
-        is_placeholder: si True, retorna SKIP
+        k: número de ratios
+        scheme: "none", "inv_n", "inv_n2", "inv_n4", "inv_r2"
+        X: array (n_samples, k) de ratios (requerido para inv_r2)
     
-    Si is_placeholder=True, marca como SKIP en lugar de evaluar.
+    Returns:
+        weights: array (k,) con pesos normalizados
     """
-    if is_placeholder:
-        return {
-            "status": "SKIP",
-            "rmse_per_ratio": [],
-            "rmse_global": None,
-            "spectral_ok": None,
-            "metric": metric,
-            "threshold": threshold,
-            "note": "C3 requiere modelo directo. Use --enable-c3 para activar.",
-        }
+    n = np.arange(1, k + 1)  # n = 1, 2, ..., k
     
-    eps = 1e-12
-    
-    # Calcular errores segun metrica
-    if metric == "rmse":
-        errors = X - X_pred
-    elif metric == "rmse_log":
-        # RMSE sobre log(r) - estabiliza ratios grandes
-        X_safe = np.clip(X, eps, None)
-        X_pred_safe = np.clip(X_pred, eps, None)
-        errors = np.log(X_safe) - np.log(X_pred_safe)
-    elif metric == "rmse_rel":
-        # RMSE relativo
-        denom = np.clip(np.abs(X), eps, None)
-        errors = (X - X_pred) / denom
+    if scheme == "none":
+        w = np.ones(k)
+    elif scheme == "inv_n":
+        w = 1.0 / n
+    elif scheme == "inv_n2":
+        w = 1.0 / (n ** 2)
+    elif scheme == "inv_n4":
+        w = 1.0 / (n ** 4)
+    elif scheme == "inv_r2":
+        if X is None:
+            raise ValueError("inv_r2 requiere X (ratios)")
+        # Media de r_n² sobre muestras + epsilon para estabilidad
+        r_mean_sq = np.mean(X ** 2, axis=0) + 1e-12
+        w = 1.0 / r_mean_sq
     else:
-        raise ValueError(f"metric desconocida: {metric}")
+        raise ValueError(f"Esquema de pesos desconocido: {scheme}")
     
-    rmse_per_ratio = np.sqrt(np.mean(errors ** 2, axis=0))
-    rmse_global = np.sqrt(np.mean(errors ** 2))
-    spectral_ok = bool(rmse_global < threshold)
+    # Normalizar para que sumen 1
+    w = w / np.sum(w)
+    return w
+
+
+def compute_ratio_distance(
+    r_true: np.ndarray, 
+    r_pred: np.ndarray, 
+    metric: str,
+    weights: np.ndarray = None
+) -> dict:
+    """Función unificada para calcular distancia entre ratios.
+    
+    Args:
+        r_true: array (n_samples, k) ratios verdaderos
+        r_pred: array (n_samples, k) ratios predichos
+        metric: "rmse", "rmse_log", "rmse_rel"
+        weights: array (k,) pesos por ratio (opcional)
+    
+    Returns:
+        dict con global, per_ratio, weights_used
+    """
+    n_samples, k = r_true.shape
+    
+    if weights is None:
+        weights = np.ones(k) / k  # Pesos uniformes
+    
+    # Calcular errores según métrica
+    if metric == "rmse":
+        errors = r_true - r_pred  # (n_samples, k)
+        errors_sq = errors ** 2
+    elif metric == "rmse_log":
+        # log(r) con clamp para evitar log(0)
+        r_true_safe = np.maximum(r_true, 1e-10)
+        r_pred_safe = np.maximum(r_pred, 1e-10)
+        errors = np.log(r_true_safe) - np.log(r_pred_safe)
+        errors_sq = errors ** 2
+    elif metric == "rmse_rel":
+        # Error relativo: (r - r̂) / r
+        r_true_safe = np.where(np.abs(r_true) > 1e-10, r_true, 1e-10)
+        errors = (r_true - r_pred) / r_true_safe
+        errors_sq = errors ** 2
+    else:
+        raise ValueError(f"Métrica desconocida: {metric}")
+    
+    # MSE por ratio (promedio sobre muestras)
+    mse_per_ratio = np.mean(errors_sq, axis=0)  # (k,)
+    rmse_per_ratio = np.sqrt(mse_per_ratio)
+    
+    # WRMSE global: sqrt(sum_n w_n * mse_n)
+    wrmse_global = np.sqrt(np.sum(weights * mse_per_ratio))
     
     return {
-        "status": "PASS" if spectral_ok else "FAIL",
+        "global": float(wrmse_global),
+        "per_ratio": [float(r) for r in rmse_per_ratio],
+        "weights_used": [float(w) for w in weights],
         "metric": metric,
-        "rmse_per_ratio": [float(r) for r in rmse_per_ratio],
-        "rmse_global": float(rmse_global),
-        "threshold": threshold,
-        "spectral_ok": spectral_ok,
     }
 
 
-def evaluate_c3_cycle(X: np.ndarray, y: np.ndarray, 
-                      inverse_model_type: str,
-                      direct_model_type: str = "poly",
-                      direct_degree: int = 2,
-                      c3_metric: str = "rmse",
-                      c3_threshold: float = 0.05) -> dict:
-    """Contrato C3 completo: test de ciclo r -> Delta_hat -> r_hat.
+def compute_sensitivity(
+    y: np.ndarray,
+    betas_direct: list[np.ndarray],
+    degree: int,
+    eps: float = 0.001
+) -> dict:
+    """Calcula sensibilidad del modelo directo: |r(Δ+ε) - r(Δ)| / ε.
     
-    1. Ajusta modelo inverso: r -> Delta
-    2. Ajusta modelo directo: Delta -> r
-    3. Evalua ciclo: r -> Delta_hat -> r_hat
-    4. Mide error(r, r_hat) segun metrica
-    
-    Args:
-        X: ratios originales
-        y: Delta (target del modelo inverso)
-        inverse_model_type: tipo de modelo inverso ("linear", "poly2")
-        direct_model_type: tipo de modelo directo ("linear", "poly")
-        direct_degree: grado del polinomio para modelo directo
-        c3_metric: metrica de error ("rmse", "rmse_log", "rmse_rel")
-        c3_threshold: umbral para PASS/FAIL
+    Proxy de condicionamiento del observable.
     """
-    # Modelo inverso (ya lo tenemos, pero lo re-ajustamos para claridad)
-    Phi_inv, _ = build_design_matrix(X, inverse_model_type)
-    beta_inv = fit_model(Phi_inv, y)
+    n_samples = len(y)
+    k = len(betas_direct)
+    
+    # r(Δ) y r(Δ+ε)
+    r_base = predict_ratios(y, betas_direct, degree)
+    r_perturbed = predict_ratios(y + eps, betas_direct, degree)
+    
+    # Sensibilidad por componente: |dr/dΔ| ≈ |r(Δ+ε) - r(Δ)| / ε
+    sensitivity = np.abs(r_perturbed - r_base) / eps  # (n_samples, k)
+    
+    # Agregar estadísticas
+    sensitivity_median_per_ratio = np.median(sensitivity, axis=0)  # (k,)
+    
+    # Norma L2 de sensibilidad por muestra, luego mediana
+    sensitivity_norm_per_sample = np.linalg.norm(sensitivity, axis=1)  # (n_samples,)
+    sensitivity_norm_median = float(np.median(sensitivity_norm_per_sample))
+    
+    return {
+        "eps": eps,
+        "per_ratio_median": [float(s) for s in sensitivity_median_per_ratio],
+        "norm_median": sensitivity_norm_median,
+        "norm_max": float(np.max(sensitivity_norm_per_sample)),
+        "norm_p90": float(np.percentile(sensitivity_norm_per_sample, 90)),
+    }
+
+
+def compute_noise_floor(
+    y: np.ndarray,
+    X: np.ndarray,
+    betas_direct: list[np.ndarray],
+    degree: int,
+    eps: float,
+    metric: str,
+    weights: np.ndarray
+) -> dict:
+    """Estima noise floor: resolución efectiva del observable bajo perturbación.
+    
+    Mide cuánto cambia r cuando Δ cambia por ±ε.
+    """
+    n_samples = len(y)
+    
+    # r predicho en Δ y en Δ+ε
+    r_base = predict_ratios(y, betas_direct, degree)
+    r_perturbed = predict_ratios(y + eps, betas_direct, degree)
+    
+    # Calcular "error" de la perturbación usando la métrica elegida
+    distance = compute_ratio_distance(r_base, r_perturbed, metric, weights)
+    
+    # También calcular por muestra para estadísticas
+    sigmas = []
+    for i in range(n_samples):
+        sample_dist = compute_ratio_distance(
+            r_base[i:i+1], r_perturbed[i:i+1], metric, weights
+        )
+        sigmas.append(sample_dist["global"])
+    
+    sigmas = np.array(sigmas)
+    
+    return {
+        "eps": eps,
+        "metric": metric,
+        "median_sigma": float(np.median(sigmas)),
+        "mean_sigma": float(np.mean(sigmas)),
+        "p90_sigma": float(np.percentile(sigmas, 90)),
+        "max_sigma": float(np.max(sigmas)),
+        "aggregate_distance": distance["global"],
+    }
+
+
+def evaluate_c3a_decoder(
+    X_true: np.ndarray,
+    y_true: np.ndarray,
+    betas_direct: list[np.ndarray],
+    degree: int,
+    metric: str,
+    weights: np.ndarray
+) -> dict:
+    """C3a: Evalúa modelo directo (decoder) Δ_true → r̂.
+    
+    Compara r_true con r̂ = decoder(Δ_true).
+    """
+    r_pred = predict_ratios(y_true, betas_direct, degree)
+    
+    # Calcular todas las métricas
+    result = {}
+    for m in ["rmse", "rmse_log", "rmse_rel"]:
+        dist = compute_ratio_distance(X_true, r_pred, m, weights if m == metric else None)
+        result[m] = dist["global"]
+        if m == metric:
+            result["per_ratio"] = dist["per_ratio"]
+    
+    result["metric_primary"] = metric
+    result["global"] = result[metric]
+    
+    return result
+
+
+def evaluate_c3b_cycle(
+    X_true: np.ndarray,
+    y_true: np.ndarray,
+    inverse_model_type: str,
+    betas_direct: list[np.ndarray],
+    degree: int,
+    metric: str,
+    weights: np.ndarray
+) -> dict:
+    """C3b: Evalúa ciclo completo r → Δ̂ → r̂.
+    
+    1. Ajusta modelo inverso r → Δ
+    2. Predice Δ̂ desde r_true
+    3. Predice r̂ = decoder(Δ̂)
+    4. Compara r_true vs r̂
+    """
+    # Modelo inverso
+    Phi_inv, _ = build_design_matrix(X_true, inverse_model_type)
+    beta_inv = fit_model(Phi_inv, y_true)
     delta_pred = predict(Phi_inv, beta_inv)
     
-    # Modelo directo
-    betas_dir, _ = fit_direct_model(y, X, direct_model_type, direct_degree)
+    # Ciclo: r → Δ̂ → r̂
+    r_reconstructed = predict_ratios(delta_pred, betas_direct, degree)
     
-    # Ciclo: r -> Delta_hat -> r_hat
-    X_reconstructed = predict_ratios(delta_pred, betas_dir, direct_model_type, direct_degree)
+    # Calcular todas las métricas
+    result = {}
+    for m in ["rmse", "rmse_log", "rmse_rel"]:
+        dist = compute_ratio_distance(X_true, r_reconstructed, m, weights if m == metric else None)
+        result[m] = dist["global"]
+        if m == metric:
+            result["per_ratio"] = dist["per_ratio"]
     
-    # Metricas del ciclo
-    return evaluate_c3_spectral(X, X_reconstructed, 
-                                metric=c3_metric, threshold=c3_threshold,
-                                is_placeholder=False)
+    result["metric_primary"] = metric
+    result["global"] = result[metric]
+    result["delta_pred_range"] = [float(delta_pred.min()), float(delta_pred.max())]
+    
+    return result
+
+
+def evaluate_c3_oracle(
+    X_true: np.ndarray,
+    y_true: np.ndarray,
+    betas_direct: list[np.ndarray],
+    degree: int,
+    metric: str,
+    weights: np.ndarray
+) -> dict:
+    """Oracle test: compara forward "real" (datos) vs forward aproximado (decoder).
+    
+    En baseline, esto es equivalente a C3a. Pero se etiqueta explícitamente
+    para hacer el gap entre forward real y aproximado defendible.
+    """
+    # En baseline, el "forward real" son los ratios del dataset
+    # El "forward aproximado" es el decoder
+    # Esto es idéntico a C3a, pero con etiqueta explícita
+    
+    r_pred = predict_ratios(y_true, betas_direct, degree)
+    
+    result = {}
+    for m in ["rmse", "rmse_log", "rmse_rel"]:
+        dist = compute_ratio_distance(X_true, r_pred, m, weights if m == metric else None)
+        result[m] = dist["global"]
+        if m == metric:
+            result["per_ratio"] = dist["per_ratio"]
+    
+    result["metric_primary"] = metric
+    result["global"] = result[metric]
+    result["description"] = "Gap entre forward real (datos) y forward aproximado (decoder)"
+    
+    return result
+
+
+def evaluate_c3_full(
+    X: np.ndarray,
+    y: np.ndarray,
+    cfg: Config,
+    inverse_model_type: str
+) -> dict:
+    """Evaluación completa de C3 con diagnóstico causal."""
+
+    verify_invariants(X, y, name="X")
+
+    if not cfg.enable_c3:
+        return {
+            "status": "SKIP",
+            "failure_mode": None,
+            "note": "C3 requiere --enable-c3. Usar --enable-c3 para activar.",
+        }
+    
+    k = cfg.k_features
+    metric = cfg.c3_metric
+    noise_floor_metric = cfg.c3_noise_floor_metric or metric
+    
+    # Invariantes defensivos
+    verify_invariants(X, y, name="X_ratios")
+
+    # Calcular pesos
+    weights = compute_weights(k, cfg.c3_weights, X)
+    
+    # Ajustar modelo directo
+    betas_direct = fit_direct_model(y, X, cfg.direct_degree)
+    
+    # C3a: Decoder
+    c3a = evaluate_c3a_decoder(X, y, betas_direct, cfg.direct_degree, metric, weights)
+    
+    # C3b: Cycle
+    c3b = evaluate_c3b_cycle(X, y, inverse_model_type, betas_direct, cfg.direct_degree, metric, weights)
+    
+    # Sensitivity
+    sensitivity = compute_sensitivity(y, betas_direct, cfg.direct_degree, cfg.c3_noise_floor_eps)
+    
+    # Noise floor
+    noise_floor = compute_noise_floor(
+        y, X, betas_direct, cfg.direct_degree,
+        cfg.c3_noise_floor_eps, noise_floor_metric, weights
+    )
+    
+    # Oracle (opcional)
+    oracle = None
+    if cfg.c3_oracle:
+        oracle = evaluate_c3_oracle(X, y, betas_direct, cfg.direct_degree, metric, weights)
+    
+    # Calcular umbral efectivo
+    threshold_user = cfg.c3_threshold
+    threshold_adaptive = cfg.c3_threshold_factor * noise_floor["median_sigma"]
+    
+    if cfg.c3_adaptive_threshold:
+        threshold_effective = max(threshold_user, threshold_adaptive)
+        threshold_mode = "adaptive"
+    else:
+        threshold_effective = threshold_user
+        threshold_mode = "user"
+    
+    # Determinar failure_mode y status
+    c3a_value = c3a["global"]
+    c3b_value = c3b["global"]
+
+    c3a_ok = bool(c3a_value <= threshold_effective)
+    c3b_ok = bool(c3b_value <= threshold_effective)
+    c3a_status = "PASS" if c3a_ok else "FAIL"
+    c3b_status = "PASS" if c3b_ok else "FAIL"
+    
+    if c3a_value > threshold_effective:
+        failure_mode = "DECODER_MISMATCH"
+        status = "FAIL"
+    elif c3b_value > threshold_effective:
+        failure_mode = "CYCLE_INCONSISTENT"
+        status = "FAIL"
+    else:
+        failure_mode = None
+        status = "PASS"
+    
+    return {
+        "status": status,
+        "c3a_status": c3a_status,
+        "c3b_status": c3b_status,
+        "failure_mode": failure_mode,
+        "metric": metric,
+        "weights": {
+            "scheme": cfg.c3_weights,
+            "values": [float(w) for w in weights],
+        },
+        "c3a_decoder": c3a,
+        "c3b_cycle": c3b,
+        "sensitivity": sensitivity,
+        "noise_floor": noise_floor,
+        "threshold": {
+            "user": threshold_user,
+            "adaptive": float(threshold_adaptive),
+            "effective": float(threshold_effective),
+            "factor": cfg.c3_threshold_factor,
+            "mode": threshold_mode,
+        },
+        "oracle": oracle,
+        "direct_model": {
+            "type": cfg.direct_model,
+            "degree": cfg.direct_degree,
+        },
+        # Backward compatibility
+        "spectral_ok": status == "PASS",
+        "rmse_global": c3b_value,  # Para compatibilidad con código anterior
+    }
 
 
 # =============================================================================
@@ -714,17 +1044,10 @@ def evaluate_c3_cycle(X: np.ndarray, y: np.ndarray,
 # =============================================================================
 
 def build_atlas(delta: np.ndarray, M2: np.ndarray, k: int) -> dict:
-    """Construye atlas simple de teorías efectivas.
-    
-    En hard-wall es trivial (cada Δ define una teoría), pero dejamos
-    el formato preparado para geometrías más complejas.
-    """
+    """Construye atlas simple de teorías efectivas."""
     X = compute_ratio_features(M2, k)
-    
-    # Clustering simple por Δ (ya están ordenados)
     n_theories = len(delta)
     
-    # Estadísticas por teoría
     theories = []
     for i in range(n_theories):
         theories.append({
@@ -739,7 +1062,7 @@ def build_atlas(delta: np.ndarray, M2: np.ndarray, k: int) -> dict:
         "n_theories": n_theories,
         "delta_range": [float(delta.min()), float(delta.max())],
         "theories": theories,
-        "clustering_method": "parametric_sweep",  # Trivial para hard-wall
+        "clustering_method": "parametric_sweep",
     }
 
 
@@ -771,14 +1094,12 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
     h5_path = out_dir / "dictionary.h5"
     
     with h5py.File(h5_path, "w") as h5:
-        # Features
         feat_grp = h5.create_group("features")
         feat_grp.attrs["k"] = cfg.k_features
         feat_grp.attrs["definition"] = "r_n = M_n^2 / M_0^2, n=1..k"
         feat_grp.create_dataset("feature_names", 
                                 data=np.array(best_result["feature_names"], dtype="S"))
         
-        # Model
         model_grp = h5.create_group("model")
         model_grp.attrs["type"] = best_model
         model_grp.attrs["n_params"] = best_result["n_params"]
@@ -786,7 +1107,6 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
         model_grp.create_dataset("beta_bootstrap_mean", data=bootstrap["beta_mean"])
         model_grp.create_dataset("beta_bootstrap_std", data=bootstrap["beta_std"])
         
-        # Selection
         sel_grp = h5.create_group("selection")
         sel_grp.attrs["criterion"] = "BIC"
         sel_grp.attrs["best_model"] = best_model
@@ -797,20 +1117,18 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
             m_grp.attrs["cv_rmse"] = result["cv"]["cv_rmse_mean"]
             m_grp.attrs["r2"] = result["metrics"]["r2"]
         
-        # Uncertainty
         unc_grp = h5.create_group("uncertainty")
         unc_grp.attrs["method"] = "bootstrap"
         unc_grp.attrs["n_bootstrap"] = bootstrap["n_bootstrap"]
         unc_grp.attrs["seed"] = cfg.random_seed
         unc_grp.create_dataset("sigma_delta", data=bootstrap["sigma_delta"])
         
-        # Predictions (para reproducibilidad)
         pred_grp = h5.create_group("predictions")
         pred_grp.create_dataset("delta_true", data=spectrum["delta_uv"])
         pred_grp.create_dataset("delta_pred", 
                                 data=best_result["cv"]["cv_predictions"])
         
-        # Metadata
+        h5.attrs["version"] = __version__
         h5.attrs["created"] = datetime.now(timezone.utc).isoformat()
         h5.attrs["spectrum_source"] = cfg.spectrum_file
     
@@ -831,13 +1149,13 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
             "tau_delta": cfg.tau_delta,
             "sigma_factor": cfg.sigma_factor,
             "sigma_cap": cfg.sigma_cap,
-            "note": "STRONG_PASS requiere error ≤ τ. WEAK_PASS requiere error ≤ 2σ con σ ≤ σ_cap.",
+            "note": "STRONG_PASS: error <= tau. WEAK_PASS: error <= 2*sigma con sigma <= sigma_cap.",
         },
         "sigma_comparison": contracts["c1_sigma"],
         "epsilon_comparison": contracts["c1_epsilon"],
-        "interpretation": "Hard-wall baseline: Δ es parámetro de barrido, no predicción. "
-                          "C1 aquí valida infraestructura, no física. "
-                          "Comparación real requiere geometrías emergentes (Bloque A no trivial).",
+        "interpretation": "Hard-wall baseline: Delta es parametro de barrido, no prediccion. "
+                          "C1 valida infraestructura, no fisica. "
+                          "Comparacion real requiere geometrias emergentes (Bloque A no trivial).",
     }
     with open(ising_path, "w") as f:
         json.dump(ising_data, f, indent=2)
@@ -845,26 +1163,19 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
     # --- validation.json ---
     val_path = out_dir / "validation.json"
     
-    # Determinar status de C3
-    c3_ok = contracts["c3"]["spectral_ok"] if contracts["c3"]["spectral_ok"] is not None else None
-    c3_status = contracts["c3"]["status"]
-    
-    # Lógica de hard contracts:
-    # - C2 siempre es hard
-    # - C3 es hard solo si está activo (no SKIP)
-    # - C1 es hard solo si IN_DOMAIN (OUT_OF_DOMAIN no cuenta)
     c1_sigma_in_domain = contracts["c1_sigma"].get("in_domain", True)
     c1_epsilon_in_domain = contracts["c1_epsilon"].get("in_domain", True)
     c1_sigma_status = contracts["c1_sigma"]["global_status"]
     c1_epsilon_status = contracts["c1_epsilon"]["global_status"]
     
-    # C1 hard fail solo si está in_domain y FAIL
+    c3 = contracts["c3"]
+    c3_status = c3.get("status", "SKIP")
+    c3_ok = c3.get("spectral_ok", None)
+    
     c1_hard_fail = (
         (c1_sigma_in_domain and c1_sigma_status == "FAIL") or
         (c1_epsilon_in_domain and c1_epsilon_status == "FAIL")
     )
-    
-    # C3 hard fail solo si está activo y FAIL
     c3_hard_fail = (c3_status != "SKIP" and c3_ok is False)
     
     all_hard_pass = (
@@ -873,11 +1184,11 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
         not c3_hard_fail
     )
     
-    # Rango de Δ del dataset
     delta_min = float(spectrum["delta_uv"].min())
     delta_max = float(spectrum["delta_uv"].max())
     
     validation = {
+        "version": __version__,
         "metadata": {
             "run": cfg.run,
             "spectrum_source": cfg.spectrum_file,
@@ -889,7 +1200,7 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
         "C1_ising": {
             "description": "Compatibilidad puntual con Ising 3D",
             "sigma_cap": cfg.sigma_cap,
-            "note": "OUT_OF_DOMAIN = target fuera del rango; STRONG_PASS = dentro de τ; WEAK_PASS = dentro de 2σ con σ≤σ_cap; FAIL = ninguno",
+            "note": "OUT_OF_DOMAIN = target fuera del rango; STRONG_PASS = dentro de tau; WEAK_PASS = dentro de 2sigma con sigma<=sigma_cap; FAIL = ninguno",
             "delta_range": [delta_min, delta_max],
             "sigma": contracts["c1_sigma"],
             "epsilon": contracts["c1_epsilon"],
@@ -898,10 +1209,7 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
             "description": "Consistencia interna del diccionario",
             **contracts["c2"],
         },
-        "C3_spectral": {
-            "description": "Compatibilidad espectral (test de ciclo r→Δ→r)",
-            **contracts["c3"],
-        },
+        "C3_spectral": c3,
         "overall": {
             "C1_sigma_status": c1_sigma_status,
             "C1_sigma_in_domain": c1_sigma_in_domain,
@@ -909,6 +1217,7 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
             "C1_epsilon_in_domain": c1_epsilon_in_domain,
             "C2_ok": contracts["c2"]["consistency_ok"],
             "C3_status": c3_status,
+            "C3_failure_mode": c3.get("failure_mode"),
             "hard_contracts_definition": "C2 siempre; C3 si activo; C1 solo si IN_DOMAIN",
             "all_hard_contracts_pass": all_hard_pass,
         },
@@ -917,31 +1226,11 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
         json.dump(validation, f, indent=2)
     
     # --- stage_summary.json ---
-    
-    # Re-calcular lógica de contratos para summary
-    c1_sigma_in_domain = contracts["c1_sigma"].get("in_domain", True)
-    c1_epsilon_in_domain = contracts["c1_epsilon"].get("in_domain", True)
-    c1_sigma_status_sum = contracts["c1_sigma"]["global_status"]
-    c1_epsilon_status_sum = contracts["c1_epsilon"]["global_status"]
-    c3_ok_sum = contracts["c3"]["spectral_ok"] if contracts["c3"]["spectral_ok"] is not None else None
-    c3_status_sum = contracts["c3"]["status"]
-    
-    c1_hard_fail_sum = (
-        (c1_sigma_in_domain and c1_sigma_status_sum == "FAIL") or
-        (c1_epsilon_in_domain and c1_epsilon_status_sum == "FAIL")
-    )
-    c3_hard_fail_sum = (c3_status_sum != "SKIP" and c3_ok_sum is False)
-    
-    all_hard_pass_sum = (
-        contracts["c2"]["consistency_ok"] and
-        not c1_hard_fail_sum and
-        not c3_hard_fail_sum
-    )
-    
     summary = {
         "stage": "04_diccionario",
-        "version": "1.3.0",
+        "version": __version__,
         "created": datetime.now(timezone.utc).isoformat(),
+        "notes": "El modelo directo Δ→ratios es un proxy suave local usado solo para evaluar invertibilidad (C3). No es física; fallos en C3a indican proxy/modelo insuficiente.",
         "config": {
             "run": cfg.run,
             "spectrum_file": cfg.spectrum_file,
@@ -953,13 +1242,16 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
             "tau_delta": cfg.tau_delta,
             "sigma_cap": cfg.sigma_cap,
             "enable_c3": cfg.enable_c3,
+            "c3_metric": cfg.c3_metric,
+            "c3_weights": cfg.c3_weights,
+            "c3_threshold": cfg.c3_threshold,
+            "c3_adaptive_threshold": cfg.c3_adaptive_threshold,
+            "c3_threshold_factor": cfg.c3_threshold_factor,
             "direct_model": cfg.direct_model,
             "direct_degree": cfg.direct_degree,
-            "c3_metric": cfg.c3_metric,
-            "c3_threshold": cfg.c3_threshold,
         },
         "data": {
-            "delta_range": [float(spectrum["delta_uv"].min()), float(spectrum["delta_uv"].max())],
+            "delta_range": [delta_min, delta_max],
             "n_delta": spectrum["n_delta"],
             "n_modes": spectrum["n_modes"],
         },
@@ -977,20 +1269,20 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
             "sigma_delta_max": bootstrap["sigma_delta_max"],
         },
         "validation_summary": {
-            "C1_sigma_status": c1_sigma_status_sum,
+            "C1_sigma_status": c1_sigma_status,
             "C1_sigma_in_domain": c1_sigma_in_domain,
-            "C1_epsilon_status": c1_epsilon_status_sum,
+            "C1_epsilon_status": c1_epsilon_status,
             "C1_epsilon_in_domain": c1_epsilon_in_domain,
             "C2_consistency_ok": contracts["c2"]["consistency_ok"],
-            "C3_status": c3_status_sum,
-            "all_hard_contracts_pass": all_hard_pass_sum,
+            "C3_status": c3_status,
+            "C3_failure_mode": c3.get("failure_mode"),
+            "all_hard_contracts_pass": all_hard_pass,
         },
-        "hashes": {},  # Se llena después
+        "hashes": {},
     }
     
     summary_path = out_dir / "stage_summary.json"
     
-    # Calcular hashes
     summary["hashes"] = {
         "dictionary.h5": compute_file_hash(h5_path),
         "atlas.json": compute_file_hash(atlas_path),
@@ -1004,6 +1296,7 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
     # --- manifest.json ---
     manifest = {
         "stage": "04_diccionario",
+        "version": __version__,
         "run": cfg.run,
         "created": datetime.now(timezone.utc).isoformat(),
         "files": {
@@ -1034,8 +1327,52 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
 # Main
 # =============================================================================
 
+def run_self_test() -> int:
+    """Self-tests deterministas para validar lógica interna de C3.
+
+    T1 (inyectivo): r = Δ -> C3a PASS, C3b PASS
+    T2 (no-inyectivo): r = (Δ-5)^2 -> C3a PASS, C3b FAIL/WARN
+    """
+    print("Running self-test...")
+    np.random.seed(0)
+
+    # T1: inyectivo
+    Delta = np.linspace(1.0, 10.0, 80)
+    X = Delta.reshape(-1, 1)
+    cfg = Config(run="__selftest__", test_mode=True, k_features=1, enable_c3=True, direct_model="poly", direct_degree=1)
+    res1 = evaluate_c3_full(X, Delta, cfg, inverse_model_type="linear")
+    if not (res1.get("c3a_status") == "PASS" and res1.get("c3b_status") == "PASS" and res1.get("status") == "PASS"):
+        print(f"FATAL: Self-test T1 fallo (inyectivo). {res1}")
+        return 1
+
+    # T2: no-inyectivo (controlado)
+    r = (Delta - 5.0) ** 2
+    X2 = r.reshape(-1, 1)
+    cfg2 = Config(run="__selftest__", test_mode=True, k_features=1, enable_c3=True, direct_model="poly", direct_degree=2)
+    res2 = evaluate_c3_full(X2, Delta, cfg2, inverse_model_type="poly2")
+    # Esperado: proxy aprende (C3a PASS) pero el ciclo se rompe por ambiguedad (C3b FAIL)
+    if not (res2.get("c3a_status") == "PASS" and res2.get("c3b_status") == "FAIL" and res2.get("status") == "FAIL" and res2.get("failure_mode") == "CYCLE_INCONSISTENT"):
+        print(f"FATAL: Self-test T2 fallo (no-inyectivo controlado). {res2}")
+        return 1
+
+    print("Self-test PASSED.")
+    return 0
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+
 def main() -> int:
     cfg = parse_args()
+
+    if cfg.test_mode:
+        return run_self_test()
+
+    if cfg.run is None:
+        print("ERROR: --run es requerido", file=sys.stderr)
+        return 1
     
     # Cargar espectro
     spec_path = Path("runs") / cfg.run / "spectrum" / cfg.spectrum_file
@@ -1047,9 +1384,10 @@ def main() -> int:
     
     spectrum = load_spectrum(spec_path)
     
+    print(f"Bloque C v{__version__}")
     print(f"Espectro cargado: {spec_path}")
     print(f"  n_delta={spectrum['n_delta']}, n_modes={spectrum['n_modes']}")
-    print(f"  Δ ∈ [{spectrum['delta_uv'].min():.3f}, {spectrum['delta_uv'].max():.3f}]")
+    print(f"  Delta in [{spectrum['delta_uv'].min():.3f}, {spectrum['delta_uv'].max():.3f}]")
     print()
     
     # Validar k_features
@@ -1067,13 +1405,13 @@ def main() -> int:
     print()
     
     # --- Selección de modelo ---
-    print("Evaluando modelos...")
+    print("Evaluando modelos inversos (r -> Delta)...")
     model_selection = select_best_model(X, y, cfg.models, cfg.cv_folds, cfg.random_seed)
     
     for model_type, result in model_selection["all_models"].items():
-        marker = "→" if model_type == model_selection["best_model"] else " "
+        marker = "->" if model_type == model_selection["best_model"] else "  "
         print(f"  {marker} {model_type:8s}: BIC={result['info_criteria']['bic']:8.2f}, "
-              f"CV RMSE={result['cv']['cv_rmse_mean']:.4f}, R²={result['metrics']['r2']:.4f}")
+              f"CV RMSE={result['cv']['cv_rmse_mean']:.4f}, R2={result['metrics']['r2']:.4f}")
     
     best_model = model_selection["best_model"]
     best_result = model_selection["all_models"][best_model]
@@ -1081,10 +1419,10 @@ def main() -> int:
     print()
     
     # --- Bootstrap para incertidumbre ---
-    print(f"Bootstrap ({cfg.n_bootstrap} réplicas)...")
+    print(f"Bootstrap ({cfg.n_bootstrap} replicas)...")
     bootstrap = bootstrap_uncertainty(X, y, best_model, cfg.n_bootstrap, cfg.random_seed)
-    print(f"  σ_Δ medio: {bootstrap['sigma_delta_mean']:.4f}")
-    print(f"  σ_Δ máximo: {bootstrap['sigma_delta_max']:.4f}")
+    print(f"  sigma_Delta medio: {bootstrap['sigma_delta_mean']:.4f}")
+    print(f"  sigma_Delta maximo: {bootstrap['sigma_delta_max']:.4f}")
     print()
     
     # --- Predicciones finales ---
@@ -1095,10 +1433,9 @@ def main() -> int:
     # --- Contratos ---
     print("Evaluando contratos...")
     
-    # Rango de Δ del dataset (para detectar OUT_OF_DOMAIN)
     delta_range = (float(y.min()), float(y.max()))
     
-    # C1: Ising (con sigma_cap y delta_range)
+    # C1: Ising
     c1_sigma = evaluate_c1_ising(
         y_pred, bootstrap["sigma_delta"],
         cfg.delta_sigma, cfg.tau_delta, cfg.sigma_factor, "sigma",
@@ -1113,19 +1450,11 @@ def main() -> int:
     # C2: Consistencia
     c2 = evaluate_c2_consistency(y, y_pred, best_result["cv"]["cv_rmse_mean"])
     
-    # C3: Espectral (completo si --enable-c3, placeholder si no)
+    # C3: Espectral (con diagnóstico causal)
     if cfg.enable_c3:
-        print(f"  C3: Evaluando modelo directo (model={cfg.direct_model}, degree={cfg.direct_degree}, metric={cfg.c3_metric})...")
-        c3 = evaluate_c3_cycle(
-            X, y, best_model,
-            direct_model_type=cfg.direct_model,
-            direct_degree=cfg.direct_degree,
-            c3_metric=cfg.c3_metric,
-            c3_threshold=cfg.c3_threshold
-        )
-    else:
-        c3 = evaluate_c3_spectral(X, X, metric=cfg.c3_metric, threshold=cfg.c3_threshold, is_placeholder=True)
-
+        print(f"  C3: Modelo directo (degree={cfg.direct_degree}), metric={cfg.c3_metric}, weights={cfg.c3_weights}")
+    c3 = evaluate_c3_full(X, y, cfg, best_model)
+    
     contracts = {
         "c1_sigma": c1_sigma,
         "c1_epsilon": c1_epsilon,
@@ -1133,28 +1462,45 @@ def main() -> int:
         "c3": c3,
     }
     
-    # Prints mejorados con status
+    # Prints
     sigma_status = c1_sigma['global_status']
     epsilon_status = c1_epsilon['global_status']
     
     if sigma_status == "OUT_OF_DOMAIN":
-        print(f"  C1 (Ising σ): OUT_OF_DOMAIN (Δ_σ={cfg.delta_sigma:.4f} < Δ_min={delta_range[0]:.3f})")
+        print(f"  C1 (Ising sigma): OUT_OF_DOMAIN (Delta_sigma={cfg.delta_sigma:.4f} < Delta_min={delta_range[0]:.3f})")
     else:
-        print(f"  C1 (Ising σ): {sigma_status:12s} "
+        print(f"  C1 (Ising sigma): {sigma_status:12s} "
               f"(error: {c1_sigma['best_candidate']['error']:.4f}, "
-              f"σ: {c1_sigma['best_candidate']['sigma_delta']:.4f})")
+              f"sigma: {c1_sigma['best_candidate']['sigma_delta']:.4f})")
     
     if epsilon_status == "OUT_OF_DOMAIN":
-        print(f"  C1 (Ising ε): OUT_OF_DOMAIN (Δ_ε={cfg.delta_epsilon:.4f} < Δ_min={delta_range[0]:.3f})")
+        print(f"  C1 (Ising epsilon): OUT_OF_DOMAIN (Delta_epsilon={cfg.delta_epsilon:.4f} < Delta_min={delta_range[0]:.3f})")
     else:
-        print(f"  C1 (Ising ε): {epsilon_status:12s} "
+        print(f"  C1 (Ising epsilon): {epsilon_status:12s} "
               f"(error: {c1_epsilon['best_candidate']['error']:.4f}, "
-              f"σ: {c1_epsilon['best_candidate']['sigma_delta']:.4f})")
+              f"sigma: {c1_epsilon['best_candidate']['sigma_delta']:.4f})")
     
     print(f"  C2 (consistencia): {'PASS' if c2['consistency_ok'] else 'FAIL':12s} "
           f"(CV RMSE: {c2['cv_rmse']:.4f})")
-    print(f"  C3 (espectral): {c3['status']:12s}"
-          + (f" (RMSE: {c3['rmse_global']:.4f})" if c3['rmse_global'] is not None else ""))
+    
+    c3_status = c3.get("status", "SKIP")
+    if c3_status == "SKIP":
+        print(f"  C3 (espectral): SKIP (usar --enable-c3)")
+    else:
+        failure_mode = c3.get("failure_mode", "")
+        c3a_val = c3.get("c3a_decoder", {}).get("global", 0)
+        c3b_val = c3.get("c3b_cycle", {}).get("global", 0)
+        threshold_eff = c3.get("threshold", {}).get("effective", cfg.c3_threshold)
+        noise_floor = c3.get("noise_floor", {}).get("median_sigma", 0)
+        
+        print(f"  C3 (espectral): {c3_status:12s} "
+              f"[C3a={c3a_val:.4f}, C3b={c3b_val:.4f}, threshold={threshold_eff:.4f}]")
+        if failure_mode:
+            print(f"      failure_mode: {failure_mode}")
+        print(f"      noise_floor: {noise_floor:.6f}, metric: {cfg.c3_metric}")
+        if cfg.c3_weights != "none":
+            print(f"      weights: {cfg.c3_weights}")
+    
     print()
     
     # --- Atlas ---
@@ -1170,23 +1516,26 @@ def main() -> int:
     print()
     
     # --- Resumen ---
-    c3_status = contracts["c3"]["status"]
-    c3_ok = contracts["c3"]["spectral_ok"]
-    
-    # Resultado final basado en contratos duros (C2, C3 si está activo)
-    hard_pass = c2["consistency_ok"] and (c3_ok if c3_ok is not None else True)
+    c3_ok = c3.get("spectral_ok", True) if c3_status != "SKIP" else True
+    hard_pass = c2["consistency_ok"] and c3_ok
     
     if hard_pass:
-        print("✓ VERIFICADO: Diccionario consistente")
+        print("[OK] VERIFICADO: Diccionario consistente")
         if c3_status == "SKIP":
             print("  (C3 no evaluado - usar --enable-c3 para test de ciclo completo)")
         return 0
     else:
-        print("✗ FALLO en contratos duros:")
+        print("[FAIL] FALLO en contratos duros:")
         if not c2["consistency_ok"]:
             print(f"  - C2: CV RMSE = {c2['cv_rmse']:.4f} > 0.05")
-        if c3_ok is not None and not c3_ok:
-            print(f"  - C3: RMSE ciclo = {contracts['c3']['rmse_global']:.4f}")
+        if not c3_ok:
+            failure = c3.get("failure_mode", "unknown")
+            print(f"  - C3: {failure}")
+            if "c3a_decoder" in c3:
+                print(f"    C3a (decoder): {c3['c3a_decoder']['global']:.4f}")
+            if "c3b_cycle" in c3:
+                print(f"    C3b (cycle):   {c3['c3b_cycle']['global']:.4f}")
+            print(f"    threshold:     {c3['threshold']['effective']:.4f}")
         return 1
 
 
