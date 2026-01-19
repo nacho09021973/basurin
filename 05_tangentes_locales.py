@@ -15,7 +15,8 @@ import argparse
 import json
 import os
 import hashlib
-import time
+from datetime import datetime, timezone
+from pathlib import Path
 import numpy as np
 import h5py
 
@@ -26,6 +27,10 @@ def sha256_file(path):
         for chunk in iter(lambda: f.read(8192), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
 
 
 def compute_ratio_features(masses, k_features):
@@ -61,12 +66,15 @@ def main():
     ap.add_argument("--n-perturb", type=int, default=50)
     ap.add_argument("--eps", type=float, default=0.02)
     ap.add_argument("--standardize", choices=["on", "off"], default="on")
+    ap.add_argument("--seed", type=int, default=123)
+    ap.add_argument("--rho-threshold", type=float, default=None)
     args = ap.parse_args()
 
-    run_dir = os.path.join("runs", args.run)
-    spec_path = os.path.join(run_dir, "spectrum", "spectrum.h5")
-    out_dir = os.path.join(run_dir, "tangentes", "outputs")
-    os.makedirs(out_dir, exist_ok=True)
+    run_dir = Path("runs") / args.run
+    spec_path = run_dir / "spectrum" / "spectrum.h5"
+    stage_dir = run_dir / "tangentes_locales"
+    out_dir = stage_dir / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     with h5py.File(spec_path, "r") as h5:
         masses = h5["masses"][:]
@@ -74,22 +82,44 @@ def main():
 
     X = compute_ratio_features(masses, args.k_features)
 
+    if masses.ndim != 2:
+        raise ValueError("masses debe ser 2D (N, n_features).")
+    if delta.ndim != 1:
+        raise ValueError("delta_uv debe ser 1D (N,).")
+    if masses.shape[0] != delta.shape[0]:
+        raise ValueError("masses y delta_uv deben tener el mismo número de filas.")
+    if X.shape[0] != delta.shape[0]:
+        raise ValueError("X y delta_uv deben tener el mismo número de filas.")
+    if not np.isfinite(X).all():
+        raise ValueError("X contiene NaN o Inf.")
+    if args.k_neighbors is None:
+        raise ValueError("k_neighbors no puede ser None.")
+    if args.eps <= 0:
+        raise ValueError("eps debe ser > 0.")
+    if args.n_perturb <= 0:
+        raise ValueError("n_perturb debe ser > 0.")
+
     if args.standardize == "on":
         mu = X.mean(axis=0)
         sig = X.std(axis=0) + 1e-12
         X = (X - mu) / sig
 
     N = X.shape[0]
-    rng = np.random.default_rng(123)
+    rng = np.random.default_rng(args.seed)
     idx_points = rng.choice(N, size=min(args.n_points, N), replace=False)
 
     k_list = [int(x) for x in args.k_neighbors.split(",")]
+    if any(k < 2 for k in k_list):
+        raise ValueError("k_neighbors debe ser >= 2.")
+    if any(k >= N for k in k_list):
+        raise ValueError("k_neighbors debe ser < N.")
 
     results = {}
 
     for k in k_list:
         deff_list = []
         rho_list = []
+        m_list = []
 
         for i in idx_points:
             xi = X[i]
@@ -104,6 +134,7 @@ def main():
             evals, evecs = pca_local(Xn)
             deff = effective_dimension(evals)
             m = max(1, int(round(deff)))
+            m_list.append(m)
 
             # regresión local lineal
             A = np.c_[np.ones(len(Xn)), Xn - xi]
@@ -139,40 +170,61 @@ def main():
         results[str(k)] = {
             "d_eff_mean": float(np.mean(deff_list)),
             "d_eff_std": float(np.std(deff_list)),
+            "d_eff_p10": float(np.percentile(deff_list, 10)),
+            "d_eff_p50": float(np.percentile(deff_list, 50)),
+            "d_eff_p90": float(np.percentile(deff_list, 90)),
+            "m_mean": float(np.mean(m_list)),
+            "m_std": float(np.std(m_list)),
             "rho_median": float(np.median(rho_list)),
-            "rho_mean": float(np.mean(rho_list))
+            "rho_mean": float(np.mean(rho_list)),
+            "rho_p10": float(np.percentile(rho_list, 10)),
+            "rho_p50": float(np.percentile(rho_list, 50)),
+            "rho_p90": float(np.percentile(rho_list, 90)),
+            "n_samples": int(len(rho_list))
         }
 
     # guardar resultados
-    res_path = os.path.join(out_dir, "results.json")
+    res_path = out_dir / "results.json"
     with open(res_path, "w") as f:
         json.dump(results, f, indent=2)
 
     # stage summary
     summary = {
         "stage": "tangentes_locales",
-        "timestamp": time.time(),
+        "timestamp": utc_now_iso(),
         "config": vars(args),
+        "numpy_version": np.__version__,
+        "notes": {
+            "effective_dimension_criterion": (
+                "d_eff = (sum(evals)**2) / sum(evals**2); m = max(1, round(d_eff))"
+            )
+        },
+        "interpretation": {
+            "rho >> 1": "predominantly orthogonal variation to local tangent",
+            "rho ~ 1": "no clear tangent structure"
+        },
         "inputs": {
-            "spectrum": spec_path,
-            "spectrum_sha256": sha256_file(spec_path)
+            "spectrum": str(spec_path),
+            "spectrum_sha256": sha256_file(spec_path) if spec_path.exists() else None,
+            "script_sha256": sha256_file(Path(__file__))
         },
         "outputs": {
             "results": "outputs/results.json"
         }
     }
 
-    with open(os.path.join(run_dir, "tangentes", "stage_summary.json"), "w") as f:
+    stage_summary_path = stage_dir / "stage_summary.json"
+    with open(stage_summary_path, "w") as f:
         json.dump(summary, f, indent=2)
 
-    manifest = {
-        "files": {
-            "stage_summary": "stage_summary.json",
-            "results": "outputs/results.json"
-        }
+    manifest_path = stage_dir / "manifest.json"
+    manifest_files = {
+        "outputs/results.json": sha256_file(res_path),
+        "stage_summary.json": sha256_file(stage_summary_path)
     }
+    manifest = {"files": manifest_files}
 
-    with open(os.path.join(run_dir, "tangentes", "manifest.json"), "w") as f:
+    with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
 
 
