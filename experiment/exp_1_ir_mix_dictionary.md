@@ -16,7 +16,7 @@ Este experimento es deliberadamente **adversarial**: mezcla dos familias sin int
 
 ### Input
 
-- Espectro: `runs/ir_mix/spectrum/spectrum.h5`
+- Espectro: `runs/ir_mix/spectrum/outputs/spectrum.h5`
 - Run: `ir_mix`
 - Version Bloque C: `1.4.1`
 - Timestamp: ``
@@ -104,4 +104,3 @@ Hashes (sha256) registrados para auditoría:
 2. **No extrapolación (C1):** el run no informa sobre Ising por soporte insuficiente de Δ. Este comportamiento es correcto y contractual.
 
 **Falsabilidad operacional:** si futuras versiones del Bloque C rompen este PASS (con esta configuración exacta), se detecta regresión de manera inmediata por `validation.json` y hashes.
-

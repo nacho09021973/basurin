@@ -5,11 +5,14 @@
 Etapa 01 (dataset): mezcla/concatena dos espectros spectrum.h5 (mismo formato)
 para crear un run de salida con un spectrum.h5 combinado.
 
-Contrato IO BASURIN:
+Contrato IO BASURIN (canónico):
   runs/<run_out>/spectrum/
-    - spectrum.h5
     - manifest.json
     - stage_summary.json
+    - outputs/
+        - spectrum.h5
+
+Compatibilidad (legado): lee spectrum/spectrum.h5 si no existe outputs/spectrum.h5.
 """
 
 import argparse
@@ -24,7 +27,14 @@ import h5py
 
 STAGE = "spectrum"
 SCRIPT_NAME = "01_mix_spectra.py"
-VERSION = "v0.1.0"
+VERSION = "v0.2.0"
+
+def resolve_in_spectrum(run: str) -> Path:
+    root = Path("runs") / run / STAGE
+    cand1 = root / "outputs" / "spectrum.h5"
+    if cand1.exists():
+        return cand1
+    return root / "spectrum.h5"
 
 
 def sha256_file(path: Path) -> str:
@@ -50,15 +60,15 @@ def main() -> int:
                     help="Tolerancia para comparar delta_uv entre A y B.")
     args = ap.parse_args()
 
-    root = Path("runs")
-    a_path = root / args.run_a / STAGE / "spectrum.h5"
-    b_path = root / args.run_b / STAGE / "spectrum.h5"
+    a_path = resolve_in_spectrum(args.run_a)
+    b_path = resolve_in_spectrum(args.run_b)
 
-    out_dir = root / args.run_out / STAGE
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_spectrum = out_dir / "spectrum.h5"
-    out_manifest = out_dir / "manifest.json"
-    out_summary = out_dir / "stage_summary.json"
+    stage_dir = Path("runs") / args.run_out / STAGE
+    outputs_dir = stage_dir / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    out_spectrum = outputs_dir / "spectrum.h5"
+    out_manifest = stage_dir / "manifest.json"
+    out_summary = stage_dir / "stage_summary.json"
 
     if not a_path.exists():
         raise FileNotFoundError(f"No existe: {a_path}")
@@ -125,13 +135,20 @@ def main() -> int:
     manifest = {
         "stage": STAGE,
         "run_out": args.run_out,
-        "artifacts": {
-            "spectrum": "spectrum.h5",
+        "created": utc_now_iso(),
+        "files": {
+            "spectrum": "outputs/spectrum.h5",
             "stage_summary": "stage_summary.json",
             "manifest": "manifest.json",
         },
         "hashes": {
-            "spectrum.h5": out_hash,
+            "outputs/spectrum.h5": out_hash,
+        },
+        "inputs": {
+            "run_a": args.run_a,
+            "run_b": args.run_b,
+            "run_a_spectrum": str(a_path.as_posix()),
+            "run_b_spectrum": str(b_path.as_posix()),
         },
     }
     out_manifest.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
@@ -183,4 +200,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

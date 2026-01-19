@@ -17,7 +17,7 @@ Este experimento **no pretende** extraer física real de neutrinos ni inferir Is
 ### Dataset de entrada
 
 - Run: `ir_neutrino`
-- Archivo: `runs/ir_neutrino/spectrum/spectrum.h5`
+- Archivo: `runs/ir_neutrino/spectrum/outputs/spectrum.h5`
 - Rango: `Δ ∈ [1.55, 5.50]`
 - Tamaño: `n_delta=80`, `n_modes=5`
 - Features usadas: `k_features=3` (ratios `r_1..r_3`)
@@ -172,7 +172,7 @@ Hashes registrados (para auditoría):
 
 ## Checklist de reproducción
 
-1. Confirmar que existe: `runs/ir_neutrino/spectrum/spectrum.h5`
+1. Confirmar que existe: `runs/ir_neutrino/spectrum/outputs/spectrum.h5`
 2. Ejecutar el comando de Bloque C (arriba)
 3. Verificar en `runs/ir_neutrino/dictionary/validation.json`:
    - `C2_consistency.consistency_ok == true`
