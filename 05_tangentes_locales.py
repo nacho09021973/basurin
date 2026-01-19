@@ -70,6 +70,7 @@ def main():
     ap.add_argument("--n-points", type=int, default=200)
     ap.add_argument("--n-perturb", type=int, default=50)
     ap.add_argument("--eps", type=float, default=0.02)
+    ap.add_argument("--eps-floor", type=float, default=1e-12)
     ap.add_argument("--standardize", choices=["on", "off"], default="on")
     ap.add_argument("--seed", type=int, default=123)
     ap.add_argument("--rho-threshold", type=float, default=None)
@@ -113,6 +114,8 @@ def main():
         raise ValueError("k_neighbors no puede ser None.")
     if args.eps <= 0:
         raise ValueError("eps debe ser > 0.")
+    if args.eps_floor <= 0:
+        raise ValueError("eps_floor debe ser > 0.")
     if args.n_perturb <= 0:
         raise ValueError("n_perturb debe ser > 0.")
 
@@ -136,7 +139,10 @@ def main():
     for k in k_list:
         deff_list = []
         rho_list = []
+        rho_clipped_list = []
+        log10_rho_list = []
         m_list = []
+        parallel_means = []
 
         for i in idx_points:
             xi = X[i]
@@ -179,10 +185,20 @@ def main():
                 errs_par.append(abs(delta_hat(xi + v_par) - di))
                 errs_ort.append(abs(delta_hat(xi + v_ort) - di))
 
-            rho = (np.mean(errs_ort) + 1e-12) / (np.mean(errs_par) + 1e-12)
+            perp = np.mean(errs_ort)
+            parallel = np.mean(errs_par)
+            rho_clipped = perp / max(parallel, args.eps_floor)
+            rho = rho_clipped
+            parallel_means.append(parallel)
 
             deff_list.append(deff)
             rho_list.append(rho)
+            rho_clipped_list.append(rho_clipped)
+            log10_rho_list.append(np.log10(rho_clipped))
+
+        frac_parallel_below_floor = float(
+            np.mean(np.array(parallel_means) < args.eps_floor)
+        )
 
         results[str(k)] = {
             "d_eff_mean": float(np.mean(deff_list)),
@@ -197,6 +213,15 @@ def main():
             "rho_p10": float(np.percentile(rho_list, 10)),
             "rho_p50": float(np.percentile(rho_list, 50)),
             "rho_p90": float(np.percentile(rho_list, 90)),
+            "eps_floor": float(args.eps_floor),
+            "rho_clipped_mean": float(np.mean(rho_clipped_list)),
+            "rho_clipped_p10": float(np.percentile(rho_clipped_list, 10)),
+            "rho_clipped_p50": float(np.percentile(rho_clipped_list, 50)),
+            "rho_clipped_p90": float(np.percentile(rho_clipped_list, 90)),
+            "log10_rho_p10": float(np.percentile(log10_rho_list, 10)),
+            "log10_rho_p50": float(np.percentile(log10_rho_list, 50)),
+            "log10_rho_p90": float(np.percentile(log10_rho_list, 90)),
+            "frac_parallel_below_floor": frac_parallel_below_floor,
             "n_samples": int(len(rho_list))
         }
 
@@ -214,6 +239,10 @@ def main():
         "notes": {
             "effective_dimension_criterion": (
                 "d_eff = (sum(evals)**2) / sum(evals**2); m = max(1, round(d_eff))"
+            ),
+            "eps_floor": float(args.eps_floor),
+            "rho_clipped_definition": (
+                "rho_clipped = perp / max(parallel, eps_floor); log10_rho = log10(rho_clipped)"
             )
         },
         "interpretation": {
@@ -246,6 +275,21 @@ def main():
 
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
+
+    for k in k_list:
+        entry = results[str(k)]
+        print(
+            "k={k} d_eff_p50={d_eff_p50:.4f} rho_p50={rho_p50:.4f} "
+            "log10_rho_p50={log10_rho_p50:.4f} frac_parallel_below_floor={frac:.4f}"
+            .format(
+                k=k,
+                d_eff_p50=entry["d_eff_p50"],
+                rho_p50=entry["rho_p50"],
+                log10_rho_p50=entry["log10_rho_p50"],
+                frac=entry["frac_parallel_below_floor"],
+            )
+        )
+    print(f"Stage written to: {stage_dir}")
 
 
 if __name__ == "__main__":
