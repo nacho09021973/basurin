@@ -10,3 +10,6 @@ outputs/
 *.log
 .vscode/
 .DS_Store
+
+# Windows Mark-of-the-Web ADS
+*:Zone.Identifier
