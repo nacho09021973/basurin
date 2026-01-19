@@ -617,6 +617,7 @@ def main() -> int:
     # the mixed spectrum has all required attrs by copying from source.
     print("       Ensuring HDF5 attrs...")
     attr_actions = ensure_spectrum_attrs(mix_spec, a_spec)
+    source_attrs_hash = sha256_file(a_spec)
     if attr_actions["copied"]:
         print(f"       Copied attrs: {attr_actions['copied']}")
     if attr_actions["computed"]:
@@ -751,7 +752,6 @@ def main() -> int:
 
     # Input hash
     input_hash = sha256_file(mix_spec)
-    attrs_source_hash = sha256_file(a_spec)
 
     # Git commit
     git_commit = get_git_commit()
@@ -834,7 +834,7 @@ def main() -> int:
             "sha256": input_hash,
             "attrs_source": {
                 "path": str(a_spec.as_posix()),
-                "sha256": attrs_source_hash,
+                "sha256": source_attrs_hash,
             },
         },
         "derived_runs": {
