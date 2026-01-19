@@ -20,6 +20,13 @@ Salida:
         ├── stage_summary.json   (metadatos, parámetros, hashes)
         └── validation.json      (ortogonalidad, residuos)
 
+Manual tests:
+    - Dual run produce M2_N sin modo espurio:
+      - M2_N[:, 0] no debe ser sistemáticamente negativo/extremo.
+      - validation.json contiene dual.neumann_mode_filter.
+    - Ejemplo:
+      python 03_sturm_liouville.py --run <run> --dual-spectrum
+
 Convención física:
     λ ≡ M_n² = -k² = ω² - |k⃗|²  (hard-wall, self-adjoint SL)
 """
@@ -417,6 +424,7 @@ def compute_spectral_separation(
             "delta": float(delta),
             "rel_diff_p50": float(np.percentile(sep, 50)),
             "rel_diff_p90": float(np.percentile(sep, 90)),
+            "rel_diff_p99": float(np.percentile(sep, 99)),
             "ratio_M2_0": ratio,
         })
     
@@ -424,6 +432,7 @@ def compute_spectral_separation(
     global_stats = {
         "rel_diff_p50": float(np.percentile(all_rel, 50)) if all_rel.size else 0.0,
         "rel_diff_p90": float(np.percentile(all_rel, 90)) if all_rel.size else 0.0,
+        "rel_diff_p99": float(np.percentile(all_rel, 99)) if all_rel.size else 0.0,
     }
     
     return {
@@ -431,6 +440,23 @@ def compute_spectral_separation(
         "per_delta": per_delta,
         "global": global_stats,
     }
+
+
+def filter_neumann_modes(
+    eigenvalues: np.ndarray,
+    eigenvectors: np.ndarray,
+    n_modes: int
+) -> tuple[np.ndarray, np.ndarray, float, float]:
+    """Descarta modo 0 Neumann y conserva n_modes modos válidos."""
+    min_before = float(np.min(eigenvalues))
+    eigenvalues = eigenvalues[1:]
+    eigenvectors = eigenvectors[:, 1:]
+    if len(eigenvalues) < n_modes:
+        raise ValueError("Canal Neumann: insuficientes modos tras descartar el modo 0.")
+    eigenvalues = eigenvalues[:n_modes]
+    eigenvectors = eigenvectors[:, :n_modes]
+    min_after = float(np.min(eigenvalues))
+    return eigenvalues, eigenvectors, min_before, min_after
 
 
 # =============================================================================
@@ -593,12 +619,15 @@ def solve_channel(
     cfg: Config,
     bc_uv: str,
     bc_ir: str,
-    label: str
-) -> tuple[list[dict], list[dict], list[dict]]:
+    label: str,
+    apply_neumann_filter: bool = False
+) -> tuple[list[dict], list[dict], list[dict], dict | None]:
     """Resuelve espectro para un canal (D o N)."""
     results = []
     all_ortho = []
     all_resid = []
+    min_before_list = []
+    min_after_list = []
     
     for i, (delta, m2L2) in enumerate(zip(deltas, m2L2_list)):
         # Coeficientes SL
@@ -608,7 +637,14 @@ def solve_channel(
         K, W = build_sl_matrices(z, p, q, w, bc_uv, bc_ir)
         
         # Resolver
-        eigenvalues, eigenvectors = solve_sl_eigenproblem(K, W, cfg.n_modes)
+        n_modes_requested = cfg.n_modes + 1 if apply_neumann_filter else cfg.n_modes
+        eigenvalues, eigenvectors = solve_sl_eigenproblem(K, W, n_modes_requested)
+        if apply_neumann_filter:
+            eigenvalues, eigenvectors, min_before, min_after = filter_neumann_modes(
+                eigenvalues, eigenvectors, cfg.n_modes
+            )
+            min_before_list.append(min_before)
+            min_after_list.append(min_after)
         
         # Extender a malla completa
         phi_full = extend_eigenfunctions(eigenvectors, len(z), bc_uv, bc_ir)
@@ -632,7 +668,13 @@ def solve_channel(
         print(f"  [{i+1:3d}/{len(deltas)}] ({label}) Δ={delta:.3f}, m²L²={m2L2:.3f}, "
               f"M²₀={eigenvalues[0]:.4f} {status}")
     
-    return results, all_ortho, all_resid
+    filter_audit = None
+    if apply_neumann_filter:
+        filter_audit = {
+            "min_before_per_delta": min_before_list,
+            "min_after_per_delta": min_after_list,
+        }
+    return results, all_ortho, all_resid, filter_audit
 
 
 # =============================================================================
@@ -681,16 +723,18 @@ def main() -> int:
     results_N = None
     all_ortho_N = None
     all_resid_N = None
+    neumann_filter_audit = None
     
     if cfg.dual_spectrum:
-        results, all_ortho, all_resid = solve_channel(
+        results, all_ortho, all_resid, _ = solve_channel(
             deltas, m2L2_list, z, d, cfg, cfg.bc_uv_D, cfg.bc_ir_D, "D"
         )
-        results_N, all_ortho_N, all_resid_N = solve_channel(
-            deltas, m2L2_list, z, d, cfg, cfg.bc_uv_N, cfg.bc_ir_N, "N"
+        results_N, all_ortho_N, all_resid_N, neumann_filter_audit = solve_channel(
+            deltas, m2L2_list, z, d, cfg, cfg.bc_uv_N, cfg.bc_ir_N, "N",
+            apply_neumann_filter=True
         )
     else:
-        results, all_ortho, all_resid = solve_channel(
+        results, all_ortho, all_resid, _ = solve_channel(
             deltas, m2L2_list, z, d, cfg, cfg.bc_uv, cfg.bc_ir, "L"
         )
     
@@ -713,6 +757,13 @@ def main() -> int:
     if cfg.dual_spectrum and results_N is not None and all_ortho_N is not None and all_resid_N is not None:
         M2_all_D = np.array([r["M2"] for r in results])
         M2_all_N = np.array([r["M2"] for r in results_N])
+        min_before_list = []
+        min_after_list = []
+        if neumann_filter_audit is not None:
+            min_before_list = neumann_filter_audit.get("min_before_per_delta", [])
+            min_after_list = neumann_filter_audit.get("min_after_per_delta", [])
+        min_before_global = float(min(min_before_list)) if min_before_list else None
+        min_after_global = float(min(min_after_list)) if min_after_list else None
         validation["dual"] = {
             "orthonormality_N": {
                 "orthonormality_ok": all(o["orthonormality_ok"] for o in all_ortho_N),
@@ -723,6 +774,15 @@ def main() -> int:
                 "residuals_ok": all(r["residuals_ok"] for r in all_resid_N),
                 "residual_max_global": max(r["residual_max"] for r in all_resid_N),
                 "per_delta": all_resid_N,
+            },
+            "neumann_mode_filter": {
+                "dropped_modes": [0],
+                "kept_from_mode": 1,
+                "reason": "Neumann fundamental mode dropped (non-informative / numerically spurious in this formulation)",
+                "min_M2_N_before_per_delta": min_before_list,
+                "min_M2_N_after_per_delta": min_after_list,
+                "min_M2_N_before_global": min_before_global,
+                "min_M2_N_after_global": min_after_global,
             },
             "spectral_separation": compute_spectral_separation(
                 M2_all_D, M2_all_N, list(deltas), cfg.n_modes
