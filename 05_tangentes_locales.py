@@ -33,11 +33,16 @@ def utc_now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
-def compute_ratio_features(masses, k_features):
+def compute_ratio_features(masses, k_features, mass_kind):
     m0 = masses[:, 0]
     X = []
     for n in range(1, k_features + 1):
-        X.append((masses[:, n] ** 2) / (m0 ** 2))
+        if mass_kind == "masses":
+            X.append((masses[:, n] ** 2) / (m0 ** 2))
+        elif mass_kind == "M2":
+            X.append(masses[:, n] / m0)
+        else:
+            raise ValueError(f"mass_kind inválido: {mass_kind}")
     return np.stack(X, axis=1)
 
 
@@ -77,10 +82,22 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     with h5py.File(spec_path, "r") as h5:
-        masses = h5["masses"][:]
+        if "masses" in h5:
+            mass_dataset = "masses"
+            mass_kind = "masses"
+        elif "M2" in h5:
+            mass_dataset = "M2"
+            mass_kind = "M2"
+        else:
+            available = ", ".join(sorted(h5.keys()))
+            raise ValueError(
+                "spectrum.h5 debe incluir dataset 'masses' o 'M2'. "
+                f"Disponibles: {available}"
+            )
+        masses = h5[mass_dataset][:]
         delta = h5["delta_uv"][:]
 
-    X = compute_ratio_features(masses, args.k_features)
+    X = compute_ratio_features(masses, args.k_features, mass_kind)
 
     if masses.ndim != 2:
         raise ValueError("masses debe ser 2D (N, n_features).")
@@ -205,6 +222,9 @@ def main():
         },
         "inputs": {
             "spectrum": str(spec_path),
+            "mass_dataset": mass_dataset,
+            "mass_kind": mass_kind,
+            "mass_dataset_path": f"/{mass_dataset}",
             "spectrum_sha256": sha256_file(spec_path) if spec_path.exists() else None,
             "script_sha256": sha256_file(Path(__file__))
         },
