@@ -58,7 +58,7 @@ class Config:
     """Configuración del Bloque C."""
     run: str
     test_mode: bool = False  # Ejecuta self-tests deterministas y sale
-    spectrum_file: str = "spectrum.h5"
+    spectrum_file: str = "outputs/spectrum.h5"
     
     # Features
     k_features: int = 3              # Número de ratios r_n (n=1..K)
@@ -107,7 +107,7 @@ def parse_args() -> Config:
     p.add_argument("--run", type=str, default=None, help="Nombre del run")
     p.add_argument("--test", action="store_true", dest="test_mode",
                    help="Ejecuta self-tests deterministas (T1/T2) y sale")
-    p.add_argument("--spectrum-file", type=str, default="spectrum.h5",
+    p.add_argument("--spectrum-file", type=str, default="outputs/spectrum.h5",
                    dest="spectrum_file", help="Archivo H5 del espectro")
     p.add_argument("--k-features", type=int, default=3, dest="k_features",
                    help="Número de ratios r_n a usar como features (default: 3)")
@@ -206,6 +206,33 @@ def load_spectrum(h5_path: Path) -> dict:
             "n_modes": int(h5.attrs["n_modes"]),
         }
     return data
+
+
+def resolve_spectrum_path(run: str, spectrum_file: str) -> Path:
+    """Resuelve la ruta del espectro.
+
+    Contrato IO (canónico):
+      runs/<run>/spectrum/outputs/spectrum.h5
+
+    Legado:
+      runs/<run>/spectrum/spectrum.h5
+
+    Si spectrum_file es ruta absoluta o empieza por 'runs/', se usa tal cual
+    para evitar duplicación de prefijos.
+    """
+    sf = Path(spectrum_file)
+    if sf.is_absolute() or spectrum_file.startswith("runs/"):
+        return sf
+
+    stage_dir = Path("runs") / run / "spectrum"
+    cand = stage_dir / spectrum_file
+    if cand.exists():
+        return cand
+
+    cand2 = stage_dir / "outputs" / "spectrum.h5"
+    if cand2.exists():
+        return cand2
+    return stage_dir / "spectrum.h5"
 
 
 def verify_invariants(X: np.ndarray, y: Optional[np.ndarray] = None, *, name: str = "X") -> None:
@@ -1377,7 +1404,7 @@ def main() -> int:
         return 1
     
     # Cargar espectro
-    spec_path = Path("runs") / cfg.run / "spectrum" / cfg.spectrum_file
+    spec_path = resolve_spectrum_path(cfg.run, cfg.spectrum_file)
     if not spec_path.exists():
         print(f"ERROR: No existe espectro en {spec_path}", file=sys.stderr)
         print("       Ejecuta primero: python 03_sturm_liouville.py --run " + cfg.run,

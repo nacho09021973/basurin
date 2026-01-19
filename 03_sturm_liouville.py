@@ -15,7 +15,7 @@ Uso:
 
 Salida:
     runs/<run>/spectrum/
-        ├── spectrum.h5          (autovalores, autofunciones, Δ, m²L²)
+        ├── outputs/spectrum.h5          (autovalores, autofunciones, Δ, m²L²)
         ├── manifest.json        (índice de artefactos)
         ├── stage_summary.json   (metadatos, parámetros, hashes)
         └── validation.json      (ortogonalidad, residuos)
@@ -364,19 +364,30 @@ def compute_file_hash(path: Path) -> str:
 
 
 def write_outputs(
-    out_dir: Path,
+    stage_dir: Path,
     cfg: Config,
     geo: dict,
     results: list[dict],
     validation: dict
 ) -> dict:
-    """Escribe todos los outputs del Bloque B."""
+    """Escribe todos los outputs del Bloque B.
+
+    Contrato IO BASURIN:
+      runs/<run>/spectrum/
+        - manifest.json
+        - stage_summary.json
+        - outputs/
+            - spectrum.h5
+            - validation.json
+    """
     import h5py
-    
-    out_dir.mkdir(parents=True, exist_ok=True)
+
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    outputs_dir = stage_dir / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
     
     # --- spectrum.h5 ---
-    h5_path = out_dir / "spectrum.h5"
+    h5_path = outputs_dir / "spectrum.h5"
     
     n_delta = len(results)
     n_modes = cfg.n_modes
@@ -410,14 +421,14 @@ def write_outputs(
         h5.attrs["created"] = datetime.now(timezone.utc).isoformat()
     
     # --- validation.json ---
-    val_path = out_dir / "validation.json"
+    val_path = outputs_dir / "validation.json"
     with open(val_path, "w") as f:
         json.dump(validation, f, indent=2)
     
     # --- stage_summary.json ---
     summary = {
         "stage": "03_sturm_liouville",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "created": datetime.now(timezone.utc).isoformat(),
         "config": asdict(cfg),
         "geometry": {
@@ -439,12 +450,11 @@ def write_outputs(
             "residuals_ok": validation["residuals"]["residuals_ok"],
         },
         "hashes": {
-            "spectrum.h5": compute_file_hash(h5_path),
-            "validation.json": compute_file_hash(val_path),
+            "outputs/spectrum.h5": compute_file_hash(h5_path),
+            "outputs/validation.json": compute_file_hash(val_path),
         }
     }
-    
-    summary_path = out_dir / "stage_summary.json"
+    summary_path = stage_dir / "stage_summary.json"
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)
     
@@ -454,14 +464,13 @@ def write_outputs(
         "run": cfg.run,
         "created": datetime.now(timezone.utc).isoformat(),
         "files": {
-            "spectrum": "spectrum.h5",
-            "validation": "validation.json",
+            "spectrum": "outputs/spectrum.h5",
+            "validation": "outputs/validation.json",
             "summary": "stage_summary.json",
         },
         "input_geometry": f"../geometry/{cfg.geometry_file}",
     }
-    
-    manifest_path = out_dir / "manifest.json"
+    manifest_path = stage_dir / "manifest.json"
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
     

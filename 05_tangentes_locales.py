@@ -46,6 +46,14 @@ def compute_ratio_features(masses, k_features, mass_kind):
     return np.stack(X, axis=1)
 
 
+def resolve_spectrum_path(run_dir: Path) -> Path:
+    stage_dir = run_dir / "spectrum"
+    candidate = stage_dir / "outputs" / "spectrum.h5"
+    if candidate.exists():
+        return candidate
+    return stage_dir / "spectrum.h5"
+
+
 def pca_local(X):
     Xc = X - X.mean(axis=0, keepdims=True)
     C = np.cov(Xc, rowvar=False)
@@ -77,7 +85,7 @@ def main():
     args = ap.parse_args()
 
     run_dir = Path("runs") / args.run
-    spec_path = run_dir / "spectrum" / "spectrum.h5"
+    spec_path = resolve_spectrum_path(run_dir)
     stage_dir = run_dir / "tangentes_locales"
     out_dir = stage_dir / "outputs"
     out_dir.mkdir(parents=True, exist_ok=True)
