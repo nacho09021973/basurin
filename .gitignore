@@ -1,11 +1,6 @@
-# Entornos
 .venv/
-venv/
-.env/
 __pycache__/
 *.pyc
-
-# Outputs BASURIN
 runs/
 outputs/
 *.h5
@@ -13,7 +8,5 @@ outputs/
 *.pt
 *.pth
 *.log
-
-# Editores / SO
 .vscode/
 .DS_Store
