@@ -1,6 +1,6 @@
 # BASURIN
 
-Pipeline mínimo, completo, reproducible y auditable para explorar emergencia geométrica y diccionarios holográficos guiados por datos (enfoque “honesto y falsable”).
+Pipeline mínimo, completo, reproducible y auditable para explorar emergencia geométrica y diccionarios holográficos guiados por datos (enfoque “honesto y falsable”). En verdad es una basura por ahora, no pierdas el tiempo hasta que esto no avance.
 
 ## Estructura de IO (determinista)
 
