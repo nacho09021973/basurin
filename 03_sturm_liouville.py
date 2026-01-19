@@ -48,6 +48,7 @@ class Config:
     run: str
     geometry_file: str = "ads_puro.h5"
     mode: Literal["sweep_delta", "fixed_mass"] = "sweep_delta"
+    dual_spectrum: bool = False
     
     # Barrido en Δ (mode=sweep_delta)
     delta_min: float = 1.55      # > d/2 para d=3 (BF bound)
@@ -61,6 +62,10 @@ class Config:
     n_modes: int = 10            # Modos a calcular por cada Δ
     bc_uv: Literal["dirichlet", "neumann"] = "dirichlet"
     bc_ir: Literal["dirichlet", "neumann"] = "dirichlet"
+    bc_uv_D: str | None = None
+    bc_ir_D: str | None = None
+    bc_uv_N: str | None = None
+    bc_ir_N: str | None = None
 
 
 def parse_args() -> Config:
@@ -73,6 +78,8 @@ def parse_args() -> Config:
     p.add_argument("--mode", type=str, default="sweep_delta",
                    choices=["sweep_delta", "fixed_mass"],
                    help="Modo de operación")
+    p.add_argument("--dual-spectrum", action="store_true", dest="dual_spectrum",
+                   help="Activa espectro dual Dirichlet/Neumann")
     
     # Barrido Δ
     p.add_argument("--delta-min", type=float, default=1.55, dest="delta_min")
@@ -87,6 +94,14 @@ def parse_args() -> Config:
     p.add_argument("--bc-uv", type=str, default="dirichlet", dest="bc_uv",
                    choices=["dirichlet", "neumann"])
     p.add_argument("--bc-ir", type=str, default="dirichlet", dest="bc_ir",
+                   choices=["dirichlet", "neumann"])
+    p.add_argument("--bc-uv-D", type=str, dest="bc_uv_D",
+                   choices=["dirichlet", "neumann"])
+    p.add_argument("--bc-ir-D", type=str, dest="bc_ir_D",
+                   choices=["dirichlet", "neumann"])
+    p.add_argument("--bc-uv-N", type=str, dest="bc_uv_N",
+                   choices=["dirichlet", "neumann"])
+    p.add_argument("--bc-ir-N", type=str, dest="bc_ir_N",
                    choices=["dirichlet", "neumann"])
     
     args = p.parse_args()
@@ -107,6 +122,22 @@ def validate_config(cfg: Config, d: int) -> None:
     
     if cfg.n_modes < 1:
         raise ValueError("n_modes debe ser >= 1")
+
+
+def resolve_dual_defaults(cfg: Config) -> None:
+    """Resuelve defaults para espectro dual respetando Config frozen."""
+    if not cfg.dual_spectrum:
+        return
+    if cfg.bc_uv_D is None:
+        object.__setattr__(cfg, "bc_uv_D", cfg.bc_uv)
+    if cfg.bc_ir_D is None:
+        object.__setattr__(cfg, "bc_ir_D", cfg.bc_ir)
+    if cfg.bc_uv_N is None:
+        object.__setattr__(cfg, "bc_uv_N", "neumann")
+    if cfg.bc_ir_N is None:
+        object.__setattr__(cfg, "bc_ir_N", cfg.bc_ir)
+    object.__setattr__(cfg, "bc_uv", cfg.bc_uv_D)
+    object.__setattr__(cfg, "bc_ir", cfg.bc_ir_D)
 
 
 # =============================================================================
@@ -211,6 +242,8 @@ def build_sl_matrices(
     
     if N_int < 3:
         raise ValueError(f"Malla muy gruesa: N={N}, necesito N >= 5")
+    if bc_uv == "neumann" and bc_ir == "neumann" and N_int < 5:
+        raise ValueError("Neumann/Neumann requiere N_int >= 5 para estabilidad numérica.")
     
     # Matrices
     K = np.zeros((N_int, N_int), dtype=np.float64)
@@ -228,7 +261,12 @@ def build_sl_matrices(
         # Diagonal: contribución de -(p φ')' discretizado
         # -[p_{i+1/2}(φ_{i+1}-φ_i) - p_{i-1/2}(φ_i-φ_{i-1})] / h²
         # Para φ_i: coef = (p_{i+1/2} + p_{i-1/2}) / h²
-        K[i, i] = (p_half[ig] + p_half[ig - 1]) / h2 + q[ig]
+        if i == 0 and bc_uv == "neumann":
+            K[i, i] = p_half[ig] / h2 + q[ig]
+        elif i == N_int - 1 and bc_ir == "neumann":
+            K[i, i] = p_half[ig - 1] / h2 + q[ig]
+        else:
+            K[i, i] = (p_half[ig] + p_half[ig - 1]) / h2 + q[ig]
         
         # Sub/super diagonal
         if i > 0:
@@ -287,7 +325,12 @@ def extend_eigenfunctions(
     # Interior
     phi_full[1:-1, :] = eigenvectors
     
-    # BCs ya son 0 por construcción (Dirichlet)
+    if bc_uv == "neumann":
+        phi_full[0, :] = phi_full[1, :]
+    if bc_ir == "neumann":
+        phi_full[-1, :] = phi_full[-2, :]
+    
+    # BCs Dirichlet ya son 0 por construcción
     return phi_full
 
 
@@ -350,6 +393,46 @@ def validate_residuals(
     }
 
 
+def compute_spectral_separation(
+    M2_D: np.ndarray,
+    M2_N: np.ndarray,
+    deltas: list[float],
+    n_modes: int
+) -> dict:
+    """Calcula diagnóstico de separación entre espectros D y N."""
+    k = min(5, n_modes)
+    per_delta = []
+    rel_diffs = []
+    
+    for idx, delta in enumerate(deltas):
+        m2d = M2_D[idx, :k]
+        m2n = M2_N[idx, :k]
+        denom = np.maximum(np.abs(m2d), 1e-12)
+        sep = np.abs((m2d - m2n) / denom)
+        rel_diffs.append(sep)
+        ratio = None
+        if abs(m2d[0]) > 1e-12:
+            ratio = float(m2n[0] / m2d[0])
+        per_delta.append({
+            "delta": float(delta),
+            "rel_diff_p50": float(np.percentile(sep, 50)),
+            "rel_diff_p90": float(np.percentile(sep, 90)),
+            "ratio_M2_0": ratio,
+        })
+    
+    all_rel = np.concatenate(rel_diffs) if rel_diffs else np.array([])
+    global_stats = {
+        "rel_diff_p50": float(np.percentile(all_rel, 50)) if all_rel.size else 0.0,
+        "rel_diff_p90": float(np.percentile(all_rel, 90)) if all_rel.size else 0.0,
+    }
+    
+    return {
+        "k": k,
+        "per_delta": per_delta,
+        "global": global_stats,
+    }
+
+
 # =============================================================================
 # IO y manifests
 # =============================================================================
@@ -368,7 +451,8 @@ def write_outputs(
     cfg: Config,
     geo: dict,
     results: list[dict],
-    validation: dict
+    validation: dict,
+    results_N: list[dict] | None = None
 ) -> dict:
     """Escribe todos los outputs del Bloque B.
 
@@ -403,11 +487,22 @@ def write_outputs(
         
         # Autovalores: shape (n_delta, n_modes)
         M2_all = np.array([r["M2"] for r in results])
-        h5.create_dataset("M2", data=M2_all)
         
         # Autofunciones: shape (n_delta, N, n_modes)
         phi_all = np.array([r["phi"] for r in results])
-        h5.create_dataset("phi", data=phi_all)
+        
+        if cfg.dual_spectrum and results_N is not None:
+            M2_all_N = np.array([r["M2"] for r in results_N])
+            phi_all_N = np.array([r["phi"] for r in results_N])
+            h5.create_dataset("M2_D", data=M2_all)
+            h5.create_dataset("phi_D", data=phi_all)
+            h5.create_dataset("M2_N", data=M2_all_N)
+            h5.create_dataset("phi_N", data=phi_all_N)
+            h5.create_dataset("M2", data=M2_all)
+            h5.create_dataset("phi", data=phi_all)
+        else:
+            h5.create_dataset("M2", data=M2_all)
+            h5.create_dataset("phi", data=phi_all)
         
         # Metadatos
         h5.attrs["lambda_definition"] = "M_n^2 = -k^2 = omega^2 - |k_vec|^2 (hard-wall, self-adjoint SL)"
@@ -417,6 +512,14 @@ def write_outputs(
         h5.attrs["n_modes"] = n_modes
         h5.attrs["bc_uv"] = cfg.bc_uv
         h5.attrs["bc_ir"] = cfg.bc_ir
+        h5.attrs["dual_spectrum"] = bool(cfg.dual_spectrum)
+        if cfg.dual_spectrum:
+            h5.attrs["n_modes_D"] = n_modes
+            h5.attrs["n_modes_N"] = n_modes
+            h5.attrs["bc_uv_D"] = cfg.bc_uv_D
+            h5.attrs["bc_ir_D"] = cfg.bc_ir_D
+            h5.attrs["bc_uv_N"] = cfg.bc_uv_N
+            h5.attrs["bc_ir_N"] = cfg.bc_ir_N
         h5.attrs["geometry_source"] = cfg.geometry_file
         h5.attrs["created"] = datetime.now(timezone.utc).isoformat()
     
@@ -428,7 +531,7 @@ def write_outputs(
     # --- stage_summary.json ---
     summary = {
         "stage": "03_sturm_liouville",
-        "version": "1.0.1",
+        "version": "1.1.0",
         "created": datetime.now(timezone.utc).isoformat(),
         "config": asdict(cfg),
         "geometry": {
@@ -482,6 +585,56 @@ def write_outputs(
     }
 
 
+def solve_channel(
+    deltas: list[float],
+    m2L2_list: list[float],
+    z: np.ndarray,
+    d: int,
+    cfg: Config,
+    bc_uv: str,
+    bc_ir: str,
+    label: str
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Resuelve espectro para un canal (D o N)."""
+    results = []
+    all_ortho = []
+    all_resid = []
+    
+    for i, (delta, m2L2) in enumerate(zip(deltas, m2L2_list)):
+        # Coeficientes SL
+        p, q, w = compute_sl_coefficients(z, d, m2L2)
+        
+        # Construir matrices
+        K, W = build_sl_matrices(z, p, q, w, bc_uv, bc_ir)
+        
+        # Resolver
+        eigenvalues, eigenvectors = solve_sl_eigenproblem(K, W, cfg.n_modes)
+        
+        # Extender a malla completa
+        phi_full = extend_eigenfunctions(eigenvectors, len(z), bc_uv, bc_ir)
+        
+        # Validar
+        ortho = validate_orthonormality(eigenvectors, W, z[1:-1])
+        resid = validate_residuals(K, W, eigenvalues, eigenvectors)
+        
+        all_ortho.append(ortho)
+        all_resid.append(resid)
+        
+        results.append({
+            "delta": float(delta),
+            "m2L2": float(m2L2),
+            "M2": eigenvalues,
+            "phi": phi_full,
+        })
+        
+        # Progreso
+        status = "✓" if ortho["orthonormality_ok"] and resid["residuals_ok"] else "⚠"
+        print(f"  [{i+1:3d}/{len(deltas)}] ({label}) Δ={delta:.3f}, m²L²={m2L2:.3f}, "
+              f"M²₀={eigenvalues[0]:.4f} {status}")
+    
+    return results, all_ortho, all_resid
+
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -507,6 +660,7 @@ def main() -> int:
     
     # Validar config
     validate_config(cfg, d)
+    resolve_dual_defaults(cfg)
     
     # Construir lista de (Δ, m²L²) a procesar
     if cfg.mode == "sweep_delta":
@@ -524,41 +678,21 @@ def main() -> int:
     print()
     
     # --- Resolver para cada Δ ---
-    results = []
-    all_ortho = []
-    all_resid = []
+    results_N = None
+    all_ortho_N = None
+    all_resid_N = None
     
-    for i, (delta, m2L2) in enumerate(zip(deltas, m2L2_list)):
-        # Coeficientes SL
-        p, q, w = compute_sl_coefficients(z, d, m2L2)
-        
-        # Construir matrices
-        K, W = build_sl_matrices(z, p, q, w, cfg.bc_uv, cfg.bc_ir)
-        
-        # Resolver
-        eigenvalues, eigenvectors = solve_sl_eigenproblem(K, W, cfg.n_modes)
-        
-        # Extender a malla completa
-        phi_full = extend_eigenfunctions(eigenvectors, len(z), cfg.bc_uv, cfg.bc_ir)
-        
-        # Validar
-        ortho = validate_orthonormality(eigenvectors, W, z[1:-1])
-        resid = validate_residuals(K, W, eigenvalues, eigenvectors)
-        
-        all_ortho.append(ortho)
-        all_resid.append(resid)
-        
-        results.append({
-            "delta": float(delta),
-            "m2L2": float(m2L2),
-            "M2": eigenvalues,
-            "phi": phi_full,
-        })
-        
-        # Progreso
-        status = "✓" if ortho["orthonormality_ok"] and resid["residuals_ok"] else "⚠"
-        print(f"  [{i+1:3d}/{len(deltas)}] Δ={delta:.3f}, m²L²={m2L2:.3f}, "
-              f"M²₀={eigenvalues[0]:.4f} {status}")
+    if cfg.dual_spectrum:
+        results, all_ortho, all_resid = solve_channel(
+            deltas, m2L2_list, z, d, cfg, cfg.bc_uv_D, cfg.bc_ir_D, "D"
+        )
+        results_N, all_ortho_N, all_resid_N = solve_channel(
+            deltas, m2L2_list, z, d, cfg, cfg.bc_uv_N, cfg.bc_ir_N, "N"
+        )
+    else:
+        results, all_ortho, all_resid = solve_channel(
+            deltas, m2L2_list, z, d, cfg, cfg.bc_uv, cfg.bc_ir, "L"
+        )
     
     print()
     
@@ -576,9 +710,28 @@ def main() -> int:
         },
     }
     
+    if cfg.dual_spectrum and results_N is not None and all_ortho_N is not None and all_resid_N is not None:
+        M2_all_D = np.array([r["M2"] for r in results])
+        M2_all_N = np.array([r["M2"] for r in results_N])
+        validation["dual"] = {
+            "orthonormality_N": {
+                "orthonormality_ok": all(o["orthonormality_ok"] for o in all_ortho_N),
+                "gram_offdiag_max_global": max(o["gram_offdiag_max"] for o in all_ortho_N),
+                "per_delta": all_ortho_N,
+            },
+            "residuals_N": {
+                "residuals_ok": all(r["residuals_ok"] for r in all_resid_N),
+                "residual_max_global": max(r["residual_max"] for r in all_resid_N),
+                "per_delta": all_resid_N,
+            },
+            "spectral_separation": compute_spectral_separation(
+                M2_all_D, M2_all_N, list(deltas), cfg.n_modes
+            ),
+        }
+    
     # --- Escribir outputs ---
     out_dir = Path("runs") / cfg.run / "spectrum"
-    paths = write_outputs(out_dir, cfg, geo, results, validation)
+    paths = write_outputs(out_dir, cfg, geo, results, validation, results_N=results_N)
     
     print("Outputs escritos:")
     for name, path in paths.items():
