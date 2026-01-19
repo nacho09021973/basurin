@@ -14,12 +14,13 @@ Uso:
 
 Salida:
     runs/<run>/dictionary/
-        ├── dictionary.h5          (modelo, coeficientes, métricas)
-        ├── atlas.json             (clustering de teorías efectivas)
-        ├── ising_comparison.json  (contraste con Δ_σ, Δ_ε)
-        ├── validation.json        (contratos C1, C2, C3)
         ├── manifest.json
-        └── stage_summary.json
+        ├── stage_summary.json
+        └── outputs/
+            ├── dictionary.h5          (modelo, coeficientes, métricas)
+            ├── atlas.json             (clustering de teorías efectivas)
+            ├── ising_comparison.json  (contraste con Δ_σ, Δ_ε)
+            └── validation.json        (contratos C1, C2, C3, C5)
 
 Contratos:
     C1: Compatibilidad puntual con Ising (τ_Δ=0.02 o 2σ)
@@ -46,7 +47,7 @@ import numpy as np
 # Silenciar warnings de convergencia en CV con pocos datos
 warnings.filterwarnings("ignore", category=UserWarning)
 
-__version__ = "1.4.2"
+__version__ = "1.5.0"
 
 
 # =============================================================================
@@ -59,6 +60,7 @@ class Config:
     run: str
     test_mode: bool = False  # Ejecuta self-tests deterministas y sale
     spectrum_file: str = "outputs/spectrum.h5"
+    exp04_compare_run: Optional[str] = None
     
     # Features
     k_features: int = 3              # Número de ratios r_n (n=1..K)
@@ -102,7 +104,7 @@ class Config:
 
 def parse_args() -> Config:
     p = argparse.ArgumentParser(
-        description="Bloque C: Diccionario holográfico inverso (v1.4.1)"
+        description="Bloque C: Diccionario holográfico inverso (v1.5.0)"
     )
     p.add_argument("--run", type=str, default=None, help="Nombre del run")
     p.add_argument("--test", action="store_true", dest="test_mode",
@@ -111,6 +113,9 @@ def parse_args() -> Config:
                    dest="spectrum_file", help="Archivo H5 del espectro")
     p.add_argument("--k-features", type=int, default=3, dest="k_features",
                    help="Número de ratios r_n a usar como features (default: 3)")
+    p.add_argument("--exp04-compare-run", type=str, default=None,
+                   dest="exp04_compare_run",
+                   help="Run baseline para comparar contratos C5 (Exp04)")
     p.add_argument("--cv-folds", type=int, default=5, dest="cv_folds")
     p.add_argument("--n-bootstrap", type=int, default=200, dest="n_bootstrap")
     p.add_argument("--seed", type=int, default=42, dest="random_seed")
@@ -163,6 +168,7 @@ def parse_args() -> Config:
         test_mode=getattr(args, "test_mode", False),
         spectrum_file=args.spectrum_file,
         k_features=args.k_features,
+        exp04_compare_run=args.exp04_compare_run,
         cv_folds=args.cv_folds,
         n_bootstrap=args.n_bootstrap,
         random_seed=args.random_seed,
@@ -195,16 +201,23 @@ def load_spectrum(h5_path: Path) -> dict:
         sys.exit(1)
     
     with h5py.File(h5_path, "r") as h5:
+        dual_spectrum = bool(h5.attrs.get("dual_spectrum", False))
         data = {
             "delta_uv": h5["delta_uv"][:],
             "m2L2": h5["m2L2"][:],
-            "M2": h5["M2"][:],          # shape (n_delta, n_modes)
             "z_grid": h5["z_grid"][:],
             "d": int(h5.attrs["d"]),
             "L": float(h5.attrs["L"]),
             "n_delta": int(h5.attrs["n_delta"]),
             "n_modes": int(h5.attrs["n_modes"]),
+            "dual_spectrum": dual_spectrum,
         }
+        if dual_spectrum:
+            data["M2_D"] = h5["M2_D"][:]
+            data["M2_N"] = h5["M2_N"][:]
+            data["M2"] = h5["M2"][:] if "M2" in h5 else data["M2_D"]
+        else:
+            data["M2"] = h5["M2"][:]
     return data
 
 
@@ -225,13 +238,22 @@ def resolve_spectrum_path(run: str, spectrum_file: str) -> Path:
         return sf
 
     stage_dir = Path("runs") / run / "spectrum"
+    if spectrum_file == "outputs/spectrum.h5":
+        cand_outputs = stage_dir / "outputs" / "spectrum.h5"
+        if cand_outputs.exists():
+            return cand_outputs
+        legacy = stage_dir / "spectrum.h5"
+        if legacy.exists():
+            return legacy
+        return cand_outputs
+
     cand = stage_dir / spectrum_file
     if cand.exists():
         return cand
 
-    cand2 = stage_dir / "outputs" / "spectrum.h5"
-    if cand2.exists():
-        return cand2
+    cand_outputs = stage_dir / "outputs" / "spectrum.h5"
+    if cand_outputs.exists():
+        return cand_outputs
     return stage_dir / "spectrum.h5"
 
 
@@ -260,7 +282,7 @@ def verify_invariants(X: np.ndarray, y: Optional[np.ndarray] = None, *, name: st
             raise ValueError(f"y contiene NaNs/Infs en indices {bad[:5].tolist()} (mostrando hasta 5).")
 
 
-def compute_ratio_features(M2: np.ndarray, k: int) -> np.ndarray:
+def compute_ratio_features(M2: np.ndarray, k: int, eps: float = 1e-12) -> np.ndarray:
     """Calcula features invariantes de escala: r_n = M_n² / M_0².
     
     Args:
@@ -278,7 +300,7 @@ def compute_ratio_features(M2: np.ndarray, k: int) -> np.ndarray:
     M0 = M2[:, 0:1]  # (n_samples, 1)
     
     # Evitar división por cero
-    M0_safe = np.where(np.abs(M0) > 1e-10, M0, 1e-10)
+    M0_safe = np.maximum(M0, eps)
     
     # Ratios r_1, r_2, ..., r_k
     X = M2[:, 1:k+1] / M0_safe
@@ -286,6 +308,27 @@ def compute_ratio_features(M2: np.ndarray, k: int) -> np.ndarray:
     verify_invariants(X, name="X_ratios")
 
     return X
+
+
+def build_features_from_spectrum(spectrum: dict, k: int, eps: float = 1e-12) -> tuple[np.ndarray, dict]:
+    """Construye features X desde el espectro, soportando dual spectrum."""
+    dual = bool(spectrum.get("dual_spectrum", False))
+    if dual:
+        rD = compute_ratio_features(spectrum["M2_D"], k, eps)
+        rN = compute_ratio_features(spectrum["M2_N"], k, eps)
+        X = np.concatenate([rD, rN], axis=1)
+        dim = 2 * k
+    else:
+        X = compute_ratio_features(spectrum["M2"], k, eps)
+        dim = k
+
+    features_meta = {
+        "k": int(k),
+        "dual": dual,
+        "dim": int(dim),
+        "definition": "ratios M2_n/M2_0 excluding n=0",
+    }
+    return X, features_meta
 
 
 # =============================================================================
@@ -1021,7 +1064,7 @@ def evaluate_c3_full(
             "note": "C3 requiere --enable-c3. Usar --enable-c3 para activar.",
         }
     
-    k = cfg.k_features
+    k = X.shape[1]
     metric = cfg.c3_metric
     noise_floor_metric = metric
     if cfg.c3_noise_floor_metric not in (None, "same"):
@@ -1171,24 +1214,167 @@ def compute_file_hash(path: Path) -> str:
     return sha.hexdigest()
 
 
+def resolve_validation_path(run: str) -> Optional[Path]:
+    """Resuelve validation.json para un run (outputs primero, luego legacy)."""
+    candidates = [
+        Path("runs") / run / "dictionary" / "outputs" / "validation.json",
+        Path("runs") / run / "dictionary" / "validation.json",
+    ]
+    for cand in candidates:
+        if cand.exists():
+            return cand
+    return None
+
+
+def load_validation(run: str) -> tuple[Optional[dict], Optional[Path]]:
+    """Carga validation.json de un run si existe."""
+    path = resolve_validation_path(run)
+    if path is None:
+        return None, None
+    with open(path, "r") as f:
+        return json.load(f), path
+
+
+def extract_primary_error(validation: dict) -> tuple[Optional[float], Optional[str]]:
+    """Extrae la métrica de error principal según claves existentes."""
+    c3 = validation.get("C3_spectral", {})
+    c3b = c3.get("c3b_cycle", {})
+    if isinstance(c3b, dict) and "global" in c3b:
+        return float(c3b["global"]), "C3_spectral.c3b_cycle.global"
+    c2 = validation.get("C2_consistency", {})
+    if isinstance(c2, dict) and "cv_rmse" in c2:
+        return float(c2["cv_rmse"]), "C2_consistency.cv_rmse"
+    return None, None
+
+
+def extract_c3b_status(validation: dict) -> Optional[str]:
+    """Extrae status C3b si está disponible."""
+    c3 = validation.get("C3_spectral", {})
+    status = c3.get("c3b_status")
+    if status in ("PASS", "FAIL"):
+        return status
+    return None
+
+
+def evaluate_c5(
+    current_validation: dict,
+    *,
+    dual: bool,
+    compare_run: Optional[str],
+    eps: float = 1e-12
+) -> dict:
+    """Evalúa contratos C5 (Exp04) comparando con baseline si procede."""
+    if not dual:
+        return {
+            "status": "SKIP",
+            "reason": "dual_spectrum False",
+            "C5a": {"status": "SKIP", "reason": "dual_spectrum False"},
+            "C5b": {"status": "SKIP", "reason": "dual_spectrum False"},
+            "C5c": {"status": "SKIP", "reason": "dual_spectrum False"},
+        }
+
+    if not compare_run:
+        return {
+            "status": "SKIP",
+            "reason": "no baseline provided",
+            "C5a": {"status": "SKIP", "reason": "no baseline provided"},
+            "C5b": {"status": "SKIP", "reason": "no baseline provided"},
+            "C5c": {"status": "SKIP", "reason": "no baseline provided"},
+        }
+
+    baseline_validation, baseline_path = load_validation(compare_run)
+    if baseline_validation is None:
+        reason = f"baseline validation not found for {compare_run}"
+        return {
+            "status": "SKIP",
+            "reason": reason,
+            "baseline_run": compare_run,
+            "C5a": {"status": "SKIP", "reason": reason},
+            "C5b": {"status": "SKIP", "reason": reason},
+            "C5c": {"status": "SKIP", "reason": reason},
+        }
+
+    c5a = {"status": "SKIP"}
+    baseline_err, baseline_key = extract_primary_error(baseline_validation)
+    dual_err, dual_key = extract_primary_error(current_validation)
+    if baseline_err is None or dual_err is None:
+        c5a["reason"] = "missing error metric in validation"
+    else:
+        gain = baseline_err - dual_err
+        gain_frac = gain / max(baseline_err, eps)
+        c5a = {
+            "status": "PASS" if dual_err < baseline_err else "FAIL",
+            "baseline_error": baseline_err,
+            "dual_error": dual_err,
+            "gain": gain,
+            "gain_frac": gain_frac,
+            "baseline_metric": baseline_key,
+            "dual_metric": dual_key,
+        }
+
+    c5b = {"status": "SKIP"}
+    baseline_c3b = extract_c3b_status(baseline_validation)
+    dual_c3b = extract_c3b_status(current_validation)
+    if baseline_c3b is None or dual_c3b is None:
+        c5b["reason"] = "missing C3b status in validation"
+    else:
+        c5b = {
+            "status": "PASS" if dual_c3b == "PASS" else "FAIL",
+            "baseline_C3b": baseline_c3b,
+            "dual_C3b": dual_c3b,
+            "rule": "PASS if dual does not worsen; improves if baseline FAIL",
+        }
+
+    c5c = {"status": "SKIP"}
+    baseline_c2 = baseline_validation.get("C2_consistency", {})
+    dual_c2 = current_validation.get("C2_consistency", {})
+    if "cv_rmse" not in baseline_c2 or "cv_rmse" not in dual_c2:
+        c5c["reason"] = "missing cv_rmse in validation"
+    else:
+        baseline_rmse = float(baseline_c2["cv_rmse"])
+        dual_rmse = float(dual_c2["cv_rmse"])
+        ratio = dual_rmse / max(baseline_rmse, eps)
+        c5c = {
+            "status": "PASS" if dual_rmse <= 1.2 * baseline_rmse else "FAIL",
+            "baseline_cv_rmse": baseline_rmse,
+            "dual_cv_rmse": dual_rmse,
+            "ratio": ratio,
+            "threshold": 1.2,
+        }
+
+    return {
+        "status": "EVALUATED",
+        "baseline_run": compare_run,
+        "baseline_validation_path": str(baseline_path),
+        "C5a": c5a,
+        "C5b": c5b,
+        "C5c": c5c,
+    }
+
+
 def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
                   model_selection: dict, bootstrap: dict,
-                  contracts: dict, atlas: dict) -> dict:
+                  contracts: dict, atlas: dict, features_meta: dict,
+                  spectrum_rel_path: str, c5_contracts: dict) -> dict:
     """Escribe todos los outputs del Bloque C."""
     import h5py
-    
-    out_dir.mkdir(parents=True, exist_ok=True)
+
+    stage_dir = out_dir
+    outputs_dir = stage_dir / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
     
     best_model = model_selection["best_model"]
     best_result = model_selection["all_models"][best_model]
     
     # --- dictionary.h5 ---
-    h5_path = out_dir / "dictionary.h5"
+    h5_path = outputs_dir / "dictionary.h5"
     
     with h5py.File(h5_path, "w") as h5:
         feat_grp = h5.create_group("features")
         feat_grp.attrs["k"] = cfg.k_features
         feat_grp.attrs["definition"] = "r_n = M_n^2 / M_0^2, n=1..k"
+        feat_grp.attrs["dual"] = bool(features_meta["dual"])
+        feat_grp.attrs["dim"] = int(features_meta["dim"])
         feat_grp.create_dataset("feature_names", 
                                 data=np.array(best_result["feature_names"], dtype="S"))
         
@@ -1225,12 +1411,12 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
         h5.attrs["spectrum_source"] = cfg.spectrum_file
     
     # --- atlas.json ---
-    atlas_path = out_dir / "atlas.json"
+    atlas_path = outputs_dir / "atlas.json"
     with open(atlas_path, "w") as f:
         json.dump(atlas, f, indent=2)
     
     # --- ising_comparison.json ---
-    ising_path = out_dir / "ising_comparison.json"
+    ising_path = outputs_dir / "ising_comparison.json"
     ising_data = {
         "targets": {
             "delta_sigma": cfg.delta_sigma,
@@ -1253,7 +1439,7 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
         json.dump(ising_data, f, indent=2)
     
     # --- validation.json ---
-    val_path = out_dir / "validation.json"
+    val_path = outputs_dir / "validation.json"
     
     c1_sigma_in_domain = contracts["c1_sigma"].get("in_domain", True)
     c1_epsilon_in_domain = contracts["c1_epsilon"].get("in_domain", True)
@@ -1281,6 +1467,7 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
     
     validation = {
         "version": __version__,
+        "features": features_meta,
         "metadata": {
             "run": cfg.run,
             "spectrum_source": cfg.spectrum_file,
@@ -1308,6 +1495,7 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
             **contracts["c2"],
         },
         "C3_spectral": c3,
+        "C5_exp04": c5_contracts,
         "overall": {
             "C1_sigma_status": c1_sigma_status,
             "C1_sigma_in_domain": c1_sigma_in_domain,
@@ -1333,6 +1521,7 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
             "run": cfg.run,
             "spectrum_file": cfg.spectrum_file,
             "k_features": cfg.k_features,
+            "exp04_compare_run": cfg.exp04_compare_run,
             "models_evaluated": list(cfg.models),
             "cv_folds": cfg.cv_folds,
             "n_bootstrap": cfg.n_bootstrap,
@@ -1352,6 +1541,7 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
             "delta_range": [delta_min, delta_max],
             "n_delta": spectrum["n_delta"],
             "n_modes": spectrum["n_modes"],
+            "features": features_meta,
         },
         "model": {
             "selected": best_model,
@@ -1380,13 +1570,13 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
         "hashes": {},
     }
     
-    summary_path = out_dir / "stage_summary.json"
+    summary_path = stage_dir / "stage_summary.json"
     
     summary["hashes"] = {
-        "dictionary.h5": compute_file_hash(h5_path),
-        "atlas.json": compute_file_hash(atlas_path),
-        "ising_comparison.json": compute_file_hash(ising_path),
-        "validation.json": compute_file_hash(val_path),
+        "outputs/dictionary.h5": compute_file_hash(h5_path),
+        "outputs/atlas.json": compute_file_hash(atlas_path),
+        "outputs/ising_comparison.json": compute_file_hash(ising_path),
+        "outputs/validation.json": compute_file_hash(val_path),
     }
     
     with open(summary_path, "w") as f:
@@ -1399,16 +1589,16 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
         "run": cfg.run,
         "created": datetime.now(timezone.utc).isoformat(),
         "files": {
-            "dictionary": "dictionary.h5",
-            "atlas": "atlas.json",
-            "ising_comparison": "ising_comparison.json",
-            "validation": "validation.json",
+            "dictionary": "outputs/dictionary.h5",
+            "atlas": "outputs/atlas.json",
+            "ising_comparison": "outputs/ising_comparison.json",
+            "validation": "outputs/validation.json",
             "summary": "stage_summary.json",
         },
-        "input_spectrum": f"../spectrum/{cfg.spectrum_file}",
+        "input_spectrum": spectrum_rel_path,
     }
     
-    manifest_path = out_dir / "manifest.json"
+    manifest_path = stage_dir / "manifest.json"
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
     
@@ -1482,6 +1672,12 @@ def main() -> int:
         return 1
     
     spectrum = load_spectrum(spec_path)
+    run_dir = Path("runs") / cfg.run
+    try:
+        spectrum_rel_path = str(spec_path.relative_to(run_dir))
+    except ValueError:
+        print(f"ERROR: spectrum fuera de runs/{cfg.run}: {spec_path}", file=sys.stderr)
+        return 1
     
     print(f"Bloque C v{__version__}")
     print(f"Espectro cargado: {spec_path}")
@@ -1497,9 +1693,14 @@ def main() -> int:
     
     # Preparar datos
     y = spectrum["delta_uv"]
-    X = compute_ratio_features(spectrum["M2"], cfg.k_features)
+    if spectrum.get("dual_spectrum", False):
+        if spectrum["M2_D"].shape != spectrum["M2_N"].shape:
+            print("ERROR: M2_D y M2_N deben tener misma forma", file=sys.stderr)
+            return 1
+    X, features_meta = build_features_from_spectrum(spectrum, cfg.k_features, eps=1e-12)
     
-    print(f"Features: {cfg.k_features} ratios (r_1, ..., r_{cfg.k_features})")
+    feature_label = "dual" if features_meta["dual"] else "legacy"
+    print(f"Features: {features_meta['dim']} ratios ({feature_label}, k={cfg.k_features})")
     print(f"Dataset: {len(y)} muestras")
     print()
     
@@ -1560,6 +1761,16 @@ def main() -> int:
         "c2": c2,
         "c3": c3,
     }
+
+    current_validation = {
+        "C2_consistency": c2,
+        "C3_spectral": c3,
+    }
+    c5_contracts = evaluate_c5(
+        current_validation,
+        dual=bool(features_meta["dual"]),
+        compare_run=cfg.exp04_compare_run,
+    )
     
     # Prints
     sigma_status = c1_sigma['global_status']
@@ -1614,7 +1825,18 @@ def main() -> int:
     
     # --- Escribir outputs ---
     out_dir = Path("runs") / cfg.run / "dictionary"
-    paths = write_outputs(out_dir, cfg, spectrum, model_selection, bootstrap, contracts, atlas)
+    paths = write_outputs(
+        out_dir,
+        cfg,
+        spectrum,
+        model_selection,
+        bootstrap,
+        contracts,
+        atlas,
+        features_meta,
+        spectrum_rel_path,
+        c5_contracts,
+    )
     
     print("Outputs escritos:")
     for name, path in paths.items():
