@@ -751,11 +751,23 @@ def main() -> int:
 
     # Input hash
     input_hash = sha256_file(mix_spec)
+    attrs_source_hash = sha256_file(a_spec)
 
     # Git commit
     git_commit = get_git_commit()
 
     # --- Write metrics.json ---
+    note: Optional[str] = None
+    if (
+        cfg.is_canonical
+        and not hyp_check["hypothesis_confirmed"]
+        and hyp_check["sensitivity_demonstrated"]
+    ):
+        note = (
+            "Canonical Exp03: positive control did NOT pass with threshold=0.02 for this dataset, "
+            "but sensitivity to metric/weights is demonstrated (C3 reduced). This is a falsable "
+            "negative result, not a pipeline failure."
+        )
     metrics = {
         "experiment": "Exp03_C3_metric_sensitivity",
         "version": __version__,
@@ -763,6 +775,7 @@ def main() -> int:
         "run_mix": cfg.run_mix,
         "is_canonical": cfg.is_canonical,
         "variant_label": cfg.variant_label,
+        "note": note,
         "canonical_thresholds": {
             "neg": CANONICAL_NEG_THRESHOLD,
             "pos": CANONICAL_POS_THRESHOLD,
@@ -819,6 +832,10 @@ def main() -> int:
         "inputs": {
             "spectrum": str(mix_spec.as_posix()),
             "sha256": input_hash,
+            "attrs_source": {
+                "path": str(a_spec.as_posix()),
+                "sha256": attrs_source_hash,
+            },
         },
         "derived_runs": {
             "A": cfg.run_mix_a,
