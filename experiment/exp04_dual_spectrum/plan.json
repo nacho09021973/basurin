@@ -1,0 +1,21 @@
+{
+  "exp_id": "exp04_dual_spectrum",
+  "runs": {
+    "baseline_D": "2026-01-19__exp04_D_only",
+    "dual_DN": "2026-01-19__exp04_DN_dual"
+  },
+  "spectrum": {
+    "n_modes": 10,
+    "bc_uv": "dirichlet",
+    "bc_ir": "dirichlet",
+    "dual": {
+      "enabled": true,
+      "bc_uv_N": "neumann",
+      "bc_ir_N": "dirichlet"
+    }
+  },
+  "contracts": {
+    "C5a_gain_frac_min": 0.70,
+    "C5c_cv_rmse_max_ratio": 1.20
+  }
+}
