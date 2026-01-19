@@ -69,7 +69,7 @@ def test_c3_adaptive_validation(tmp_path: Path) -> None:
     )
     assert result.returncode in (0, 1)
 
-    validation_path = tmp_path / "runs" / run_name / "dictionary" / "validation.json"
+    validation_path = tmp_path / "runs" / run_name / "dictionary" / "outputs" / "validation.json"
     assert validation_path.exists()
 
     data = json.loads(validation_path.read_text())
