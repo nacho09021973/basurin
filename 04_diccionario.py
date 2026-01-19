@@ -46,7 +46,7 @@ import numpy as np
 # Silenciar warnings de convergencia en CV con pocos datos
 warnings.filterwarnings("ignore", category=UserWarning)
 
-__version__ = "1.4.1"
+__version__ = "1.4.2"
 
 
 # =============================================================================
@@ -475,12 +475,14 @@ def bootstrap_uncertainty(X: np.ndarray, y: np.ndarray, model_type: str,
         bootstrap_predictions[b] = y_pred_b
     
     sigma_delta = np.std(bootstrap_predictions, axis=0)
+    sigma_delta_p90 = float(np.percentile(sigma_delta, 90))
     beta_mean = np.mean(bootstrap_betas, axis=0)
     beta_std = np.std(bootstrap_betas, axis=0)
     
     return {
         "sigma_delta": sigma_delta,
         "sigma_delta_mean": float(np.mean(sigma_delta)),
+        "sigma_delta_p90": sigma_delta_p90,
         "sigma_delta_max": float(np.max(sigma_delta)),
         "beta_mean": beta_mean,
         "beta_std": beta_std,
@@ -775,6 +777,53 @@ def compute_ratio_distance(
     }
 
 
+def estimate_sensitivity(delta: np.ndarray, ratios: np.ndarray) -> dict:
+    """Estima sensibilidad ||dr/dΔ||_2 usando diferencias finitas en datos."""
+    if delta.ndim != 1:
+        raise ValueError("delta debe ser 1D")
+    if ratios.ndim != 2:
+        raise ValueError("ratios debe ser 2D")
+    if len(delta) != ratios.shape[0]:
+        raise ValueError("delta y ratios deben tener mismo n_samples")
+
+    n_samples = len(delta)
+    if n_samples < 2:
+        return {
+            "n_samples": n_samples,
+            "s_p50": 0.0,
+            "s_p90": 0.0,
+            "s_p95": 0.0,
+            "s_max": 0.0,
+        }
+
+    order = np.argsort(delta)
+    delta_sorted = delta[order]
+    ratios_sorted = ratios[order]
+
+    sensitivities = np.zeros(n_samples)
+    for i in range(n_samples):
+        if i == 0:
+            dr = ratios_sorted[1] - ratios_sorted[0]
+            ddelta = delta_sorted[1] - delta_sorted[0]
+        elif i == n_samples - 1:
+            dr = ratios_sorted[-1] - ratios_sorted[-2]
+            ddelta = delta_sorted[-1] - delta_sorted[-2]
+        else:
+            dr = ratios_sorted[i + 1] - ratios_sorted[i - 1]
+            ddelta = delta_sorted[i + 1] - delta_sorted[i - 1]
+
+        denom = ddelta if np.abs(ddelta) > 1e-12 else 1e-12
+        sensitivities[i] = np.linalg.norm(dr / denom)
+
+    return {
+        "n_samples": n_samples,
+        "s_p50": float(np.percentile(sensitivities, 50)),
+        "s_p90": float(np.percentile(sensitivities, 90)),
+        "s_p95": float(np.percentile(sensitivities, 95)),
+        "s_max": float(np.max(sensitivities)),
+    }
+
+
 def compute_sensitivity(
     y: np.ndarray,
     betas_direct: list[np.ndarray],
@@ -958,7 +1007,8 @@ def evaluate_c3_full(
     X: np.ndarray,
     y: np.ndarray,
     cfg: Config,
-    inverse_model_type: str
+    inverse_model_type: str,
+    sigma_delta_stats: Optional[dict] = None
 ) -> dict:
     """Evaluación completa de C3 con diagnóstico causal."""
 
@@ -992,8 +1042,8 @@ def evaluate_c3_full(
     # C3b: Cycle
     c3b = evaluate_c3b_cycle(X, y, inverse_model_type, betas_direct, cfg.direct_degree, metric, weights)
     
-    # Sensitivity
-    sensitivity = compute_sensitivity(y, betas_direct, cfg.direct_degree, cfg.c3_noise_floor_eps)
+    # Sensitivity (datos reales)
+    sensitivity = estimate_sensitivity(y, X)
     
     # Noise floor
     noise_floor = compute_noise_floor(
@@ -1006,30 +1056,37 @@ def evaluate_c3_full(
     if cfg.c3_oracle:
         oracle = evaluate_c3_oracle(X, y, betas_direct, cfg.direct_degree, metric, weights)
     
-    # Calcular umbral efectivo
+    # Calcular umbral efectivo (C3b)
     threshold_user = cfg.c3_threshold
-    threshold_adaptive = cfg.c3_threshold_factor * noise_floor["median_sigma"]
-    
-    if cfg.c3_adaptive_threshold:
-        threshold_effective = max(threshold_user, threshold_adaptive)
-        threshold_mode = "adaptive"
+    noise_floor_r = noise_floor["median_sigma"]
+    if sigma_delta_stats is None:
+        sigma_delta_used = 0.0
+        sigma_delta_source = "none"
     else:
-        threshold_effective = threshold_user
-        threshold_mode = "user"
+        if "sigma_delta_p90" in sigma_delta_stats:
+            sigma_delta_used = float(sigma_delta_stats["sigma_delta_p90"])
+            sigma_delta_source = "p90"
+        else:
+            sigma_delta_used = float(sigma_delta_stats.get("sigma_delta_mean", 0.0))
+            sigma_delta_source = "mean"
+
+    tol_cycle = max(noise_floor_r, sensitivity["s_p90"] * sigma_delta_used)
+    threshold_used = cfg.c3_threshold_factor * tol_cycle if cfg.c3_adaptive_threshold else threshold_user
+    threshold_mode = "adaptive" if cfg.c3_adaptive_threshold else "user"
     
     # Determinar failure_mode y status
     c3a_value = c3a["global"]
     c3b_value = c3b["global"]
 
-    c3a_ok = bool(c3a_value <= threshold_effective)
-    c3b_ok = bool(c3b_value <= threshold_effective)
+    c3a_ok = bool(c3a_value <= threshold_user)
+    c3b_ok = bool(c3b_value <= threshold_used)
     c3a_status = "PASS" if c3a_ok else "FAIL"
     c3b_status = "PASS" if c3b_ok else "FAIL"
     
-    if c3a_value > threshold_effective:
+    if c3a_value > threshold_user:
         failure_mode = "DECODER_MISMATCH"
         status = "FAIL"
-    elif c3b_value > threshold_effective:
+    elif c3b_value > threshold_used:
         failure_mode = "CYCLE_INCONSISTENT"
         status = "FAIL"
     else:
@@ -1049,14 +1106,20 @@ def evaluate_c3_full(
         "c3a_decoder": c3a,
         "c3b_cycle": c3b,
         "sensitivity": sensitivity,
+        "sigma_delta": {
+            "used": float(sigma_delta_used),
+            "source": sigma_delta_source,
+        },
+        "tol_cycle": float(tol_cycle),
         "noise_floor": noise_floor,
         "threshold": {
             "user": threshold_user,
-            "adaptive": float(threshold_adaptive),
-            "effective": float(threshold_effective),
+            "adaptive": float(cfg.c3_threshold_factor * tol_cycle),
+            "effective": float(threshold_used),
             "factor": cfg.c3_threshold_factor,
             "mode": threshold_mode,
         },
+        "threshold_used": float(threshold_used),
         "oracle": oracle,
         "direct_model": {
             "type": cfg.direct_model,
@@ -1226,6 +1289,12 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
             "n_modes": spectrum["n_modes"],
             "k_features": cfg.k_features,
         },
+        "bootstrap": {
+            "n_bootstrap": bootstrap["n_bootstrap"],
+            "sigma_delta_mean": bootstrap["sigma_delta_mean"],
+            "sigma_delta_p90": bootstrap["sigma_delta_p90"],
+            "sigma_delta_max": bootstrap["sigma_delta_max"],
+        },
         "C1_ising": {
             "description": "Compatibilidad puntual con Ising 3D",
             "sigma_cap": cfg.sigma_cap,
@@ -1295,6 +1364,7 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
         },
         "uncertainty": {
             "sigma_delta_mean": bootstrap["sigma_delta_mean"],
+            "sigma_delta_p90": bootstrap["sigma_delta_p90"],
             "sigma_delta_max": bootstrap["sigma_delta_max"],
         },
         "validation_summary": {
@@ -1482,7 +1552,7 @@ def main() -> int:
     # C3: Espectral (con diagnóstico causal)
     if cfg.enable_c3:
         print(f"  C3: Modelo directo (degree={cfg.direct_degree}), metric={cfg.c3_metric}, weights={cfg.c3_weights}")
-    c3 = evaluate_c3_full(X, y, cfg, best_model)
+    c3 = evaluate_c3_full(X, y, cfg, best_model, sigma_delta_stats=bootstrap)
     
     contracts = {
         "c1_sigma": c1_sigma,
@@ -1519,14 +1589,21 @@ def main() -> int:
         failure_mode = c3.get("failure_mode", "")
         c3a_val = c3.get("c3a_decoder", {}).get("global", 0)
         c3b_val = c3.get("c3b_cycle", {}).get("global", 0)
-        threshold_eff = c3.get("threshold", {}).get("effective", cfg.c3_threshold)
+        threshold_eff = c3.get("threshold_used", cfg.c3_threshold)
         noise_floor = c3.get("noise_floor", {}).get("median_sigma", 0)
+        tol_cycle = c3.get("tol_cycle", 0)
+        sensitivity = c3.get("sensitivity", {})
+        sigma_delta_used = c3.get("sigma_delta", {}).get("used", 0)
         
         print(f"  C3 (espectral): {c3_status:12s} "
               f"[C3a={c3a_val:.4f}, C3b={c3b_val:.4f}, threshold={threshold_eff:.4f}]")
         if failure_mode:
             print(f"      failure_mode: {failure_mode}")
         print(f"      noise_floor: {noise_floor:.6f}, metric: {cfg.c3_metric}")
+        print(f"      tol_cycle: {tol_cycle:.6f}, sigma_delta: {sigma_delta_used:.6f}")
+        if sensitivity:
+            print(f"      sensitivity: s_p50={sensitivity.get('s_p50', 0):.4f}, "
+                  f"s_p90={sensitivity.get('s_p90', 0):.4f}")
         if cfg.c3_weights != "none":
             print(f"      weights: {cfg.c3_weights}")
     
