@@ -1,20 +1,19 @@
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+# Entornos
 .venv/
 venv/
-.vscode/
-.idea/
+.env/
+__pycache__/
+*.pyc
+
+# Outputs BASURIN
 runs/
+outputs/
 *.h5
 *.hdf5
+*.pt
+*.pth
+*.log
 
-*:Zone.Identifier
-
-*:Zone.Identifier
-
-# No subir papers/PDFs
-papers/
-*.pdf
+# Editores / SO
+.vscode/
+.DS_Store
