@@ -27,3 +27,12 @@ All data files MUST be placed under:
 runs/<experiment>/<stage>/outputs/
 
 No stage may write outside `runs/<experiment>/`.
+
+## bridge_f4_1_alignment outputs
+`degeneracy_per_point.json` entries include audit fields for pairing:
+
+- pairing_policy
+- paired_by
+- atlas_id
+- event_id
+- row_i (index for order pairing)
