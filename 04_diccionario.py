@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import subprocess
 import sys
 import warnings
 from dataclasses import dataclass, asdict, field
@@ -1414,6 +1415,36 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
     atlas_path = outputs_dir / "atlas.json"
     with open(atlas_path, "w") as f:
         json.dump(atlas, f, indent=2)
+
+    # --- atlas_points.json ---
+    atlas_points_path = outputs_dir / "atlas_points.json"
+    atlas_points_feature_key = "ratios"
+    atlas_points_generated = False
+    atlas_points_error = None
+    exporter_path = Path("experiment/ringdown/export_atlas_points.py")
+    if exporter_path.exists():
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(exporter_path),
+                "--atlas",
+                str(atlas_path),
+                "--out",
+                str(atlas_points_path),
+                "--feature-key",
+                atlas_points_feature_key,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0 and atlas_points_path.exists():
+            atlas_points_generated = True
+        else:
+            error_message = (result.stderr or result.stdout or "exporter failed").strip()
+            atlas_points_error = error_message[:200] or "exporter failed"
+    else:
+        atlas_points_error = "exporter not found"
     
     # --- ising_comparison.json ---
     ising_path = outputs_dir / "ising_comparison.json"
@@ -1569,6 +1600,15 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
         },
         "hashes": {},
     }
+
+    if atlas_points_generated:
+        summary["atlas_points_generated"] = True
+        summary["atlas_points"] = "outputs/atlas_points.json"
+        summary["atlas_points_sha256"] = compute_file_hash(atlas_points_path)
+        summary["atlas_points_feature_key"] = atlas_points_feature_key
+    else:
+        summary["atlas_points_generated"] = False
+        summary["atlas_points_error"] = atlas_points_error or "exporter failed"
     
     summary_path = stage_dir / "stage_summary.json"
     
@@ -1578,6 +1618,10 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
         "outputs/ising_comparison.json": compute_file_hash(ising_path),
         "outputs/validation.json": compute_file_hash(val_path),
     }
+    if atlas_points_path.exists():
+        summary["hashes"]["outputs/atlas_points.json"] = compute_file_hash(
+            atlas_points_path
+        )
     
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)
@@ -1591,12 +1635,15 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
         "files": {
             "dictionary": "outputs/dictionary.h5",
             "atlas": "outputs/atlas.json",
+            "atlas_points": "outputs/atlas_points.json",
             "ising_comparison": "outputs/ising_comparison.json",
             "validation": "outputs/validation.json",
             "summary": "stage_summary.json",
         },
         "input_spectrum": spectrum_rel_path,
     }
+    if not atlas_points_path.exists():
+        manifest["files"].pop("atlas_points")
     
     manifest_path = stage_dir / "manifest.json"
     with open(manifest_path, "w") as f:
