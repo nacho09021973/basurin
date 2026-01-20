@@ -15,3 +15,9 @@ outputs/
 *:Zone.Identifier
 out_bayesiano_v16/
 out_bayesiano_v16/
+
+# local prototypes / artifacts
+fase_A_v2.py
+fase_B_v2.py
+fase_B_v2_results.png
+papers/
