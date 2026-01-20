@@ -62,6 +62,7 @@ from sklearn.cross_decomposition import CCA
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 
+from experiment.bridge.pairing import pair_frames
 __version__ = "0.1.0"
 
 
@@ -150,46 +151,6 @@ def load_feature_json(path: Path, kind: str) -> Tuple[Optional[List[Any]], np.nd
                 meta[mk] = obj[mk]
 
     return ids, mat, meta
-
-
-def pair_by_id(
-    ids_x: Optional[List[Any]],
-    X: np.ndarray,
-    ids_y: Optional[List[Any]],
-    Y: np.ndarray,
-    pairing_policy: str,
-) -> Tuple[List[Any], np.ndarray, np.ndarray, Dict[str, Any]]:
-    """Devuelve ids comunes y matrices alineadas."""
-    info: Dict[str, Any] = {"pairing_policy": pairing_policy}
-
-    if ids_x is not None and ids_y is not None:
-        # Join por id (intersección)
-        ix = {str(i): idx for idx, i in enumerate(ids_x)}
-        iy = {str(i): idx for idx, i in enumerate(ids_y)}
-        common = sorted(set(ix.keys()).intersection(set(iy.keys())))
-        if len(common) < 5:
-            raise ValueError(
-                f"Intersección por id demasiado pequeña (n={len(common)}). "
-                "Proporciona features con ids consistentes o usa --pairing-policy order si procede."
-            )
-        Xp = np.vstack([X[ix[c]] for c in common])
-        Yp = np.vstack([Y[iy[c]] for c in common])
-        info.update({"paired_by": "id", "n_common": len(common)})
-        return common, Xp, Yp, info
-
-    # Sin ids: solo se permite pairing por orden si el usuario lo declara explícitamente
-    if pairing_policy != "order":
-        raise ValueError(
-            "No hay ids en uno o ambos datasets. "
-            "Debes proporcionar ids o usar explícitamente --pairing-policy order."
-        )
-    if X.shape[0] != Y.shape[0]:
-        raise ValueError(
-            f"--pairing-policy order requiere mismo N. N_X={X.shape[0]} vs N_Y={Y.shape[0]}"
-        )
-    ids = [f"idx_{i}" for i in range(X.shape[0])]
-    info.update({"paired_by": "order", "n_common": len(ids)})
-    return ids, X, Y, info
 
 
 # =============================================================================
@@ -611,7 +572,7 @@ def main() -> int:
     ids_y, Y, meta_y = load_feature_json(features_path, kind="ringdown")
 
     # Pair
-    ids, Xp, Yp, pairing_info = pair_by_id(ids_x, X, ids_y, Y, cfg.pairing_policy)
+    ids, Xp, Yp, pairing_info = pair_frames(ids_x, X, ids_y, Y, cfg.pairing_policy)
 
     # Basic dims
     N = Xp.shape[0]
