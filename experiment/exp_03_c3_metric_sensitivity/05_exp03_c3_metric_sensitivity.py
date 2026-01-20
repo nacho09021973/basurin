@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -152,6 +153,22 @@ def copytree_overwrite(src: Path, dst: Path) -> None:
     if dst.exists():
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
+
+
+def validation_json_candidates(run_id: str) -> list[Path]:
+    """Return candidate paths for validation.json for a given run."""
+    return [
+        Path("runs") / run_id / "dictionary" / "validation.json",
+        Path("runs") / run_id / "dictionary" / "outputs" / "validation.json",
+    ]
+
+
+def resolve_validation_json(run_id: str) -> Optional[Path]:
+    """Resolve validation.json path across legacy and new layouts."""
+    for p in validation_json_candidates(run_id):
+        if os.path.exists(p):
+            return p
+    return None
 
 
 def ensure_spectrum_attrs(mix_spec: Path, source_h5: Path) -> dict:
@@ -688,23 +705,31 @@ def main() -> int:
     print("Extracting metrics...")
     print("=" * 70)
 
-    val_a_path = runs / cfg.run_mix_a / "dictionary" / "validation.json"
-    val_b_path = runs / cfg.run_mix_b / "dictionary" / "validation.json"
+    val_a_candidates = validation_json_candidates(cfg.run_mix_a)
+    val_b_candidates = validation_json_candidates(cfg.run_mix_b)
+    val_a_path = resolve_validation_json(cfg.run_mix_a)
+    val_b_path = resolve_validation_json(cfg.run_mix_b)
     
-    val_a_exists = val_a_path.exists()
-    val_b_exists = val_b_path.exists()
+    val_a_exists = val_a_path is not None
+    val_b_exists = val_b_path is not None
     
-    val_a = safe_load_json(val_a_path)
-    val_b = safe_load_json(val_b_path)
+    val_a = safe_load_json(val_a_path) if val_a_path else {}
+    val_b = safe_load_json(val_b_path) if val_b_path else {}
 
     m_a = extract_metrics(val_a)
     m_b = extract_metrics(val_b)
 
     # Check for missing evidence (hard failure)
     if not val_a_exists:
-        print(f"ERROR: validation.json missing for A: {val_a_path}")
+        print(
+            "ERROR: validation.json missing for A. Tried: "
+            + ", ".join(str(p) for p in val_a_candidates)
+        )
     if not val_b_exists:
-        print(f"ERROR: validation.json missing for B: {val_b_path}")
+        print(
+            "ERROR: validation.json missing for B. Tried: "
+            + ", ".join(str(p) for p in val_b_candidates)
+        )
 
     # --- Write auditable stage ---
     exp_dir = runs / cfg.run_mix / cfg.exp_stage
@@ -726,9 +751,9 @@ def main() -> int:
     )
 
     # Copy evidence files
-    def copy_if_exists(src: Path, dst_name: str) -> tuple[Optional[str], Optional[str]]:
+    def copy_if_exists(src: Optional[Path], dst_name: str) -> tuple[Optional[str], Optional[str]]:
         """Copy file if exists, return (relative_path, sha256) or (None, None)."""
-        if src.exists():
+        if src and src.exists():
             dst = out_dir / dst_name
             shutil.copy2(src, dst)
             return dst_name, sha256_file(dst)
