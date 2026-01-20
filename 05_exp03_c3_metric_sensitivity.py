@@ -154,7 +154,7 @@ def copytree_overwrite(src: Path, dst: Path) -> None:
     shutil.copytree(src, dst)
 
 
-def ensure_spectrum_attrs(h5_path: Path, source_h5: Path) -> dict:
+def ensure_spectrum_attrs(mix_spec: Path, source_h5: Path) -> dict:
     """
     Ensure mixed spectrum.h5 has all required attrs.
     
@@ -171,7 +171,12 @@ def ensure_spectrum_attrs(h5_path: Path, source_h5: Path) -> dict:
     # Keys that must be recomputed from actual mixed data
     recompute_keys = {"n_delta"}
     
-    with h5py.File(h5_path, "a") as h5:
+    with h5py.File(mix_spec, "a") as h5:
+        if len(h5.keys()) == 0:
+            raise RuntimeError(
+                f"{mix_spec} has no datasets (only attrs). "
+                "Mix spectrum was not written yet. Ensure mix generation runs before ensure_spectrum_attrs()."
+            )
         with h5py.File(source_h5, "r") as src:
             # Copy all attrs from source except those to recompute
             for k, v in src.attrs.items():
