@@ -16,6 +16,12 @@ Cada etapa escribe como mínimo:
 
 El pipeline no debe escribir fuera de runs/<run_id>/.
 
+## IO / Runs / Paths
+
+Guía operativa y normativa de rutas, layouts y resolvers:
+
+- [readme_rutas.md](readme_rutas.md)
+
 ## Quickstart (WSL/Linux)
 
 Requisitos: Python 3.11+.
