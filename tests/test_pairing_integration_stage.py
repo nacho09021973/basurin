@@ -79,3 +79,23 @@ def test_stage_order_policy_ignores_ids(tmp_path: Path) -> None:
         "idx_2",
         "idx_3",
     ]
+    assert per_point[0]["paired_by"] == "order"
+    assert [row["pairing_policy"] for row in per_point] == [
+        "order",
+        "order",
+        "order",
+        "order",
+    ]
+    assert [row["atlas_id"] for row in per_point] == [
+        "a",
+        "b",
+        "c",
+        "d",
+    ]
+    assert [row["event_id"] for row in per_point] == [
+        "c",
+        "a",
+        "d",
+        "b",
+    ]
+    assert [row["row_i"] for row in per_point] == [0, 1, 2, 3]

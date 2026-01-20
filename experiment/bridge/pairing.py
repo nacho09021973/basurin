@@ -24,7 +24,12 @@ def pair_frames(
                 f"--pairing-policy order requiere mismo N. N_X={X.shape[0]} vs N_Y={Y.shape[0]}"
             )
         ids = [f"idx_{i}" for i in range(X.shape[0])]
-        info.update({"paired_by": "order", "n_common": len(ids)})
+        pair_map = []
+        for i in range(X.shape[0]):
+            atlas_id = str(ids_x[i]) if ids_x is not None else None
+            event_id = str(ids_y[i]) if ids_y is not None else None
+            pair_map.append({"atlas_id": atlas_id, "event_id": event_id, "row_i": i})
+        info.update({"paired_by": "order", "n_common": len(ids), "pair_map": pair_map})
         return ids, X, Y, info
 
     if pairing_policy != "id":
@@ -50,5 +55,6 @@ def pair_frames(
         raise ValueError("Intersección por id vacía; no se pueden parear X y Y.")
     Xp = np.vstack([X[ix[c]] for c in common])
     Yp = np.vstack([Y[iy[c]] for c in common])
-    info.update({"paired_by": "id", "n_common": len(common)})
+    pair_map = [{"atlas_id": c, "event_id": c, "row_i": i} for i, c in enumerate(common)]
+    info.update({"paired_by": "id", "n_common": len(common), "pair_map": pair_map})
     return common, Xp, Yp, info

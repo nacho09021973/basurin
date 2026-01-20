@@ -550,6 +550,26 @@ def save_json(path: Path, obj: Any) -> None:
         json.dump(obj, f, indent=2)
 
 
+def add_pairing_trace(per_point: List[Dict[str, Any]], pairing_info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    pair_map = pairing_info.get("pair_map")
+    if not pair_map or len(pair_map) != len(per_point):
+        return per_point
+    traced = []
+    for row, trace in zip(per_point, pair_map):
+        merged = dict(row)
+        merged.update(
+            {
+                "pairing_policy": pairing_info.get("pairing_policy"),
+                "paired_by": pairing_info.get("paired_by"),
+                "atlas_id": trace.get("atlas_id"),
+                "event_id": trace.get("event_id"),
+                "row_i": trace.get("row_i"),
+            }
+        )
+        traced.append(merged)
+    return traced
+
+
 def main() -> int:
     cfg = parse_args()
 
@@ -640,6 +660,7 @@ def main() -> int:
     perm = permutation_significance(Xs, Ys, ncomp, cfg.permutation_samples, cfg.seed)
     global_var_trace = float(np.trace(np.cov(Xc.T, bias=False))) if Xc.shape[0] > 1 else float(np.var(Xc))
     deg = local_degeneracy_metrics(Xc, Yc, ids, cfg.k_nn, global_var_trace)
+    per_point = add_pairing_trace(deg["per_point"], pairing_info)
 
     # kNN preservation (real vs negativo)
     knn_real = knn_preservation_metrics(Xc, Yc, ids, cfg.k_nn)
@@ -677,7 +698,7 @@ def main() -> int:
     save_json(outdir / "alignment_map.json", alignment)
 
     # Save per-point degeneracy
-    save_json(outdir / "degeneracy_per_point.json", deg["per_point"])
+    save_json(outdir / "degeneracy_per_point.json", per_point)
 
     # Save kNN preservation raw
     save_json(outdir / "knn_preservation_real.json", knn_real)
@@ -728,7 +749,7 @@ def main() -> int:
     try:
         import matplotlib.pyplot as plt
 
-        conds = np.array([r["cond_local"] for r in deg["per_point"]], dtype=float)
+        conds = np.array([r["cond_local"] for r in per_point], dtype=float)
         # hist
         plt.figure()
         plt.hist(np.log10(np.clip(conds, 1e-12, 1e12)), bins=50)
