@@ -58,14 +58,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-
-try:
-    from sklearn.cross_decomposition import CCA
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.neighbors import NearestNeighbors
-except Exception as e:  # pragma: no cover
-    print(f"ERROR: dependencias sklearn no disponibles: {e}", file=sys.stderr)
-    sys.exit(1)
+from sklearn.cross_decomposition import CCA
+from sklearn.neighbors import NearestNeighbors
+from sklearn.preprocessing import StandardScaler
 
 __version__ = "0.1.0"
 
@@ -174,7 +169,8 @@ def pair_by_id(
         common = sorted(set(ix.keys()).intersection(set(iy.keys())))
         if len(common) < 5:
             raise ValueError(
-                f"Intersección por id demasiado pequeña (n={len(common)})." \n+                " Proporciona features con ids consistentes o usa --pairing-policy order si procede."
+                f"Intersección por id demasiado pequeña (n={len(common)}). "
+                "Proporciona features con ids consistentes o usa --pairing-policy order si procede."
             )
         Xp = np.vstack([X[ix[c]] for c in common])
         Yp = np.vstack([Y[iy[c]] for c in common])
@@ -369,6 +365,7 @@ def local_degeneracy_metrics(
     Yc: np.ndarray,
     ids: List[Any],
     k_nn: int,
+    global_var_trace: float,
 ) -> Dict[str, Any]:
     """Diagnóstico de degeneración/no-inyectividad local.
 
@@ -379,7 +376,19 @@ def local_degeneracy_metrics(
       - varX_trace en vecindario como proxy Var(X|Y).
     """
     N = Yc.shape[0]
-    k = int(min(max(3, k_nn), max(3, N - 1)))
+    if N < 2:
+        return {
+            "k_nn": 0,
+            "degeneracy_index_median": float("nan"),
+            "degeneracy_index_p90": float("nan"),
+            "degeneracy_index_max": float("nan"),
+            "varX_trace_median": float("nan"),
+            "varX_trace_p90": float("nan"),
+            "varX_trace_ratio_median": float("nan"),
+            "varX_trace_ratio_p90": float("nan"),
+            "per_point": [],
+        }
+    k = int(min(max(3, k_nn), max(1, N - 1)))
     nn = NearestNeighbors(n_neighbors=k + 1, algorithm="auto")
     nn.fit(Yc)
     dists, neigh = nn.kneighbors(Yc, return_distance=True)
@@ -387,6 +396,7 @@ def local_degeneracy_metrics(
 
     conds = []
     var_traces = []
+    var_ratios = []
     per_point = []
 
     for i in range(N):
@@ -398,6 +408,8 @@ def local_degeneracy_metrics(
         covX = np.cov(Xc[js].T, bias=False)
         var_trace = float(np.trace(covX)) if covX.ndim == 2 else float(np.var(Xc[js]))
         var_traces.append(var_trace)
+        var_ratio = float(var_trace / (global_var_trace + 1e-12))
+        var_ratios.append(var_ratio)
 
         # estimar J via pseudo-inversa
         # DX: (k, dx), DY: (k, dy) => J: (dx, dy)
@@ -417,12 +429,14 @@ def local_degeneracy_metrics(
                 "id": ids[i],
                 "cond_local": cond,
                 "varX_trace": var_trace,
+                "varX_trace_ratio": var_ratio,
                 "k_nn": k,
             }
         )
 
     conds_np = np.asarray(conds, dtype=float)
     var_np = np.asarray(var_traces, dtype=float)
+    var_ratio_np = np.asarray(var_ratios, dtype=float)
 
     return {
         "k_nn": k,
@@ -431,7 +445,84 @@ def local_degeneracy_metrics(
         "degeneracy_index_max": float(np.nanmax(conds_np)),
         "varX_trace_median": float(np.nanmedian(var_np)),
         "varX_trace_p90": float(np.nanpercentile(var_np, 90)),
+        "varX_trace_ratio_median": float(np.nanmedian(var_ratio_np)),
+        "varX_trace_ratio_p90": float(np.nanpercentile(var_ratio_np, 90)),
         "per_point": per_point,
+    }
+
+
+def knn_preservation_metrics(
+    A: np.ndarray,
+    B: np.ndarray,
+    ids: List[Any],
+    k_nn: int,
+) -> Dict[str, Any]:
+    """kNN-preservation entre dos espacios (A,B)."""
+    N = A.shape[0]
+    if N < 2:
+        return {
+            "k_nn": 0,
+            "overlap_mean": float("nan"),
+            "overlap_median": float("nan"),
+            "overlap_p10": float("nan"),
+            "overlap_p90": float("nan"),
+            "per_point": [],
+        }
+    k = int(min(max(3, k_nn), max(1, N - 1)))
+    nn_a = NearestNeighbors(n_neighbors=k + 1, algorithm="auto")
+    nn_b = NearestNeighbors(n_neighbors=k + 1, algorithm="auto")
+    nn_a.fit(A)
+    nn_b.fit(B)
+    neigh_a = nn_a.kneighbors(A, return_distance=False)[:, 1:]
+    neigh_b = nn_b.kneighbors(B, return_distance=False)[:, 1:]
+
+    overlaps = []
+    per_point = []
+    for i in range(N):
+        a = set(neigh_a[i])
+        b = set(neigh_b[i])
+        overlap = float(len(a.intersection(b)) / k) if k > 0 else 0.0
+        overlaps.append(overlap)
+        per_point.append({"id": ids[i], "overlap": overlap, "k_nn": k})
+
+    overlaps_np = np.asarray(overlaps, dtype=float)
+    return {
+        "k_nn": k,
+        "overlap_mean": float(np.mean(overlaps_np)),
+        "overlap_median": float(np.median(overlaps_np)),
+        "overlap_p10": float(np.percentile(overlaps_np, 10)),
+        "overlap_p90": float(np.percentile(overlaps_np, 90)),
+        "per_point": per_point,
+    }
+
+
+def split_atlas_positive_control(
+    Xs: np.ndarray,
+    ids: List[Any],
+    n_components: int,
+    k_nn: int,
+    seed: int,
+) -> Dict[str, Any]:
+    dx = Xs.shape[1]
+    if dx < 2:
+        return {"status": "SKIP", "reason": "dx<2", "per_point": []}
+
+    even_cols = np.arange(dx) % 2 == 0
+    odd_cols = ~even_cols
+    if even_cols.sum() < 1 or odd_cols.sum() < 1:
+        return {"status": "SKIP", "reason": "split_failed", "per_point": []}
+
+    ncomp = int(min(n_components, even_cols.sum(), odd_cols.sum()))
+    if ncomp < 1:
+        return {"status": "SKIP", "reason": "n_components<1", "per_point": []}
+
+    cca, Xc_pos, Yc_pos, _ = fit_cca(Xs[:, even_cols], Xs[:, odd_cols], ncomp, seed)
+    _ = cca  # noqa: F841 - solo para consistencia de estilo
+    metrics = knn_preservation_metrics(Xc_pos, Yc_pos, ids, k_nn)
+    return {
+        "status": "OK",
+        "n_components": ncomp,
+        **metrics,
     }
 
 
@@ -586,7 +677,18 @@ def main() -> int:
     cca, Xc, Yc, corrs = fit_cca(Xs, Ys, ncomp, cfg.seed)
     boot = bootstrap_axis_stability(Xs, Ys, ncomp, cfg.bootstrap_samples, cfg.seed)
     perm = permutation_significance(Xs, Ys, ncomp, cfg.permutation_samples, cfg.seed)
-    deg = local_degeneracy_metrics(Xc, Yc, ids, cfg.k_nn)
+    global_var_trace = float(np.trace(np.cov(Xc.T, bias=False))) if Xc.shape[0] > 1 else float(np.var(Xc))
+    deg = local_degeneracy_metrics(Xc, Yc, ids, cfg.k_nn, global_var_trace)
+
+    # kNN preservation (real vs negativo)
+    knn_real = knn_preservation_metrics(Xc, Yc, ids, cfg.k_nn)
+    rs = np.random.RandomState(cfg.seed)
+    perm_idx = rs.permutation(N)
+    knn_neg = knn_preservation_metrics(Xc, Yc[perm_idx], ids, cfg.k_nn)
+    knn_ratio = float(knn_real["overlap_mean"] / (knn_neg["overlap_mean"] + 1e-12))
+
+    # control positivo (split atlas)
+    control_pos = split_atlas_positive_control(Xs, ids, ncomp, cfg.k_nn, cfg.seed)
 
     # Save alignment map (auditable)
     alignment = {
@@ -616,6 +718,11 @@ def main() -> int:
     # Save per-point degeneracy
     save_json(outdir / "degeneracy_per_point.json", deg["per_point"])
 
+    # Save kNN preservation raw
+    save_json(outdir / "knn_preservation_real.json", knn_real)
+    save_json(outdir / "knn_preservation_negative.json", knn_neg)
+    save_json(outdir / "knn_preservation_control_positive.json", control_pos)
+
     # Save metrics bundle
     metrics = {
         "stage": "bridge_f4_1_alignment",
@@ -632,10 +739,22 @@ def main() -> int:
             "degeneracy_index_median": float(deg["degeneracy_index_median"]),
             "degeneracy_index_p90": float(deg["degeneracy_index_p90"]),
             "varX_trace_median": float(deg["varX_trace_median"]),
+            "varX_trace_ratio_median": float(deg["varX_trace_ratio_median"]),
+            "knn_preservation_mean": float(knn_real["overlap_mean"]),
+            "knn_preservation_negative_mean": float(knn_neg["overlap_mean"]),
+            "knn_preservation_ratio": float(knn_ratio),
+            "control_positive_status": control_pos.get("status"),
+            "control_positive_overlap_mean": float(control_pos.get("overlap_mean", float("nan"))),
         },
         "bootstrap": boot,
         "permutation": perm,
         "degeneracy": {k: v for k, v in deg.items() if k != "per_point"},
+        "structure_preservation": {
+            "real": {k: v for k, v in knn_real.items() if k != "per_point"},
+            "negative": {k: v for k, v in knn_neg.items() if k != "per_point"},
+            "ratio": knn_ratio,
+        },
+        "control_positive": {k: v for k, v in control_pos.items() if k != "per_point"},
         "pairing": pairing_info,
         "data": {"N": N, "dx": dx, "dy": dy, "meta_atlas": meta_x, "meta_ringdown": meta_y},
         "config": asdict(cfg),
@@ -691,6 +810,9 @@ def main() -> int:
             "outputs/alignment_map.json": compute_file_hash(outdir / "alignment_map.json"),
             "outputs/metrics.json": compute_file_hash(outdir / "metrics.json"),
             "outputs/degeneracy_per_point.json": compute_file_hash(outdir / "degeneracy_per_point.json"),
+            "outputs/knn_preservation_real.json": compute_file_hash(outdir / "knn_preservation_real.json"),
+            "outputs/knn_preservation_negative.json": compute_file_hash(outdir / "knn_preservation_negative.json"),
+            "outputs/knn_preservation_control_positive.json": compute_file_hash(outdir / "knn_preservation_control_positive.json"),
         },
     }
     # hash plots if exist
@@ -706,6 +828,9 @@ def main() -> int:
         "alignment_map": "outputs/alignment_map.json",
         "metrics": "outputs/metrics.json",
         "degeneracy_per_point": "outputs/degeneracy_per_point.json",
+        "knn_preservation_real": "outputs/knn_preservation_real.json",
+        "knn_preservation_negative": "outputs/knn_preservation_negative.json",
+        "knn_preservation_control_positive": "outputs/knn_preservation_control_positive.json",
         "summary": "stage_summary.json",
     }
     for _, fn in plot_files.items():
@@ -741,5 +866,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
---- /dev/null	2026-01-20 11:02:47.077533531 +0000
