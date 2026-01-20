@@ -121,8 +121,13 @@ def main() -> int:
     if summary.get("status") != "OK":
         # propagate aborts
         status = summary.get("status")
-        verdict = "FAIL_NO_BRIDGE"
-        reason = f"Upstream stage status={status}"
+        abort_reason = summary.get("abort_reason")
+        if status == "ABORT" and isinstance(abort_reason, str) and "LEAKAGE" in abort_reason.upper():
+            verdict = "ABORT_LEAKAGE"
+            reason = f"Upstream stage abort: {abort_reason}"
+        else:
+            verdict = "FAIL_NO_BRIDGE"
+            reason = f"Upstream stage status={status}"
         report = {
             "contract": "C7_bridge",
             "version": __version__,
@@ -140,25 +145,56 @@ def main() -> int:
             },
         }
     else:
-        r = summary["results"]
+        r = summary.get("results", {})
+        metrics_results = metrics.get("results", {})
+        structure = metrics.get("structure_preservation", {})
+        control = metrics.get("control_positive", {})
+        deg = metrics.get("degeneracy", {})
+        perm = metrics.get("permutation", {})
+        boot = metrics.get("bootstrap", {})
         thr = cfg.thresholds
 
-        stability = float(r.get("stability_score", 0.0))
-        sig_ratio = float(r.get("significance_ratio", 0.0))
-        p_value = float(r.get("p_value", 1.0))
-        deg_med = float(r.get("degeneracy_index_median", float("inf")))
-        varx_ratio_med = float(r.get("varX_trace_ratio_median", float("inf")))
-        knn_real = float(r.get("knn_preservation_mean", 0.0))
-        knn_neg = float(r.get("knn_preservation_negative_mean", 0.0))
-        knn_ratio = float(r.get("knn_preservation_ratio", 0.0))
-        control_status = r.get("control_positive_status")
-        control_overlap = float(r.get("control_positive_overlap_mean", float("nan")))
+        stability = float(metrics_results.get("stability_score", r.get("stability_score", 0.0)))
+        sig_ratio = float(metrics_results.get("significance_ratio", r.get("significance_ratio", 0.0)))
+        p_value = float(metrics_results.get("p_value", r.get("p_value", 1.0)))
+        deg_med = float(metrics_results.get("degeneracy_index_median", r.get("degeneracy_index_median", float("inf"))))
+        varx_ratio_med = float(metrics_results.get("varX_trace_ratio_median", r.get("varX_trace_ratio_median", float("inf"))))
 
-        # decisiones
+        knn_real = float(
+            metrics_results.get(
+                "knn_preservation_mean",
+                structure.get("real", {}).get("overlap_mean", r.get("knn_preservation_mean", 0.0)),
+            )
+        )
+        knn_neg = float(
+            metrics_results.get(
+                "knn_preservation_negative_mean",
+                structure.get("negative", {}).get("overlap_mean", r.get("knn_preservation_negative_mean", 0.0)),
+            )
+        )
+        knn_ratio = float(
+            metrics_results.get(
+                "knn_preservation_ratio",
+                structure.get("ratio", r.get("knn_preservation_ratio", 0.0)),
+            )
+        )
+        control_status = metrics_results.get("control_positive_status", control.get("status", r.get("control_positive_status")))
+        control_overlap = float(
+            metrics_results.get(
+                "control_positive_overlap_mean",
+                control.get("overlap_mean", r.get("control_positive_overlap_mean", float("nan"))),
+            )
+        )
+
+        # decisiones (suite C7a-C7e)
         ok_signif = (sig_ratio >= thr.significance_ratio_min) and (p_value <= thr.p_value_max)
         ok_stable = stability >= thr.stability_score_min
         ok_degen = (deg_med <= thr.degeneracy_index_max_pass) and (varx_ratio_med <= thr.varX_trace_ratio_max)
-        ok_knn = (knn_real >= thr.knn_preservation_real_min) and (knn_ratio >= thr.knn_preservation_ratio_min)
+        ok_knn = (
+            (knn_real >= thr.knn_preservation_real_min)
+            and (knn_ratio >= thr.knn_preservation_ratio_min)
+            and (knn_neg < thr.knn_preservation_negative_max)
+        )
         negative_pass = knn_neg >= thr.knn_preservation_negative_max
 
         if negative_pass:
@@ -178,13 +214,6 @@ def main() -> int:
             warnings.append("Control positivo no disponible (split atlas).")
         elif control_overlap < thr.control_positive_min:
             warnings.append("Control positivo (split atlas) no alcanza el umbral.")
-
-        # Diagnósticos adicionales
-        perm = metrics.get("permutation", {})
-        boot = metrics.get("bootstrap", {})
-        deg = metrics.get("degeneracy", {})
-        structure = metrics.get("structure_preservation", {})
-        control = metrics.get("control_positive", {})
 
         report = {
             "contract": "C7_bridge",
@@ -211,7 +240,7 @@ def main() -> int:
                 "significance_ratio": sig_ratio,
                 "p_value": p_value,
                 "degeneracy_index_median": deg_med,
-                "degeneracy_index_p90": float(r.get("degeneracy_index_p90", float("nan"))),
+                "degeneracy_index_p90": float(metrics_results.get("degeneracy_index_p90", r.get("degeneracy_index_p90", float("nan")))),
                 "varX_trace_ratio_median": varx_ratio_med,
                 "canonical_corr_mean": float(r.get("canonical_corr_mean", float("nan"))),
                 "knn_preservation_mean": knn_real,

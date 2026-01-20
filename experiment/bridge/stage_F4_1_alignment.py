@@ -745,6 +745,7 @@ def main() -> int:
             "knn_preservation_ratio": float(knn_ratio),
             "control_positive_status": control_pos.get("status"),
             "control_positive_overlap_mean": float(control_pos.get("overlap_mean", float("nan"))),
+            "k_nn": int(cfg.k_nn),
         },
         "bootstrap": boot,
         "permutation": perm,
