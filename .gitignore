@@ -21,3 +21,13 @@ fase_A_v2.py
 fase_B_v2.py
 fase_B_v2_results.png
 papers/
+
+# Ringdown local data/artifacts
+experiment/ringdown/data/
+
+# Numpy artifacts
+*.npy
+*.npz
+
+# Ringdown local data/artifacts
+experiment/ringdown/data/
