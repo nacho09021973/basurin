@@ -346,12 +346,12 @@ def compute_bandpower(fft_mag: np.ndarray, freqs: np.ndarray,
 
 
 def bandpower_voting(fft_mag: np.ndarray, freqs: np.ndarray, 
-                     fmin_auto: float = 10.0, fmax_auto: float = 800.0) -> Dict:
+                     fmin_auto: float = None, fmax_auto: float = None) -> Dict:
     """
     Clasifica por potencia integrada en bandas y calcula confianza.
     
-    v3.1: Las bandas se ajustan a [fmin_auto, fmax_auto] para no medir
-    fuera de la banda de auto-detección.
+    v3.1: Las bandas se ajustan a [fmin_auto, fmax_auto] cuando se pasa
+    un rango de auto-detección, para no medir fuera de banda.
     
     Bandas nominales (ajustadas por fmin_auto/fmax_auto):
     - LIGHT:        400-800 Hz
@@ -362,21 +362,32 @@ def bandpower_voting(fft_mag: np.ndarray, freqs: np.ndarray,
     Returns:
         Dict con category, confidence, bandpowers
     """
-    # v3.1: Ajustar bandas para respetar límites de auto-detección
+    # v3.1: Ajustar bandas para respetar límites de auto-detección si aplica
     bands = {
-        EventCategory.LIGHT: (max(400, fmin_auto), min(800, fmax_auto)),
-        EventCategory.STELLAR: (max(150, fmin_auto), min(400, fmax_auto)),
-        EventCategory.INTERMEDIATE: (max(50, fmin_auto), min(150, fmax_auto)),
-        EventCategory.HEAVY: (max(10, fmin_auto), min(50, fmax_auto))
+        EventCategory.LIGHT: (400.0, 800.0),
+        EventCategory.STELLAR: (150.0, 400.0),
+        EventCategory.INTERMEDIATE: (50.0, 150.0),
+        EventCategory.HEAVY: (10.0, 50.0)
     }
     
     powers = {}
     for cat, (f_lo, f_hi) in bands.items():
-        powers[cat] = compute_bandpower(fft_mag, freqs, f_lo, f_hi)
+        if fmin_auto is not None:
+            f_lo = max(f_lo, fmin_auto)
+        if fmax_auto is not None:
+            f_hi = min(f_hi, fmax_auto)
+        if f_hi <= f_lo:
+            powers[cat] = 0.0
+        else:
+            powers[cat] = compute_bandpower(fft_mag, freqs, f_lo, f_hi)
     
     # Normalizar por ancho de banda para comparación justa
     bw_normalized = {}
     for cat, (f_lo, f_hi) in bands.items():
+        if fmin_auto is not None:
+            f_lo = max(f_lo, fmin_auto)
+        if fmax_auto is not None:
+            f_hi = min(f_hi, fmax_auto)
         bw = f_hi - f_lo
         bw_normalized[cat] = powers[cat] / bw if bw > 0 else 0
     
