@@ -69,6 +69,7 @@ class Config:
     test_mode: bool = False  # Ejecuta self-tests deterministas y sale
     spectrum_file: str = "outputs/spectrum.h5"
     exp04_compare_run: Optional[str] = None
+    export_atlas_points: bool = False
     
     # Features
     k_features: int = 3              # Número de ratios r_n (n=1..K)
@@ -119,6 +120,12 @@ def parse_args() -> Config:
                    help="Ejecuta self-tests deterministas (T1/T2) y sale")
     p.add_argument("--spectrum-file", type=str, default="outputs/spectrum.h5",
                    dest="spectrum_file", help="Archivo H5 del espectro")
+    p.add_argument(
+        "--export-atlas-points",
+        action="store_true",
+        dest="export_atlas_points",
+        help="Exporta atlas_points.json (opcional, default: desactivado)",
+    )
     p.add_argument("--k-features", type=int, default=3, dest="k_features",
                    help="Número de ratios r_n a usar como features (default: 3)")
     p.add_argument("--exp04-compare-run", type=str, default=None,
@@ -175,6 +182,7 @@ def parse_args() -> Config:
         run=(args.run if args.run is not None else ("__selftest__" if getattr(args, "test_mode", False) else None)),
         test_mode=getattr(args, "test_mode", False),
         spectrum_file=args.spectrum_file,
+        export_atlas_points=args.export_atlas_points,
         k_features=args.k_features,
         exp04_compare_run=args.exp04_compare_run,
         cv_folds=args.cv_folds,
@@ -229,7 +237,7 @@ def load_spectrum(h5_path: Path) -> dict:
     return data
 
 
-def resolve_spectrum_path(run: str, spectrum_file: str) -> Path:
+def resolve_input_spectrum_path(run: str, spectrum_file: str) -> Path:
     """Resuelve la ruta del espectro.
 
     Contrato IO (canónico):
@@ -1405,35 +1413,41 @@ def write_outputs(stage_dir: Path, outputs_dir: Path, cfg: Config, spectrum: dic
     with open(atlas_path, "w") as f:
         json.dump(atlas, f, indent=2)
 
-    # --- atlas_points.json ---
+    # --- atlas_points.json (opcional) ---
     atlas_points_path = outputs_dir / "atlas_points.json"
     atlas_points_feature_key = "ratios"
     atlas_points_generated = False
-    atlas_points_error = None
+    atlas_points_status = "disabled"
+    atlas_points_reason = "export disabled (--export-atlas-points not set)"
     exporter_path = Path("experiment/ringdown/export_atlas_points.py")
-    if exporter_path.exists():
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(exporter_path),
-                "--atlas",
-                str(atlas_path),
-                "--out",
-                str(atlas_points_path),
-                "--feature-key",
-                atlas_points_feature_key,
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode == 0 and atlas_points_path.exists():
-            atlas_points_generated = True
+    if cfg.export_atlas_points:
+        if exporter_path.exists():
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(exporter_path),
+                    "--atlas",
+                    str(atlas_path),
+                    "--out",
+                    str(atlas_points_path),
+                    "--feature-key",
+                    atlas_points_feature_key,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0 and atlas_points_path.exists():
+                atlas_points_generated = True
+                atlas_points_status = "generated"
+                atlas_points_reason = "enabled"
+            else:
+                error_message = (result.stderr or result.stdout or "exporter failed").strip()
+                atlas_points_status = "error"
+                atlas_points_reason = error_message[:200] or "exporter failed"
         else:
-            error_message = (result.stderr or result.stdout or "exporter failed").strip()
-            atlas_points_error = error_message[:200] or "exporter failed"
-    else:
-        atlas_points_error = "exporter not found"
+            atlas_points_status = "not_found"
+            atlas_points_reason = "exporter not found"
     
     # --- ising_comparison.json ---
     ising_path = outputs_dir / "ising_comparison.json"
@@ -1542,6 +1556,7 @@ def write_outputs(stage_dir: Path, outputs_dir: Path, cfg: Config, spectrum: dic
         "config": {
             "run": cfg.run,
             "spectrum_file": cfg.spectrum_file,
+            "export_atlas_points": cfg.export_atlas_points,
             "k_features": cfg.k_features,
             "exp04_compare_run": cfg.exp04_compare_run,
             "models_evaluated": list(cfg.models),
@@ -1592,14 +1607,13 @@ def write_outputs(stage_dir: Path, outputs_dir: Path, cfg: Config, spectrum: dic
         "hashes": {},
     }
 
+    summary["atlas_points_status"] = atlas_points_status
+    summary["atlas_points_reason"] = atlas_points_reason
+    summary["atlas_points_generated"] = atlas_points_generated
     if atlas_points_generated:
-        summary["atlas_points_generated"] = True
         summary["atlas_points"] = "outputs/atlas_points.json"
         summary["atlas_points_sha256"] = sha256_file(atlas_points_path)
         summary["atlas_points_feature_key"] = atlas_points_feature_key
-    else:
-        summary["atlas_points_generated"] = False
-        summary["atlas_points_error"] = atlas_points_error or "exporter failed"
     
     summary_path = stage_dir / "stage_summary.json"
     
@@ -1634,6 +1648,8 @@ def write_outputs(stage_dir: Path, outputs_dir: Path, cfg: Config, spectrum: dic
             "version": __version__,
             "stage_legacy": "04_diccionario",
             "input_spectrum": spectrum_rel_path,
+            "atlas_points_status": atlas_points_status,
+            "atlas_points_reason": atlas_points_reason,
         },
     )
     
@@ -1699,7 +1715,7 @@ def main() -> int:
         return 1
     
     # Cargar espectro
-    spec_path = resolve_spectrum_path(cfg.run, cfg.spectrum_file)
+    spec_path = resolve_input_spectrum_path(cfg.run, cfg.spectrum_file)
     if not spec_path.exists():
         print(f"ERROR: No existe espectro en {spec_path}", file=sys.stderr)
         print("       Ejecuta primero: python 03_sturm_liouville.py --run " + cfg.run,

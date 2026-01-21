@@ -18,7 +18,7 @@ Salida:
         ├── outputs/spectrum.h5          (autovalores, autofunciones, Δ, m²L²)
         ├── manifest.json        (índice de artefactos)
         ├── stage_summary.json   (metadatos, parámetros, hashes)
-        └── validation.json      (ortogonalidad, residuos)
+        └── outputs/validation.json      (ortogonalidad, residuos)
 
 Manual tests:
     - Dual run produce M2_N sin modo espurio:
@@ -156,6 +156,47 @@ def resolve_dual_defaults(cfg: Config) -> None:
 # =============================================================================
 # Carga de geometría
 # =============================================================================
+
+def resolve_geometry_path(run: str, geometry_file: str) -> tuple[Path, str, str | None]:
+    """Resuelve la ruta de geometría con anclaje a runs/<run>/geometry/."""
+    run_dir = get_run_dir(run)
+    geo_path = Path(geometry_file)
+    is_absolute = geo_path.is_absolute()
+    starts_with_runs = geometry_file.startswith("runs/")
+
+    if is_absolute or starts_with_runs:
+        resolved = geo_path
+    else:
+        rel_path = Path(geometry_file)
+        if ".." in rel_path.parts:
+            raise ValueError(
+                "geometry_file no puede contener '..'; usa rutas dentro de "
+                f"runs/{run}/geometry/."
+            )
+        base_dir = run_dir / "geometry"
+        resolved = (base_dir / rel_path).resolve()
+        base_resolved = base_dir.resolve()
+        try:
+            resolved.relative_to(base_resolved)
+        except ValueError as exc:
+            raise ValueError(
+                f"geometry_file sale de runs/{run}/geometry/: {geometry_file}"
+            ) from exc
+
+    if not resolved.exists():
+        raise FileNotFoundError(
+            f"No existe geometría en {resolved}. "
+            f"Verifica --geometry-file o genera geometría en runs/{run}/geometry/."
+        )
+
+    try:
+        input_geometry = str(resolved.resolve().relative_to(run_dir.resolve()))
+    except ValueError:
+        input_geometry = geometry_file
+
+    input_geometry_absolute = str(resolved) if is_absolute else None
+    return resolved, input_geometry, input_geometry_absolute
+
 
 def load_geometry(h5_path: Path) -> dict:
     """Carga geometría desde H5 (compatible con 01_genera_ads_puro.py)."""
@@ -470,6 +511,8 @@ def write_outputs(
     geo: dict,
     results: list[dict],
     validation: dict,
+    input_geometry: str,
+    input_geometry_absolute: str | None,
     results_N: list[dict] | None = None
 ) -> dict:
     """Escribe todos los outputs del Bloque B.
@@ -588,7 +631,12 @@ def write_outputs(
         extra={
             "version": "1.1.0",
             "stage_legacy": "03_sturm_liouville",
-            "input_geometry": f"../geometry/{cfg.geometry_file}",
+            "input_geometry": input_geometry,
+            **(
+                {"input_geometry_absolute": input_geometry_absolute}
+                if input_geometry_absolute
+                else {}
+            ),
         },
     )
     
@@ -674,11 +722,17 @@ def main() -> int:
     cfg = parse_args()
     
     # Cargar geometría
-    geo_path = get_run_dir(cfg.run) / "geometry" / cfg.geometry_file
-    if not geo_path.exists():
-        print(f"ERROR: No existe geometría en {geo_path}", file=sys.stderr)
-        print("       Ejecuta primero: python 01_genera_ads_puro.py --run " + cfg.run,
-              file=sys.stderr)
+    try:
+        geo_path, input_geometry, input_geometry_absolute = resolve_geometry_path(
+            cfg.run, cfg.geometry_file
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        if not (Path(cfg.geometry_file).is_absolute() or cfg.geometry_file.startswith("runs/")):
+            print(
+                "       Ejecuta primero: python 01_genera_ads_puro.py --run " + cfg.run,
+                file=sys.stderr,
+            )
         return 1
     
     geo = load_geometry(geo_path)
@@ -779,7 +833,15 @@ def main() -> int:
         }
     
     # --- Escribir outputs ---
-    paths = write_outputs(cfg, geo, results, validation, results_N=results_N)
+    paths = write_outputs(
+        cfg,
+        geo,
+        results,
+        validation,
+        input_geometry,
+        input_geometry_absolute,
+        results_N=results_N,
+    )
     
     print("Outputs escritos:")
     for name, path in paths.items():
