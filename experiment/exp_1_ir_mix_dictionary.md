@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Evaluar el comportamiento del **Bloque C (diccionario holográfico emergente)** bajo un dataset **mixto** construido por concatenación de dos familias espectrales (etapa `01_mix_spectra.py`), y verificar:
+Evaluar el comportamiento del **Bloque C (diccionario holográfico emergente)** bajo un dataset **mixto** construido por concatenación de dos familias espectrales (etapa `02_mix_spectra.py`), y verificar:
 
 1. estabilidad del ajuste inverso **ratios → Δ** (Contrato C2),
 2. compatibilidad espectral / *cycle-consistency* (Contrato C3) bajo una métrica robusta,
