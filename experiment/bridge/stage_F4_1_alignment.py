@@ -48,6 +48,7 @@ Nota: Este stage NO dicta PASS/FAIL final (eso es Contrato C7 separado).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -228,6 +229,22 @@ def check_leakage(
     feature_key_y = meta_y.get("feature_key")
     columns_x = meta_x.get("columns")
     columns_y = meta_y.get("columns")
+    params = {
+        "corr_threshold": 0.9999,
+        "rmse_threshold": 1e-3,
+        "same_dim_rmse_threshold": 1e-3,
+        "ddof": 1,
+        "top_k": 10,
+        "epsilon": 1e-12,
+    }
+    out["params"] = params
+    out["data_used"] = {
+        "N": int(Xs.shape[0]),
+        "dx": int(Xs.shape[1]),
+        "dy": int(Ys.shape[1]),
+        "columns_x": _summarize_columns(columns_x, max_items=50),
+        "columns_y": _summarize_columns(columns_y, max_items=50),
+    }
     feature_key_match = bool(feature_key_x and feature_key_y and feature_key_x == feature_key_y)
     columns_match = bool(columns_x and columns_y and columns_x == columns_y)
     out["feature_key_match"] = feature_key_match
@@ -255,12 +272,12 @@ def check_leakage(
     # Importante: alta correlación NO implica fuga; sólo abortamos si hay evidencia
     # de *identidad* (columnas prácticamente iguales tras estandarizar).
     if compare_cross:
-        Xc = Xs - Xs.mean(axis=0, keepdims=True)
-        Yc = Ys - Ys.mean(axis=0, keepdims=True)
-        Xc /= (Xs.std(axis=0, keepdims=True) + 1e-12)
-        Yc /= (Ys.std(axis=0, keepdims=True) + 1e-12)
-
+        # Estandarización consistente (ddof=1) para evitar incoherencias numéricas.
+        # La fórmula de correlación ya respeta el bound |corr|<=1; el clip es cinturón numérico.
+        Xc = _standardize_ddof1(Xs, eps=params["epsilon"])
+        Yc = _standardize_ddof1(Ys, eps=params["epsilon"])
         C = (Xc.T @ Yc) / max(1, Xs.shape[0] - 1)
+        C = np.clip(C, -1.0, 1.0)
         absC = np.abs(C)
         max_abs_corr = float(np.max(absC))
         out["max_abs_corr"] = max_abs_corr
@@ -268,23 +285,112 @@ def check_leakage(
 
         # localizar el par más correlacionado y comprobar igualdad numérica
         i_max, j_max = np.unravel_index(int(np.argmax(absC)), absC.shape)
-        col_rmse = float(np.sqrt(np.mean((Xc[:, i_max] - Yc[:, j_max]) ** 2)))
-        out["max_corr_pair_rmse"] = col_rmse
+        pair_stats = _pair_stats(Xc, Yc, C, i_max, j_max)
+        out["max_corr_pair_rmse"] = pair_stats["rmse"]
+        out["i_max"] = int(i_max)
+        out["j_max"] = int(j_max)
+        out["pair_max"] = _pair_record(pair_stats, i_max, j_max, columns_x, columns_y)
+        out["top_pairs"] = _top_k_pairs(absC, Xc, Yc, C, params["top_k"], columns_x, columns_y)
 
         # umbral muy estricto: casi identidad tras estandarizar
-        if max_abs_corr > 0.9999 and col_rmse < 1e-3:
-            out.update({"ok": False, "reason": "LEAKAGE_SUSPECTED: columns nearly identical across X/Y after standardization."})
+        if max_abs_corr > params["corr_threshold"] and pair_stats["rmse"] < params["rmse_threshold"]:
+            out.update({
+                "ok": False,
+                "reason": (
+                    "LEAKAGE_SUSPECTED: columns nearly identical across X/Y after standardization "
+                    f"(i={i_max}, j={j_max}, corr={pair_stats['corr']:.6f}, rmse={pair_stats['rmse']:.3e})."
+                ),
+            })
             return out
 
     # Matrices casi iguales si dim coincide
     if Xs.shape[1] == Ys.shape[1]:
-        rmse = float(np.sqrt(np.mean((Xs - Ys) ** 2)))
+        Xc = _standardize_ddof1(Xs, eps=params["epsilon"])
+        Yc = _standardize_ddof1(Ys, eps=params["epsilon"])
+        rmse = float(np.sqrt(np.mean((Xc - Yc) ** 2)))
         out["rmse_same_dim"] = rmse
-        if rmse < 1e-3:
+        if rmse < params["same_dim_rmse_threshold"]:
             out.update({"ok": False, "reason": "LEAKAGE_SUSPECTED: X and Y nearly identical after standardization."})
             return out
 
     return out
+
+
+def _summarize_columns(columns: Optional[List[Any]], max_items: int = 50) -> Optional[Dict[str, Any]]:
+    if not columns:
+        return None
+    if not isinstance(columns, (list, tuple)):
+        return None
+    cols = [str(c) for c in columns]
+    summary: Dict[str, Any] = {"count": len(cols)}
+    if len(cols) <= max_items:
+        summary["columns"] = cols
+        return summary
+    payload = json.dumps(cols, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    summary["columns"] = cols[:max_items]
+    summary["sha256"] = hashlib.sha256(payload).hexdigest()
+    return summary
+
+
+def _standardize_ddof1(mat: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+    data = np.asarray(mat, dtype=np.float64)
+    mean = data.mean(axis=0, keepdims=True)
+    std = data.std(axis=0, ddof=1, keepdims=True)
+    std = np.where(std < eps, eps, std)
+    return (data - mean) / std
+
+
+def _pair_stats(Xc: np.ndarray, Yc: np.ndarray, C: np.ndarray, i: int, j: int) -> Dict[str, float]:
+    diff = Xc[:, i] - Yc[:, j]
+    return {
+        "corr": float(C[i, j]),
+        "rmse": float(np.sqrt(np.mean(diff ** 2))),
+        "max_abs_diff": float(np.max(np.abs(diff))),
+        "mean_abs_diff": float(np.mean(np.abs(diff))),
+    }
+
+
+def _pair_record(
+    stats: Dict[str, float],
+    i: int,
+    j: int,
+    columns_x: Optional[List[Any]],
+    columns_y: Optional[List[Any]],
+) -> Dict[str, Any]:
+    name_x = columns_x[i] if columns_x and i < len(columns_x) else None
+    name_y = columns_y[j] if columns_y and j < len(columns_y) else None
+    return {
+        "i": int(i),
+        "j": int(j),
+        "column_x": name_x,
+        "column_y": name_y,
+        "stats": stats,
+    }
+
+
+def _top_k_pairs(
+    absC: np.ndarray,
+    Xc: np.ndarray,
+    Yc: np.ndarray,
+    C: np.ndarray,
+    top_k: int,
+    columns_x: Optional[List[Any]],
+    columns_y: Optional[List[Any]],
+) -> List[Dict[str, Any]]:
+    flat = absC.ravel()
+    if flat.size == 0:
+        return []
+    k = int(min(top_k, flat.size))
+    idx = np.argpartition(-flat, k - 1)[:k]
+    idx = idx[np.argsort(-flat[idx])]
+    pairs = []
+    dx, dy = absC.shape
+    for flat_idx in idx:
+        i = int(flat_idx // dy)
+        j = int(flat_idx % dy)
+        stats = _pair_stats(Xc, Yc, C, i, j)
+        pairs.append(_pair_record(stats, i, j, columns_x, columns_y))
+    return pairs
 
 
 # =============================================================================
@@ -724,15 +830,24 @@ def main() -> int:
         print(f"ERROR: n_components inválido (dx={dx}, dy={dy})", file=sys.stderr)
         return 1
 
-    # Standardize
-    sx = StandardScaler(with_mean=True, with_std=True)
-    sy = StandardScaler(with_mean=True, with_std=True)
-    Xs = sx.fit_transform(Xp)
-    Ys = sy.fit_transform(Yp)
-
-    # Kill-switch leakage
-    leakage = check_leakage(Xs, Ys, meta_x=meta_x, meta_y=meta_y)
+    # Kill-switch leakage (estandariza internamente con ddof=1 para coherencia numérica)
+    leakage = check_leakage(Xp, Yp, meta_x=meta_x, meta_y=meta_y)
     if cfg.kill_switch and (not leakage["ok"]):
+        cleaned_ok_outputs = []
+        for stale_name in [
+            "alignment_map.json",
+            "metrics.json",
+            "degeneracy_per_point.json",
+            "knn_preservation_real.json",
+            "knn_preservation_negative.json",
+            "knn_preservation_control_positive.json",
+            "degeneracy_hist.png",
+            "degeneracy_scatter.png",
+        ]:
+            stale_path = outdir / stale_name
+            if stale_path.exists():
+                stale_path.unlink()
+                cleaned_ok_outputs.append(stale_name)
         abort = {
             "stage": "bridge_f4_1_alignment",
             "version": __version__,
@@ -743,8 +858,14 @@ def main() -> int:
             "leakage": leakage,
             "pairing": pairing_info,
             "data": {"N": N, "dx": dx, "dy": dy},
+            "cleaned_ok_outputs": cleaned_ok_outputs,
         }
         save_json(outdir / "abort_leakage.json", abort)
+        outputs_coherence = {
+            "aborted": True,
+            "has_abort_file": True,
+            "cleaned_stale_abort": False,
+        }
         summary_path = write_stage_summary(stage_dir, {
             "stage": "bridge_f4_1_alignment",
             "version": __version__,
@@ -755,6 +876,12 @@ def main() -> int:
             "config": asdict(cfg),
             "pairing": pairing_info,
             "data": {"N": N, "dx": dx, "dy": dy, "meta_atlas": meta_x, "meta_ringdown": meta_y},
+            "leakage_check": {
+                "executed": True,
+                "params": leakage.get("params"),
+                "ok": leakage.get("ok"),
+                "reason": leakage.get("reason"),
+            },
             "hashes": {
                 "inputs/atlas": sha256_file(atlas_path),
                 "inputs/features": sha256_file(features_path),
@@ -771,10 +898,22 @@ def main() -> int:
                 "version": __version__,
                 "status": "ABORT",
                 "inputs": {"atlas": str(atlas_path), "features": str(features_path)},
+                "outputs_coherence": outputs_coherence,
             },
         )
         print(f"ABORT: {leakage['reason']}", file=sys.stderr)
         return 2
+
+    # Standardize
+    sx = StandardScaler(with_mean=True, with_std=True)
+    sy = StandardScaler(with_mean=True, with_std=True)
+    Xs = sx.fit_transform(Xp)
+    Ys = sy.fit_transform(Yp)
+    abort_path = outdir / "abort_leakage.json"
+    cleaned_stale_abort = False
+    if abort_path.exists():
+        abort_path.unlink()
+        cleaned_stale_abort = True
 
     # Fit CCA + metrics
     cca, Xc, Yc, corrs = fit_cca(Xs, Ys, ncomp, cfg.seed)
@@ -914,6 +1053,12 @@ def main() -> int:
         "pairing": pairing_info,
         "data": {"N": N, "dx": dx, "dy": dy, "meta_atlas": meta_x, "meta_ringdown": meta_y},
         "results": metrics["results"],
+        "leakage_check": {
+            "executed": True,
+            "params": leakage.get("params"),
+            "ok": leakage.get("ok"),
+            "reason": leakage.get("reason"),
+        },
         "hashes": {
             "inputs/atlas": sha256_file(atlas_path),
             "inputs/features": sha256_file(features_path),
@@ -946,6 +1091,11 @@ def main() -> int:
     for _, fn in plot_files.items():
         manifest_artifacts[Path(fn).stem] = outdir / fn
 
+    outputs_coherence = {
+        "aborted": False,
+        "has_abort_file": abort_path.exists(),
+        "cleaned_stale_abort": cleaned_stale_abort,
+    }
     write_manifest(
         stage_dir,
         manifest_artifacts,
@@ -955,6 +1105,7 @@ def main() -> int:
                 "atlas": str(atlas_path),
                 "features": str(features_path),
             },
+            "outputs_coherence": outputs_coherence,
         },
     )
 
