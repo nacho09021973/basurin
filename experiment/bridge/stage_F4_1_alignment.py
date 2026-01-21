@@ -410,19 +410,28 @@ def _top_k_pairs(
 # =============================================================================
 
 
-def fit_cca(Xs: np.ndarray, Ys: np.ndarray, n_components: int, seed: int) -> Tuple[CCA, np.ndarray, np.ndarray, np.ndarray]:
+def fit_cca(
+    Xs: np.ndarray,
+    Ys: np.ndarray,
+    n_components: int,
+    seed: int,
+) -> Tuple[CCA, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     # sklearn CCA es determinista dadas entradas; seed se usa para consistencia de bootstrap/permutaciones
     cca = CCA(n_components=n_components, max_iter=5000)
     cca.fit(Xs, Ys)
     Xc, Yc = cca.transform(Xs, Ys)
-    # Correlaciones canónicas por componente
-    corrs = []
+    # Correlaciones canónicas por componente (corrcoef directo)
+    corrs_raw = []
     for i in range(n_components):
         x = Xc[:, i]
         y = Yc[:, i]
-        denom = (np.std(x) * np.std(y)) + 1e-12
-        corrs.append(float(np.cov(x, y, bias=False)[0, 1] / denom))
-    return cca, Xc, Yc, np.asarray(corrs, dtype=float)
+        if np.std(x) <= 1e-12 or np.std(y) <= 1e-12:
+            corrs_raw.append(float("nan"))
+            continue
+        corrs_raw.append(float(np.corrcoef(x, y)[0, 1]))
+    corrs_raw_np = np.asarray(corrs_raw, dtype=float)
+    corrs = np.clip(corrs_raw_np, -1.0, 1.0)
+    return cca, Xc, Yc, corrs, corrs_raw_np
 
 
 def bootstrap_axis_stability(
@@ -435,7 +444,7 @@ def bootstrap_axis_stability(
     """Estabilidad angular de ejes canónicos (U,V) vs fit completo."""
     rs = np.random.RandomState(seed)
     N = Xs.shape[0]
-    cca0, _, _, _ = fit_cca(Xs, Ys, n_components, seed)
+    cca0, _, _, _, _ = fit_cca(Xs, Ys, n_components, seed)
     Wx0 = cca0.x_weights_.copy()
     Wy0 = cca0.y_weights_.copy()
 
@@ -453,7 +462,7 @@ def bootstrap_axis_stability(
     cos_sims = []
     for _ in range(n_boot):
         idx = rs.randint(0, N, size=N)  # bootstrap con reemplazo
-        cca, _, _, _ = fit_cca(Xs[idx], Ys[idx], n_components, seed)
+        cca, _, _, _, _ = fit_cca(Xs[idx], Ys[idx], n_components, seed)
         Wx = norm_cols(cca.x_weights_)
         Wy = norm_cols(cca.y_weights_)
 
@@ -487,15 +496,15 @@ def permutation_significance(
     """Comparación score_true vs distribución permutada."""
     rs = np.random.RandomState(seed)
 
-    _, _, _, corrs_true = fit_cca(Xs, Ys, n_components, seed)
-    score_true = float(np.mean(np.abs(corrs_true)))
+    _, _, _, corrs_true, _ = fit_cca(Xs, Ys, n_components, seed)
+    score_true = float(np.nanmean(np.abs(corrs_true)))
 
     scores = []
     N = Xs.shape[0]
     for _ in range(n_perm):
         perm = rs.permutation(N)
-        _, _, _, corrs = fit_cca(Xs, Ys[perm], n_components, seed)
-        scores.append(float(np.mean(np.abs(corrs))))
+        _, _, _, corrs, _ = fit_cca(Xs, Ys[perm], n_components, seed)
+        scores.append(float(np.nanmean(np.abs(corrs))))
 
     scores_np = np.asarray(scores, dtype=float)
     med = float(np.median(scores_np))
@@ -669,7 +678,7 @@ def split_atlas_positive_control(
     if ncomp < 1:
         return {"status": "SKIP", "reason": "n_components<1", "per_point": []}
 
-    cca, Xc_pos, Yc_pos, _ = fit_cca(Xs[:, even_cols], Xs[:, odd_cols], ncomp, seed)
+    cca, Xc_pos, Yc_pos, _, _ = fit_cca(Xs[:, even_cols], Xs[:, odd_cols], ncomp, seed)
     _ = cca  # noqa: F841 - solo para consistencia de estilo
     metrics = knn_preservation_metrics(Xc_pos, Yc_pos, ids, k_nn)
     return {
@@ -696,6 +705,8 @@ class Config:
     k_nn: int = 20
     seed: int = 42
     kill_switch: bool = True
+    scale_floor_abs: float = 1e-8
+    scale_floor_rel: float = 1e-6
     out_root: str = "runs"
 
 
@@ -711,6 +722,8 @@ def parse_args() -> Config:
     p.add_argument("--k-nn", default=20, type=int, dest="k_nn")
     p.add_argument("--seed", default=42, type=int)
     p.add_argument("--no-kill-switch", action="store_true", help="Desactiva kill-switch (no recomendado)")
+    p.add_argument("--scale-floor-abs", default=1e-8, type=float, help="Umbral absoluto para filtrar columnas casi constantes")
+    p.add_argument("--scale-floor-rel", default=1e-6, type=float, help="Umbral relativo (a mediana) para filtrar columnas")
     p.add_argument("--out-root", default="runs", type=str, help="Directorio raíz de runs (default: runs)")
     a = p.parse_args()
     return Config(
@@ -724,6 +737,8 @@ def parse_args() -> Config:
         k_nn=int(a.k_nn),
         seed=int(a.seed),
         kill_switch=(not bool(a.no_kill_switch)),
+        scale_floor_abs=float(a.scale_floor_abs),
+        scale_floor_rel=float(a.scale_floor_rel),
         out_root=a.out_root,
     )
 
@@ -779,6 +794,27 @@ def _leakage_summary(leakage: Dict[str, Any]) -> Dict[str, Any]:
         "rmse_same_dim": leakage.get("rmse_same_dim"),
         "params": leakage.get("params"),
     }
+
+
+def _scale_threshold(scales: np.ndarray, floor_abs: float, floor_rel: float) -> float:
+    finite = np.asarray(scales, dtype=float)
+    finite = finite[np.isfinite(finite) & (finite > 0)]
+    median = float(np.median(finite)) if finite.size else 0.0
+    return float(max(floor_abs, floor_rel * median))
+
+
+def _filter_by_scale(
+    data: np.ndarray,
+    scales: np.ndarray,
+    floor_abs: float,
+    floor_rel: float,
+) -> Tuple[np.ndarray, List[int]]:
+    threshold = _scale_threshold(scales, floor_abs, floor_rel)
+    scales_arr = np.asarray(scales, dtype=float)
+    drop_mask = (~np.isfinite(scales_arr)) | (scales_arr < threshold)
+    dropped_idx = np.where(drop_mask)[0].astype(int).tolist()
+    kept = data[:, ~drop_mask]
+    return kept, dropped_idx
 
 
 def reconcile_ids(
@@ -951,6 +987,24 @@ def main() -> int:
     sy = StandardScaler(with_mean=True, with_std=True)
     Xs = sx.fit_transform(Xp)
     Ys = sy.fit_transform(Yp)
+    x_scale_raw = np.std(Xp, axis=0, ddof=0)
+    y_scale_raw = np.std(Yp, axis=0, ddof=0)
+    Xs_used, x_dropped_idx = _filter_by_scale(
+        Xs, x_scale_raw, cfg.scale_floor_abs, cfg.scale_floor_rel
+    )
+    Ys_used, y_dropped_idx = _filter_by_scale(
+        Ys, y_scale_raw, cfg.scale_floor_abs, cfg.scale_floor_rel
+    )
+    dx_used = int(Xs_used.shape[1])
+    dy_used = int(Ys_used.shape[1])
+    ncomp = int(min(cfg.n_components, dx_used, dy_used))
+    if ncomp < 1:
+        print(
+            "ERROR: n_components inválido tras filtrar columnas casi constantes "
+            f"(dx_used={dx_used}, dy_used={dy_used})",
+            file=sys.stderr,
+        )
+        return 1
     abort_path = outdir / "abort_leakage.json"
     cleaned_stale_abort = False
     if abort_path.exists():
@@ -958,9 +1012,9 @@ def main() -> int:
         cleaned_stale_abort = True
 
     # Fit CCA + metrics
-    cca, Xc, Yc, corrs = fit_cca(Xs, Ys, ncomp, cfg.seed)
-    boot = bootstrap_axis_stability(Xs, Ys, ncomp, cfg.bootstrap_samples, cfg.seed)
-    perm = permutation_significance(Xs, Ys, ncomp, cfg.permutation_samples, cfg.seed)
+    cca, Xc, Yc, corrs, corrs_raw = fit_cca(Xs_used, Ys_used, ncomp, cfg.seed)
+    boot = bootstrap_axis_stability(Xs_used, Ys_used, ncomp, cfg.bootstrap_samples, cfg.seed)
+    perm = permutation_significance(Xs_used, Ys_used, ncomp, cfg.permutation_samples, cfg.seed)
     if Xc.shape[0] > 1:
         cov = np.cov(Xc.T, bias=False)
         # np.cov devuelve escalar si d==1; traza de escalar = escalar
@@ -978,9 +1032,30 @@ def main() -> int:
     knn_ratio = float(knn_real["overlap_mean"] / (knn_neg["overlap_mean"] + 1e-12))
 
     # control positivo (split atlas)
-    control_pos = split_atlas_positive_control(Xs, ids, ncomp, cfg.k_nn, cfg.seed)
+    control_pos = split_atlas_positive_control(Xs_used, ids, ncomp, cfg.k_nn, cfg.seed)
 
     # Save alignment map (auditable)
+    cca_validation = {
+        "status": "OK",
+        "message": None,
+    }
+    raw_out_of_bounds = np.isfinite(corrs_raw) & (np.abs(corrs_raw) > (1.0 + 1e-6))
+    if np.any(raw_out_of_bounds):
+        cca_validation = {
+            "status": "FAIL",
+            "message": "cca_out_of_bounds_raw",
+        }
+
+    data_used = {
+        "x_dim_original": int(dx),
+        "y_dim_original": int(dy),
+        "x_dim_used": int(dx_used),
+        "y_dim_used": int(dy_used),
+        "x_dropped_idx": x_dropped_idx,
+        "y_dropped_idx": y_dropped_idx,
+        "scale_floor_abs": float(cfg.scale_floor_abs),
+        "scale_floor_rel": float(cfg.scale_floor_rel),
+    }
     alignment = {
         "stage": "bridge_f4_1_alignment",
         "version": __version__,
@@ -995,11 +1070,15 @@ def main() -> int:
         },
         "cca": {
             "n_components": ncomp,
+            "canonical_corrs_raw": corrs_raw.tolist(),
             "canonical_corrs": corrs.tolist(),
+            "canonical_corrs_method": "corrcoef(U[:,k],V[:,k]) then clip",
             "x_weights": cca.x_weights_.tolist(),
             "y_weights": cca.y_weights_.tolist(),
             "x_loadings": getattr(cca, "x_loadings_", None).tolist() if getattr(cca, "x_loadings_", None) is not None else None,
             "y_loadings": getattr(cca, "y_loadings_", None).tolist() if getattr(cca, "y_loadings_", None) is not None else None,
+            "data_used": data_used,
+            "validation": cca_validation,
         },
         "leakage_check": leakage,
     }
@@ -1020,8 +1099,10 @@ def main() -> int:
         "created": utcnow_iso(),
         "run": cfg.run,
         "results": {
-            "canonical_corr_mean": float(np.mean(np.abs(corrs))),
+            "canonical_corr_mean": float(np.nanmean(np.abs(corrs))),
             "canonical_corrs": corrs.tolist(),
+            "canonical_corrs_raw": corrs_raw.tolist(),
+            "cca_validation": cca_validation,
             "stability_score": float(boot["stability_score"]),
             "mean_axis_angle_deg": float(boot["mean_angle_deg"]),
             "significance_ratio": float(perm["significance_ratio"]),
