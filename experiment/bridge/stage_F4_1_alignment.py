@@ -61,6 +61,10 @@ from sklearn.cross_decomposition import CCA
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from basurin_io import ensure_stage_dirs, sha256_file, write_manifest, write_stage_summary
 from experiment.bridge.pairing import pair_frames
 __version__ = "0.1.0"
@@ -974,4 +978,3 @@ if __name__ == "__main__":
         print("ERROR: unexpected exception in bridge entrypoint", file=sys.stderr)
         traceback.print_exc()
         raise SystemExit(1)
-
