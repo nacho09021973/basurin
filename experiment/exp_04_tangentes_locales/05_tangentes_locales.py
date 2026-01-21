@@ -148,7 +148,7 @@ def main():
 
     N = X.shape[0]
     rng = np.random.default_rng(args.seed)
-    idx_points = rng.choice(N, size=min(args.n_points, N), replace=False)
+    idx_points = np.sort(rng.choice(N, size=min(args.n_points, N), replace=False))
 
     k_list = [int(x) for x in args.k_neighbors.split(",")]
     if any(k < 2 for k in k_list):
