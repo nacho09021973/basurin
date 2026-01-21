@@ -157,7 +157,32 @@ def resolve_dual_defaults(cfg: Config) -> None:
 # Carga de geometría
 # =============================================================================
 
-def resolve_geometry_path(run: str, geometry_file: str) -> tuple[Path, str, str | None]:
+def _format_geometry_path(
+    run_dir: Path,
+    resolved_path: Path,
+    geometry_file: str,
+    is_absolute: bool,
+) -> str:
+    resolved_abs = resolved_path.resolve()
+    run_dir_abs = run_dir.resolve()
+    try:
+        rel_to_run = resolved_abs.relative_to(run_dir_abs)
+    except ValueError:
+        rel_to_run = None
+    if rel_to_run is not None:
+        return str(Path("runs") / run_dir.name / rel_to_run)
+
+    try:
+        rel_to_cwd = resolved_abs.relative_to(Path.cwd().resolve())
+    except ValueError:
+        rel_to_cwd = None
+    if rel_to_cwd is not None:
+        return str(rel_to_cwd)
+
+    return str(resolved_abs) if is_absolute else geometry_file
+
+
+def resolve_geometry_path(run: str, geometry_file: str) -> tuple[Path, str, str | None, str]:
     """Resuelve la ruta de geometría con anclaje a runs/<run>/geometry/."""
     run_dir = get_run_dir(run)
     geo_path = Path(geometry_file)
@@ -189,13 +214,25 @@ def resolve_geometry_path(run: str, geometry_file: str) -> tuple[Path, str, str 
             f"Verifica --geometry-file o genera geometría en runs/{run}/geometry/."
         )
 
-    try:
-        input_geometry = str(resolved.resolve().relative_to(run_dir.resolve()))
-    except ValueError:
-        input_geometry = geometry_file
+    resolved_abs = resolved.resolve()
+    geometry_resolution = "absolute" if is_absolute or starts_with_runs else "legacy"
+    if geometry_resolution != "absolute":
+        outputs_dir = (run_dir / "geometry" / "outputs").resolve()
+        try:
+            resolved_abs.relative_to(outputs_dir)
+            geometry_resolution = "canonical"
+        except ValueError:
+            geometry_resolution = "legacy"
 
-    input_geometry_absolute = str(resolved) if is_absolute else None
-    return resolved, input_geometry, input_geometry_absolute
+    geometry_path = _format_geometry_path(
+        run_dir,
+        resolved_abs,
+        geometry_file,
+        is_absolute,
+    )
+
+    input_geometry_absolute = str(resolved_abs) if is_absolute else None
+    return resolved_abs, geometry_path, input_geometry_absolute, geometry_resolution
 
 
 def load_geometry(h5_path: Path) -> dict:
@@ -511,7 +548,9 @@ def write_outputs(
     geo: dict,
     results: list[dict],
     validation: dict,
-    input_geometry: str,
+    geometry_path: str,
+    geometry_sha256: str,
+    geometry_resolution: str,
     input_geometry_absolute: str | None,
     results_N: list[dict] | None = None
 ) -> dict:
@@ -595,6 +634,11 @@ def write_outputs(
         "version": "1.1.0",
         "created": datetime.now(timezone.utc).isoformat(),
         "config": asdict(cfg),
+        "inputs": {
+            "geometry_path": geometry_path,
+            "geometry_sha256": geometry_sha256,
+            "geometry_resolution": geometry_resolution,
+        },
         "geometry": {
             "d": geo["d"],
             "L": geo["L"],
@@ -631,7 +675,8 @@ def write_outputs(
         extra={
             "version": "1.1.0",
             "stage_legacy": "03_sturm_liouville",
-            "input_geometry": input_geometry,
+            "input_geometry": geometry_path,
+            "input_geometry_sha256": geometry_sha256,
             **(
                 {"input_geometry_absolute": input_geometry_absolute}
                 if input_geometry_absolute
@@ -723,7 +768,7 @@ def main() -> int:
     
     # Cargar geometría
     try:
-        geo_path, input_geometry, input_geometry_absolute = resolve_geometry_path(
+        geo_path, geometry_path, input_geometry_absolute, geometry_resolution = resolve_geometry_path(
             cfg.run, cfg.geometry_file
         )
     except (ValueError, FileNotFoundError) as exc:
@@ -735,6 +780,7 @@ def main() -> int:
             )
         return 1
     
+    geometry_sha256 = sha256_file(geo_path)
     geo = load_geometry(geo_path)
     d, L = geo["d"], geo["L"]
     z = geo["z"]
@@ -838,7 +884,9 @@ def main() -> int:
         geo,
         results,
         validation,
-        input_geometry,
+        geometry_path,
+        geometry_sha256,
+        geometry_resolution,
         input_geometry_absolute,
         results_N=results_N,
     )

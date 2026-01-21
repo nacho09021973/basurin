@@ -19,34 +19,36 @@ resolve_geometry_path = sturm_liouville.resolve_geometry_path
 
 def test_geometry_basename_resolves_under_run(tmp_path, monkeypatch):
     run_id = "run-001"
-    geometry_path = tmp_path / "runs" / run_id / "geometry" / "ads_puro.h5"
-    geometry_path.parent.mkdir(parents=True)
-    geometry_path.write_text("geometry")
+    geometry_path_expected = tmp_path / "runs" / run_id / "geometry" / "ads_puro.h5"
+    geometry_path_expected.parent.mkdir(parents=True)
+    geometry_path_expected.write_text("geometry")
     monkeypatch.chdir(tmp_path)
 
-    resolved, input_geometry, input_geometry_absolute = resolve_geometry_path(
+    resolved, geometry_path, input_geometry_absolute, geometry_resolution = resolve_geometry_path(
         run_id, "ads_puro.h5"
     )
 
-    assert resolved.resolve() == geometry_path.resolve()
-    assert input_geometry == "geometry/ads_puro.h5"
+    assert resolved.resolve() == geometry_path_expected.resolve()
+    assert geometry_path == f"runs/{run_id}/geometry/ads_puro.h5"
     assert input_geometry_absolute is None
+    assert geometry_resolution == "legacy"
 
 
 def test_geometry_runs_prefix_does_not_duplicate(tmp_path, monkeypatch):
     run_id = "run-002"
-    geometry_path = tmp_path / "runs" / run_id / "geometry" / "ads_puro.h5"
-    geometry_path.parent.mkdir(parents=True)
-    geometry_path.write_text("geometry")
+    geometry_path_expected = tmp_path / "runs" / run_id / "geometry" / "ads_puro.h5"
+    geometry_path_expected.parent.mkdir(parents=True)
+    geometry_path_expected.write_text("geometry")
     monkeypatch.chdir(tmp_path)
 
-    resolved, input_geometry, input_geometry_absolute = resolve_geometry_path(
+    resolved, geometry_path, input_geometry_absolute, geometry_resolution = resolve_geometry_path(
         run_id, f"runs/{run_id}/geometry/ads_puro.h5"
     )
 
-    assert resolved.resolve() == geometry_path.resolve()
-    assert input_geometry == "geometry/ads_puro.h5"
+    assert resolved.resolve() == geometry_path_expected.resolve()
+    assert geometry_path == f"runs/{run_id}/geometry/ads_puro.h5"
     assert input_geometry_absolute is None
+    assert geometry_resolution == "absolute"
 
 
 def test_geometry_rejects_parent_traversal(tmp_path, monkeypatch):
