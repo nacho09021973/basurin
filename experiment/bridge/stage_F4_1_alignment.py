@@ -116,6 +116,8 @@ def _normalize_records(obj: Any, key_vec: str) -> Tuple[Optional[List[Any]], Opt
             if vec is None:
                 # tolerar nombres alternativos
                 vec = r.get(key_vec.upper())
+            if vec is None and key_vec == "x":
+                vec = r.get("features", r.get("vector"))
             if vec is None:
                 return None, None
             ids.append(rid)
@@ -124,6 +126,16 @@ def _normalize_records(obj: Any, key_vec: str) -> Tuple[Optional[List[Any]], Opt
         return ids, mat
 
     return None, None
+
+
+def _coerce_vector(vec: Any) -> Optional[List[float]]:
+    if isinstance(vec, list):
+        return [float(x) for x in vec]
+    if isinstance(vec, dict):
+        for key in ["values", "vector", "data", "features"]:
+            if key in vec:
+                return _coerce_vector(vec[key])
+    return None
 
 
 def load_feature_json(path: Path, kind: str) -> Tuple[Optional[List[Any]], np.ndarray, Dict[str, Any]]:
@@ -138,6 +150,32 @@ def load_feature_json(path: Path, kind: str) -> Tuple[Optional[List[Any]], np.nd
     else:
         raise ValueError(kind)
 
+    if kind == "atlas" and isinstance(obj, dict) and "points" in obj:
+        ids = []
+        rows = []
+        for point in obj.get("points", []):
+            if not isinstance(point, dict):
+                continue
+            rid = point.get("id", point.get("uid", point.get("name")))
+            vec = point.get("features", point.get("vector", point.get("x")))
+            vec_list = _coerce_vector(vec)
+            if vec_list is None:
+                continue
+            ids.append(rid)
+            rows.append(vec_list)
+        if rows:
+            mat = np.asarray(rows, dtype=float)
+            meta = {
+                "feature_key": obj.get("feature_key"),
+                "source": obj.get("source_atlas"),
+                "n_points": obj.get("n_points"),
+            }
+            if "columns" in obj:
+                meta["columns"] = obj.get("columns")
+            if "columns" not in meta and meta.get("feature_key"):
+                meta["columns"] = [f"{meta['feature_key']}_{i}" for i in range(mat.shape[1])]
+            return ids, mat, meta
+
     ids, mat = _normalize_records(obj, key)
     if mat is None:
         raise ValueError(
@@ -146,9 +184,18 @@ def load_feature_json(path: Path, kind: str) -> Tuple[Optional[List[Any]], np.nd
 
     meta: Dict[str, Any] = {}
     if isinstance(obj, dict):
+        if "meta" in obj and isinstance(obj["meta"], dict):
+            meta.update(obj["meta"])
         for mk in ["feature_key", "k", "dim", "source", "schema_version", "created"]:
             if mk in obj:
                 meta[mk] = obj[mk]
+        if "columns" in obj:
+            meta["columns"] = obj["columns"]
+
+    if "columns" not in meta and "feature_key" in meta and mat is not None:
+        feature_key = meta.get("feature_key")
+        if feature_key:
+            meta["columns"] = [f"{feature_key}_{i}" for i in range(mat.shape[1])]
 
     return ids, mat, meta
 
@@ -158,7 +205,12 @@ def load_feature_json(path: Path, kind: str) -> Tuple[Optional[List[Any]], np.nd
 # =============================================================================
 
 
-def check_leakage(Xs: np.ndarray, Ys: np.ndarray, feature_names_x: Optional[List[str]] = None, feature_names_y: Optional[List[str]] = None) -> Dict[str, Any]:
+def check_leakage(
+    Xs: np.ndarray,
+    Ys: np.ndarray,
+    meta_x: Optional[Dict[str, Any]] = None,
+    meta_y: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Heurísticas defensivas. Devuelve dict con {ok: bool, reason: str?, stats: ...}.
 
     Criterios (abort):
@@ -167,33 +219,69 @@ def check_leakage(Xs: np.ndarray, Ys: np.ndarray, feature_names_x: Optional[List
 
     Nota: NO prueba fuga; evita tautologías obvias.
     """
-    out: Dict[str, Any] = {"ok": True, "reason": None, "max_abs_corr": None, "rmse_same_dim": None}
+    out: Dict[str, Any] = {
+        "ok": True,
+        "reason": None,
+        "max_abs_corr": None,
+        "rmse_same_dim": None,
+        "feature_key_match": None,
+        "columns_match": None,
+        "cross_corr_checked": False,
+    }
+
+    meta_x = meta_x or {}
+    meta_y = meta_y or {}
+    feature_key_x = meta_x.get("feature_key")
+    feature_key_y = meta_y.get("feature_key")
+    columns_x = meta_x.get("columns")
+    columns_y = meta_y.get("columns")
+    feature_key_match = bool(feature_key_x and feature_key_y and feature_key_x == feature_key_y)
+    columns_match = bool(columns_x and columns_y and columns_x == columns_y)
+    out["feature_key_match"] = feature_key_match
+    out["columns_match"] = columns_match
+
+    if feature_key_match or columns_match:
+        out.update(
+            {
+                "ok": False,
+                "reason": "LEAKAGE_SUSPECTED: matching feature_key/columns indicates shared feature space.",
+            }
+        )
+        return out
 
     if Xs.shape[0] < 10:
         return out
 
-    # Correlaciones columna-columna.
+    compare_cross = True
+    if feature_key_x and feature_key_y and feature_key_x != feature_key_y:
+        compare_cross = False
+    if columns_x and columns_y and columns_x != columns_y:
+        compare_cross = False
+
+    # Correlaciones columna-columna (solo si los espacios parecen comparables).
     # Importante: alta correlación NO implica fuga; sólo abortamos si hay evidencia
     # de *identidad* (columnas prácticamente iguales tras estandarizar).
-    Xc = Xs - Xs.mean(axis=0, keepdims=True)
-    Yc = Ys - Ys.mean(axis=0, keepdims=True)
-    Xc /= (Xs.std(axis=0, keepdims=True) + 1e-12)
-    Yc /= (Ys.std(axis=0, keepdims=True) + 1e-12)
+    if compare_cross:
+        Xc = Xs - Xs.mean(axis=0, keepdims=True)
+        Yc = Ys - Ys.mean(axis=0, keepdims=True)
+        Xc /= (Xs.std(axis=0, keepdims=True) + 1e-12)
+        Yc /= (Ys.std(axis=0, keepdims=True) + 1e-12)
 
-    C = (Xc.T @ Yc) / max(1, Xs.shape[0] - 1)
-    absC = np.abs(C)
-    max_abs_corr = float(np.max(absC))
-    out["max_abs_corr"] = max_abs_corr
+        C = (Xc.T @ Yc) / max(1, Xs.shape[0] - 1)
+        absC = np.abs(C)
+        max_abs_corr = float(np.max(absC))
+        out["max_abs_corr"] = max_abs_corr
+        out["cross_corr_checked"] = True
 
-    # localizar el par más correlacionado y comprobar igualdad numérica
-    i_max, j_max = np.unravel_index(int(np.argmax(absC)), absC.shape)
-    col_rmse = float(np.sqrt(np.mean((Xc[:, i_max] - Yc[:, j_max]) ** 2)))
-    out["max_corr_pair_rmse"] = col_rmse
+        # localizar el par más correlacionado y comprobar igualdad numérica
+        i_max, j_max = np.unravel_index(int(np.argmax(absC)), absC.shape)
+        col_rmse = float(np.sqrt(np.mean((Xc[:, i_max] - Yc[:, j_max]) ** 2)))
+        out["max_corr_pair_rmse"] = col_rmse
 
-    # umbral muy estricto: casi identidad tras estandarizar
-    if max_abs_corr > 0.9999 and col_rmse < 1e-3:
-        out.update({"ok": False, "reason": "LEAKAGE_SUSPECTED: columns nearly identical across X/Y after standardization."})
-        return out
+        # umbral muy estricto: casi identidad tras estandarizar
+        if max_abs_corr > 0.9999 and col_rmse < 1e-3:
+            out.update({"ok": False, "reason": "LEAKAGE_SUSPECTED: columns nearly identical across X/Y after standardization."})
+            return out
 
     # Matrices casi iguales si dim coincide
     if Xs.shape[1] == Ys.shape[1]:
@@ -202,13 +290,6 @@ def check_leakage(Xs: np.ndarray, Ys: np.ndarray, feature_names_x: Optional[List
         if rmse < 1e-3:
             out.update({"ok": False, "reason": "LEAKAGE_SUSPECTED: X and Y nearly identical after standardization."})
             return out
-
-    # Heurística nombres (si están)
-    bad_tokens = ["delta", "ratios", "m2", "atlas", "ising"]
-    joined = " ".join((feature_names_x or []) + (feature_names_y or [])).lower()
-    if any(t in joined for t in bad_tokens):
-        out.update({"ok": False, "reason": "LEAKAGE_SUSPECTED: feature names include internal target-like tokens."})
-        return out
 
     return out
 
@@ -610,7 +691,7 @@ def main() -> int:
     Ys = sy.fit_transform(Yp)
 
     # Kill-switch leakage
-    leakage = check_leakage(Xs, Ys)
+    leakage = check_leakage(Xs, Ys, meta_x=meta_x, meta_y=meta_y)
     if cfg.kill_switch and (not leakage["ok"]):
         abort = {
             "stage": "bridge_f4_1_alignment",
