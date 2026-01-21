@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from basurin_io import get_run_dir, resolve_spectrum_path
+
 
 def resolve_spectrum_h5(run_id: str) -> Path:
     """Resolve the spectrum.h5 path for a run.
@@ -13,19 +15,7 @@ def resolve_spectrum_h5(run_id: str) -> Path:
     Raises:
         FileNotFoundError: when no candidate exists.
     """
-    base = Path("runs") / run_id / "spectrum"
-    candidates = [
-        base / "outputs" / "spectrum.h5",
-        base / "spectrum.h5",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-
-    raise FileNotFoundError(
-        "spectrum.h5 no encontrado en outputs/ ni legacy: "
-        f"{candidates[0]} | {candidates[1]}"
-    )
+    return resolve_spectrum_path(get_run_dir(run_id))
 
 
 def resolve_validation_json(run_id: str) -> Path | None:

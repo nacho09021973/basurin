@@ -47,6 +47,7 @@ import numpy as np
 from basurin_io import (
     ensure_stage_dirs,
     get_run_dir,
+    resolve_spectrum_path as resolve_run_spectrum_path,
     write_manifest,
     write_stage_summary,
     sha256_file,
@@ -244,24 +245,16 @@ def resolve_spectrum_path(run: str, spectrum_file: str) -> Path:
     if sf.is_absolute() or spectrum_file.startswith("runs/"):
         return sf
 
-    stage_dir = get_run_dir(run) / "spectrum"
-    if spectrum_file == "outputs/spectrum.h5":
-        cand_outputs = stage_dir / "outputs" / "spectrum.h5"
-        if cand_outputs.exists():
-            return cand_outputs
-        legacy = stage_dir / "spectrum.h5"
-        if legacy.exists():
-            return legacy
-        return cand_outputs
+    run_dir = get_run_dir(run)
+    if spectrum_file in ("outputs/spectrum.h5", "spectrum.h5"):
+        return resolve_run_spectrum_path(run_dir)
 
+    stage_dir = run_dir / "spectrum"
     cand = stage_dir / spectrum_file
     if cand.exists():
         return cand
 
-    cand_outputs = stage_dir / "outputs" / "spectrum.h5"
-    if cand_outputs.exists():
-        return cand_outputs
-    return stage_dir / "spectrum.h5"
+    return resolve_run_spectrum_path(run_dir)
 
 
 def verify_invariants(X: np.ndarray, y: Optional[np.ndarray] = None, *, name: str = "X") -> None:

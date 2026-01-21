@@ -42,6 +42,8 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
+from basurin_io import get_run_dir, resolve_spectrum_path
+
 # Contratos (módulo puro, sin IO)
 # Nota: el nombre del fichero empieza por dígitos; lo cargamos por ruta.
 import importlib.util
@@ -257,7 +259,7 @@ def parse_args() -> Config:
 # -----------------------------
 
 def run_stage(cfg: Config) -> Dict[str, Path]:
-    run_dir = Path("runs") / cfg.run
+    run_dir = get_run_dir(cfg.run)
     geo_path = run_dir / "geometry" / cfg.geometry_file
 
     if not geo_path.exists():
@@ -268,8 +270,15 @@ def run_stage(cfg: Config) -> Dict[str, Path]:
     d, L = geo["d"], geo["L"]
 
     # Optional spectrum
-    spec_path = run_dir / "spectrum" / "outputs" / "spectrum.h5"
-    M2 = load_spectrum_M2(spec_path)
+    try:
+        spec_path = resolve_spectrum_path(run_dir)
+    except FileNotFoundError as exc:
+        spec_path = None
+        missing_reason = str(exc)
+        M2 = None
+    else:
+        missing_reason = None
+        M2 = load_spectrum_M2(spec_path)
 
     # Contratos
     contracts: Dict[str, Any] = {}
@@ -327,11 +336,20 @@ def run_stage(cfg: Config) -> Dict[str, Path]:
         spline_s=cfg.spline_s,
     )
 
+    spectrum_rel = None
+    if spec_path is not None:
+        spectrum_rel = (
+            "../spectrum/outputs/spectrum.h5"
+            if "outputs" in spec_path.parts
+            else "../spectrum/spectrum.h5"
+        )
+
     if M2 is None:
-        contracts["F_regge"] = {"status": "SKIP", "reason": f"No existe {spec_path}"}
+        reason = missing_reason or f"No existe {spec_path}"
+        contracts["F_regge"] = {"status": "SKIP", "reason": reason}
     else:
         regge = check_regge_trajectory(M2, n_skip_low=cfg.regge_skip_low, r2_threshold=cfg.regge_r2_threshold)
-        regge["spectrum_source"] = "../spectrum/outputs/spectrum.h5"
+        regge["spectrum_source"] = spectrum_rel
         contracts["F_regge"] = regge
 
     # IO
@@ -359,7 +377,7 @@ def run_stage(cfg: Config) -> Dict[str, Path]:
         },
         "inputs": {
             "geometry_h5": f"../geometry/{cfg.geometry_file}",
-            "spectrum_h5": "../spectrum/outputs/spectrum.h5" if spec_path.exists() else None,
+            "spectrum_h5": spectrum_rel,
         },
         "contracts": {k: v.get("status", "UNKNOWN") if isinstance(v, dict) else "UNKNOWN" for k, v in contracts.items()},
         "contract_groups": {
@@ -390,7 +408,7 @@ def run_stage(cfg: Config) -> Dict[str, Path]:
             "summary": "stage_summary.json",
         },
         "input_geometry": f"../geometry/{cfg.geometry_file}",
-        "input_spectrum": "../spectrum/outputs/spectrum.h5" if spec_path.exists() else None,
+        "input_spectrum": spectrum_rel,
     }
 
     manifest_path = stage_dir / "manifest.json"

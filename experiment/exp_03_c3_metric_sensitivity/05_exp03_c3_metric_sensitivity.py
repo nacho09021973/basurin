@@ -63,6 +63,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from basurin_io import get_run_dir, resolve_spectrum_path
+
 __version__ = "0.3.0"
 
 # =============================================================================
@@ -562,13 +564,6 @@ def main() -> int:
     cfg = parse_args()
     runs = Path("runs")
 
-    def resolve_spectrum_path(run_name: str) -> Path:
-        stage_dir = runs / run_name / "spectrum"
-        candidate = stage_dir / "outputs" / "spectrum.h5"
-        if candidate.exists():
-            return candidate
-        return stage_dir / "spectrum.h5"
-
     # Header
     print("=" * 70)
     print(f"BASURIN Exp 03: C3 metric sensitivity (v{__version__})")
@@ -583,7 +578,7 @@ def main() -> int:
     print("=" * 70)
 
     # --- Step 1: Generate ir_A if missing ---
-    a_spec = resolve_spectrum_path(cfg.run_a)
+    a_spec = resolve_spectrum_path(get_run_dir(cfg.run_a))
     if not a_spec.exists():
         print(f"\n[1/6] Generating {cfg.run_a} (family={cfg.a_family})...")
         run_cmd([
@@ -606,7 +601,7 @@ def main() -> int:
         print(f"\n[1/6] {cfg.run_a} exists, skipping.")
 
     # --- Step 2: Generate ir_B if missing ---
-    b_spec = resolve_spectrum_path(cfg.run_b)
+    b_spec = resolve_spectrum_path(get_run_dir(cfg.run_b))
     if not b_spec.exists():
         print(f"\n[2/6] Generating {cfg.run_b} (family={cfg.b_family})...")
         run_cmd([
@@ -629,7 +624,7 @@ def main() -> int:
         print(f"\n[2/6] {cfg.run_b} exists, skipping.")
 
     # --- Step 3: Mix to ir_mix if missing ---
-    mix_spec = resolve_spectrum_path(cfg.run_mix)
+    mix_spec = resolve_spectrum_path(get_run_dir(cfg.run_mix))
     if not mix_spec.exists():
         print(f"\n[3/6] Mixing {cfg.run_a} + {cfg.run_b} -> {cfg.run_mix}...")
         run_cmd([

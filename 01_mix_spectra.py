@@ -24,17 +24,14 @@ from pathlib import Path
 import numpy as np
 import h5py
 
+from basurin_io import get_run_dir, resolve_spectrum_path
 
 STAGE = "spectrum"
 SCRIPT_NAME = "01_mix_spectra.py"
 VERSION = "v0.2.0"
 
 def resolve_in_spectrum(run: str) -> Path:
-    root = Path("runs") / run / STAGE
-    cand1 = root / "outputs" / "spectrum.h5"
-    if cand1.exists():
-        return cand1
-    return root / "spectrum.h5"
+    return resolve_spectrum_path(get_run_dir(run))
 
 
 def sha256_file(path: Path) -> str:

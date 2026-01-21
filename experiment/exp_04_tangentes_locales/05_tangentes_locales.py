@@ -21,6 +21,9 @@ import h5py
 from basurin_io import (
     ensure_stage_dirs,
     get_run_dir,
+    resolve_spectrum_path,
+    spectrum_legacy_path,
+    spectrum_outputs_path,
     sha256_file,
     utc_now_iso,
     write_manifest,
@@ -38,14 +41,6 @@ def compute_ratio_features(masses, k_features, mass_kind):
         else:
             raise ValueError(f"mass_kind inválido: {mass_kind}")
     return np.stack(X, axis=1)
-
-
-def resolve_spectrum_path(run_dir: Path) -> Path:
-    stage_dir = run_dir / "spectrum"
-    candidate = stage_dir / "outputs" / "spectrum.h5"
-    if candidate.exists():
-        return candidate
-    return stage_dir / "spectrum.h5"
 
 
 def load_atlas_ids(run_dir: Path, expected_n: int) -> tuple[list[str] | None, dict]:
@@ -102,6 +97,9 @@ def main():
 
     run_dir = get_run_dir(args.run)
     spec_path = resolve_spectrum_path(run_dir)
+    spectrum_outputs = spectrum_outputs_path(run_dir)
+    spectrum_legacy = spectrum_legacy_path(run_dir)
+    spectrum_kind = "outputs" if spec_path == spectrum_outputs else "legacy"
     stage_dir, out_dir = ensure_stage_dirs(args.run, "tangentes_locales")
 
     with h5py.File(spec_path, "r") as h5:
@@ -318,6 +316,8 @@ def main():
         },
         "inputs": {
             "spectrum": str(spec_path),
+            "spectrum_path_used": str(spec_path),
+            "spectrum_path_kind": spectrum_kind,
             "mass_dataset": mass_dataset,
             "mass_kind": mass_kind,
             "mass_dataset_path": f"/{mass_dataset}",

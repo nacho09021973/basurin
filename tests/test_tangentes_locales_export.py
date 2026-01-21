@@ -93,4 +93,6 @@ def test_tangentes_locales_exports_features_points(tmp_path: Path) -> None:
     assert "files" in manifest
     assert manifest["files"]["results"] == "outputs/results.json"
     assert all(not Path(path).is_absolute() for path in manifest["files"].values())
-    assert (stage_dir / "stage_summary.json").exists()
+    summary = json.loads((stage_dir / "stage_summary.json").read_text())
+    assert summary["inputs"]["spectrum_path_kind"] == "outputs"
+    assert summary["inputs"]["spectrum_path_used"].endswith("spectrum/outputs/spectrum.h5")
