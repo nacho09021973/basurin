@@ -12,6 +12,7 @@ def test_corr_bounds() -> None:
 
     leakage = check_leakage(X, Y)
 
+    assert leakage["executed"] is True
     assert leakage["cross_corr_checked"] is True
     assert leakage["max_abs_corr"] <= 1.0 + 1e-12
 
@@ -28,7 +29,7 @@ def test_identical_columns_abort() -> None:
     leakage = check_leakage(X, Y)
 
     assert leakage["ok"] is False
-    assert "i=1" in leakage["reason"]
-    assert "j=2" in leakage["reason"]
+    assert leakage["i_max"] == 1
+    assert leakage["j_max"] == 2
     assert "rmse=" in leakage["reason"]
     assert leakage["pair_max"]["stats"]["rmse"] < 1e-6
