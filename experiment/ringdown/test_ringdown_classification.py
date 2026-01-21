@@ -180,8 +180,7 @@ def test_A_gw150914_like():
             else:
                 print(f"   ⚠ Voting = {voting['category'].value}, verificar si es por ruido LF")
         
-        return passed
-        
+        assert passed        
     finally:
         Path(data_file).unlink()
 
@@ -249,8 +248,7 @@ def test_B_ambiguous():
             print(f"   ⚠ Confianza relativamente alta ({confidence:.2f}), puede ser OK si el ruido tiene pico claro")
             # No es necesariamente un fallo, depende del ruido generado
         
-        return passed
-        
+        assert passed        
     finally:
         Path(data_file).unlink()
 
@@ -367,8 +365,7 @@ def test_C_multidetector_weighting():
             print(f"   ✗ H1 debería dominar pero no lo hace")
             passed = False
         
-        return passed
-        
+        assert passed        
     finally:
         Path(file1).unlink()
         Path(file2).unlink()
@@ -443,8 +440,7 @@ def test_D_voting_filtered():
     if voting_unfiltered['category'] == EventCategory.HEAVY:
         print(f"   (Confirmado: sin fix, se sesga a HEAVY por ruido LF)")
     
-    return passed
-
+    assert passed
 
 # =============================================================================
 # Main
