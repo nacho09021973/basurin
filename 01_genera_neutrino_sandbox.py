@@ -6,7 +6,7 @@ Objetivo
 Genera un dataset sintético *etiquetado* (Δ como parámetro latente) y lo escribe
 con el mismo esquema mínimo que espera `04_diccionario.py`:
 
-  runs/<run>/spectrum/spectrum.h5
+  runs/<run>/spectrum/outputs/spectrum.h5
     - delta_uv : (n_delta,)
     - m2L2     : (n_delta,)          (placeholder; no usado por Bloque C)
     - M2       : (n_delta, n_modes)  ("masas"/observables por modo)
@@ -109,7 +109,7 @@ class Config:
 
 
 def parse_args() -> Config:
-    p = argparse.ArgumentParser(description="01: Genera sandbox neutrino (proxy espectral) en spectrum.h5")
+    p = argparse.ArgumentParser(description="01: Genera sandbox neutrino (proxy espectral) en outputs/spectrum.h5")
     p.add_argument("--run", required=True, type=str, help="Nombre del run (runs/<run>/...) ")
     p.add_argument("--family", type=str, default="eft_power", choices=["eft_power", "symmetron"],
                    help="Familia de A(rho) a usar")
@@ -282,8 +282,9 @@ def main() -> int:
 
     np.random.seed(cfg.seed)
 
-    out_dir = Path("runs") / cfg.run / "spectrum"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    stage_dir = Path("runs") / cfg.run / "spectrum"
+    outputs_dir = stage_dir / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
 
     # Grid s
     s = np.linspace(0.0, cfg.s_max, cfg.n_grid, dtype=np.float64)
@@ -350,7 +351,7 @@ def main() -> int:
         print("ERROR: pip install h5py", file=sys.stderr)
         return 1
 
-    h5_path = out_dir / "spectrum.h5"
+    h5_path = outputs_dir / "spectrum.h5"
     with h5py.File(h5_path, "w") as h5:
         h5.create_dataset("z_grid", data=s)  # compat: 04 espera z_grid
         h5.create_dataset("delta_uv", data=delta_uv)
@@ -378,7 +379,7 @@ def main() -> int:
         h5.attrs["created"] = datetime.now(timezone.utc).isoformat()
 
     # Write validation.json
-    val_path = out_dir / "validation.json"
+    val_path = outputs_dir / "validation.json"
     with open(val_path, "w", encoding="utf-8") as f:
         json.dump(validation, f, indent=2)
 
@@ -389,19 +390,19 @@ def main() -> int:
         "created": datetime.now(timezone.utc).isoformat(),
         "config": asdict(cfg),
         "outputs": {
-            "spectrum_h5": "spectrum.h5",
-            "validation": "validation.json",
+            "spectrum_h5": "outputs/spectrum.h5",
+            "validation": "outputs/validation.json",
         },
         "hashes": {
-            "spectrum.h5": sha256_file(h5_path),
-            "validation.json": sha256_file(val_path),
+            "outputs/spectrum.h5": sha256_file(h5_path),
+            "outputs/validation.json": sha256_file(val_path),
         },
         "compatibility": {
             "consumer": "04_diccionario.load_spectrum",
             "note": "Esquema mínimo compatible: delta_uv, m2L2, M2, z_grid y attrs d,L,n_delta,n_modes.",
         },
     }
-    summary_path = out_dir / "stage_summary.json"
+    summary_path = stage_dir / "stage_summary.json"
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
@@ -411,12 +412,12 @@ def main() -> int:
         "run": cfg.run,
         "created": datetime.now(timezone.utc).isoformat(),
         "files": {
-            "spectrum": "spectrum.h5",
-            "validation": "validation.json",
+            "spectrum": "outputs/spectrum.h5",
+            "validation": "outputs/validation.json",
             "summary": "stage_summary.json",
         },
     }
-    manifest_path = out_dir / "manifest.json"
+    manifest_path = stage_dir / "manifest.json"
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 

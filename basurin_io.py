@@ -36,6 +36,35 @@ def ensure_stage_dirs(
     return sdir, outputs_dir
 
 
+def spectrum_outputs_path(run_dir: Path | str) -> Path:
+    return Path(run_dir) / "spectrum" / "outputs" / "spectrum.h5"
+
+
+def spectrum_legacy_path(run_dir: Path | str) -> Path:
+    return Path(run_dir) / "spectrum" / "spectrum.h5"
+
+
+def resolve_spectrum_path(run_dir: Path | str) -> Path:
+    """Resolve the spectrum path for a run directory.
+
+    Canonical:
+      runs/<run>/spectrum/outputs/spectrum.h5
+
+    Legacy (read-only fallback):
+      runs/<run>/spectrum/spectrum.h5
+    """
+    outputs = spectrum_outputs_path(run_dir)
+    legacy = spectrum_legacy_path(run_dir)
+    if outputs.exists():
+        return outputs
+    if legacy.exists():
+        return legacy
+    raise FileNotFoundError(
+        "spectrum.h5 no encontrado; rutas esperadas: "
+        f"{outputs} | {legacy}"
+    )
+
+
 def _relative_to_stage(stage_dir: Path, path: Path) -> str:
     try:
         return str(path.relative_to(stage_dir))

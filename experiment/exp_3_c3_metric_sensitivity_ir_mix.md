@@ -36,7 +36,7 @@ Pero si se evalúa C3 con:
 ## 2) Contexto y motivación técnica
 
 - Estamos en **Bloque C v1.4.1** (`04_diccionario.py`).
-- El run `ir_mix` es un dataset **mixto** creado por `01_mix_spectra.py`, que **concatena** dos espectros `spectrum.h5` compatibles (mismo `delta_uv` y mismo `n_modes`) y **duplica** `delta_uv` para etiquetar cada muestra (dos familias para los mismos Δ).
+- El run `ir_mix` es un dataset **mixto** creado por `01_mix_spectra.py`, que **concatena** dos espectros `outputs/spectrum.h5` compatibles (mismo `delta_uv` y mismo `n_modes`) y **duplica** `delta_uv` para etiquetar cada muestra (dos familias para los mismos Δ).
 
 Motivación: en datasets mixtos (multi-familia), la comparación en **norma absoluta** puede penalizar de forma desproporcionada ratios de orden alto (típicamente con mayor escala), y un contrato C3 basado en **log-ratios** y pesos decrecientes puede capturar mejor la “compatibilidad estructural” del ciclo sin colapsar en penalizaciones por escala.
 
@@ -45,7 +45,7 @@ Motivación: en datasets mixtos (multi-familia), la comparación en **norma abso
 ## 3) Inputs (rutas exactas bajo `runs/ir_mix/...`)
 
 ### Dataset de entrada
-- `runs/ir_mix/spectrum/spectrum.h5`  *(input principal para `04_diccionario.py`)*
+- `runs/ir_mix/spectrum/outputs/spectrum.h5`  *(input principal para `04_diccionario.py`)*
 
 ### Metadatos del dataset (mezcla)
 - `runs/ir_mix/spectrum/stage_summary.json`
@@ -192,7 +192,7 @@ Implicación: si el fallo en C3 con `rmse` desaparece con `rmse_log` sin cambiar
 
 ### 7.3 Validez sin “inyectar teoría”
 Este experimento no cambia:
-- ni el dataset (`runs/ir_mix/spectrum/spectrum.h5`),
+- ni el dataset (`runs/ir_mix/spectrum/outputs/spectrum.h5`),
 - ni el modelo inverso seleccionado por BIC,
 - ni el mecanismo de entrenamiento.
 
@@ -230,7 +230,7 @@ Bajo `runs/ir_mix/dictionary/`:
 
 ## 9) Falsabilidad operacional (criterio de “rompe el experimento”)
 
-El experimento se considera **roto** si, ejecutando exactamente los comandos de §4 y §5 sobre el mismo `runs/ir_mix/spectrum/spectrum.h5`:
+El experimento se considera **roto** si, ejecutando exactamente los comandos de §4 y §5 sobre el mismo `runs/ir_mix/spectrum/outputs/spectrum.h5`:
 
 1. **Control positivo** deja de pasar:  
    - `C3.status != PASS` **o** `C3a.global > threshold.effective` **o** `C3b.global > threshold.effective`.
@@ -239,7 +239,7 @@ El experimento se considera **roto** si, ejecutando exactamente los comandos de 
    - `C3.status == PASS` **o** `failure_mode` no corresponde al observado (p.ej., no aparece `DECODER_MISMATCH`).
 
 3. Los resultados se vuelven ambiguos por cambios silenciosos en inputs:
-   - hash de `runs/ir_mix/spectrum/spectrum.h5` cambia sin justificar (por ejemplo, regeneración del dataset).
+   - hash de `runs/ir_mix/spectrum/outputs/spectrum.h5` cambia sin justificar (por ejemplo, regeneración del dataset).
 
 En cualquiera de estos casos, el Exp 03 exige:
 - registrar el cambio (hashes + stage_summary),
@@ -260,4 +260,3 @@ Para completar este documento con números exactos, se requieren los JSON (dos c
   - `runs/ir_mix/dictionary/validation.json`
 
 Una vez aportados, este .md se actualizará sustituyendo los **N/A** por valores exactos y añadiendo los **sha256** de `stage_summary.json`.
-
