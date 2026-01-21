@@ -48,7 +48,6 @@ Nota: Este stage NO dicta PASS/FAIL final (eso es Contrato C7 separado).
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import sys
@@ -62,20 +61,9 @@ from sklearn.cross_decomposition import CCA
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 
+from basurin_io import ensure_stage_dirs, sha256_file, write_manifest, write_stage_summary
 from experiment.bridge.pairing import pair_frames
 __version__ = "0.1.0"
-
-
-# =============================================================================
-# Utilidades IO / hashing
-# =============================================================================
-
-def compute_file_hash(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def utcnow_iso() -> str:
@@ -167,7 +155,7 @@ def load_feature_json(path: Path, kind: str) -> Tuple[Optional[List[Any]], np.nd
             mat = np.asarray(rows, dtype=float)
             meta = {
                 "feature_key": obj.get("feature_key"),
-                "source": obj.get("source_atlas"),
+                "source_atlas": obj.get("source_atlas"),
                 "n_points": obj.get("n_points"),
             }
             if "columns" in obj:
@@ -622,10 +610,6 @@ def parse_args() -> Config:
 # =============================================================================
 
 
-def _safe_mkdir(p: Path) -> None:
-    p.mkdir(parents=True, exist_ok=True)
-
-
 def save_json(path: Path, obj: Any) -> None:
     with open(path, "w") as f:
         json.dump(obj, f, indent=2)
@@ -651,13 +635,44 @@ def add_pairing_trace(per_point: List[Dict[str, Any]], pairing_info: Dict[str, A
     return traced
 
 
+def reconcile_ids(
+    ids_x: Optional[List[Any]],
+    ids_y: Optional[List[Any]],
+    meta_x: Dict[str, Any],
+    meta_y: Dict[str, Any],
+    atlas_path: Path,
+) -> Tuple[Optional[List[Any]], Optional[List[Any]], Dict[str, Any]]:
+    remap_info = {"applied": False, "reason": None}
+    if ids_x is None or ids_y is None:
+        return ids_x, ids_y, remap_info
+    if ids_x == ids_y:
+        return ids_x, ids_y, remap_info
+    if len(ids_x) != len(ids_y):
+        return ids_x, ids_y, remap_info
+
+    ids_source = meta_y.get("ids_source")
+    source_atlas_y = meta_y.get("source_atlas")
+    source_atlas_x = meta_x.get("source_atlas")
+    same_atlas = bool(source_atlas_x and source_atlas_y and str(source_atlas_x) == str(source_atlas_y))
+    same_atlas = same_atlas or bool(source_atlas_y and str(source_atlas_y) == str(atlas_path))
+    same_atlas = same_atlas or bool(source_atlas_x and str(source_atlas_x) == str(atlas_path))
+
+    if ids_source == "atlas_points.json" or same_atlas:
+        remap_info = {
+            "applied": True,
+            "reason": "ids remapped by order (shared atlas_points source)",
+        }
+        return ids_x, list(ids_x), remap_info
+
+    return ids_x, ids_y, remap_info
+
+
 def main() -> int:
     cfg = parse_args()
 
-    run_root = Path(cfg.out_root) / cfg.run
-    stage_dir = run_root / "bridge_f4_1_alignment"
-    outdir = stage_dir / "outputs"
-    _safe_mkdir(outdir)
+    stage_dir, outdir = ensure_stage_dirs(
+        cfg.run, "bridge_f4_1_alignment", base_dir=Path(cfg.out_root)
+    )
 
     atlas_path = Path(cfg.atlas)
     features_path = Path(cfg.features)
@@ -672,8 +687,28 @@ def main() -> int:
     ids_x, X, meta_x = load_feature_json(atlas_path, kind="atlas")
     ids_y, Y, meta_y = load_feature_json(features_path, kind="ringdown")
 
+    remap_info = {"applied": False, "reason": None}
+    if cfg.pairing_policy == "id":
+        ids_x, ids_y, remap_info = reconcile_ids(
+            ids_x, ids_y, meta_x, meta_y, atlas_path
+        )
+        if remap_info.get("applied"):
+            print(
+                "WARNING: ids no coinciden; remapeando por orden (atlas_points compartido).",
+                file=sys.stderr,
+            )
+        if ids_x is not None and ids_y is not None and ids_x != ids_y:
+            sample_x = [str(x) for x in ids_x[:5]]
+            sample_y = [str(y) for y in ids_y[:5]]
+            raise ValueError(
+                "IDs no coinciden para pairing-policy id. "
+                f"ids_x[0:5]={sample_x}, ids_y[0:5]={sample_y}. "
+                "Sugerencia: usa --pairing-policy order."
+            )
+
     # Pair
     ids, Xp, Yp, pairing_info = pair_frames(ids_x, X, ids_y, Y, cfg.pairing_policy)
+    pairing_info["ids_remap"] = remap_info
 
     # Basic dims
     N = Xp.shape[0]
@@ -705,7 +740,7 @@ def main() -> int:
             "data": {"N": N, "dx": dx, "dy": dy},
         }
         save_json(outdir / "abort_leakage.json", abort)
-        save_json(stage_dir / "stage_summary.json", {
+        summary_path = write_stage_summary(stage_dir, {
             "stage": "bridge_f4_1_alignment",
             "version": __version__,
             "created": abort["created"],
@@ -716,22 +751,23 @@ def main() -> int:
             "pairing": pairing_info,
             "data": {"N": N, "dx": dx, "dy": dy, "meta_atlas": meta_x, "meta_ringdown": meta_y},
             "hashes": {
-                "inputs/atlas": compute_file_hash(atlas_path),
-                "inputs/features": compute_file_hash(features_path),
-                "outputs/abort_leakage.json": compute_file_hash(outdir / "abort_leakage.json"),
+                "inputs/atlas": sha256_file(atlas_path),
+                "inputs/features": sha256_file(features_path),
+                "outputs/abort_leakage.json": sha256_file(outdir / "abort_leakage.json"),
             }
         })
-        save_json(stage_dir / "manifest.json", {
-            "stage": "bridge_f4_1_alignment",
-            "version": __version__,
-            "run": cfg.run,
-            "created": abort["created"],
-            "files": {
-                "abort_leakage": "outputs/abort_leakage.json",
-                "summary": "stage_summary.json"
+        write_manifest(
+            stage_dir,
+            {
+                "abort_leakage": outdir / "abort_leakage.json",
+                "summary": summary_path,
             },
-            "inputs": {"atlas": str(atlas_path), "features": str(features_path)},
-        })
+            extra={
+                "version": __version__,
+                "status": "ABORT",
+                "inputs": {"atlas": str(atlas_path), "features": str(features_path)},
+            },
+        )
         print(f"ABORT: {leakage['reason']}", file=sys.stderr)
         return 2
 
@@ -874,52 +910,48 @@ def main() -> int:
         "data": {"N": N, "dx": dx, "dy": dy, "meta_atlas": meta_x, "meta_ringdown": meta_y},
         "results": metrics["results"],
         "hashes": {
-            "inputs/atlas": compute_file_hash(atlas_path),
-            "inputs/features": compute_file_hash(features_path),
-            "outputs/alignment_map.json": compute_file_hash(outdir / "alignment_map.json"),
-            "outputs/metrics.json": compute_file_hash(outdir / "metrics.json"),
-            "outputs/degeneracy_per_point.json": compute_file_hash(outdir / "degeneracy_per_point.json"),
-            "outputs/knn_preservation_real.json": compute_file_hash(outdir / "knn_preservation_real.json"),
-            "outputs/knn_preservation_negative.json": compute_file_hash(outdir / "knn_preservation_negative.json"),
-            "outputs/knn_preservation_control_positive.json": compute_file_hash(outdir / "knn_preservation_control_positive.json"),
+            "inputs/atlas": sha256_file(atlas_path),
+            "inputs/features": sha256_file(features_path),
+            "outputs/alignment_map.json": sha256_file(outdir / "alignment_map.json"),
+            "outputs/metrics.json": sha256_file(outdir / "metrics.json"),
+            "outputs/degeneracy_per_point.json": sha256_file(outdir / "degeneracy_per_point.json"),
+            "outputs/knn_preservation_real.json": sha256_file(outdir / "knn_preservation_real.json"),
+            "outputs/knn_preservation_negative.json": sha256_file(outdir / "knn_preservation_negative.json"),
+            "outputs/knn_preservation_control_positive.json": sha256_file(outdir / "knn_preservation_control_positive.json"),
         },
     }
     # hash plots if exist
     for png in ["degeneracy_hist.png", "degeneracy_scatter.png"]:
         p = outdir / png
         if p.exists():
-            summary["hashes"][f"outputs/{png}"] = compute_file_hash(p)
+            summary["hashes"][f"outputs/{png}"] = sha256_file(p)
 
-    save_json(stage_dir / "stage_summary.json", summary)
+    write_stage_summary(stage_dir, summary)
 
     # manifest
-    files = {
-        "alignment_map": "outputs/alignment_map.json",
-        "metrics": "outputs/metrics.json",
-        "degeneracy_per_point": "outputs/degeneracy_per_point.json",
-        "knn_preservation_real": "outputs/knn_preservation_real.json",
-        "knn_preservation_negative": "outputs/knn_preservation_negative.json",
-        "knn_preservation_control_positive": "outputs/knn_preservation_control_positive.json",
-        "summary": "stage_summary.json",
+    manifest_artifacts: Dict[str, Path] = {
+        "alignment_map": outdir / "alignment_map.json",
+        "metrics": outdir / "metrics.json",
+        "degeneracy_per_point": outdir / "degeneracy_per_point.json",
+        "knn_preservation_real": outdir / "knn_preservation_real.json",
+        "knn_preservation_negative": outdir / "knn_preservation_negative.json",
+        "knn_preservation_control_positive": outdir / "knn_preservation_control_positive.json",
+        "summary": stage_dir / "stage_summary.json",
     }
     for _, fn in plot_files.items():
-        files[Path(fn).stem] = f"outputs/{fn}"
+        manifest_artifacts[Path(fn).stem] = outdir / fn
 
-    manifest = {
-        "stage": "bridge_f4_1_alignment",
-        "version": __version__,
-        "run": cfg.run,
-        "created": utcnow_iso(),
-        "inputs": {
-            "atlas": str(atlas_path),
-            "features": str(features_path),
+    write_manifest(
+        stage_dir,
+        manifest_artifacts,
+        extra={
+            "version": __version__,
+            "inputs": {
+                "atlas": str(atlas_path),
+                "features": str(features_path),
+            },
         },
-        "files": files,
-    }
-
-    manifest_path = stage_dir / "manifest.json"
-    with open(manifest_path, "w") as f:
-        json.dump(manifest, f, indent=2)
+    )
 
     # Console summary
     print("=== F4-1 bridge_f4_1_alignment ===")

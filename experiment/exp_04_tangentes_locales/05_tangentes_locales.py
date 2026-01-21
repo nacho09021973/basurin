@@ -13,25 +13,19 @@ Autor: BASURIN
 
 import argparse
 import json
-import os
-import hashlib
-from datetime import datetime, timezone
+import sys
 from pathlib import Path
 import numpy as np
 import h5py
 
-
-def sha256_file(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def utc_now_iso():
-    return datetime.now(timezone.utc).isoformat()
-
+from basurin_io import (
+    ensure_stage_dirs,
+    get_run_dir,
+    sha256_file,
+    utc_now_iso,
+    write_manifest,
+    write_stage_summary,
+)
 
 def compute_ratio_features(masses, k_features, mass_kind):
     m0 = masses[:, 0]
@@ -52,6 +46,28 @@ def resolve_spectrum_path(run_dir: Path) -> Path:
     if candidate.exists():
         return candidate
     return stage_dir / "spectrum.h5"
+
+
+def load_atlas_ids(run_dir: Path, expected_n: int) -> tuple[list[str] | None, dict]:
+    atlas_points_path = run_dir / "dictionary" / "outputs" / "atlas_points.json"
+    if not atlas_points_path.exists():
+        return None, {"ids_source": "fallback_idx", "ids_source_reason": "atlas_points_missing"}
+
+    try:
+        payload = json.loads(atlas_points_path.read_text())
+    except json.JSONDecodeError:
+        return None, {"ids_source": "fallback_idx", "ids_source_reason": "atlas_points_invalid_json"}
+
+    points = payload.get("points", [])
+    ids = [p.get("id") for p in points if isinstance(p, dict)]
+    if len(ids) != expected_n or any(i is None for i in ids):
+        return None, {
+            "ids_source": "fallback_idx",
+            "ids_source_reason": "atlas_points_length_or_ids_mismatch",
+            "source_atlas": payload.get("source_atlas"),
+        }
+
+    return ids, {"ids_source": "atlas_points.json", "source_atlas": payload.get("source_atlas")}
 
 
 def pca_local(X):
@@ -84,11 +100,9 @@ def main():
     ap.add_argument("--rho-threshold", type=float, default=None)
     args = ap.parse_args()
 
-    run_dir = Path("runs") / args.run
+    run_dir = get_run_dir(args.run)
     spec_path = resolve_spectrum_path(run_dir)
-    stage_dir = run_dir / "tangentes_locales"
-    out_dir = stage_dir / "outputs"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    stage_dir, out_dir = ensure_stage_dirs(args.run, "tangentes_locales")
 
     with h5py.File(spec_path, "r") as h5:
         if "masses" in h5:
@@ -147,7 +161,11 @@ def main():
 
     results = {}
     per_point_outputs = {}
-    ids = [f"idx_{i}" for i in idx_points]
+    base_ids, ids_meta = load_atlas_ids(run_dir, N)
+    if base_ids is None:
+        reason = ids_meta.get("ids_source_reason", "atlas_points_not_used")
+        print(f"WARNING: usando ids fallback (idx_*). motivo={reason}", file=sys.stderr)
+    ids = [base_ids[i] if base_ids is not None else f"idx_{i}" for i in idx_points]
 
     for k in k_list:
         deff_list = []
@@ -259,6 +277,9 @@ def main():
                 "schema_version": "1",
                 "created": utc_now_iso(),
                 "source_stage": "tangentes_locales",
+                "ids_source": ids_meta.get("ids_source"),
+                "ids_source_reason": ids_meta.get("ids_source_reason"),
+                "source_atlas": ids_meta.get("source_atlas"),
             },
         }
 
@@ -277,6 +298,8 @@ def main():
     # stage summary
     summary = {
         "stage": "tangentes_locales",
+        "run": args.run,
+        "created": utc_now_iso(),
         "timestamp": utc_now_iso(),
         "config": vars(args),
         "numpy_version": np.__version__,
@@ -304,25 +327,35 @@ def main():
         "outputs": {
             "results": "outputs/results.json",
             "features_points": features_paths,
-        }
+        },
+        "ids": ids_meta,
     }
 
-    stage_summary_path = stage_dir / "stage_summary.json"
-    with open(stage_summary_path, "w") as f:
-        json.dump(summary, f, indent=2)
+    stage_summary_path = write_stage_summary(stage_dir, summary)
 
-    manifest_path = stage_dir / "manifest.json"
-    manifest_files = {
-        "outputs/results.json": sha256_file(res_path),
-        "stage_summary.json": sha256_file(stage_summary_path)
+    manifest_artifacts = {
+        "results": res_path,
+        "summary": stage_summary_path,
     }
     for k in k_list:
         features_path = out_dir / f"features_points_k{k}.json"
-        manifest_files[f"outputs/features_points_k{k}.json"] = sha256_file(features_path)
-    manifest = {"files": manifest_files}
-
-    with open(manifest_path, "w") as f:
-        json.dump(manifest, f, indent=2)
+        manifest_artifacts[f"features_points_k{k}"] = features_path
+    manifest_path = write_manifest(
+        stage_dir,
+        manifest_artifacts,
+        extra={
+            "files_legacy": {
+                "outputs/results.json": sha256_file(res_path),
+                "stage_summary.json": sha256_file(stage_summary_path),
+                **{
+                    f"outputs/features_points_k{k}.json": sha256_file(
+                        out_dir / f"features_points_k{k}.json"
+                    )
+                    for k in k_list
+                },
+            }
+        },
+    )
 
     for k in k_list:
         entry = results[str(k)]

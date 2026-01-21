@@ -34,7 +34,6 @@ Convención física:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from dataclasses import dataclass, field, asdict
@@ -44,6 +43,13 @@ from typing import Literal
 
 import numpy as np
 
+from basurin_io import (
+    ensure_stage_dirs,
+    get_run_dir,
+    write_manifest,
+    write_stage_summary,
+    sha256_file,
+)
 
 # =============================================================================
 # Configuración
@@ -459,21 +465,7 @@ def filter_neumann_modes(
     return eigenvalues, eigenvectors, min_before, min_after
 
 
-# =============================================================================
-# IO y manifests
-# =============================================================================
-
-def compute_file_hash(path: Path) -> str:
-    """Calcula SHA256 de un archivo."""
-    sha = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            sha.update(chunk)
-    return sha.hexdigest()
-
-
 def write_outputs(
-    stage_dir: Path,
     cfg: Config,
     geo: dict,
     results: list[dict],
@@ -492,9 +484,7 @@ def write_outputs(
     """
     import h5py
 
-    stage_dir.mkdir(parents=True, exist_ok=True)
-    outputs_dir = stage_dir / "outputs"
-    outputs_dir.mkdir(parents=True, exist_ok=True)
+    stage_dir, outputs_dir = ensure_stage_dirs(cfg.run, "spectrum")
     
     # --- spectrum.h5 ---
     h5_path = outputs_dir / "spectrum.h5"
@@ -556,7 +546,9 @@ def write_outputs(
     
     # --- stage_summary.json ---
     summary = {
-        "stage": "03_sturm_liouville",
+        "stage": "spectrum",
+        "stage_legacy": "03_sturm_liouville",
+        "run": cfg.run,
         "version": "1.1.0",
         "created": datetime.now(timezone.utc).isoformat(),
         "config": asdict(cfg),
@@ -579,29 +571,26 @@ def write_outputs(
             "residuals_ok": validation["residuals"]["residuals_ok"],
         },
         "hashes": {
-            "outputs/spectrum.h5": compute_file_hash(h5_path),
-            "outputs/validation.json": compute_file_hash(val_path),
-        }
+            "outputs/spectrum.h5": sha256_file(h5_path),
+            "outputs/validation.json": sha256_file(val_path),
+        },
     }
-    summary_path = stage_dir / "stage_summary.json"
-    with open(summary_path, "w") as f:
-        json.dump(summary, f, indent=2)
+    summary_path = write_stage_summary(stage_dir, summary)
     
     # --- manifest.json ---
-    manifest = {
-        "stage": "03_sturm_liouville",
-        "run": cfg.run,
-        "created": datetime.now(timezone.utc).isoformat(),
-        "files": {
-            "spectrum": "outputs/spectrum.h5",
-            "validation": "outputs/validation.json",
-            "summary": "stage_summary.json",
+    manifest_path = write_manifest(
+        stage_dir,
+        {
+            "spectrum": h5_path,
+            "validation": val_path,
+            "summary": summary_path,
         },
-        "input_geometry": f"../geometry/{cfg.geometry_file}",
-    }
-    manifest_path = stage_dir / "manifest.json"
-    with open(manifest_path, "w") as f:
-        json.dump(manifest, f, indent=2)
+        extra={
+            "version": "1.1.0",
+            "stage_legacy": "03_sturm_liouville",
+            "input_geometry": f"../geometry/{cfg.geometry_file}",
+        },
+    )
     
     return {
         "spectrum": h5_path,
@@ -685,7 +674,7 @@ def main() -> int:
     cfg = parse_args()
     
     # Cargar geometría
-    geo_path = Path("runs") / cfg.run / "geometry" / cfg.geometry_file
+    geo_path = get_run_dir(cfg.run) / "geometry" / cfg.geometry_file
     if not geo_path.exists():
         print(f"ERROR: No existe geometría en {geo_path}", file=sys.stderr)
         print("       Ejecuta primero: python 01_genera_ads_puro.py --run " + cfg.run,
@@ -790,8 +779,7 @@ def main() -> int:
         }
     
     # --- Escribir outputs ---
-    out_dir = Path("runs") / cfg.run / "spectrum"
-    paths = write_outputs(out_dir, cfg, geo, results, validation, results_N=results_N)
+    paths = write_outputs(cfg, geo, results, validation, results_N=results_N)
     
     print("Outputs escritos:")
     for name, path in paths.items():

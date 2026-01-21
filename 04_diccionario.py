@@ -33,7 +33,6 @@ Contratos:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import subprocess
 import sys
@@ -45,6 +44,13 @@ from typing import Literal, Optional
 
 import numpy as np
 
+from basurin_io import (
+    ensure_stage_dirs,
+    get_run_dir,
+    write_manifest,
+    write_stage_summary,
+    sha256_file,
+)
 # Silenciar warnings de convergencia en CV con pocos datos
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -238,7 +244,7 @@ def resolve_spectrum_path(run: str, spectrum_file: str) -> Path:
     if sf.is_absolute() or spectrum_file.startswith("runs/"):
         return sf
 
-    stage_dir = Path("runs") / run / "spectrum"
+    stage_dir = get_run_dir(run) / "spectrum"
     if spectrum_file == "outputs/spectrum.h5":
         cand_outputs = stage_dir / "outputs" / "spectrum.h5"
         if cand_outputs.exists():
@@ -1206,20 +1212,12 @@ def build_atlas(delta: np.ndarray, M2: np.ndarray, k: int) -> dict:
 # IO
 # =============================================================================
 
-def compute_file_hash(path: Path) -> str:
-    """Calcula SHA256 de un archivo."""
-    sha = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            sha.update(chunk)
-    return sha.hexdigest()
-
-
 def resolve_validation_path(run: str) -> Optional[Path]:
     """Resuelve validation.json para un run (outputs primero, luego legacy)."""
+    run_dir = get_run_dir(run)
     candidates = [
-        Path("runs") / run / "dictionary" / "outputs" / "validation.json",
-        Path("runs") / run / "dictionary" / "validation.json",
+        run_dir / "dictionary" / "outputs" / "validation.json",
+        run_dir / "dictionary" / "validation.json",
     ]
     for cand in candidates:
         if cand.exists():
@@ -1353,15 +1351,13 @@ def evaluate_c5(
     }
 
 
-def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
+def write_outputs(stage_dir: Path, outputs_dir: Path, cfg: Config, spectrum: dict,
                   model_selection: dict, bootstrap: dict,
                   contracts: dict, atlas: dict, features_meta: dict,
                   spectrum_rel_path: str, c5_contracts: dict) -> dict:
     """Escribe todos los outputs del Bloque C."""
     import h5py
 
-    stage_dir = out_dir
-    outputs_dir = stage_dir / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
     
     best_model = model_selection["best_model"]
@@ -1544,9 +1540,11 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
     
     # --- stage_summary.json ---
     summary = {
-        "stage": "04_diccionario",
+        "stage": "dictionary",
+        "stage_legacy": "04_diccionario",
         "version": __version__,
         "created": datetime.now(timezone.utc).isoformat(),
+        "run": cfg.run,
         "notes": "El modelo directo Δ→ratios es un proxy suave local usado solo para evaluar invertibilidad (C3). No es física; fallos en C3a indican proxy/modelo insuficiente.",
         "config": {
             "run": cfg.run,
@@ -1604,7 +1602,7 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
     if atlas_points_generated:
         summary["atlas_points_generated"] = True
         summary["atlas_points"] = "outputs/atlas_points.json"
-        summary["atlas_points_sha256"] = compute_file_hash(atlas_points_path)
+        summary["atlas_points_sha256"] = sha256_file(atlas_points_path)
         summary["atlas_points_feature_key"] = atlas_points_feature_key
     else:
         summary["atlas_points_generated"] = False
@@ -1613,41 +1611,38 @@ def write_outputs(out_dir: Path, cfg: Config, spectrum: dict,
     summary_path = stage_dir / "stage_summary.json"
     
     summary["hashes"] = {
-        "outputs/dictionary.h5": compute_file_hash(h5_path),
-        "outputs/atlas.json": compute_file_hash(atlas_path),
-        "outputs/ising_comparison.json": compute_file_hash(ising_path),
-        "outputs/validation.json": compute_file_hash(val_path),
+        "outputs/dictionary.h5": sha256_file(h5_path),
+        "outputs/atlas.json": sha256_file(atlas_path),
+        "outputs/ising_comparison.json": sha256_file(ising_path),
+        "outputs/validation.json": sha256_file(val_path),
     }
     if atlas_points_path.exists():
-        summary["hashes"]["outputs/atlas_points.json"] = compute_file_hash(
+        summary["hashes"]["outputs/atlas_points.json"] = sha256_file(
             atlas_points_path
         )
     
-    with open(summary_path, "w") as f:
-        json.dump(summary, f, indent=2)
+    write_stage_summary(stage_dir, summary)
     
     # --- manifest.json ---
-    manifest = {
-        "stage": "04_diccionario",
-        "version": __version__,
-        "run": cfg.run,
-        "created": datetime.now(timezone.utc).isoformat(),
-        "files": {
-            "dictionary": "outputs/dictionary.h5",
-            "atlas": "outputs/atlas.json",
-            "atlas_points": "outputs/atlas_points.json",
-            "ising_comparison": "outputs/ising_comparison.json",
-            "validation": "outputs/validation.json",
-            "summary": "stage_summary.json",
-        },
-        "input_spectrum": spectrum_rel_path,
+    manifest_artifacts = {
+        "dictionary": h5_path,
+        "atlas": atlas_path,
+        "ising_comparison": ising_path,
+        "validation": val_path,
+        "summary": summary_path,
     }
-    if not atlas_points_path.exists():
-        manifest["files"].pop("atlas_points")
-    
-    manifest_path = stage_dir / "manifest.json"
-    with open(manifest_path, "w") as f:
-        json.dump(manifest, f, indent=2)
+    if atlas_points_path.exists():
+        manifest_artifacts["atlas_points"] = atlas_points_path
+
+    manifest_path = write_manifest(
+        stage_dir,
+        manifest_artifacts,
+        extra={
+            "version": __version__,
+            "stage_legacy": "04_diccionario",
+            "input_spectrum": spectrum_rel_path,
+        },
+    )
     
     return {
         "dictionary": h5_path,
@@ -1719,7 +1714,7 @@ def main() -> int:
         return 1
     
     spectrum = load_spectrum(spec_path)
-    run_dir = Path("runs") / cfg.run
+    run_dir = get_run_dir(cfg.run)
     try:
         spectrum_rel_path = str(spec_path.relative_to(run_dir))
     except ValueError:
@@ -1871,9 +1866,10 @@ def main() -> int:
     atlas = build_atlas(spectrum["delta_uv"], spectrum["M2"], cfg.k_features)
     
     # --- Escribir outputs ---
-    out_dir = Path("runs") / cfg.run / "dictionary"
+    stage_dir, outputs_dir = ensure_stage_dirs(cfg.run, "dictionary")
     paths = write_outputs(
-        out_dir,
+        stage_dir,
+        outputs_dir,
         cfg,
         spectrum,
         model_selection,
