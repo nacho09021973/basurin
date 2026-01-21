@@ -214,8 +214,9 @@ def check_leakage(
     Nota: NO prueba fuga; evita tautologías obvias.
     """
     out: Dict[str, Any] = {
-        "ok": True,
-        "reason": None,
+        "ok": False,
+        "reason": "LEAKAGE_CHECK_NOT_EXECUTED",
+        "executed": False,
         "max_abs_corr": None,
         "rmse_same_dim": None,
         "feature_key_match": None,
@@ -238,6 +239,25 @@ def check_leakage(
         "epsilon": 1e-12,
     }
     out["params"] = params
+    if not isinstance(Xs, np.ndarray) or not isinstance(Ys, np.ndarray):
+        out["reason"] = "LEAKAGE_CHECK_MISSING_DATA"
+        return out
+
+    if Xs.ndim != 2 or Ys.ndim != 2:
+        out["reason"] = "LEAKAGE_CHECK_INVALID_SHAPE"
+        return out
+
+    if Xs.shape[0] != Ys.shape[0]:
+        out["reason"] = "LEAKAGE_CHECK_N_MISMATCH"
+        return out
+
+    if Xs.shape[0] < 2 or Xs.shape[1] < 1 or Ys.shape[1] < 1:
+        out["reason"] = "LEAKAGE_CHECK_INSUFFICIENT_DATA"
+        return out
+
+    out["executed"] = True
+    out["ok"] = True
+    out["reason"] = None
     out["data_used"] = {
         "N": int(Xs.shape[0]),
         "dx": int(Xs.shape[1]),
@@ -250,6 +270,29 @@ def check_leakage(
     out["feature_key_match"] = feature_key_match
     out["columns_match"] = columns_match
 
+    # Correlaciones columna-columna (siempre que X/Y compartan N).
+    # Importante: alta correlación NO implica fuga; sólo abortamos si hay evidencia
+    # de *identidad* (columnas prácticamente iguales tras estandarizar).
+    # Estandarización consistente (ddof=1) para evitar incoherencias numéricas.
+    # La fórmula de correlación ya respeta el bound |corr|<=1; el clip es cinturón numérico.
+    Xc = _standardize_ddof1(Xs, eps=params["epsilon"])
+    Yc = _standardize_ddof1(Ys, eps=params["epsilon"])
+    C = (Xc.T @ Yc) / max(1, Xs.shape[0] - 1)
+    C = np.clip(C, -1.0, 1.0)
+    absC = np.abs(C)
+    max_abs_corr = float(np.max(absC))
+    out["max_abs_corr"] = max_abs_corr
+    out["cross_corr_checked"] = True
+
+    # localizar el par más correlacionado y comprobar igualdad numérica
+    i_max, j_max = np.unravel_index(int(np.argmax(absC)), absC.shape)
+    pair_stats = _pair_stats(Xc, Yc, C, i_max, j_max)
+    out["max_corr_pair_rmse"] = pair_stats["rmse"]
+    out["i_max"] = int(i_max)
+    out["j_max"] = int(j_max)
+    out["pair_max"] = _pair_record(pair_stats, i_max, j_max, columns_x, columns_y)
+    out["top_pairs"] = _top_k_pairs(absC, Xc, Yc, C, params["top_k"], columns_x, columns_y)
+
     if feature_key_match or columns_match:
         out.update(
             {
@@ -259,49 +302,16 @@ def check_leakage(
         )
         return out
 
-    if Xs.shape[0] < 10:
+    # umbral muy estricto: casi identidad tras estandarizar
+    if max_abs_corr > params["corr_threshold"] and pair_stats["rmse"] < params["rmse_threshold"]:
+        out.update({
+            "ok": False,
+            "reason": (
+                "LEAKAGE_SUSPECTED: columns nearly identical across X/Y after standardization "
+                f"(i={i_max}, j={j_max}, corr={pair_stats['corr']:.6f}, rmse={pair_stats['rmse']:.3e})."
+            ),
+        })
         return out
-
-    compare_cross = True
-    if feature_key_x and feature_key_y and feature_key_x != feature_key_y:
-        compare_cross = False
-    if columns_x and columns_y and columns_x != columns_y:
-        compare_cross = False
-
-    # Correlaciones columna-columna (solo si los espacios parecen comparables).
-    # Importante: alta correlación NO implica fuga; sólo abortamos si hay evidencia
-    # de *identidad* (columnas prácticamente iguales tras estandarizar).
-    if compare_cross:
-        # Estandarización consistente (ddof=1) para evitar incoherencias numéricas.
-        # La fórmula de correlación ya respeta el bound |corr|<=1; el clip es cinturón numérico.
-        Xc = _standardize_ddof1(Xs, eps=params["epsilon"])
-        Yc = _standardize_ddof1(Ys, eps=params["epsilon"])
-        C = (Xc.T @ Yc) / max(1, Xs.shape[0] - 1)
-        C = np.clip(C, -1.0, 1.0)
-        absC = np.abs(C)
-        max_abs_corr = float(np.max(absC))
-        out["max_abs_corr"] = max_abs_corr
-        out["cross_corr_checked"] = True
-
-        # localizar el par más correlacionado y comprobar igualdad numérica
-        i_max, j_max = np.unravel_index(int(np.argmax(absC)), absC.shape)
-        pair_stats = _pair_stats(Xc, Yc, C, i_max, j_max)
-        out["max_corr_pair_rmse"] = pair_stats["rmse"]
-        out["i_max"] = int(i_max)
-        out["j_max"] = int(j_max)
-        out["pair_max"] = _pair_record(pair_stats, i_max, j_max, columns_x, columns_y)
-        out["top_pairs"] = _top_k_pairs(absC, Xc, Yc, C, params["top_k"], columns_x, columns_y)
-
-        # umbral muy estricto: casi identidad tras estandarizar
-        if max_abs_corr > params["corr_threshold"] and pair_stats["rmse"] < params["rmse_threshold"]:
-            out.update({
-                "ok": False,
-                "reason": (
-                    "LEAKAGE_SUSPECTED: columns nearly identical across X/Y after standardization "
-                    f"(i={i_max}, j={j_max}, corr={pair_stats['corr']:.6f}, rmse={pair_stats['rmse']:.3e})."
-                ),
-            })
-            return out
 
     # Matrices casi iguales si dim coincide
     if Xs.shape[1] == Ys.shape[1]:
@@ -362,6 +372,8 @@ def _pair_record(
     return {
         "i": int(i),
         "j": int(j),
+        "x_col_index": int(i),
+        "y_col_index": int(j),
         "column_x": name_x,
         "column_y": name_y,
         "stats": stats,
@@ -746,6 +758,29 @@ def add_pairing_trace(per_point: List[Dict[str, Any]], pairing_info: Dict[str, A
     return traced
 
 
+def _leakage_summary(leakage: Dict[str, Any]) -> Dict[str, Any]:
+    params = leakage.get("params") or {}
+    return {
+        "executed": leakage.get("executed"),
+        "cross_corr_checked": leakage.get("cross_corr_checked"),
+        "max_abs_corr": leakage.get("max_abs_corr"),
+        "threshold_rmse": params.get("rmse_threshold"),
+        "top_k": params.get("top_k"),
+        "ddof": params.get("ddof"),
+        "ok": leakage.get("ok"),
+        "reason": leakage.get("reason"),
+        "i_max": leakage.get("i_max"),
+        "j_max": leakage.get("j_max"),
+        "pair_max": leakage.get("pair_max"),
+        "top_pairs": leakage.get("top_pairs"),
+        "data_used": leakage.get("data_used"),
+        "feature_key_match": leakage.get("feature_key_match"),
+        "columns_match": leakage.get("columns_match"),
+        "rmse_same_dim": leakage.get("rmse_same_dim"),
+        "params": leakage.get("params"),
+    }
+
+
 def reconcile_ids(
     ids_x: Optional[List[Any]],
     ids_y: Optional[List[Any]],
@@ -832,7 +867,17 @@ def main() -> int:
 
     # Kill-switch leakage (estandariza internamente con ddof=1 para coherencia numérica)
     leakage = check_leakage(Xp, Yp, meta_x=meta_x, meta_y=meta_y)
-    if cfg.kill_switch and (not leakage["ok"]):
+    leakage_summary = _leakage_summary(leakage)
+    should_abort = False
+    abort_reason = None
+    if not leakage.get("executed"):
+        should_abort = True
+        abort_reason = leakage.get("reason") or "LEAKAGE_CHECK_NOT_EXECUTED"
+    elif cfg.kill_switch and (not leakage.get("ok")):
+        should_abort = True
+        abort_reason = leakage.get("reason")
+
+    if should_abort:
         cleaned_ok_outputs = []
         for stale_name in [
             "alignment_map.json",
@@ -854,7 +899,7 @@ def main() -> int:
             "created": utcnow_iso(),
             "run": cfg.run,
             "status": "ABORT",
-            "abort_reason": leakage["reason"],
+            "abort_reason": abort_reason,
             "leakage": leakage,
             "pairing": pairing_info,
             "data": {"N": N, "dx": dx, "dy": dy},
@@ -872,16 +917,12 @@ def main() -> int:
             "created": abort["created"],
             "run": cfg.run,
             "status": "ABORT",
-            "abort_reason": leakage["reason"],
+            "abort_reason": abort_reason,
             "config": asdict(cfg),
             "pairing": pairing_info,
             "data": {"N": N, "dx": dx, "dy": dy, "meta_atlas": meta_x, "meta_ringdown": meta_y},
-            "leakage_check": {
-                "executed": True,
-                "params": leakage.get("params"),
-                "ok": leakage.get("ok"),
-                "reason": leakage.get("reason"),
-            },
+            "leakage_check": leakage_summary,
+            "outputs_coherence": outputs_coherence,
             "hashes": {
                 "inputs/atlas": sha256_file(atlas_path),
                 "inputs/features": sha256_file(features_path),
@@ -899,9 +940,10 @@ def main() -> int:
                 "status": "ABORT",
                 "inputs": {"atlas": str(atlas_path), "features": str(features_path)},
                 "outputs_coherence": outputs_coherence,
+                "leakage_check": leakage_summary,
             },
         )
-        print(f"ABORT: {leakage['reason']}", file=sys.stderr)
+        print(f"ABORT: {abort_reason}", file=sys.stderr)
         return 2
 
     # Standardize
@@ -1042,6 +1084,12 @@ def main() -> int:
         # no fail: plots son opcionales
         plot_files["plots_error"] = str(e)
 
+    outputs_coherence = {
+        "aborted": False,
+        "has_abort_file": abort_path.exists(),
+        "cleaned_stale_abort": cleaned_stale_abort,
+    }
+
     # stage_summary
     summary = {
         "stage": "bridge_f4_1_alignment",
@@ -1053,12 +1101,8 @@ def main() -> int:
         "pairing": pairing_info,
         "data": {"N": N, "dx": dx, "dy": dy, "meta_atlas": meta_x, "meta_ringdown": meta_y},
         "results": metrics["results"],
-        "leakage_check": {
-            "executed": True,
-            "params": leakage.get("params"),
-            "ok": leakage.get("ok"),
-            "reason": leakage.get("reason"),
-        },
+        "leakage_check": leakage_summary,
+        "outputs_coherence": outputs_coherence,
         "hashes": {
             "inputs/atlas": sha256_file(atlas_path),
             "inputs/features": sha256_file(features_path),
@@ -1090,12 +1134,6 @@ def main() -> int:
     }
     for _, fn in plot_files.items():
         manifest_artifacts[Path(fn).stem] = outdir / fn
-
-    outputs_coherence = {
-        "aborted": False,
-        "has_abort_file": abort_path.exists(),
-        "cleaned_stale_abort": cleaned_stale_abort,
-    }
     write_manifest(
         stage_dir,
         manifest_artifacts,
@@ -1106,6 +1144,7 @@ def main() -> int:
                 "features": str(features_path),
             },
             "outputs_coherence": outputs_coherence,
+            "leakage_check": leakage_summary,
         },
     )
 
