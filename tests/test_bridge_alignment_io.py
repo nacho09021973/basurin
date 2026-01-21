@@ -86,6 +86,10 @@ def test_bridge_alignment_runs_with_features_points(tmp_path: Path) -> None:
 
     outputs_dir = run_root / "bridge-io" / "bridge_f4_1_alignment" / "outputs"
     assert (outputs_dir / "metrics.json").exists()
+    manifest = json.loads((outputs_dir.parent / "manifest.json").read_text())
+    assert "files" in manifest
+    assert manifest["files"]["metrics"] == "outputs/metrics.json"
+    assert all(not Path(path).is_absolute() for path in manifest["files"].values())
 
 
 def test_bridge_alignment_aborts_on_matching_feature_key(tmp_path: Path) -> None:
@@ -153,3 +157,5 @@ def test_bridge_alignment_aborts_on_matching_feature_key(tmp_path: Path) -> None
 
     outputs_dir = run_root / "bridge-leakage" / "bridge_f4_1_alignment" / "outputs"
     assert (outputs_dir / "abort_leakage.json").exists()
+    manifest = json.loads((outputs_dir.parent / "manifest.json").read_text())
+    assert manifest["files"]["abort_leakage"] == "outputs/abort_leakage.json"
