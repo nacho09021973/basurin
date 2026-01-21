@@ -4,7 +4,7 @@
 **Bloque:** C (diccionario holográfico inverso)  
 **Versión del código:** v1.4.1  
 **Run:** `ir_mix`  
-**Generador del dataset mixto:** `01_mix_spectra.py` (concatena dos `spectrum.h5`)  
+**Generador del dataset mixto:** `02_mix_spectra.py` (concatena dos `spectrum.h5`)  
 
 > Documento **mínimo, completo, reproducible y auditable**.  
 > Regla de honestidad: **no se inventan números**. Todo valor numérico reportado debe provenir de los JSON de corrida.  
@@ -36,7 +36,7 @@ Pero si se evalúa C3 con:
 ## 2) Contexto y motivación técnica
 
 - Estamos en **Bloque C v1.4.1** (`04_diccionario.py`).
-- El run `ir_mix` es un dataset **mixto** creado por `01_mix_spectra.py`, que **concatena** dos espectros `outputs/spectrum.h5` compatibles (mismo `delta_uv` y mismo `n_modes`) y **duplica** `delta_uv` para etiquetar cada muestra (dos familias para los mismos Δ).
+- El run `ir_mix` es un dataset **mixto** creado por `02_mix_spectra.py`, que **concatena** dos espectros `outputs/spectrum.h5` compatibles (mismo `delta_uv` y mismo `n_modes`) y **duplica** `delta_uv` para etiquetar cada muestra (dos familias para los mismos Δ).
 
 Motivación: en datasets mixtos (multi-familia), la comparación en **norma absoluta** puede penalizar de forma desproporcionada ratios de orden alto (típicamente con mayor escala), y un contrato C3 basado en **log-ratios** y pesos decrecientes puede capturar mejor la “compatibilidad estructural” del ciclo sin colapsar en penalizaciones por escala.
 
@@ -51,7 +51,7 @@ Motivación: en datasets mixtos (multi-familia), la comparación en **norma abso
 - `runs/ir_mix/spectrum/stage_summary.json`
 - `runs/ir_mix/spectrum/manifest.json`
 
-> Nota: el experimento depende de que `ir_mix` exista y haya sido generado por `01_mix_spectra.py`. Este script documenta inputs y hashes en `runs/ir_mix/spectrum/stage_summary.json`.
+> Nota: el experimento depende de que `ir_mix` exista y haya sido generado por `02_mix_spectra.py`. Este script documenta inputs y hashes en `runs/ir_mix/spectrum/stage_summary.json`.
 
 ---
 

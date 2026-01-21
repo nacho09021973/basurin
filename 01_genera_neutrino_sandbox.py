@@ -365,7 +365,7 @@ def main() -> int:
         h5.attrs["n_modes"] = int(cfg.n_modes)
 
         # extras de auditoría
-        h5.attrs["generator"] = "01_genera_neutrino_sandbox"
+        h5.attrs["generator"] = "01_genera_neutrino_sandbox.py"
         h5.attrs["family"] = cfg.family
         h5.attrs["profiles"] = ",".join(profiles)
         h5.attrs["map_mode"] = cfg.map_mode
@@ -385,7 +385,8 @@ def main() -> int:
 
     # stage_summary.json
     summary = {
-        "stage": "01_genera_neutrino_sandbox",
+        "stage": "spectrum",
+        "script": "01_genera_neutrino_sandbox.py",
         "version": "0.1.0",
         "created": datetime.now(timezone.utc).isoformat(),
         "config": asdict(cfg),
@@ -408,7 +409,7 @@ def main() -> int:
 
     # manifest.json
     manifest = {
-        "stage": "01_genera_neutrino_sandbox",
+        "stage": "spectrum",
         "run": cfg.run,
         "created": datetime.now(timezone.utc).isoformat(),
         "files": {

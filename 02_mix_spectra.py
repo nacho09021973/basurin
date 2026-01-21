@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-01_mix_spectra.py
+02_mix_spectra.py
 
-Etapa 01 (dataset): mezcla/concatena dos espectros spectrum.h5 (mismo formato)
+Etapa 02 (transformación): mezcla/concatena dos espectros spectrum.h5 (mismo formato)
 para crear un run de salida con un spectrum.h5 combinado.
 
 Contrato IO BASURIN (canónico):
@@ -27,7 +27,7 @@ import h5py
 from basurin_io import get_run_dir, resolve_spectrum_path
 
 STAGE = "spectrum"
-SCRIPT_NAME = "01_mix_spectra.py"
+SCRIPT_NAME = "02_mix_spectra.py"
 VERSION = "v0.2.0"
 
 def resolve_in_spectrum(run: str) -> Path:

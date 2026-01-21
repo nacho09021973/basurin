@@ -628,7 +628,7 @@ def main() -> int:
     if not mix_spec.exists():
         print(f"\n[3/6] Mixing {cfg.run_a} + {cfg.run_b} -> {cfg.run_mix}...")
         run_cmd([
-            sys.executable, "01_mix_spectra.py",
+            sys.executable, "02_mix_spectra.py",
             "--run-out", cfg.run_mix,
             "--run-a", cfg.run_a,
             "--run-b", cfg.run_b,
@@ -637,7 +637,7 @@ def main() -> int:
         print(f"\n[3/6] {cfg.run_mix} exists, skipping.")
 
     # Ensure HDF5 attrs are complete
-    # NOTE: 01_mix_spectra.py may not copy all attrs. This step ensures
+    # NOTE: 02_mix_spectra.py may not copy all attrs. This step ensures
     # the mixed spectrum has all required attrs by copying from source.
     print("       Ensuring HDF5 attrs...")
     attr_actions = ensure_spectrum_attrs(mix_spec, a_spec)
