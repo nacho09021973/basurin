@@ -142,7 +142,12 @@ def main():
     if any(k >= N for k in k_list):
         raise ValueError("k_neighbors debe ser < N.")
 
+    feature_columns = ["d_eff", "m", "parallel", "perp", "rho_clipped", "log10_rho"]
+    feature_key = "tangentes_locales_v1"
+
     results = {}
+    per_point_outputs = {}
+    ids = [f"idx_{i}" for i in idx_points]
 
     for k in k_list:
         deff_list = []
@@ -151,6 +156,7 @@ def main():
         log10_rho_list = []
         m_list = []
         parallel_means = []
+        per_point_rows = []
 
         for i in idx_points:
             xi = X[i]
@@ -203,6 +209,16 @@ def main():
             rho_list.append(rho)
             rho_clipped_list.append(rho_clipped)
             log10_rho_list.append(np.log10(rho_clipped))
+            per_point_rows.append(
+                [
+                    float(deff),
+                    float(m),
+                    float(parallel),
+                    float(perp),
+                    float(rho_clipped),
+                    float(np.log10(rho_clipped)),
+                ]
+            )
 
         frac_parallel_below_floor = float(
             np.mean(np.array(parallel_means) < args.eps_floor)
@@ -232,11 +248,31 @@ def main():
             "frac_parallel_below_floor": frac_parallel_below_floor,
             "n_samples": int(len(rho_list))
         }
+        per_point_outputs[str(k)] = {
+            "ids": ids,
+            "Y": per_point_rows,
+            "meta": {
+                "feature_key": feature_key,
+                "columns": feature_columns,
+                "k_neighbors": int(k),
+                "n_points": int(len(ids)),
+                "schema_version": "1",
+                "created": utc_now_iso(),
+                "source_stage": "tangentes_locales",
+            },
+        }
 
     # guardar resultados
     res_path = out_dir / "results.json"
     with open(res_path, "w") as f:
         json.dump(results, f, indent=2)
+
+    features_paths = {}
+    for k, payload in per_point_outputs.items():
+        features_path = out_dir / f"features_points_k{k}.json"
+        with open(features_path, "w") as f:
+            json.dump(payload, f, indent=2)
+        features_paths[k] = f"outputs/features_points_k{k}.json"
 
     # stage summary
     summary = {
@@ -266,7 +302,8 @@ def main():
             "script_sha256": sha256_file(Path(__file__))
         },
         "outputs": {
-            "results": "outputs/results.json"
+            "results": "outputs/results.json",
+            "features_points": features_paths,
         }
     }
 
@@ -279,6 +316,9 @@ def main():
         "outputs/results.json": sha256_file(res_path),
         "stage_summary.json": sha256_file(stage_summary_path)
     }
+    for k in k_list:
+        features_path = out_dir / f"features_points_k{k}.json"
+        manifest_files[f"outputs/features_points_k{k}.json"] = sha256_file(features_path)
     manifest = {"files": manifest_files}
 
     with open(manifest_path, "w") as f:
