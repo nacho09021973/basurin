@@ -39,11 +39,15 @@ def test_id_join_independent_of_row_order():
     assert np.array_equal(Yp, np.array([[100.0], [200.0], [300.0]]))
 
 
-def test_order_requires_same_length():
+def test_order_truncates_to_min_length():
     ids_x = [1, 2]
     ids_y = [1, 2, 3]
     X = np.array([[1.0], [2.0]])
     Y = np.array([[10.0], [20.0], [30.0]])
 
-    with pytest.raises(ValueError, match="order requiere mismo N"):
-        pair_frames(ids_x, X, ids_y, Y, "order")
+    ids, Xp, Yp, info = pair_frames(ids_x, X, ids_y, Y, "order")
+
+    assert info["paired_by"] == "order"
+    assert ids == ["idx_0", "idx_1"]
+    assert np.array_equal(Xp, np.array([[1.0], [2.0]]))
+    assert np.array_equal(Yp, np.array([[10.0], [20.0]]))

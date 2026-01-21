@@ -19,18 +19,15 @@ def pair_frames(
     info: Dict[str, Any] = {"pairing_policy": pairing_policy}
 
     if pairing_policy == "order":
-        if X.shape[0] != Y.shape[0]:
-            raise ValueError(
-                f"--pairing-policy order requiere mismo N. N_X={X.shape[0]} vs N_Y={Y.shape[0]}"
-            )
-        ids = [f"idx_{i}" for i in range(X.shape[0])]
+        n = int(min(X.shape[0], Y.shape[0]))
+        ids = [f"idx_{i}" for i in range(n)]
         pair_map = []
-        for i in range(X.shape[0]):
-            atlas_id = str(ids_x[i]) if ids_x is not None else None
-            event_id = str(ids_y[i]) if ids_y is not None else None
+        for i in range(n):
+            atlas_id = str(ids_x[i]) if ids_x is not None and i < len(ids_x) else None
+            event_id = str(ids_y[i]) if ids_y is not None and i < len(ids_y) else None
             pair_map.append({"atlas_id": atlas_id, "event_id": event_id, "row_i": i})
         info.update({"paired_by": "order", "n_common": len(ids), "pair_map": pair_map})
-        return ids, X, Y, info
+        return ids, X[:n], Y[:n], info
 
     if pairing_policy != "id":
         raise ValueError(f"pairing_policy desconocida: {pairing_policy}")
