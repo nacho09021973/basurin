@@ -963,13 +963,15 @@ def main() -> int:
     print(f"Outputs: {stage_dir}")
 
     return 0
-
-
+    
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except SystemExit:
         raise
-    except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+    except Exception as e:
+        import traceback
+        print("ERROR: unexpected exception in bridge entrypoint", file=sys.stderr)
+        traceback.print_exc()
         raise SystemExit(1)
+
