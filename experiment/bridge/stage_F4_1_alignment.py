@@ -658,7 +658,12 @@ def main() -> int:
     cca, Xc, Yc, corrs = fit_cca(Xs, Ys, ncomp, cfg.seed)
     boot = bootstrap_axis_stability(Xs, Ys, ncomp, cfg.bootstrap_samples, cfg.seed)
     perm = permutation_significance(Xs, Ys, ncomp, cfg.permutation_samples, cfg.seed)
-    global_var_trace = float(np.trace(np.cov(Xc.T, bias=False))) if Xc.shape[0] > 1 else float(np.var(Xc))
+    if Xc.shape[0] > 1:
+        cov = np.cov(Xc.T, bias=False)
+        # np.cov devuelve escalar si d==1; traza de escalar = escalar
+        global_var_trace = float(np.trace(cov)) if getattr(cov, "ndim", 0) >= 2 else float(cov)
+    else:
+        global_var_trace = float(np.var(Xc))
     deg = local_degeneracy_metrics(Xc, Yc, ids, cfg.k_nn, global_var_trace)
     per_point = add_pairing_trace(deg["per_point"], pairing_info)
 
