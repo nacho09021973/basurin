@@ -50,6 +50,14 @@ from basurin_io import (
     write_stage_summary,
     sha256_file,
 )
+from experiment.geometry.geometry_from_json import (
+    DEFAULT_Z_MAX,
+    DEFAULT_Z_MIN,
+    __version__ as GEOMETRY_COMPILER_VERSION,
+    compile_geometry_numeric,
+    load_geometry_json,
+    write_geometry_numeric,
+)
 
 # =============================================================================
 # Configuración
@@ -59,6 +67,7 @@ from basurin_io import (
 class Config:
     """Configuración del solver SL."""
     run: str
+    geometry_json: str | None = None
     geometry_file: str = "ads_puro.h5"
     mode: Literal["sweep_delta", "fixed_mass"] = "sweep_delta"
     dual_spectrum: bool = False
@@ -80,6 +89,9 @@ class Config:
     bc_ir_D: str | None = None
     bc_uv_N: str | None = None
     bc_ir_N: str | None = None
+    n_z: int = 2048
+    z_min: float | None = None
+    z_max: float | None = None
 
 
 def parse_args() -> Config:
@@ -87,6 +99,13 @@ def parse_args() -> Config:
         description="Solver Sturm-Liouville para espectro escalar AdS"
     )
     p.add_argument("--run", type=str, required=True, help="Nombre del run")
+    p.add_argument(
+        "--geometry-json",
+        type=str,
+        default=None,
+        dest="geometry_json",
+        help="Ruta geometry.json (default runs/<run>/geometry/outputs/geometry.json)",
+    )
     p.add_argument("--geometry-file", type=str, default="ads_puro.h5",
                    dest="geometry_file", help="Archivo H5 de geometría")
     p.add_argument("--mode", type=str, default="sweep_delta",
@@ -117,6 +136,9 @@ def parse_args() -> Config:
                    choices=["dirichlet", "neumann"])
     p.add_argument("--bc-ir-N", type=str, dest="bc_ir_N",
                    choices=["dirichlet", "neumann"])
+    p.add_argument("--n-z", type=int, default=2048, dest="n_z")
+    p.add_argument("--z-min", type=float, default=None, dest="z_min")
+    p.add_argument("--z-max", type=float, default=None, dest="z_max")
     
     args = p.parse_args()
     return Config(**{k: v for k, v in vars(args).items()})
@@ -178,6 +200,30 @@ def load_geometry(h5_path: Path) -> dict:
             "family": str(h5.attrs.get("family", "unknown")),
         }
     return data
+
+
+def resolve_geometry_json_path(cfg: Config) -> Path:
+    if cfg.geometry_json:
+        return Path(cfg.geometry_json)
+    return Path("runs") / cfg.run / "geometry" / "outputs" / "geometry.json"
+
+
+def _resolve_geometry_numeric_config(
+    cfg: Config,
+    geometry_payload: dict,
+) -> tuple[float, float]:
+    geom_z_min = geometry_payload.get("z_min")
+    geom_z_max = geometry_payload.get("z_max")
+
+    z_min = cfg.z_min if cfg.z_min is not None else geom_z_min
+    z_max = cfg.z_max if cfg.z_max is not None else geom_z_max
+
+    if z_min is None:
+        z_min = DEFAULT_Z_MIN
+    if z_max is None:
+        z_max = DEFAULT_Z_MAX
+
+    return float(z_min), float(z_max)
 
 
 # =============================================================================
@@ -474,6 +520,8 @@ def write_outputs(
     geometry_sha256: str,
     geometry_resolution: str,
     input_geometry_absolute: str | None,
+    geometry_numeric_path: Path | None = None,
+    geometry_numeric_sha256: str | None = None,
     results_N: list[dict] | None = None
 ) -> dict:
     """Escribe todos los outputs del Bloque B.
@@ -540,7 +588,7 @@ def write_outputs(
             h5.attrs["bc_ir_D"] = cfg.bc_ir_D
             h5.attrs["bc_uv_N"] = cfg.bc_uv_N
             h5.attrs["bc_ir_N"] = cfg.bc_ir_N
-        h5.attrs["geometry_source"] = cfg.geometry_file
+        h5.attrs["geometry_source"] = geometry_path
         h5.attrs["created"] = datetime.now(timezone.utc).isoformat()
     
     # --- validation.json ---
@@ -549,6 +597,22 @@ def write_outputs(
         json.dump(validation, f, indent=2)
     
     # --- stage_summary.json ---
+    inputs_payload = {
+        "geometry_path": geometry_path,
+        "geometry_sha256": geometry_sha256,
+        "geometry_resolution": geometry_resolution,
+    }
+    hashes_payload = {
+        "outputs/spectrum.h5": sha256_file(h5_path),
+        "outputs/validation.json": sha256_file(val_path),
+    }
+    if geometry_numeric_path and geometry_numeric_sha256:
+        inputs_payload["geometry_numeric_path"] = str(
+            geometry_numeric_path.relative_to(stage_dir)
+        )
+        inputs_payload["geometry_numeric_sha256"] = geometry_numeric_sha256
+        hashes_payload[str(geometry_numeric_path.relative_to(stage_dir))] = geometry_numeric_sha256
+
     summary = {
         "stage": "spectrum",
         "stage_legacy": "03_sturm_liouville",
@@ -556,11 +620,7 @@ def write_outputs(
         "version": "1.1.0",
         "created": datetime.now(timezone.utc).isoformat(),
         "config": asdict(cfg),
-        "inputs": {
-            "geometry_path": geometry_path,
-            "geometry_sha256": geometry_sha256,
-            "geometry_resolution": geometry_resolution,
-        },
+        "inputs": inputs_payload,
         "geometry": {
             "d": geo["d"],
             "L": geo["L"],
@@ -579,21 +639,21 @@ def write_outputs(
             "orthonormality_ok": validation["orthonormality"]["orthonormality_ok"],
             "residuals_ok": validation["residuals"]["residuals_ok"],
         },
-        "hashes": {
-            "outputs/spectrum.h5": sha256_file(h5_path),
-            "outputs/validation.json": sha256_file(val_path),
-        },
+        "hashes": hashes_payload,
     }
     summary_path = write_stage_summary(stage_dir, summary)
     
     # --- manifest.json ---
+    manifest_artifacts = {
+        "spectrum": h5_path,
+        "validation": val_path,
+        "summary": summary_path,
+    }
+    if geometry_numeric_path:
+        manifest_artifacts["geometry_numeric"] = geometry_numeric_path
     manifest_path = write_manifest(
         stage_dir,
-        {
-            "spectrum": h5_path,
-            "validation": val_path,
-            "summary": summary_path,
-        },
+        manifest_artifacts,
         extra={
             "version": "1.1.0",
             "stage_legacy": "03_sturm_liouville",
@@ -689,25 +749,90 @@ def main() -> int:
     cfg = parse_args()
     
     # Cargar geometría
-    try:
-        geo_path, geometry_path, input_geometry_absolute, geometry_resolution = resolve_geometry_path(
-            cfg.run, cfg.geometry_file
-        )
-    except (ValueError, FileNotFoundError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        if not (Path(cfg.geometry_file).is_absolute() or cfg.geometry_file.startswith("runs/")):
+    geo = None
+    geometry_path = ""
+    geometry_sha256 = ""
+    geometry_resolution = ""
+    input_geometry_absolute = None
+    geometry_numeric_sha256 = None
+    geometry_numeric_path = None
+    geometry_source_path = None
+
+    geometry_json_path = resolve_geometry_json_path(cfg)
+    geometry_file_path = None
+    if cfg.geometry_file:
+        try:
+            geometry_file_path, geometry_path, input_geometry_absolute, geometry_resolution = resolve_geometry_path(
+                cfg.run, cfg.geometry_file
+            )
+        except (ValueError, FileNotFoundError):
+            geometry_file_path = None
+
+    if geometry_file_path is not None and geometry_file_path.exists():
+        geometry_sha256 = sha256_file(geometry_file_path)
+        geo = load_geometry(geometry_file_path)
+        geometry_source_path = geometry_file_path
+    elif geometry_json_path.exists():
+        try:
+            geom_decl = load_geometry_json(geometry_json_path)
+        except (ValueError, FileNotFoundError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+
+        z_min, z_max = _resolve_geometry_numeric_config(cfg, geom_decl)
+        compiled = compile_geometry_numeric(geom_decl, cfg.n_z, z_min, z_max)
+        run_dir = Path("runs") / cfg.run
+        try:
+            geometry_path = str(geometry_json_path.relative_to(run_dir))
+        except ValueError:
             print(
-                "       Ejecuta primero: python 01_genera_ads_puro.py --run " + cfg.run,
+                "ERROR: geometry.json debe vivir dentro de runs/<run>/geometry/outputs/",
                 file=sys.stderr,
             )
+            return 1
+        stage_dir, outputs_dir = ensure_stage_dirs(cfg.run, "spectrum")
+        inputs_dir = stage_dir / "inputs"
+        inputs_dir.mkdir(parents=True, exist_ok=True)
+        geometry_numeric_path = inputs_dir / "geometry_numeric.json"
+        geometry_sha256 = sha256_file(geometry_json_path)
+        geometry_resolution = "geometry_json"
+        compiled_payload = {
+            "source_geometry_path": geometry_path,
+            "geometry_sha256": geometry_sha256,
+            "compiler_version": GEOMETRY_COMPILER_VERSION,
+            "numeric_config": {
+                "n_z": cfg.n_z,
+                "z_min": z_min,
+                "z_max": z_max,
+            },
+            "geometry": geom_decl["raw"],
+            "numeric": compiled,
+        }
+        geometry_numeric_sha256 = write_geometry_numeric(geometry_numeric_path, compiled_payload)
+        geo = {
+            "z": np.array(compiled["z"], dtype=np.float64),
+            "A": np.array(compiled["A"], dtype=np.float64),
+            "f": np.array(compiled["f"], dtype=np.float64),
+            "d": compiled["d"],
+            "L": compiled["L"],
+            "z_min": compiled["z_min"],
+            "z_max": compiled["z_max"],
+            "N": compiled["N"],
+            "family": compiled["family"],
+        }
+        geometry_source_path = geometry_json_path
+    else:
+        print(
+            "ERROR: geometría no encontrada. Proporciona --geometry-file (H5 existente) "
+            "o un geometry.json en runs/<run>/geometry/outputs/geometry.json.",
+            file=sys.stderr,
+        )
         return 1
-    
-    geometry_sha256 = sha256_file(geo_path)
-    geo = load_geometry(geo_path)
+
     d, L = geo["d"], geo["L"]
     z = geo["z"]
     
-    print(f"Geometría cargada: {geo_path}")
+    print(f"Geometría cargada: {geometry_source_path}")
     print(f"  d={d}, L={L}, N={geo['N']}, z∈[{geo['z_min']}, {geo['z_max']}]")
     print()
     
@@ -810,6 +935,8 @@ def main() -> int:
         geometry_sha256,
         geometry_resolution,
         input_geometry_absolute,
+        geometry_numeric_path=geometry_numeric_path,
+        geometry_numeric_sha256=geometry_numeric_sha256,
         results_N=results_N,
     )
     
