@@ -2,6 +2,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def _run_dictionary_pipeline(tmp_path: Path, run_id: str) -> Path:
     repo_root = Path(__file__).resolve().parents[1]
@@ -48,8 +50,24 @@ def _run_dictionary_pipeline(tmp_path: Path, run_id: str) -> Path:
 
 
 def test_bridge_alignment_defaults_require_features_stage(tmp_path: Path) -> None:
+    pytest.importorskip("sklearn")
+
     run_id = "bridge-defaults"
     repo_root = _run_dictionary_pipeline(tmp_path, run_id)
+
+    features_result = subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "tools" / "05_build_features_stage.py"),
+            "--run",
+            run_id,
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert features_result.returncode == 0, features_result.stderr
 
     result = subprocess.run(
         [
@@ -57,12 +75,21 @@ def test_bridge_alignment_defaults_require_features_stage(tmp_path: Path) -> Non
             str(repo_root / "experiment" / "bridge" / "stage_F4_1_alignment.py"),
             "--run",
             run_id,
+            "--no-kill-switch",
+            "--bootstrap",
+            "2",
+            "--perm",
+            "2",
+            "--k-nn",
+            "2",
+            "--n-components",
+            "2",
         ],
         cwd=tmp_path,
         capture_output=True,
         text=True,
     )
 
-    assert result.returncode != 0
-    assert "tools/05_build_features_stage.py --run" in result.stderr
-    assert "dictionary.h5" in result.stderr or "features.json" in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert "dictionary/outputs" not in result.stderr
+    assert "tools/05_build_features_stage.py --run" not in result.stderr
