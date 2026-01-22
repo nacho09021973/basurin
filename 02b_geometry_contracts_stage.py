@@ -12,7 +12,8 @@ IO (determinista, contrato BASURIN):
         - contracts.json
 
 Inputs esperados:
-  - Geometría: runs/<run>/geometry/<geometry-file>  (H5)
+  - Geometría (canónico): runs/<run>/geometry/outputs/<geometry-file>  (H5)
+  - Geometría (legacy, solo lectura): runs/<run>/geometry/<geometry-file>
     datasets: z_grid, A_of_z, f_of_z; attrs: d, L
   - (Opcional) Espectro: runs/<run>/spectrum/outputs/spectrum.h5
     datasets: M2 (o M2_D), attrs: d, L
@@ -32,7 +33,6 @@ Uso:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import sys
@@ -44,7 +44,15 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
-from basurin_io import get_run_dir, resolve_spectrum_path
+from basurin_io import (
+    ensure_stage_dirs,
+    get_run_dir,
+    resolve_geometry_path,
+    resolve_spectrum_path,
+    sha256_file,
+    write_manifest,
+    write_stage_summary,
+)
 
 _HAS_SCIPY_SIGNAL = find_spec("scipy.signal") is not None
 _HAS_SCIPY_INTERP = find_spec("scipy.interpolate") is not None
@@ -59,14 +67,6 @@ if _HAS_SCIPY_INTERP:
 # -----------------------------
 # Utilidades IO BASURIN
 # -----------------------------
-
-def compute_file_hash(path: Path) -> str:
-    sha = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            sha.update(chunk)
-    return sha.hexdigest()
-
 
 def write_json(path: Path, payload: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -676,10 +676,9 @@ def parse_args() -> Config:
 
 def run_stage(cfg: Config) -> Dict[str, Path]:
     run_dir = get_run_dir(cfg.run)
-    geo_path = run_dir / "geometry" / cfg.geometry_file
-
-    if not geo_path.exists():
-        raise FileNotFoundError(f"No existe geometría: {geo_path}")
+    geo_path, geometry_path, input_geometry_absolute, geometry_resolution = resolve_geometry_path(
+        cfg.run, cfg.geometry_file
+    )
 
     geo = load_geometry(geo_path)
     z, A, f = geo["z"], geo["A"], geo["f"]
@@ -769,9 +768,7 @@ def run_stage(cfg: Config) -> Dict[str, Path]:
         contracts["F_regge"] = regge
 
     # IO
-    stage_dir = run_dir / "geometry_contracts"
-    outputs_dir = stage_dir / "outputs"
-    outputs_dir.mkdir(parents=True, exist_ok=True)
+    stage_dir, outputs_dir = ensure_stage_dirs(cfg.run, "geometry_contracts")
 
     contracts_path = outputs_dir / "contracts.json"
     write_json(contracts_path, contracts)
@@ -789,11 +786,17 @@ def run_stage(cfg: Config) -> Dict[str, Path]:
             "z_min": geo["z_min"],
             "z_max": geo["z_max"],
             "family": geo["family"],
-            "source": f"../geometry/{cfg.geometry_file}",
+            "source": geometry_path,
         },
         "inputs": {
-            "geometry_h5": f"../geometry/{cfg.geometry_file}",
+            "geometry_h5": geometry_path,
             "spectrum_h5": spectrum_rel,
+            "geometry_resolution": geometry_resolution,
+            **(
+                {"input_geometry_absolute": input_geometry_absolute}
+                if input_geometry_absolute
+                else {}
+            ),
         },
         "contracts": {k: v.get("status", "UNKNOWN") if isinstance(v, dict) else "UNKNOWN" for k, v in contracts.items()},
         "contract_groups": {
@@ -807,28 +810,29 @@ def run_stage(cfg: Config) -> Dict[str, Path]:
             "spectral_ir": "Depende de espectro SL (Bloque B) y diagnostica asintótica IR (Regge/soft-wall).",
         },
         "hashes": {
-            "outputs/contracts.json": compute_file_hash(contracts_path),
+            "outputs/contracts.json": sha256_file(contracts_path),
         },
     }
 
-    summary_path = stage_dir / "stage_summary.json"
-    write_json(summary_path, summary)
+    summary_path = write_stage_summary(stage_dir, summary)
 
-    # manifest
-    manifest = {
-        "stage": "02b_geometry_contracts",
-        "run": cfg.run,
-        "created": datetime.now(timezone.utc).isoformat(),
-        "files": {
-            "contracts": "outputs/contracts.json",
-            "summary": "stage_summary.json",
+    manifest_path = write_manifest(
+        stage_dir,
+        {
+            "contracts": contracts_path,
+            "summary": summary_path,
         },
-        "input_geometry": f"../geometry/{cfg.geometry_file}",
-        "input_spectrum": spectrum_rel,
-    }
-
-    manifest_path = stage_dir / "manifest.json"
-    write_json(manifest_path, manifest)
+        extra={
+            "input_geometry": geometry_path,
+            "input_spectrum": spectrum_rel,
+            "geometry_resolution": geometry_resolution,
+            **(
+                {"input_geometry_absolute": input_geometry_absolute}
+                if input_geometry_absolute
+                else {}
+            ),
+        },
+    )
 
     return {
         "contracts": contracts_path,

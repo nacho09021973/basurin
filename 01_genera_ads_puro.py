@@ -6,7 +6,7 @@ Uso:
     python genera_ads_puro.py --run mi_experimento
 
 Salida:
-    runs/mi_experimento/geometry/ads_puro.h5
+    runs/mi_experimento/geometry/outputs/ads_puro.h5
 
 El H5 contiene:
     - z_grid: array (N,)
@@ -21,10 +21,15 @@ import argparse
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
-
 import numpy as np
 
+from basurin_io import (
+    ensure_stage_dirs,
+    sha256_file,
+    utc_now_iso,
+    write_manifest,
+    write_stage_summary,
+)
 
 @dataclass(frozen=True)
 class Config:
@@ -75,9 +80,7 @@ def main() -> int:
     cfg = parse_args()
     validate(cfg)
     
-    # Crear directorio
-    out_dir = Path("runs") / cfg.run / "geometry"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    stage_dir, out_dir = ensure_stage_dirs(cfg.run, "geometry")
     out_path = out_dir / "ads_puro.h5"
     
     # Generar datos
@@ -109,6 +112,34 @@ def main() -> int:
         h5.attrs["z_max"] = cfg.z_max
         h5.attrs["N"] = cfg.n
         h5.attrs["created"] = datetime.now(timezone.utc).isoformat()
+
+    stage_summary = {
+        "stage": "geometry",
+        "run": cfg.run,
+        "created": utc_now_iso(),
+        "config": {
+            "z_min": cfg.z_min,
+            "z_max": cfg.z_max,
+            "n": cfg.n,
+            "d": cfg.d,
+            "L": cfg.L,
+        },
+        "outputs": {
+            "geometry_h5": "outputs/ads_puro.h5",
+        },
+        "hashes": {
+            "outputs/ads_puro.h5": sha256_file(out_path),
+        },
+    }
+    summary_path = write_stage_summary(stage_dir, stage_summary)
+    write_manifest(
+        stage_dir,
+        {
+            "geometry_h5": out_path,
+            "summary": summary_path,
+        },
+        extra={"version": "1"},
+    )
     
     print(f"OK: {out_path}")
     print(f"    d={cfg.d}, L={cfg.L}, N={cfg.n}, z=[{cfg.z_min}, {cfg.z_max}]")

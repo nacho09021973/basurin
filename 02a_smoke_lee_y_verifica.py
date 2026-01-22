@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
+from basurin_io import resolve_geometry_path
 
 def load_geometry(h5_path: Path) -> dict:
     """Carga geometría desde H5."""
@@ -79,10 +80,10 @@ def main() -> int:
     parser.add_argument("--file", type=str, default="ads_puro.h5", help="Archivo H5")
     args = parser.parse_args()
     
-    h5_path = Path("runs") / args.run / "geometry" / args.file
-    
-    if not h5_path.exists():
-        print(f"ERROR: No existe {h5_path}", file=sys.stderr)
+    try:
+        h5_path, geometry_path, _, _ = resolve_geometry_path(args.run, args.file)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     
     # Cargar
@@ -90,7 +91,7 @@ def main() -> int:
     z, A, f = geo["z"], geo["A"], geo["f"]
     d, L = geo["d"], geo["L"]
     
-    print(f"Archivo: {h5_path}")
+    print(f"Archivo: {geometry_path}")
     print(f"  d = {d}, L = {L}")
     print(f"  N = {len(z)}, z ∈ [{z[0]:.4f}, {z[-1]:.4f}]")
     print()
