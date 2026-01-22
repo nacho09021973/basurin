@@ -58,16 +58,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-from sklearn.cross_decomposition import CCA
-from sklearn.neighbors import NearestNeighbors
-from sklearn.preprocessing import StandardScaler
-
 # Allow running as a script by ensuring repo root is on sys.path.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from basurin_io import (
+    assert_within_runs,
     ensure_stage_dirs,
     resolve_out_root,
     sha256_file,
@@ -139,6 +136,17 @@ def _coerce_vector(vec: Any) -> Optional[List[float]]:
     return None
 
 
+def _load_sklearn() -> None:
+    global CCA, NearestNeighbors, StandardScaler
+    from sklearn.cross_decomposition import CCA as _CCA
+    from sklearn.neighbors import NearestNeighbors as _NearestNeighbors
+    from sklearn.preprocessing import StandardScaler as _StandardScaler
+
+    CCA = _CCA
+    NearestNeighbors = _NearestNeighbors
+    StandardScaler = _StandardScaler
+
+
 def load_feature_json(path: Path, kind: str) -> Tuple[Optional[List[Any]], np.ndarray, Dict[str, Any]]:
     """Carga JSON y devuelve ids (si existen), matriz y metadatos mínimos."""
     with open(path, "r") as f:
@@ -151,30 +159,51 @@ def load_feature_json(path: Path, kind: str) -> Tuple[Optional[List[Any]], np.nd
     else:
         raise ValueError(kind)
 
-    if kind == "atlas" and isinstance(obj, dict) and "points" in obj:
-        ids = []
-        rows = []
-        for point in obj.get("points", []):
-            if not isinstance(point, dict):
-                continue
-            rid = point.get("id", point.get("uid", point.get("name")))
-            vec = point.get("features", point.get("vector", point.get("x")))
-            vec_list = _coerce_vector(vec)
-            if vec_list is None:
-                continue
-            ids.append(rid)
-            rows.append(vec_list)
-        if rows:
-            mat = np.asarray(rows, dtype=float)
-            meta = {
-                "feature_key": obj.get("feature_key"),
-                "source_atlas": obj.get("source_atlas"),
-                "n_points": obj.get("n_points"),
-            }
-            if "columns" in obj:
-                meta["columns"] = obj.get("columns")
-            if "columns" not in meta and meta.get("feature_key"):
-                meta["columns"] = [f"{meta['feature_key']}_{i}" for i in range(mat.shape[1])]
+    if kind == "atlas" and isinstance(obj, dict):
+        for key in ["points", "theories"]:
+            if key in obj and isinstance(obj[key], list):
+                ids = []
+                rows = []
+                for point in obj.get(key, []):
+                    if not isinstance(point, dict):
+                        continue
+                    rid = point.get("id", point.get("uid", point.get("name")))
+                    vec = point.get(
+                        "features",
+                        point.get("ratios", point.get("vector", point.get("x"))),
+                    )
+                    vec_list = _coerce_vector(vec)
+                    if vec_list is None:
+                        continue
+                    ids.append(rid)
+                    rows.append(vec_list)
+                if rows:
+                    mat = np.asarray(rows, dtype=float)
+                    meta = {
+                        "feature_key": obj.get("feature_key"),
+                        "source_atlas": obj.get("source_atlas"),
+                        "n_points": obj.get("n_points"),
+                    }
+                    if "columns" in obj:
+                        meta["columns"] = obj.get("columns")
+                    if "columns" not in meta and meta.get("feature_key"):
+                        meta["columns"] = [f"{meta['feature_key']}_{i}" for i in range(mat.shape[1])]
+                    return ids, mat, meta
+
+    if kind == "ringdown" and isinstance(obj, dict):
+        if "X" in obj and "ids" in obj:
+            ids = obj["ids"]
+            mat = np.asarray(obj["X"], dtype=float)
+            meta: Dict[str, Any] = {}
+            if "feature_names" in obj and "columns" not in meta:
+                meta["columns"] = obj.get("feature_names")
+            return ids, mat, meta
+        if "x" in obj and "ids" in obj:
+            ids = obj["ids"]
+            mat = np.asarray(obj["x"], dtype=float)
+            meta = {}
+            if "feature_names" in obj and "columns" not in meta:
+                meta["columns"] = obj.get("feature_names")
             return ids, mat, meta
 
     ids, mat = _normalize_records(obj, key)
@@ -192,6 +221,8 @@ def load_feature_json(path: Path, kind: str) -> Tuple[Optional[List[Any]], np.nd
                 meta[mk] = obj[mk]
         if "columns" in obj:
             meta["columns"] = obj["columns"]
+        if "feature_names" in obj and "columns" not in meta:
+            meta["columns"] = obj["feature_names"]
 
     if "columns" not in meta and "feature_key" in meta and mat is not None:
         feature_key = meta.get("feature_key")
@@ -703,8 +734,8 @@ def split_atlas_positive_control(
 @dataclass(frozen=True)
 class Config:
     run: str
-    atlas: str
-    features: str
+    atlas: Optional[str]
+    features: Optional[str]
     pairing_policy: str = "id"
     n_components: int = 3
     bootstrap_samples: int = 100
@@ -720,8 +751,8 @@ class Config:
 def parse_args() -> Config:
     p = argparse.ArgumentParser(description="BASURIN F4-1: Bridge discovery via manifold alignment + injectivity diagnostics")
     p.add_argument("--run", required=True, type=str, help="run_id (carpeta bajo runs/<run>/)")
-    p.add_argument("--atlas", required=True, type=str, help="Path a atlas_points.json (X)")
-    p.add_argument("--features", required=True, type=str, help="Path a ringdown event_features.json (Y)")
+    p.add_argument("--atlas", required=False, type=str, help="Path a atlas.json (X)")
+    p.add_argument("--features", required=False, type=str, help="Path a features.json (Y)")
     p.add_argument("--pairing-policy", default="id", choices=["id", "order"], help="Cómo parear X y Y (default: id)")
     p.add_argument("--n-components", default=3, type=int, help="CCA components (<=min(dx,dy))")
     p.add_argument("--bootstrap", default=100, type=int, dest="bootstrap_samples")
@@ -870,14 +901,45 @@ def main() -> int:
         cfg.run, "bridge_f4_1_alignment", base_dir=out_root
     )
 
-    atlas_path = Path(cfg.atlas)
-    features_path = Path(cfg.features)
+    run_dir = (out_root / cfg.run).resolve()
+
+    def _resolve_input(
+        value: Optional[str],
+        default_rel: Path,
+    ) -> Tuple[Path, bool]:
+        used_default = value is None
+        path = Path(value) if value is not None else (run_dir / default_rel)
+        if not path.is_absolute():
+            path = (Path.cwd() / path).resolve()
+        else:
+            path = path.resolve()
+        assert_within_runs(run_dir, path)
+        return path, used_default
+
+    try:
+        atlas_path, _ = _resolve_input(
+            cfg.atlas,
+            Path("dictionary") / "outputs" / "atlas.json",
+        )
+        features_path, _ = _resolve_input(
+            cfg.features,
+            Path("features") / "outputs" / "features.json",
+        )
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
     if not atlas_path.exists():
         print(f"ERROR: no existe atlas: {atlas_path}", file=sys.stderr)
         return 1
     if not features_path.exists():
-        print(f"ERROR: no existe features: {features_path}", file=sys.stderr)
+        print(
+            f"ERROR: Primero ejecutar tools/05_build_features_stage.py --run {cfg.run}",
+            file=sys.stderr,
+        )
         return 1
+
+    _load_sklearn()
 
     input_hashes = {
         "inputs/atlas": sha256_file(atlas_path),
