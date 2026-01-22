@@ -85,6 +85,20 @@ def _check_stage_summary_hash(summary_path: Path, rel_key: str, actual_path: Pat
     return True, "ok"
 
 
+def _get_run_kind(summary_path: Path) -> str:
+    if not summary_path.exists():
+        return "geometry_pipeline"
+    summary = _read_json(summary_path)
+    config = summary.get("config", {})
+    inputs = summary.get("inputs", {})
+    return (
+        config.get("run_kind")
+        or inputs.get("run_kind")
+        or summary.get("run_kind")
+        or "geometry_pipeline"
+    )
+
+
 def _check_geometry_verdict(run_dir: Path) -> tuple[bool, str]:
     geometry_validation = run_dir / "geometry" / "outputs" / "validation.json"
     if geometry_validation.exists():
@@ -117,16 +131,23 @@ def _require_h5_datasets(path: Path, datasets: Iterable[str]) -> tuple[bool, str
 def main() -> int:
     args = parse_args()
     run_dir = get_run_dir(args.run)
+    spectrum_summary = _stage_summary_path(run_dir, "spectrum")
+    run_kind = _get_run_kind(spectrum_summary)
 
     checks: list[CheckResult] = []
     required = [
-        ("geometry", _manifest_path(run_dir, "geometry")),
-        ("geometry", _stage_summary_path(run_dir, "geometry")),
         ("spectrum", _manifest_path(run_dir, "spectrum")),
-        ("spectrum", _stage_summary_path(run_dir, "spectrum")),
+        ("spectrum", spectrum_summary),
         ("dictionary", _manifest_path(run_dir, "dictionary")),
         ("dictionary", _stage_summary_path(run_dir, "dictionary")),
     ]
+    if run_kind != "spectrum_only":
+        required.extend(
+            [
+                ("geometry", _manifest_path(run_dir, "geometry")),
+                ("geometry", _stage_summary_path(run_dir, "geometry")),
+            ]
+        )
     missing = [str(path) for _, path in required if not path.exists()]
     if missing:
         checks.append(CheckResult("E1", False, f"faltan archivos: {missing}"))
@@ -156,14 +177,16 @@ def main() -> int:
 
     stage_manifest_ok = True
     reasons: list[str] = []
-    for stage in ("geometry", "spectrum", "dictionary"):
+    manifest_targets = ["spectrum", "dictionary"]
+    if run_kind != "spectrum_only":
+        manifest_targets.insert(0, "geometry")
+    for stage in manifest_targets:
         ok, reason = _check_manifest_paths(run_dir, stage)
         if not ok:
             stage_manifest_ok = False
             reasons.append(reason)
     checks.append(CheckResult("E3", stage_manifest_ok, "; ".join(reasons) if reasons else "ok"))
 
-    spectrum_summary = _stage_summary_path(run_dir, "spectrum")
     dict_summary = _stage_summary_path(run_dir, "dictionary")
     e4_ok = True
     e4_reasons: list[str] = []
@@ -197,11 +220,26 @@ def main() -> int:
     if spectrum_summary.exists():
         summary = _read_json(spectrum_summary)
         inputs = summary.get("inputs", {})
+        config = summary.get("config", {})
         geometry_path_value = inputs.get("geometry_path")
-        if inputs.get("geometry_path") and inputs.get("geometry_sha256"):
-            checks.append(CheckResult("E5", True, "ok"))
+        if run_kind == "spectrum_only":
+            generator_script = inputs.get("generator_script") or inputs.get("generator")
+            seed_value = inputs.get("generator_seed", config.get("seed"))
+            if generator_script and seed_value is not None:
+                checks.append(CheckResult("E5", True, "ok"))
+            else:
+                checks.append(
+                    CheckResult(
+                        "E5",
+                        False,
+                        "inputs.generator_script/generator o seed faltante para spectrum_only",
+                    )
+                )
         else:
-            checks.append(CheckResult("E5", False, "inputs.geometry_path o geometry_sha256 faltante"))
+            if inputs.get("geometry_path") and inputs.get("geometry_sha256"):
+                checks.append(CheckResult("E5", True, "ok"))
+            else:
+                checks.append(CheckResult("E5", False, "inputs.geometry_path o geometry_sha256 faltante"))
     else:
         checks.append(CheckResult("E5", False, "stage_summary spectrum faltante"))
 
@@ -215,6 +253,11 @@ def main() -> int:
     else:
         e6_ok = False
         e6_reasons.append("spectrum.h5 faltante")
+    if run_kind == "spectrum_only":
+        spectrum_validation = run_dir / "spectrum" / "outputs" / "validation.json"
+        if not spectrum_validation.exists():
+            e6_ok = False
+            e6_reasons.append("validation.json faltante en spectrum")
     if dictionary_path.exists():
         ok, reason = _require_h5_datasets(dictionary_path, [])
         if not ok:
@@ -225,8 +268,11 @@ def main() -> int:
         e6_reasons.append("dictionary.h5 faltante")
     checks.append(CheckResult("E6", e6_ok, "; ".join(e6_reasons)))
 
-    ok, reason = _check_geometry_verdict(run_dir)
-    checks.append(CheckResult("E7", ok, reason))
+    if run_kind == "spectrum_only":
+        checks.append(CheckResult("E7", True, "skip: spectrum_only"))
+    else:
+        ok, reason = _check_geometry_verdict(run_dir)
+        checks.append(CheckResult("E7", ok, reason))
 
     verdict = "PASS" if all(c.ok for c in checks) else "FAIL"
     stage_dir, outputs_dir = ensure_stage_dirs(args.run, "RUN_VALID")

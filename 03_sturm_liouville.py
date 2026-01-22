@@ -62,6 +62,7 @@ class Config:
     geometry_file: str = "ads_puro.h5"
     mode: Literal["sweep_delta", "fixed_mass"] = "sweep_delta"
     dual_spectrum: bool = False
+    run_kind: Literal["geometry_pipeline"] = "geometry_pipeline"
     
     # Barrido en Δ (mode=sweep_delta)
     delta_min: float = 1.55      # > d/2 para d=3 (BF bound)

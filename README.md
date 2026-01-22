@@ -44,3 +44,17 @@ Ejecuta el runner canónico desde `tools/run_v1.py`:
 ```bash
 python tools/run_v1.py --run <run_id>
 ```
+
+Modos disponibles:
+
+- `--mode geometry` (default): genera geometría, espectro y diccionario.
+- `--mode spectrum_only`: genera espectro directo (sin geometry) con
+  `01_genera_neutrino_sandbox.py`, luego diccionario y RUN_VALID.
+
+El stage `spectrum` declara `config.run_kind`:
+
+- `geometry_pipeline`: espectro derivado de geometría (03_sturm_liouville).
+- `spectrum_only`: espectro generado directamente (01_genera_neutrino_sandbox).
+
+Los experiments consumen features canónicas desde `runs/<run>/features/outputs/`
+(no escribir en `dictionary/outputs`).

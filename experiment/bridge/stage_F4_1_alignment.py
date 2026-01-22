@@ -824,6 +824,8 @@ def split_atlas_positive_control(
 @dataclass(frozen=True)
 class Config:
     run: str
+    run_x: str
+    run_y: str
     atlas: Optional[str]
     features: Optional[str]
     features_from_h5: bool = False
@@ -841,7 +843,10 @@ class Config:
 
 def parse_args() -> Config:
     p = argparse.ArgumentParser(description="BASURIN F4-1: Bridge discovery via manifold alignment + injectivity diagnostics")
-    p.add_argument("--run", required=True, type=str, help="run_id (carpeta bajo runs/<run>/)")
+    p.add_argument("--run", required=False, type=str, help="run_id (legacy single-domain)")
+    p.add_argument("--run-x", required=False, type=str, help="run_id dominio X (atlas)")
+    p.add_argument("--run-y", required=False, type=str, help="run_id dominio Y (features)")
+    p.add_argument("--allow-self-alignment", action="store_true", help="Permite run-x == run-y (no recomendado)")
     p.add_argument("--atlas", required=False, type=str, help="Path a atlas.json (X)")
     p.add_argument("--features", required=False, type=str, help="Path a features.json (Y)")
     p.add_argument(
@@ -860,8 +865,24 @@ def parse_args() -> Config:
     p.add_argument("--scale-floor-rel", default=1e-6, type=float, help="Umbral relativo (a mediana) para filtrar columnas")
     p.add_argument("--out-root", default="runs", type=str, help="Directorio raíz de runs (default: runs)")
     a = p.parse_args()
+    if a.run_x or a.run_y:
+        if not (a.run_x and a.run_y):
+            p.error("--run-x y --run-y deben usarse juntos")
+        if a.run_x == a.run_y and not a.allow_self_alignment:
+            p.error("run-x == run-y no permitido sin --allow-self-alignment")
+        run = a.run_x
+        run_x = a.run_x
+        run_y = a.run_y
+    else:
+        if not a.run:
+            p.error("--run es obligatorio si no se usan --run-x/--run-y")
+        run = a.run
+        run_x = a.run
+        run_y = a.run
     return Config(
-        run=a.run,
+        run=run,
+        run_x=run_x,
+        run_y=run_y,
         atlas=a.atlas,
         features=a.features,
         features_from_h5=bool(a.features_from_h5),
@@ -989,33 +1010,38 @@ def main() -> int:
     try:
         out_root = resolve_out_root(cfg.out_root)
         validate_run_id(cfg.run, out_root)
+        validate_run_id(cfg.run_x, out_root)
+        validate_run_id(cfg.run_y, out_root)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
     if cfg.kill_switch:
-        contract_cmd = [
-            sys.executable,
-            str(_REPO_ROOT / "tools" / "contract_run_valid.py"),
-            "--run",
-            cfg.run,
-        ]
-        result = subprocess.run(contract_cmd, check=False)
-        if result.returncode != 0:
-            print(
-                "ERROR: contract_run_valid falló; abortando F4-1. "
-                "Usa --no-kill-switch para omitir este gate.",
-                file=sys.stderr,
-            )
-            return int(result.returncode) if result.returncode != 0 else 1
+        for run_id in {cfg.run_x, cfg.run_y}:
+            contract_cmd = [
+                sys.executable,
+                str(_REPO_ROOT / "tools" / "contract_run_valid.py"),
+                "--run",
+                run_id,
+            ]
+            result = subprocess.run(contract_cmd, check=False)
+            if result.returncode != 0:
+                print(
+                    "ERROR: contract_run_valid falló; abortando F4-1. "
+                    "Usa --no-kill-switch para omitir este gate.",
+                    file=sys.stderr,
+                )
+                return int(result.returncode) if result.returncode != 0 else 1
 
     stage_dir, outdir = ensure_stage_dirs(
         cfg.run, "bridge_f4_1_alignment", base_dir=out_root
     )
 
-    run_dir = (out_root / cfg.run).resolve()
+    run_dir_x = (out_root / cfg.run_x).resolve()
+    run_dir_y = (out_root / cfg.run_y).resolve()
 
     def _resolve_input(
+        run_dir: Path,
         value: Optional[str],
         default_rel: Path,
     ) -> Tuple[Path, bool]:
@@ -1028,9 +1054,9 @@ def main() -> int:
         assert_within_runs(run_dir, path)
         return path, used_default
 
-    def _resolve_features_path() -> Tuple[Path, str]:
+    def _resolve_features_path(run_dir: Path, run_label: str) -> Tuple[Path, str]:
         if cfg.features:
-            path, _ = _resolve_input(cfg.features, Path("dictionary") / "outputs" / "features.json")
+            path, _ = _resolve_input(run_dir, cfg.features, Path("dictionary") / "outputs" / "features.json")
             kind = path.suffix.lower()
             if kind == ".npz":
                 return path, "npz"
@@ -1052,15 +1078,16 @@ def main() -> int:
             return dictionary_h5, "h5"
         raise FileNotFoundError(
             "faltan features canónicas. "
-            f"Ejecuta python tools/05_build_features_stage.py --run {cfg.run}"
+            f"Ejecuta python tools/05_build_features_stage.py --run {run_label}"
         )
 
     try:
         atlas_path, _ = _resolve_input(
+            run_dir_x,
             cfg.atlas,
             Path("dictionary") / "outputs" / "atlas.json",
         )
-        features_path, features_kind = _resolve_features_path()
+        features_path, features_kind = _resolve_features_path(run_dir_y, cfg.run_y)
     except (ValueError, FileNotFoundError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -1089,7 +1116,7 @@ def main() -> int:
     except (ValueError, RuntimeError) as exc:
         print(
             "ERROR: no se pudieron resolver features canónicas. "
-            f"{exc} Ejecuta python tools/05_build_features_stage.py --run {cfg.run}",
+            f"{exc} Ejecuta python tools/05_build_features_stage.py --run {cfg.run_y}",
             file=sys.stderr,
         )
         return 1
@@ -1209,6 +1236,8 @@ def main() -> int:
                     "atlas": str(atlas_path),
                     "features": str(features_path),
                     "features_kind": features_kind,
+                    "run_x": cfg.run_x,
+                    "run_y": cfg.run_y,
                 },
                 "outputs_coherence": outputs_coherence,
                 "leakage_check": leakage_summary,
@@ -1459,6 +1488,8 @@ def main() -> int:
                 "atlas": str(atlas_path),
                 "features": str(features_path),
                 "features_kind": features_kind,
+                "run_x": cfg.run_x,
+                "run_y": cfg.run_y,
             },
             "outputs_coherence": outputs_coherence,
             "leakage_check": leakage_summary,
