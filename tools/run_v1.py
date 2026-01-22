@@ -2,8 +2,9 @@
 """BASURIN — Runner v1: orquestación 01→02b→03→04→RUN_VALID.
 
 Uso:
-  python tools/run_v1.py --run <run_id> [--skip-02b] [--geometry-file ads_puro.h5]
-                           [--keep-runs]
+  python tools/run_v1.py --run <run_id> [--mode geometry|spectrum_only]
+                          [--skip-02b] [--geometry-file ads_puro.h5]
+                          [--generator neutrino] [--keep-runs]
 """
 
 from __future__ import annotations
@@ -24,11 +25,23 @@ from basurin_io import get_run_dir, validate_run_id
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Runner v1 BASURIN (01→02b→03→04→RUN_VALID)")
     parser.add_argument("--run", required=True, help="Run ID")
+    parser.add_argument(
+        "--mode",
+        choices=["geometry", "spectrum_only"],
+        default="geometry",
+        help="Modo de ejecución (default: geometry)",
+    )
     parser.add_argument("--skip-02b", action="store_true", help="Omitir 02b_geometry_contracts_stage")
     parser.add_argument(
         "--geometry-file",
         default="ads_puro.h5",
         help="Archivo H5 de geometría (default: ads_puro.h5)",
+    )
+    parser.add_argument(
+        "--generator",
+        choices=["neutrino"],
+        default="neutrino",
+        help="Generador para spectrum_only (default: neutrino)",
     )
     parser.add_argument(
         "--keep-runs",
@@ -51,13 +64,12 @@ def main() -> int:
     if not args.keep_runs and run_dir.exists():
         shutil.rmtree(run_dir)
 
-    commands: list[list[str]] = [
-        [sys.executable, "01_genera_ads_puro.py", "--run", args.run],
-    ]
-    if not args.skip_02b:
-        commands.append([sys.executable, "02b_geometry_contracts_stage.py", "--run", args.run])
-    commands.extend(
-        [
+    commands: list[list[str]] = []
+    if args.mode == "geometry":
+        commands.append([sys.executable, "01_genera_ads_puro.py", "--run", args.run])
+        if not args.skip_02b:
+            commands.append([sys.executable, "02b_geometry_contracts_stage.py", "--run", args.run])
+        commands.append(
             [
                 sys.executable,
                 "03_sturm_liouville.py",
@@ -65,7 +77,13 @@ def main() -> int:
                 args.run,
                 "--geometry-file",
                 args.geometry_file,
-            ],
+            ]
+        )
+    else:
+        if args.generator == "neutrino":
+            commands.append([sys.executable, "01_genera_neutrino_sandbox.py", "--run", args.run])
+    commands.extend(
+        [
             [sys.executable, "04_diccionario.py", "--run", args.run],
             [sys.executable, "tools/contract_run_valid.py", "--run", args.run],
         ]

@@ -106,6 +106,7 @@ class Config:
     d: int
     L: float
     seed: int
+    run_kind: str = "spectrum_only"
 
 
 def parse_args() -> Config:
@@ -389,7 +390,14 @@ def main() -> int:
         "script": "01_genera_neutrino_sandbox.py",
         "version": "0.1.0",
         "created": datetime.now(timezone.utc).isoformat(),
+        "run": cfg.run,
         "config": asdict(cfg),
+        "inputs": {
+            "generator": "neutrino_sandbox",
+            "generator_script": "01_genera_neutrino_sandbox.py",
+            "generator_seed": cfg.seed,
+            "generator_config": asdict(cfg),
+        },
         "outputs": {
             "spectrum_h5": "outputs/spectrum.h5",
             "validation": "outputs/validation.json",
