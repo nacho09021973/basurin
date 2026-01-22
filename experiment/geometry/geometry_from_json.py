@@ -16,17 +16,34 @@ DEFAULT_Z_MAX = 1.0
 
 
 def _expect_number(value: Any, field: str) -> float:
-    if not isinstance(value, (int, float)):
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        return float(value)
+    except (TypeError, ValueError):
         raise ValueError(f"{field} debe ser numérico")
-    return float(value)
+
+
+def _expect_int(value: Any, field: str) -> int:
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        if isinstance(value, float) and not value.is_integer():
+            raise ValueError
+        if isinstance(value, str):
+            num = float(value)
+            if not num.is_integer():
+                raise ValueError
+            return int(num)
+        return int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{field} debe ser entero")
 
 
 def _resolve_dimension(geom: dict[str, Any]) -> int:
     for key in ("d", "boundary_dimension", "dimension"):
         if key in geom:
-            value = geom[key]
-            if not isinstance(value, int):
-                raise ValueError(f"{key} debe ser entero")
+            value = _expect_int(geom[key], key)
             if value < 2:
                 raise ValueError(f"{key} debe ser >= 2")
             return value

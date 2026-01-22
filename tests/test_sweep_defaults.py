@@ -2,6 +2,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 import sys
 
+import numpy as np
 import pytest
 
 
@@ -22,7 +23,7 @@ def test_resolve_sweep_defaults_raises_only_for_explicit_delta_min():
 
     sl.resolve_sweep_defaults(cfg, d=5)
 
-    assert cfg.delta_min == pytest.approx(2.501)
+    assert cfg.delta_min == pytest.approx(np.nextafter(2.5, np.inf))
     sl.validate_config(cfg, d=5)
 
     explicit = sl.Config(run="r1", mode="sweep_delta", delta_min=2.4)

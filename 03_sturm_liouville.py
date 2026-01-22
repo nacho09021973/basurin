@@ -193,7 +193,7 @@ def resolve_sweep_defaults(cfg: Config, d: int) -> None:
         return
     bf_bound = d / 2.0
     if cfg.delta_min == 1.55 and cfg.delta_min <= bf_bound:
-        object.__setattr__(cfg, "delta_min", bf_bound + 1e-3)
+        object.__setattr__(cfg, "delta_min", float(np.nextafter(bf_bound, np.inf)))
 
 
 # =============================================================================
