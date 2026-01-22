@@ -442,6 +442,7 @@ def validate_orthonormality(
     off_diag = G - np.diag(diag)
     
     return {
+        "gram_inner_product": "weighted",
         "gram_diagonal_mean": float(np.mean(diag)),
         "gram_diagonal_std": float(np.std(diag)),
         "gram_offdiag_max": float(np.max(np.abs(off_diag))),
@@ -456,21 +457,32 @@ def validate_residuals(
     eigenvalues: np.ndarray,
     eigenvectors: np.ndarray
 ) -> dict:
-    """Valida residuos |Kφ - λWφ|."""
+    """Valida residuos con backward error de Kφ = λWφ."""
     residuals = []
+    residual_threshold = 1e-6
     
     for i, lam in enumerate(eigenvalues):
         phi = eigenvectors[:, i]
-        r = K @ phi - lam * (W @ phi)
-        residuals.append(np.linalg.norm(r) / np.linalg.norm(K @ phi))
+        Kphi = K @ phi
+        Wphi = W @ phi
+        r = Kphi - lam * Wphi
+        denom = np.linalg.norm(Kphi) + abs(lam) * np.linalg.norm(Wphi)
+        denom = max(denom, 1e-300)
+        residuals.append(np.linalg.norm(r) / denom)
     
     residuals = np.array(residuals)
+    argmax_mode = int(np.argmax(residuals))
+    argmax_value = float(residuals[argmax_mode])
     
     return {
+        "residual_metric": "backward_error",
         "residual_max": float(np.max(residuals)),
         "residual_mean": float(np.mean(residuals)),
         "residual_per_mode": residuals.tolist(),
-        "residuals_ok": bool(np.max(residuals) < 1e-6),
+        "residual_threshold": residual_threshold,
+        "residuals_ok": bool(np.max(residuals) < residual_threshold),
+        "residual_argmax_mode": argmax_mode,
+        "residual_argmax_value": argmax_value,
     }
 
 
@@ -660,6 +672,10 @@ def write_outputs(
         "validation_summary": {
             "orthonormality_ok": validation["orthonormality"]["orthonormality_ok"],
             "residuals_ok": validation["residuals"]["residuals_ok"],
+            "residual_metric": validation["residuals"]["residual_metric"],
+            "residual_max_global": validation["residuals"]["residual_max_global"],
+            "residual_argmax_mode_global": validation["residuals"]["residual_argmax_mode_global"],
+            "residual_threshold": validation["residuals"]["residual_threshold"],
         },
         "hashes": hashes_payload,
     }
@@ -751,8 +767,12 @@ def solve_channel(
         
         # Progreso
         status = "✓" if ortho["orthonormality_ok"] and resid["residuals_ok"] else "⚠"
-        print(f"  [{i+1:3d}/{len(deltas)}] ({label}) Δ={delta:.3f}, m²L²={m2L2:.3f}, "
-              f"M²₀={eigenvalues[0]:.4f} {status}")
+        msg = (f"  [{i+1:3d}/{len(deltas)}] ({label}) Δ={delta:.3f}, m²L²={m2L2:.3f}, "
+               f"M²₀={eigenvalues[0]:.4f} {status}")
+        if status == "⚠":
+            msg += (f", rmax={resid['residual_argmax_value']:.2e} "
+                    f"(modo {resid['residual_argmax_mode'] + 1})")
+        print(msg)
     
     filter_audit = None
     if apply_neumann_filter:
@@ -900,6 +920,9 @@ def main() -> int:
     print()
     
     # --- Validación agregada ---
+    residual_metric = all_resid[0]["residual_metric"] if all_resid else "backward_error"
+    residual_threshold = all_resid[0]["residual_threshold"] if all_resid else None
+    _, max_resid = max(enumerate(all_resid), key=lambda item: item[1]["residual_max"])
     validation = {
         "orthonormality": {
             "orthonormality_ok": all(o["orthonormality_ok"] for o in all_ortho),
@@ -907,8 +930,11 @@ def main() -> int:
             "per_delta": all_ortho,
         },
         "residuals": {
+            "residual_metric": residual_metric,
             "residuals_ok": all(r["residuals_ok"] for r in all_resid),
             "residual_max_global": max(r["residual_max"] for r in all_resid),
+            "residual_argmax_mode_global": max_resid.get("residual_argmax_mode"),
+            "residual_threshold": residual_threshold,
             "per_delta": all_resid,
         },
     }
@@ -930,8 +956,13 @@ def main() -> int:
                 "per_delta": all_ortho_N,
             },
             "residuals_N": {
+                "residual_metric": all_resid_N[0]["residual_metric"],
                 "residuals_ok": all(r["residuals_ok"] for r in all_resid_N),
                 "residual_max_global": max(r["residual_max"] for r in all_resid_N),
+                "residual_argmax_mode_global": max(
+                    all_resid_N, key=lambda item: item["residual_max"]
+                ).get("residual_argmax_mode"),
+                "residual_threshold": all_resid_N[0]["residual_threshold"],
                 "per_delta": all_resid_N,
             },
             "neumann_mode_filter": {
