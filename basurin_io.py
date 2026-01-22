@@ -11,6 +11,33 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def resolve_out_root(out_root: str, runs_root: Path | str = "runs") -> Path:
+    runs_root_path = Path(runs_root).resolve()
+    if out_root == str(runs_root):
+        return runs_root_path
+    candidate = Path(out_root)
+    if not candidate.is_absolute():
+        candidate = (Path.cwd() / candidate).resolve()
+    try:
+        candidate.relative_to(runs_root_path)
+    except ValueError as exc:
+        raise ValueError(
+            f"out_root must be '{runs_root_path.name}' or a subdir under {runs_root_path}"
+        ) from exc
+    return candidate
+
+
+def validate_run_id(run_id: str, out_root: Path) -> None:
+    run_id_path = Path(run_id)
+    if run_id_path.is_absolute() or ".." in run_id_path.parts:
+        raise ValueError("run_id must be a relative path without '..'")
+    run_path = (out_root / run_id).resolve()
+    try:
+        run_path.relative_to(out_root.resolve())
+    except ValueError as exc:
+        raise ValueError("run_id escapes out_root") from exc
+
+
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:

@@ -20,7 +20,6 @@ Nota: no modifica artefactos del stage de alineación; referencia sus hashes.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from dataclasses import dataclass, asdict
@@ -28,19 +27,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
+from basurin_io import (
+    ensure_stage_dirs,
+    resolve_out_root,
+    sha256_file,
+    validate_run_id,
+    write_manifest,
+    write_stage_summary,
+)
+
 __version__ = "0.1.0"
 
 
 def utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def compute_file_hash(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 @dataclass(frozen=True)
@@ -99,7 +99,14 @@ def parse_args() -> Config:
 def main() -> int:
     cfg = parse_args()
 
-    run_root = Path(cfg.out_root) / cfg.run
+    try:
+        out_root = resolve_out_root(cfg.out_root)
+        validate_run_id(cfg.run, out_root)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    run_root = out_root / cfg.run
     in_stage_dir = run_root / cfg.alignment_stage
     in_summary = in_stage_dir / "stage_summary.json"
     in_metrics = in_stage_dir / "outputs" / "metrics.json"
@@ -117,6 +124,10 @@ def main() -> int:
         metrics = json.load(f)
 
     warnings = []
+    upstream_hashes = {
+        "inputs/alignment_stage_summary": sha256_file(in_summary),
+        "inputs/alignment_stage_metrics": sha256_file(in_metrics),
+    }
 
     if summary.get("status") != "OK":
         # propagate aborts
@@ -141,7 +152,7 @@ def main() -> int:
             "upstream": {
                 "stage": cfg.alignment_stage,
                 "summary": str(in_summary),
-                "hash_summary": compute_file_hash(in_summary),
+                "hash_summary": upstream_hashes["inputs/alignment_stage_summary"],
             },
         }
     else:
@@ -263,15 +274,13 @@ def main() -> int:
                 "stage": cfg.alignment_stage,
                 "summary": str(in_summary),
                 "metrics": str(in_metrics),
-                "hash_summary": compute_file_hash(in_summary),
-                "hash_metrics": compute_file_hash(in_metrics),
+                "hash_summary": upstream_hashes["inputs/alignment_stage_summary"],
+                "hash_metrics": upstream_hashes["inputs/alignment_stage_metrics"],
             },
         }
 
     # Escribir stage C7
-    stage_dir = run_root / "contract_C7_bridge"
-    outdir = stage_dir / "outputs"
-    outdir.mkdir(parents=True, exist_ok=True)
+    stage_dir, outdir = ensure_stage_dirs(cfg.run, "contract_C7_bridge", base_dir=out_root)
 
     out_path = outdir / "contract_C7_bridge.json"
     with open(out_path, "w") as f:
@@ -287,33 +296,40 @@ def main() -> int:
             "alignment_stage": cfg.alignment_stage,
             "thresholds": asdict(cfg.thresholds),
         },
+        "results": {
+            "verdict": report["verdict"],
+            "reason": report["reason"],
+            "metrics": report.get("metrics", {}),
+        },
+        "validation_summary": {
+            "checks": report.get("checks", {}),
+            "warnings": warnings,
+            "upstream_status": summary.get("status"),
+        },
         "hashes": {
-            "outputs/contract_C7_bridge.json": compute_file_hash(out_path),
-            "inputs/alignment_stage_summary": compute_file_hash(in_summary),
-            "inputs/alignment_stage_metrics": compute_file_hash(in_metrics),
+            "outputs/contract_C7_bridge.json": sha256_file(out_path),
+            **upstream_hashes,
         },
     }
 
-    with open(stage_dir / "stage_summary.json", "w") as f:
-        json.dump(stage_summary, f, indent=2)
+    summary_path = write_stage_summary(stage_dir, stage_summary)
 
-    manifest = {
-        "stage": "contract_C7_bridge",
-        "version": __version__,
-        "run": cfg.run,
-        "created": utcnow_iso(),
-        "inputs": {
-            "alignment_stage": cfg.alignment_stage,
-            "alignment_summary": str(in_summary),
-            "alignment_metrics": str(in_metrics),
+    write_manifest(
+        stage_dir,
+        {
+            "contract": out_path,
+            "summary": summary_path,
         },
-        "files": {
-            "contract": "outputs/contract_C7_bridge.json",
-            "summary": "stage_summary.json",
+        extra={
+            "version": __version__,
+            "inputs": {
+                "alignment_stage": cfg.alignment_stage,
+                "alignment_summary": str(in_summary),
+                "alignment_metrics": str(in_metrics),
+            },
+            "hashes": upstream_hashes,
         },
-    }
-    with open(stage_dir / "manifest.json", "w") as f:
-        json.dump(manifest, f, indent=2)
+    )
 
     print("=== Contract C7_bridge ===")
     print(f"verdict: {report['verdict']}")
