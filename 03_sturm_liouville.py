@@ -44,6 +44,11 @@ from typing import Literal
 
 import numpy as np
 
+# Residual validation policy (minimal, auditable):
+# - Global max is sensitive to high modes under stiff discretizations (e.g., d=5, z_min=1e-6).
+# - We therefore classify quality using both global max and max over the first K modes.
+RESIDUAL_FIRST_K_DEFAULT = 3
+
 # --- Repo root / runs root (NO depender de cwd) ---
 ROOT_DIR = Path(__file__).resolve().parent
 if str(ROOT_DIR) not in sys.path:
@@ -470,19 +475,46 @@ def validate_residuals(
         denom = max(denom, 1e-300)
         residuals.append(np.linalg.norm(r) / denom)
     
-    residuals = np.array(residuals)
-    argmax_mode = int(np.argmax(residuals))
-    argmax_value = float(residuals[argmax_mode])
+    residuals = np.array(residuals, dtype=float)
+
+    argmax_mode = int(np.argmax(residuals)) if residuals.size else None
+    argmax_value = float(residuals[argmax_mode]) if argmax_mode is not None else None
+
+    # First-K diagnostic (defaults to 3): targets the modes most often consumed downstream.
+    k = int(min(max(1, RESIDUAL_FIRST_K_DEFAULT), residuals.size)) if residuals.size else 0
+    residual_first_k = residuals[:k] if k > 0 else np.array([], dtype=float)
+    residual_max_first_k = float(np.max(residual_first_k)) if residual_first_k.size else 0.0
+    residuals_ok_first_k = bool(residual_max_first_k < residual_threshold) if residual_first_k.size else True
+
+    residual_max = float(np.max(residuals)) if residuals.size else 0.0
+    residuals_ok = bool(residual_max < residual_threshold) if residuals.size else True
+
+    # Status:
+    # - PASS: global passes
+    # - WARN: global fails but first-K passes (typical "high-mode" degradation)
+    # - FAIL: first-K fails (downstream-relevant modes not reliable)
+    if residuals_ok:
+        residual_status = "PASS"
+    elif residuals_ok_first_k:
+        residual_status = "WARN"
+    else:
+        residual_status = "FAIL"
     
     return {
         "residual_metric": "backward_error",
-        "residual_max": float(np.max(residuals)),
-        "residual_mean": float(np.mean(residuals)),
+        "residual_max": residual_max,
+        "residual_mean": float(np.mean(residuals)) if residuals.size else 0.0,
         "residual_per_mode": residuals.tolist(),
         "residual_threshold": residual_threshold,
-        "residuals_ok": bool(np.max(residuals) < residual_threshold),
+        "residuals_ok": residuals_ok,
         "residual_argmax_mode": argmax_mode,
         "residual_argmax_value": argmax_value,
+
+        # New, non-breaking fields:
+        "residual_first_k": k,
+        "residual_max_first_k": residual_max_first_k,
+        "residuals_ok_first_k": residuals_ok_first_k,
+        "residual_status": residual_status,
     }
 
 
