@@ -826,6 +826,7 @@ class Config:
     run: str
     atlas: Optional[str]
     features: Optional[str]
+    features_from_h5: bool = False
     pairing_policy: str = "id"
     n_components: int = 3
     bootstrap_samples: int = 100
@@ -843,6 +844,11 @@ def parse_args() -> Config:
     p.add_argument("--run", required=True, type=str, help="run_id (carpeta bajo runs/<run>/)")
     p.add_argument("--atlas", required=False, type=str, help="Path a atlas.json (X)")
     p.add_argument("--features", required=False, type=str, help="Path a features.json (Y)")
+    p.add_argument(
+        "--features-from-h5",
+        action="store_true",
+        help="Permite fallback explícito a dictionary.h5 (/features/X).",
+    )
     p.add_argument("--pairing-policy", default="id", choices=["id", "order"], help="Cómo parear X y Y (default: id)")
     p.add_argument("--n-components", default=3, type=int, help="CCA components (<=min(dx,dy))")
     p.add_argument("--bootstrap", default=100, type=int, dest="bootstrap_samples")
@@ -858,6 +864,7 @@ def parse_args() -> Config:
         run=a.run,
         atlas=a.atlas,
         features=a.features,
+        features_from_h5=bool(a.features_from_h5),
         pairing_policy=a.pairing_policy,
         n_components=int(a.n_components),
         bootstrap_samples=int(a.bootstrap_samples),
@@ -1031,20 +1038,21 @@ def main() -> int:
                 return path, "h5"
             return path, "json"
 
-        features_json = run_dir / "dictionary" / "outputs" / "features.json"
-        features_npz = run_dir / "dictionary" / "outputs" / "features.npz"
+        features_json = run_dir / "features" / "outputs" / "features.json"
+        legacy_features_json = run_dir / "dictionary" / "outputs" / "features.json"
         dictionary_h5 = run_dir / "dictionary" / "outputs" / "dictionary.h5"
+        assert_within_runs(run_dir, features_json)
+        assert_within_runs(run_dir, legacy_features_json)
+        assert_within_runs(run_dir, dictionary_h5)
         if features_json.exists():
             return features_json, "json"
-        if features_npz.exists():
-            return features_npz, "npz"
-        if dictionary_h5.exists():
+        if legacy_features_json.exists():
+            return legacy_features_json, "json"
+        if cfg.features_from_h5 and dictionary_h5.exists():
             return dictionary_h5, "h5"
         raise FileNotFoundError(
-            "faltan features canónicas: "
-            f"no existe {features_json} ni {features_npz} ni {dictionary_h5}. "
-            f"Genera con: python tools/05_build_features_stage.py --run {cfg.run} "
-            f"y coloca el resultado en {features_json}."
+            "faltan features canónicas. "
+            f"Ejecuta python tools/05_build_features_stage.py --run {cfg.run}"
         )
 
     try:
@@ -1081,8 +1089,7 @@ def main() -> int:
     except (ValueError, RuntimeError) as exc:
         print(
             "ERROR: no se pudieron resolver features canónicas. "
-            f"{exc} Genera con: python tools/05_build_features_stage.py --run {cfg.run} "
-            f"y coloca features.json en runs/{cfg.run}/dictionary/outputs/.",
+            f"{exc} Ejecuta python tools/05_build_features_stage.py --run {cfg.run}",
             file=sys.stderr,
         )
         return 1
