@@ -277,12 +277,22 @@ def main() -> int:
     verdict = "PASS" if all(c.ok for c in checks) else "FAIL"
     stage_dir, outputs_dir = ensure_stage_dirs(args.run, "RUN_VALID")
     run_valid_path = outputs_dir / "run_valid.json"
+    advisories: dict[str, Any] = {}
+    identifiability_path = run_dir / "IDENTIFIABILITY" / "outputs" / "identifiability.json"
+    if identifiability_path.exists():
+        identifiability_payload = _read_json(identifiability_path)
+        advisories["identifiability"] = {
+            "path": str(identifiability_path),
+            "verdict": identifiability_payload.get("verdict"),
+            "scientific_status": identifiability_payload.get("scientific_status"),
+        }
     run_valid_payload = {
         "run": args.run,
         "verdict": verdict,
         "checks": [
             {"id": c.id, "ok": c.ok, "reason": c.reason} for c in checks
         ],
+        "advisories": advisories,
         "inputs": {
             "geometry_path": geometry_path_value,
             "spectrum_path": str(resolved_spectrum),
