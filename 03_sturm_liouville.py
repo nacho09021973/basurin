@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
@@ -42,6 +43,17 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
+
+# --- Repo root / runs root (NO depender de cwd) ---
+ROOT_DIR = Path(__file__).resolve().parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+RUNS_ROOT = Path(os.environ.get("BASURIN_RUNS_ROOT", str(ROOT_DIR / "runs")))
+RUNS_ROOT = RUNS_ROOT.expanduser()
+if not RUNS_ROOT.is_absolute():
+    RUNS_ROOT = (Path.cwd() / RUNS_ROOT).resolve()
+else:
+    RUNS_ROOT = RUNS_ROOT.resolve()
 
 from basurin_io import (
     ensure_stage_dirs,
@@ -204,8 +216,9 @@ def load_geometry(h5_path: Path) -> dict:
 
 def resolve_geometry_json_path(cfg: Config) -> Path:
     if cfg.geometry_json:
-        return Path(cfg.geometry_json)
-    return Path("runs") / cfg.run / "geometry" / "outputs" / "geometry.json"
+        candidate = Path(cfg.geometry_json)
+        return candidate if candidate.is_absolute() else (Path.cwd() / candidate).resolve()
+    return (RUNS_ROOT / cfg.run / "geometry" / "outputs" / "geometry.json").resolve()
 
 
 def _resolve_geometry_numeric_config(
@@ -536,7 +549,7 @@ def write_outputs(
     """
     import h5py
 
-    stage_dir, outputs_dir = ensure_stage_dirs(cfg.run, "spectrum")
+    stage_dir, outputs_dir = ensure_stage_dirs(cfg.run, "spectrum", base_dir=RUNS_ROOT)
     
     # --- spectrum.h5 ---
     h5_path = outputs_dir / "spectrum.h5"
@@ -763,7 +776,7 @@ def main() -> int:
     if cfg.geometry_file:
         try:
             geometry_file_path, geometry_path, input_geometry_absolute, geometry_resolution = resolve_geometry_path(
-                cfg.run, cfg.geometry_file
+                cfg.run, cfg.geometry_file, base_dir=RUNS_ROOT
             )
         except (ValueError, FileNotFoundError):
             geometry_file_path = None
@@ -781,7 +794,7 @@ def main() -> int:
 
         z_min, z_max = _resolve_geometry_numeric_config(cfg, geom_decl)
         compiled = compile_geometry_numeric(geom_decl, cfg.n_z, z_min, z_max)
-        run_dir = Path("runs") / cfg.run
+        run_dir = (RUNS_ROOT / cfg.run).resolve()
         try:
             geometry_path = str(geometry_json_path.relative_to(run_dir))
         except ValueError:
@@ -790,7 +803,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        stage_dir, outputs_dir = ensure_stage_dirs(cfg.run, "spectrum")
+        stage_dir, outputs_dir = ensure_stage_dirs(cfg.run, "spectrum", base_dir=RUNS_ROOT)
         inputs_dir = stage_dir / "inputs"
         inputs_dir.mkdir(parents=True, exist_ok=True)
         geometry_numeric_path = inputs_dir / "geometry_numeric.json"

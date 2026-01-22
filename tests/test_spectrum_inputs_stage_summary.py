@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +34,7 @@ def test_spectrum_stage_summary_includes_geometry_inputs(tmp_path):
         ],
         check=True,
         cwd=tmp_path,
+        env={**os.environ, "BASURIN_RUNS_ROOT": str(tmp_path / "runs")},
     )
 
     summary_path = tmp_path / "runs" / run_id / "spectrum" / "stage_summary.json"
