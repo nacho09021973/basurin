@@ -29,6 +29,7 @@ from typing import Any, Dict
 
 from basurin_io import (
     ensure_stage_dirs,
+    get_run_dir,
     resolve_out_root,
     sha256_file,
     validate_run_id,
@@ -106,7 +107,7 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    run_root = out_root / cfg.run
+    run_root = get_run_dir(cfg.run, base_dir=out_root)
     in_stage_dir = run_root / cfg.alignment_stage
     in_summary = in_stage_dir / "stage_summary.json"
     in_metrics = in_stage_dir / "outputs" / "metrics.json"

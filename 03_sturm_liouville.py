@@ -45,7 +45,7 @@ import numpy as np
 
 from basurin_io import (
     ensure_stage_dirs,
-    get_run_dir,
+    resolve_geometry_path,
     write_manifest,
     write_stage_summary,
     sha256_file,
@@ -156,85 +156,6 @@ def resolve_dual_defaults(cfg: Config) -> None:
 # =============================================================================
 # Carga de geometría
 # =============================================================================
-
-def _format_geometry_path(
-    run_dir: Path,
-    resolved_path: Path,
-    geometry_file: str,
-    is_absolute: bool,
-) -> str:
-    resolved_abs = resolved_path.resolve()
-    run_dir_abs = run_dir.resolve()
-    try:
-        rel_to_run = resolved_abs.relative_to(run_dir_abs)
-    except ValueError:
-        rel_to_run = None
-    if rel_to_run is not None:
-        return str(Path("runs") / run_dir.name / rel_to_run)
-
-    try:
-        rel_to_cwd = resolved_abs.relative_to(Path.cwd().resolve())
-    except ValueError:
-        rel_to_cwd = None
-    if rel_to_cwd is not None:
-        return str(rel_to_cwd)
-
-    return str(resolved_abs) if is_absolute else geometry_file
-
-
-def resolve_geometry_path(run: str, geometry_file: str) -> tuple[Path, str, str | None, str]:
-    """Resuelve la ruta de geometría con anclaje a runs/<run>/geometry/."""
-    run_dir = get_run_dir(run)
-    geo_path = Path(geometry_file)
-    is_absolute = geo_path.is_absolute()
-    starts_with_runs = geometry_file.startswith("runs/")
-
-    if is_absolute or starts_with_runs:
-        resolved = geo_path
-    else:
-        rel_path = Path(geometry_file)
-        if ".." in rel_path.parts:
-            raise ValueError(
-                "geometry_file no puede contener '..'; usa rutas dentro de "
-                f"runs/{run}/geometry/."
-            )
-        base_dir = run_dir / "geometry"
-        resolved = (base_dir / rel_path).resolve()
-        base_resolved = base_dir.resolve()
-        try:
-            resolved.relative_to(base_resolved)
-        except ValueError as exc:
-            raise ValueError(
-                f"geometry_file sale de runs/{run}/geometry/: {geometry_file}"
-            ) from exc
-
-    if not resolved.exists():
-        raise FileNotFoundError(
-            f"No existe geometría en {resolved}. "
-            f"Verifica --geometry-file o genera geometría en runs/{run}/geometry/."
-        )
-
-    resolved_abs = resolved.resolve()
-    geometry_resolution = "absolute" if is_absolute or starts_with_runs else "legacy"
-    if geometry_resolution != "absolute":
-        outputs_dir = (run_dir / "geometry" / "outputs").resolve()
-        try:
-            resolved_abs.relative_to(outputs_dir)
-            geometry_resolution = "canonical"
-        except ValueError:
-            geometry_resolution = "legacy"
-
-    geometry_path = _format_geometry_path(
-        run_dir,
-        resolved_abs,
-        geometry_file,
-        is_absolute,
-    )
-
-    input_geometry_absolute = str(resolved_abs) if is_absolute else None
-    return resolved_abs, geometry_path, input_geometry_absolute, geometry_resolution
-
-
 def load_geometry(h5_path: Path) -> dict:
     """Carga geometría desde H5 (compatible con 01_genera_ads_puro.py)."""
     try:

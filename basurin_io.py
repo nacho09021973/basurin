@@ -92,6 +92,80 @@ def resolve_spectrum_path(run_dir: Path | str) -> Path:
     )
 
 
+def assert_within_runs(run_dir: Path, path: Path) -> None:
+    run_dir_resolved = run_dir.resolve()
+    path_resolved = path.resolve()
+    try:
+        path_resolved.relative_to(run_dir_resolved)
+    except ValueError as exc:
+        raise ValueError(f"Path {path} is not under run dir {run_dir_resolved}") from exc
+
+
+def resolve_geometry_path(run: str, geometry_file: str) -> tuple[Path, str, str | None, str]:
+    """Resolve the geometry path for a run.
+
+    Canonical:
+      runs/<run>/geometry/outputs/<file>
+
+    Legacy (read-only fallback):
+      runs/<run>/geometry/<file>
+    """
+    if ".." in Path(geometry_file).parts:
+        raise ValueError(
+            "geometry_file no puede contener '..'; usa rutas dentro de "
+            f"runs/{run}/geometry/."
+        )
+
+    run_dir = get_run_dir(run)
+    is_absolute = Path(geometry_file).is_absolute()
+    starts_with_runs = geometry_file.startswith("runs/")
+
+    if is_absolute or starts_with_runs:
+        candidate = Path(geometry_file)
+        if not candidate.is_absolute():
+            candidate = (Path.cwd() / candidate).resolve()
+        else:
+            candidate = candidate.resolve()
+
+        assert_within_runs(run_dir, candidate)
+
+        geometry_dir = (run_dir / "geometry").resolve()
+        try:
+            candidate.relative_to(geometry_dir)
+        except ValueError as exc:
+            raise ValueError(
+                f"geometry_file sale de runs/{run}/geometry/: {geometry_file}"
+            ) from exc
+
+        resolved_abs = candidate
+        geometry_path = geometry_file if starts_with_runs else str(resolved_abs)
+        geometry_resolution = "absolute"
+        input_geometry_absolute = str(resolved_abs) if is_absolute else None
+        return resolved_abs, geometry_path, input_geometry_absolute, geometry_resolution
+
+    outputs_dir = run_dir / "geometry" / "outputs"
+    outputs_path = outputs_dir / geometry_file
+    legacy_path = run_dir / "geometry" / geometry_file
+
+    if outputs_path.exists():
+        resolved_abs = outputs_path.resolve()
+        geometry_path = f"runs/{run}/geometry/outputs/{geometry_file}"
+        geometry_resolution = "canonical"
+    elif legacy_path.exists():
+        resolved_abs = legacy_path.resolve()
+        geometry_path = f"runs/{run}/geometry/{geometry_file}"
+        geometry_resolution = "legacy"
+    else:
+        raise FileNotFoundError(
+            "geometry.h5 no encontrado; rutas esperadas: "
+            f"{outputs_path} | {legacy_path}. "
+            f"Verifica --geometry-file o genera geometría en runs/{run}/geometry/outputs/."
+        )
+
+    input_geometry_absolute = None
+    return resolved_abs, geometry_path, input_geometry_absolute, geometry_resolution
+
+
 def _relative_to_stage(stage_dir: Path, path: Path) -> str:
     try:
         return str(path.relative_to(stage_dir))
@@ -104,12 +178,20 @@ def write_manifest(
     artifacts: Mapping[str, Path],
     extra: Mapping[str, Any] | None = None,
 ) -> Path:
+    stage_dir_resolved = stage_dir.resolve()
+    run_dir = stage_dir_resolved.parent
+    if run_dir.parent.name != "runs":
+        raise ValueError(f"stage_dir must be under runs/<run_id>/, got {stage_dir_resolved}")
+    assert_within_runs(run_dir, stage_dir_resolved)
+
     files: dict[str, str] = {}
     hashes: dict[str, str] = {}
     for label, path in artifacts.items():
-        rel = _relative_to_stage(stage_dir, path)
+        assert_within_runs(run_dir, path)
+        resolved_path = path.resolve()
+        rel = _relative_to_stage(stage_dir_resolved, resolved_path)
         files[label] = rel
-        hashes[rel] = sha256_file(path)
+        hashes[rel] = sha256_file(resolved_path)
 
     manifest: dict[str, Any] = {
         "stage": stage_dir.name,

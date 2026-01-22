@@ -122,15 +122,18 @@ El archivo debe contener:
 Si alguno de estos datasets falta, el pipeline se considera **inválido**.
 
 ### Nota operativa importante
-`03_sturm_liouville.py` ancla el argumento `--geometry-file` al directorio:
+`03_sturm_liouville.py` resuelve `--geometry-file` con el canon:
 ```
-runs/<RUN>/geometry/
+runs/<RUN>/geometry/outputs/<archivo>
+```
+y fallback legacy (solo lectura):
+```
+runs/<RUN>/geometry/<archivo>
 ```
 Por tanto:
-- `--geometry-file ads_puro.h5` ✔
-- `--geometry-file runs/<RUN>/geometry/ads_puro.h5` ✘ (duplica ruta)
-
-Esto debe respetarse o corregirse explícitamente en el código.
+- `--geometry-file ads_puro.h5` ✔ (busca primero en outputs/)
+- `--geometry-file runs/<RUN>/geometry/outputs/ads_puro.h5` ✔ (ruta explícita)
+- `--geometry-file runs/<RUN>/geometry/ads_puro.h5` ✔ (legacy, solo lectura)
 
 ---
 
@@ -241,7 +244,7 @@ Este documento constituye el **contrato mínimo** del pipeline BASURIN v1.
 ```mermaid
 flowchart TB
   G01["01 · Generador primario<br/>01_genera_ads_puro.py"]
-  GEO["GEOMETRY STAGE<br/>runs/&lt;RUN&gt;/geometry/ads_puro.h5"]
+  GEO["GEOMETRY STAGE<br/>runs/&lt;RUN&gt;/geometry/outputs/ads_puro.h5"]
 
   S03["03 · Solver Sturm–Liouville<br/>03_sturm_liouville.py"]
   SPEC["SPECTRUM STAGE<br/>runs/&lt;RUN&gt;/spectrum/outputs/spectrum.h5"]
@@ -255,7 +258,5 @@ flowchart TB
   SPEC --> D04
   D04 --> DICT
 ```
-
-
 
 
