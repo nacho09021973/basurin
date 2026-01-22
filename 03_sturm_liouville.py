@@ -191,6 +191,8 @@ def resolve_sweep_defaults(cfg: Config, d: int) -> None:
     """Resuelve defaults legacy para sweep_delta respetando Config frozen."""
     if cfg.mode != "sweep_delta":
         return
+    if "--delta-min" in sys.argv:
+        return
     bf_bound = d / 2.0
     if cfg.delta_min == 1.55 and cfg.delta_min <= bf_bound:
         object.__setattr__(cfg, "delta_min", bf_bound + 1e-3)

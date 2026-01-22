@@ -98,6 +98,7 @@ def compile_geometry_numeric(
     z_min: float,
     z_max: float,
 ) -> dict[str, Any]:
+    d = _resolve_dimension(geom)
     if n_z < 5:
         raise ValueError("n_z debe ser >= 5")
     if z_min <= 0:
@@ -130,7 +131,7 @@ def compile_geometry_numeric(
         "z": [float(v) for v in z],
         "A": [float(v) for v in A],
         "f": [float(v) for v in f],
-        "d": int(geom["d"]),
+        "d": d,
         "L": L,
         "N": int(n_z),
         "z_min": float(z_min),
