@@ -53,17 +53,28 @@ def load_geometry_json(path: Path) -> dict[str, Any]:
         )
 
     d = _resolve_dimension(payload)
-    L = _expect_number(payload.get("L"), "L")
+
+    # Prefer schema: payload["parameters"]
+    params = payload.get("parameters", {})
+    if params is None:
+        params = {}
+    if not isinstance(params, dict):
+        raise ValueError("parameters debe ser un objeto")
+
+    # L: prefer parameters.L, fallback legacy top-level L
+    L_val = params.get("L", payload.get("L"))
+    L = _expect_number(L_val, "L")
     if L <= 0:
         raise ValueError("L debe ser > 0")
 
-    z_min = payload.get("z_min")
+    # z_min / z_max: prefer parameters.{z_min,z_max}, fallback legacy top-level
+    z_min = params.get("z_min", payload.get("z_min"))
     if z_min is not None:
         z_min = _expect_number(z_min, "z_min")
         if z_min <= 0:
             raise ValueError("z_min debe ser > 0")
 
-    z_max = payload.get("z_max")
+    z_max = params.get("z_max", payload.get("z_max"))
     if z_max is not None:
         z_max = _expect_number(z_max, "z_max")
 
@@ -76,6 +87,7 @@ def load_geometry_json(path: Path) -> dict[str, Any]:
         "L": L,
         "z_min": z_min,
         "z_max": z_max,
+        "parameters": params,   # <-- añade esto
         "raw": payload,
     }
 
@@ -95,8 +107,21 @@ def compile_geometry_numeric(
 
     if geom.get("geometry_type") != "ads_like_minimal":
         raise ValueError("Solo se soporta geometry_type=ads_like_minimal")
+    params = geom.get("parameters", {})
+    if "L" in params:
+        L_raw = params.get("L")
+        schema_used = "parameters"
+    elif "L" in geom:
+        L_raw = geom.get("L")
+        schema_used = "legacy_top_level"
+    else:
+        raise ValueError("L faltante: se esperaba parameters.L (o legacy L)")
 
-    L = float(geom["L"])
+    try:
+        L = float(L_raw)
+    except Exception as e:
+        raise ValueError("L debe ser numérico") from e
+
     z = np.linspace(z_min, z_max, n_z, dtype=np.float64)
     A = np.log(L / z)
     f = np.ones_like(z)
