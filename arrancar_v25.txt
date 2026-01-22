@@ -16,38 +16,34 @@ o pasamos a Fase 4.2 / multi-run / robustez.
                       ACTUALIZAR REPO SIN CLONAR
 ===================================================================
 
-Opción A (recomendada): tengo cambios locales y quiero traer lo último sin perder nada
-
-A1) Guardar cambios temporalmente (incluye untracked)
-
-git stash push -u -m "WIP before updating from origin/main"
+Opción A (recomendada): conservar tu commit local y rebasarlo sobre origin/main
 
 
-A2) Actualizar main desde remoto (sin merges)
+A1) Asegura que estás limpio (lo estás: “working tree clean”):
+
+cd ~/basurin/work
+git status
+
+
+A2) Actualiza referencias remotas:
 
 git fetch --all --prune
-git pull --ff-only
 
 
-A3) Recuperar los cambios encima del código actualizado
+A3) Rebase de tu rama sobre el remoto:
 
-git stash pop
+git rebase origin/main
+
+A4) Verifica:
+
+git status
+git log --oneline --decorate -10
+
+A5) Publica tu commit ya “encima” del remoto:
+
+git push --force-with-lease
 
 
-Si hay conflictos: resuélvelos, luego
-
-git add -A
-git commit -m "Resolve conflicts after update"
-
-
-Opción B: mis cambios locales NO importan, quiero volver a limpio y actualizar
-
-Esto borra cambios locales (tracked) y untracked.
-
-git reset --hard
-git clean -fd
-git fetch --all --prune
-git pull --ff-only
 
 Opción C: mis cambios SÍ importan y quiero integrarlos correctamente antes de actualizar
 
