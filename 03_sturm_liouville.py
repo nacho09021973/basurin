@@ -188,6 +188,15 @@ def resolve_dual_defaults(cfg: Config) -> None:
     object.__setattr__(cfg, "bc_ir", cfg.bc_ir_D)
 
 
+def resolve_sweep_defaults(cfg: Config, d: int) -> None:
+    """Resuelve defaults legacy para sweep_delta respetando Config frozen."""
+    if cfg.mode != "sweep_delta":
+        return
+    bf_bound = d / 2.0
+    if cfg.delta_min == 1.55 and cfg.delta_min <= bf_bound:
+        object.__setattr__(cfg, "delta_min", bf_bound + 1e-3)
+
+
 # =============================================================================
 # Carga de geometría
 # =============================================================================
@@ -850,6 +859,7 @@ def main() -> int:
     print()
     
     # Validar config
+    resolve_sweep_defaults(cfg, d)
     validate_config(cfg, d)
     resolve_dual_defaults(cfg)
     
