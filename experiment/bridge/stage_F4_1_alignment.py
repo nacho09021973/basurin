@@ -67,7 +67,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from basurin_io import ensure_stage_dirs, sha256_file, write_manifest, write_stage_summary
+from basurin_io import (
+    ensure_stage_dirs,
+    resolve_out_root,
+    sha256_file,
+    validate_run_id,
+    write_manifest,
+    write_stage_summary,
+)
 from experiment.bridge.pairing import pair_frames
 __version__ = "0.1.0"
 
@@ -852,8 +859,15 @@ def reconcile_ids(
 def main() -> int:
     cfg = parse_args()
 
+    try:
+        out_root = resolve_out_root(cfg.out_root)
+        validate_run_id(cfg.run, out_root)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
     stage_dir, outdir = ensure_stage_dirs(
-        cfg.run, "bridge_f4_1_alignment", base_dir=Path(cfg.out_root)
+        cfg.run, "bridge_f4_1_alignment", base_dir=out_root
     )
 
     atlas_path = Path(cfg.atlas)
@@ -864,6 +878,11 @@ def main() -> int:
     if not features_path.exists():
         print(f"ERROR: no existe features: {features_path}", file=sys.stderr)
         return 1
+
+    input_hashes = {
+        "inputs/atlas": sha256_file(atlas_path),
+        "inputs/features": sha256_file(features_path),
+    }
 
     # Load
     ids_x, X, meta_x = load_feature_json(atlas_path, kind="atlas")
@@ -940,6 +959,8 @@ def main() -> int:
             "pairing": pairing_info,
             "data": {"N": N, "dx": dx, "dy": dy},
             "cleaned_ok_outputs": cleaned_ok_outputs,
+            "config": asdict(cfg),
+            "hashes": dict(input_hashes),
         }
         save_json(outdir / "abort_leakage.json", abort)
         outputs_coherence = {
@@ -960,11 +981,13 @@ def main() -> int:
             "leakage_check": leakage_summary,
             "outputs_coherence": outputs_coherence,
             "hashes": {
-                "inputs/atlas": sha256_file(atlas_path),
-                "inputs/features": sha256_file(features_path),
+                **input_hashes,
                 "outputs/abort_leakage.json": sha256_file(outdir / "abort_leakage.json"),
             }
         })
+        abort["hashes"]["outputs/abort_leakage.json"] = sha256_file(
+            outdir / "abort_leakage.json"
+        )
         write_manifest(
             stage_dir,
             {
@@ -977,6 +1000,7 @@ def main() -> int:
                 "inputs": {"atlas": str(atlas_path), "features": str(features_path)},
                 "outputs_coherence": outputs_coherence,
                 "leakage_check": leakage_summary,
+                "hashes": abort["hashes"],
             },
         )
         print(f"ABORT: {abort_reason}", file=sys.stderr)
@@ -1185,8 +1209,7 @@ def main() -> int:
         "leakage_check": leakage_summary,
         "outputs_coherence": outputs_coherence,
         "hashes": {
-            "inputs/atlas": sha256_file(atlas_path),
-            "inputs/features": sha256_file(features_path),
+            **input_hashes,
             "outputs/alignment_map.json": sha256_file(outdir / "alignment_map.json"),
             "outputs/metrics.json": sha256_file(outdir / "metrics.json"),
             "outputs/degeneracy_per_point.json": sha256_file(outdir / "degeneracy_per_point.json"),
