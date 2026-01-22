@@ -101,7 +101,11 @@ def assert_within_runs(run_dir: Path, path: Path) -> None:
         raise ValueError(f"Path {path} is not under run dir {run_dir_resolved}") from exc
 
 
-def resolve_geometry_path(run: str, geometry_file: str) -> tuple[Path, str, str | None, str]:
+def resolve_geometry_path(
+    run: str,
+    geometry_file: str,
+    base_dir: Path | str = "runs",
+) -> tuple[Path, str, str | None, str]:
     """Resolve the geometry path for a run.
 
     Canonical:
@@ -116,7 +120,7 @@ def resolve_geometry_path(run: str, geometry_file: str) -> tuple[Path, str, str 
             f"runs/{run}/geometry/."
         )
 
-    run_dir = get_run_dir(run)
+    run_dir = get_run_dir(run, base_dir=base_dir)
     is_absolute = Path(geometry_file).is_absolute()
     starts_with_runs = geometry_file.startswith("runs/")
 

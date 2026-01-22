@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +36,7 @@ def _run_sturm_liouville(repo_root: Path, run_id: str, cwd: Path) -> None:
         ],
         check=True,
         cwd=cwd,
+        env={**os.environ, "BASURIN_RUNS_ROOT": str(cwd / "runs")},
     )
 
 

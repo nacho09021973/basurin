@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -30,6 +31,7 @@ def _run_dictionary_pipeline(tmp_path: Path, run_id: str) -> Path:
             "4",
         ],
         cwd=tmp_path,
+        env={**os.environ, "BASURIN_RUNS_ROOT": str(tmp_path / "runs")},
         check=True,
     )
     result = subprocess.run(
