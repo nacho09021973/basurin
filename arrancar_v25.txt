@@ -1,0 +1,135 @@
+
+===================================================================
+                         UBUNTU EJECUTAR
+===================================================================
+
+cd ~/basurin/work
+source .venv/bin/activate
+
+seguimos con interpretación física de los outputs del bridge (degeneracy, CCA, leakage),
+
+o avanzamos con Contrato C7,
+
+o pasamos a Fase 4.2 / multi-run / robustez.
+
+===================================================================
+                      ACTUALIZAR REPO SIN CLONAR
+===================================================================
+
+Opción A (recomendada): tengo cambios locales y quiero traer lo último sin perder nada
+
+A1) Guardar cambios temporalmente (incluye untracked)
+
+git stash push -u -m "WIP before updating from origin/main"
+
+
+A2) Actualizar main desde remoto (sin merges)
+
+git fetch --all --prune
+git pull --ff-only
+
+
+A3) Recuperar los cambios encima del código actualizado
+
+git stash pop
+
+
+Si hay conflictos: resuélvelos, luego
+
+git add -A
+git commit -m "Resolve conflicts after update"
+
+
+Opción B: mis cambios locales NO importan, quiero volver a limpio y actualizar
+
+Esto borra cambios locales (tracked) y untracked.
+
+git reset --hard
+git clean -fd
+git fetch --all --prune
+git pull --ff-only
+
+Opción C: mis cambios SÍ importan y quiero integrarlos correctamente antes de actualizar
+
+C1) Commit local
+
+git add -A
+git commit -m "WIP: local changes"
+
+C2) Actualizar rebasando tu trabajo sobre lo último de origin/main
+
+git fetch --all --prune
+git pull --rebase
+
+C3) Subir si procede
+
+git push
+
+Si durante el rebase hay conflictos:
+
+# resolver conflictos...
+git add -A
+git rebase --continue
+
+Verificación final (siempre)
+
+git status
+git log --oneline --decorate -5
+git stash list
+
+Comando estándar si solo quieres “traer lo último” y estás limpio
+(working tree limpio, sin cambios locales)
+
+cd ~/basurin/work && git fetch --all --prune && git pull --ff-only
+
+
+Nota práctica (para evitar líos recurrentes)
+
+Si trabajas habitualmente sobre main, usa preferentemente Opción A (stash) para cambios no listos.
+Si el cambio está listo para vivir, usa Opción C (commit + rebase).
+Evita git pull sin flags: puede crear merges involuntarios.
+Si quieres, te lo dejo también como un script tools/update_repo.sh con mensajes claros y un modo --discard para la Opción B.
+
+
+==================================================================
+                DATOS PARA CARPETA COMPARTIDA IA
+===================================================================
+
+Siempre en la carpeta compartida:
+
+README.md
+pipeline / arquitectura
+IO_CONTRACTS.md
+scripts 01–04
+tools/run_v1.py + contract_run_valid.py
+basurin_io.py
+tests/
+
+Nunca:
+
+runs/
+outputs
+basura histórica
+experimentos sin contención
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
