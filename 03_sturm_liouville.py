@@ -67,7 +67,6 @@ from experiment.geometry.geometry_from_json import (
     DEFAULT_Z_MIN,
     __version__ as GEOMETRY_COMPILER_VERSION,
     compile_geometry_numeric,
-    load_geometry_json,
     write_geometry_numeric,
 )
 
@@ -228,6 +227,49 @@ def resolve_geometry_json_path(cfg: Config) -> Path:
         candidate = Path(cfg.geometry_json)
         return candidate if candidate.is_absolute() else (Path.cwd() / candidate).resolve()
     return (RUNS_ROOT / cfg.run / "geometry" / "outputs" / "geometry.json").resolve()
+
+
+def geometry_json_to_numeric(geo_json: dict) -> dict:
+    """
+    Normaliza geometry.json (schema canónico) al dict numérico que espera el solver.
+
+    Schema observado:
+      - geo_json["dimension"]  -> d
+      - geo_json["parameters"]["L"] -> L
+      - geo_json["parameters"]["z_min"] -> z_min
+      - geo_json["parameters"]["z_max"] -> z_max
+    """
+    if not isinstance(geo_json, dict):
+        raise ValueError("geometry.json debe ser un objeto JSON (dict)")
+
+    if "dimension" in geo_json or "parameters" in geo_json:
+        if "dimension" not in geo_json:
+            raise ValueError("geometry.json: falta campo 'dimension'")
+        if "parameters" not in geo_json or not isinstance(geo_json["parameters"], dict):
+            raise ValueError("geometry.json: falta objeto 'parameters'")
+
+        p = geo_json["parameters"]
+        for k in ("L", "z_min", "z_max"):
+            if k not in p:
+                raise ValueError(f"geometry.json: falta parameters['{k}']")
+
+        return {
+            "d": int(geo_json["dimension"]),
+            "L": float(p["L"]),
+            "z_min": float(p["z_min"]),
+            "z_max": float(p["z_max"]),
+        }
+
+    for k in ("d", "L", "z_min", "z_max"):
+        if k not in geo_json:
+            raise ValueError(f"geometry.json: falta campo '{k}'")
+
+    return {
+        "d": int(geo_json["d"]),
+        "L": float(geo_json["L"]),
+        "z_min": float(geo_json["z_min"]),
+        "z_max": float(geo_json["z_max"]),
+    }
 
 
 def _resolve_geometry_numeric_config(
@@ -796,13 +838,14 @@ def main() -> int:
         geometry_source_path = geometry_file_path
     elif geometry_json_path.exists():
         try:
-            geom_decl = load_geometry_json(geometry_json_path)
+            geo_json = json.loads(geometry_json_path.read_text())
+            geom_decl = geometry_json_to_numeric(geo_json)
         except (ValueError, FileNotFoundError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
 
         z_min, z_max = _resolve_geometry_numeric_config(cfg, geom_decl)
-        compiled = compile_geometry_numeric(geom_decl, cfg.n_z, z_min, z_max)
+        compiled = compile_geometry_numeric(geo_json, cfg.n_z, z_min, z_max)
         run_dir = (RUNS_ROOT / cfg.run).resolve()
         try:
             geometry_path = str(geometry_json_path.relative_to(run_dir))
@@ -827,7 +870,7 @@ def main() -> int:
                 "z_min": z_min,
                 "z_max": z_max,
             },
-            "geometry": geom_decl["raw"],
+            "geometry": geo_json,
             "numeric": compiled,
         }
         geometry_numeric_sha256 = write_geometry_numeric(geometry_numeric_path, compiled_payload)
