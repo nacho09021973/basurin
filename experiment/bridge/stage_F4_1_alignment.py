@@ -51,6 +51,7 @@ import argparse
 import hashlib
 import json
 import math
+import subprocess
 import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
@@ -230,6 +231,95 @@ def load_feature_json(path: Path, kind: str) -> Tuple[Optional[List[Any]], np.nd
             meta["columns"] = [f"{feature_key}_{i}" for i in range(mat.shape[1])]
 
     return ids, mat, meta
+
+
+def _decode_feature_names(raw: Any) -> Optional[List[str]]:
+    if raw is None:
+        return None
+    try:
+        values = np.asarray(raw)
+    except Exception:
+        return None
+    if values.ndim == 0:
+        return [str(values)]
+    decoded = []
+    for v in values.tolist():
+        if isinstance(v, (bytes, bytearray)):
+            decoded.append(v.decode("utf-8"))
+        else:
+            decoded.append(str(v))
+    return decoded
+
+
+def _normalize_ids(raw: Any) -> Optional[List[Any]]:
+    if raw is None:
+        return None
+    if isinstance(raw, np.ndarray):
+        values = raw.tolist()
+    elif isinstance(raw, (list, tuple)):
+        values = list(raw)
+    else:
+        return [raw]
+    normalized: List[Any] = []
+    for v in values:
+        if isinstance(v, (bytes, bytearray)):
+            normalized.append(v.decode("utf-8"))
+        else:
+            normalized.append(v)
+    return normalized
+
+
+def load_feature_npz(path: Path) -> Tuple[Optional[List[Any]], np.ndarray, Dict[str, Any]]:
+    with np.load(path, allow_pickle=True) as data:
+        if "X" in data:
+            mat = data["X"]
+        elif "features" in data:
+            mat = data["features"]
+        else:
+            raise ValueError(
+                f"features.npz en {path} no contiene 'X' ni 'features'."
+            )
+        ids_raw = data["ids"] if "ids" in data else None
+        feature_names_raw = data["feature_names"] if "feature_names" in data else None
+
+    ids = _normalize_ids(ids_raw)
+    meta: Dict[str, Any] = {}
+    if feature_names_raw is not None:
+        meta["columns"] = _decode_feature_names(feature_names_raw)
+    return ids, np.asarray(mat, dtype=float), meta
+
+
+def load_features_from_dictionary_h5(path: Path) -> Tuple[Optional[List[Any]], np.ndarray, Dict[str, Any]]:
+    """Carga features desde dictionary.h5.
+
+    Convención requerida:
+      - Dataset: /features/X (2D array)
+      - Opcional: /features/ids, /features/feature_names
+    """
+    try:
+        import h5py
+    except ImportError as exc:
+        raise RuntimeError("h5py no disponible; instala h5py para leer dictionary.h5") from exc
+
+    with h5py.File(path, "r") as h5:
+        if "features" not in h5 or not isinstance(h5["features"], h5py.Group):
+            raise ValueError(
+                f"{path} no contiene el grupo requerido /features. Se esperaba /features/X."
+            )
+        grp = h5["features"]
+        if "X" not in grp:
+            raise ValueError(
+                f"{path} no contiene dataset /features/X. "
+                "Define las features en ese dataset para usar este fallback."
+            )
+        mat = np.asarray(grp["X"])
+        ids = _normalize_ids(grp["ids"][...]) if "ids" in grp else None
+        feature_names = _decode_feature_names(grp["feature_names"][...]) if "feature_names" in grp else None
+
+    meta: Dict[str, Any] = {}
+    if feature_names is not None:
+        meta["columns"] = feature_names
+    return ids, np.asarray(mat, dtype=float), meta
 
 
 # =============================================================================
@@ -793,18 +883,17 @@ def save_json(path: Path, obj: Any) -> None:
 
 def add_pairing_trace(per_point: List[Dict[str, Any]], pairing_info: Dict[str, Any]) -> List[Dict[str, Any]]:
     pair_map = pairing_info.get("pair_map")
-    if not pair_map or len(pair_map) != len(per_point):
-        return per_point
     traced = []
-    for row, trace in zip(per_point, pair_map):
+    for idx, row in enumerate(per_point):
+        trace = pair_map[idx] if isinstance(pair_map, list) and idx < len(pair_map) else {}
         merged = dict(row)
         merged.update(
             {
                 "pairing_policy": pairing_info.get("pairing_policy"),
                 "paired_by": pairing_info.get("paired_by"),
-                "atlas_id": trace.get("atlas_id"),
-                "event_id": trace.get("event_id"),
-                "row_i": trace.get("row_i"),
+                "atlas_id": trace.get("atlas_id") if isinstance(trace, dict) else None,
+                "event_id": trace.get("event_id") if isinstance(trace, dict) else None,
+                "row_i": trace.get("row_i", idx) if isinstance(trace, dict) else idx,
             }
         )
         traced.append(merged)
@@ -897,6 +986,22 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
+    if cfg.kill_switch:
+        contract_cmd = [
+            sys.executable,
+            str(_REPO_ROOT / "tools" / "contract_run_valid.py"),
+            "--run",
+            cfg.run,
+        ]
+        result = subprocess.run(contract_cmd, check=False)
+        if result.returncode != 0:
+            print(
+                "ERROR: contract_run_valid falló; abortando F4-1. "
+                "Usa --no-kill-switch para omitir este gate.",
+                file=sys.stderr,
+            )
+            return int(result.returncode) if result.returncode != 0 else 1
+
     stage_dir, outdir = ensure_stage_dirs(
         cfg.run, "bridge_f4_1_alignment", base_dir=out_root
     )
@@ -916,16 +1021,39 @@ def main() -> int:
         assert_within_runs(run_dir, path)
         return path, used_default
 
+    def _resolve_features_path() -> Tuple[Path, str]:
+        if cfg.features:
+            path, _ = _resolve_input(cfg.features, Path("dictionary") / "outputs" / "features.json")
+            kind = path.suffix.lower()
+            if kind == ".npz":
+                return path, "npz"
+            if kind in {".h5", ".hdf5"}:
+                return path, "h5"
+            return path, "json"
+
+        features_json = run_dir / "dictionary" / "outputs" / "features.json"
+        features_npz = run_dir / "dictionary" / "outputs" / "features.npz"
+        dictionary_h5 = run_dir / "dictionary" / "outputs" / "dictionary.h5"
+        if features_json.exists():
+            return features_json, "json"
+        if features_npz.exists():
+            return features_npz, "npz"
+        if dictionary_h5.exists():
+            return dictionary_h5, "h5"
+        raise FileNotFoundError(
+            "faltan features canónicas: "
+            f"no existe {features_json} ni {features_npz} ni {dictionary_h5}. "
+            f"Genera con: python tools/05_build_features_stage.py --run {cfg.run} "
+            f"y coloca el resultado en {features_json}."
+        )
+
     try:
         atlas_path, _ = _resolve_input(
             cfg.atlas,
             Path("dictionary") / "outputs" / "atlas.json",
         )
-        features_path, _ = _resolve_input(
-            cfg.features,
-            Path("features") / "outputs" / "features.json",
-        )
-    except ValueError as exc:
+        features_path, features_kind = _resolve_features_path()
+    except (ValueError, FileNotFoundError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
@@ -933,13 +1061,8 @@ def main() -> int:
         print(f"ERROR: no existe atlas: {atlas_path}", file=sys.stderr)
         return 1
     if not features_path.exists():
-        print(
-            f"ERROR: Primero ejecutar tools/05_build_features_stage.py --run {cfg.run}",
-            file=sys.stderr,
-        )
+        print(f"ERROR: no existe features: {features_path}", file=sys.stderr)
         return 1
-
-    _load_sklearn()
 
     input_hashes = {
         "inputs/atlas": sha256_file(atlas_path),
@@ -948,7 +1071,23 @@ def main() -> int:
 
     # Load
     ids_x, X, meta_x = load_feature_json(atlas_path, kind="atlas")
-    ids_y, Y, meta_y = load_feature_json(features_path, kind="ringdown")
+    try:
+        if features_kind == "npz":
+            ids_y, Y, meta_y = load_feature_npz(features_path)
+        elif features_kind == "h5":
+            ids_y, Y, meta_y = load_features_from_dictionary_h5(features_path)
+        else:
+            ids_y, Y, meta_y = load_feature_json(features_path, kind="ringdown")
+    except (ValueError, RuntimeError) as exc:
+        print(
+            "ERROR: no se pudieron resolver features canónicas. "
+            f"{exc} Genera con: python tools/05_build_features_stage.py --run {cfg.run} "
+            f"y coloca features.json en runs/{cfg.run}/dictionary/outputs/.",
+            file=sys.stderr,
+        )
+        return 1
+
+    _load_sklearn()
 
     remap_info = {"applied": False, "reason": None}
     if cfg.pairing_policy == "id":
@@ -1059,7 +1198,11 @@ def main() -> int:
             extra={
                 "version": __version__,
                 "status": "ABORT",
-                "inputs": {"atlas": str(atlas_path), "features": str(features_path)},
+                "inputs": {
+                    "atlas": str(atlas_path),
+                    "features": str(features_path),
+                    "features_kind": features_kind,
+                },
                 "outputs_coherence": outputs_coherence,
                 "leakage_check": leakage_summary,
                 "hashes": abort["hashes"],
@@ -1308,6 +1451,7 @@ def main() -> int:
             "inputs": {
                 "atlas": str(atlas_path),
                 "features": str(features_path),
+                "features_kind": features_kind,
             },
             "outputs_coherence": outputs_coherence,
             "leakage_check": leakage_summary,

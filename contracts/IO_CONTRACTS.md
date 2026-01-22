@@ -3,30 +3,32 @@
 ## Run root
 All outputs MUST live under:
 
-runs/<experiment>/<stage>/
+runs/<run_id>/
 
 ## Mandatory files per stage
 Each stage MUST write:
 
-- runs/<experiment>/<stage>/stage_summary.json
-- runs/<experiment>/<stage>/manifest.json
+- runs/<run_id>/<stage>/stage_summary.json
+- runs/<run_id>/<stage>/manifest.json
 
 ## Manifest schema (minimal)
 `manifest.json` MUST include:
 
 - "stage": <stage_name>
-- "experiment": <experiment>
-- "created_utc": ISO8601
-- "artifacts": { <artifact_name>: <relative_path_under_run_root> }
+- "run": <run_id>
+- "created": ISO8601 (UTC)
+- "version": <string>
+- "files": { <label>: <relative_path_under_stage_dir> }
 
-All artifact paths MUST be relative to `runs/<experiment>/`.
+All artifact paths MUST be relative to the stage directory
+(`runs/<run_id>/<stage>/`).
 
 ## Data outputs
 All data files MUST be placed under:
 
-runs/<experiment>/<stage>/outputs/
+runs/<run_id>/<stage>/outputs/
 
-No stage may write outside `runs/<experiment>/`.
+No stage may write outside `runs/<run_id>/`.
 
 ## bridge_f4_1_alignment outputs
 `degeneracy_per_point.json` entries include audit fields for pairing:

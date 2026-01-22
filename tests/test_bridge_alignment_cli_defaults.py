@@ -64,4 +64,5 @@ def test_bridge_alignment_defaults_require_features_stage(tmp_path: Path) -> Non
     )
 
     assert result.returncode != 0
-    assert "Primero ejecutar tools/05_build_features_stage.py --run" in result.stderr
+    assert "tools/05_build_features_stage.py --run" in result.stderr
+    assert "dictionary.h5" in result.stderr or "features.json" in result.stderr
