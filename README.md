@@ -35,3 +35,12 @@ pip install --upgrade pip
 # pip install -r requirements.txt
 # Si existe pyproject.toml:
 # pip install -e .
+```
+
+## Runner v1 (pipeline mínimo 01→02b→03→04→RUN_VALID)
+
+Ejecuta el runner canónico desde `tools/run_v1.py`:
+
+```bash
+python tools/run_v1.py --run <run_id>
+```
