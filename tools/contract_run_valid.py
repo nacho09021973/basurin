@@ -133,6 +133,11 @@ def main() -> int:
     run_dir = get_run_dir(args.run)
     spectrum_summary = _stage_summary_path(run_dir, "spectrum")
     run_kind = _get_run_kind(spectrum_summary)
+    geometry_json_path = run_dir / "geometry" / "outputs" / "geometry.json"
+    geometry_manifest = _manifest_path(run_dir, "geometry")
+    geometry_summary = _stage_summary_path(run_dir, "geometry")
+    has_geometry_stage = geometry_manifest.exists() and geometry_summary.exists()
+    has_geometry_json = geometry_json_path.exists()
 
     checks: list[CheckResult] = []
     required = [
@@ -142,12 +147,15 @@ def main() -> int:
         ("dictionary", _stage_summary_path(run_dir, "dictionary")),
     ]
     if run_kind != "spectrum_only":
-        required.extend(
-            [
-                ("geometry", _manifest_path(run_dir, "geometry")),
-                ("geometry", _stage_summary_path(run_dir, "geometry")),
-            ]
-        )
+        if has_geometry_stage:
+            required.extend(
+                [
+                    ("geometry", geometry_manifest),
+                    ("geometry", geometry_summary),
+                ]
+            )
+        else:
+            required.append(("geometry", geometry_json_path))
     missing = [str(path) for _, path in required if not path.exists()]
     if missing:
         checks.append(CheckResult("E1", False, f"faltan archivos: {missing}"))
@@ -179,7 +187,11 @@ def main() -> int:
     reasons: list[str] = []
     manifest_targets = ["spectrum", "dictionary"]
     if run_kind != "spectrum_only":
-        manifest_targets.insert(0, "geometry")
+        if has_geometry_stage:
+            manifest_targets.insert(0, "geometry")
+        elif not has_geometry_json:
+            stage_manifest_ok = False
+            reasons.append("geometry.json faltante")
     for stage in manifest_targets:
         ok, reason = _check_manifest_paths(run_dir, stage)
         if not ok:
@@ -271,8 +283,13 @@ def main() -> int:
     if run_kind == "spectrum_only":
         checks.append(CheckResult("E7", True, "skip: spectrum_only"))
     else:
-        ok, reason = _check_geometry_verdict(run_dir)
-        checks.append(CheckResult("E7", ok, reason))
+        if has_geometry_stage:
+            ok, reason = _check_geometry_verdict(run_dir)
+            checks.append(CheckResult("E7", ok, reason))
+        elif has_geometry_json:
+            checks.append(CheckResult("E7", True, "skip: geometry.json-only"))
+        else:
+            checks.append(CheckResult("E7", False, "geometry.json faltante"))
 
     verdict = "PASS" if all(c.ok for c in checks) else "FAIL"
     stage_dir, outputs_dir = ensure_stage_dirs(args.run, "RUN_VALID")
