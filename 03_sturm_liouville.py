@@ -88,6 +88,7 @@ class Config:
     run: str
     geometry_json: str | None = None
     geometry_file: str = "ads_puro.h5"
+    geometry_file_provided: bool = False
     mode: Literal["sweep_delta", "fixed_mass"] = "sweep_delta"
     dual_spectrum: bool = False
     run_kind: Literal["geometry_pipeline"] = "geometry_pipeline"
@@ -184,7 +185,10 @@ def parse_args() -> Config:
     )
     
     args = p.parse_args()
-    cfg = Config(**{k: v for k, v in vars(args).items()})
+    geometry_file_provided = any(
+        flag in sys.argv for flag in ("--geometry-file", "--geometry-h5")
+    )
+    cfg = Config(**{k: v for k, v in vars(args).items()}, geometry_file_provided=geometry_file_provided)
 
     # Si Config es frozen, esto es seguro; si no, también funciona.
     object.__setattr__(cfg, "residual_threshold", float(args.residual_threshold))
@@ -903,13 +907,22 @@ def main() -> int:
             geometry_file_path, geometry_path, input_geometry_absolute, geometry_resolution = resolve_geometry_path(
                 cfg.run, cfg.geometry_file, base_dir=RUNS_ROOT
             )
-        except (ValueError, FileNotFoundError):
+        except (ValueError, FileNotFoundError) as exc:
+            if cfg.geometry_file_provided:
+                print(f"ERROR: {exc}", file=sys.stderr)
+                return 2
             geometry_file_path = None
 
     if geometry_file_path is not None and geometry_file_path.exists():
         geometry_sha256 = sha256_file(geometry_file_path)
         geo = load_geometry(geometry_file_path)
         geometry_source_path = geometry_file_path
+    elif geometry_file_path is not None and cfg.geometry_file_provided:
+        print(
+            f"ERROR: geometry-file no encontrado: {geometry_file_path}",
+            file=sys.stderr,
+        )
+        return 2
     elif geometry_json_path.exists():
         try:
             geom_decl = load_geometry_json(geometry_json_path)

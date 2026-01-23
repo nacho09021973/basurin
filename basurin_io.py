@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -184,17 +185,20 @@ def write_manifest(
 ) -> Path:
     stage_dir_resolved = stage_dir.resolve()
     run_dir = stage_dir_resolved.parent
-    runs_root = None
-    for parent in (stage_dir_resolved,) + tuple(stage_dir_resolved.parents):
-        if parent.name == "runs":
-            runs_root = parent
-            break
-    if runs_root is None:
-        raise ValueError(f"stage_dir must be under a runs/ directory, got {stage_dir_resolved}")
+    env_runs_root = None
+    if "BASURIN_RUNS_ROOT" in os.environ:
+        env_runs_root = Path(os.environ["BASURIN_RUNS_ROOT"]).expanduser()
+        if not env_runs_root.is_absolute():
+            env_runs_root = (Path.cwd() / env_runs_root).resolve()
+        else:
+            env_runs_root = env_runs_root.resolve()
+    runs_root = env_runs_root if env_runs_root is not None else run_dir.parent
     try:
         run_dir.relative_to(runs_root)
     except ValueError as exc:
-        raise ValueError(f"stage_dir must be under runs/<run_id>/, got {stage_dir_resolved}") from exc
+        raise ValueError(
+            f"stage_dir must be under {runs_root}/<run_id>/, got {stage_dir_resolved}"
+        ) from exc
     assert_within_runs(run_dir, stage_dir_resolved)
 
     files: dict[str, str] = {}

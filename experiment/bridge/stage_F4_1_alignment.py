@@ -85,54 +85,9 @@ def utcnow_iso() -> str:
 # Parsing de inputs
 # =============================================================================
 
-def _normalize_records(obj: Any, key_vec: str) -> Tuple[Optional[List[Any]], Optional[np.ndarray]]:
-    """Intenta extraer (ids, matrix) de varias formas."""
-    if isinstance(obj, dict):
-        # Forma {"X": ..., "ids": ...}
-        if key_vec.upper() in obj and "ids" in obj:
-            ids = obj["ids"]
-            mat = np.asarray(obj[key_vec.upper()], dtype=float)
-            return ids, mat
-        if key_vec in obj and "ids" in obj:
-            ids = obj["ids"]
-            mat = np.asarray(obj[key_vec], dtype=float)
-            return ids, mat
-
-        # Forma {"points": [...]}, {"events": [...]}
-        for k in ["points", "events", "data", "rows"]:
-            if k in obj and isinstance(obj[k], list):
-                obj = obj[k]
-                break
-
-    if isinstance(obj, list):
-        ids = []
-        rows = []
-        for r in obj:
-            if not isinstance(r, dict):
-                return None, None
-            rid = r.get("id", r.get("uid", r.get("name")))
-            vec = r.get(key_vec)
-            if vec is None:
-                # tolerar nombres alternativos
-                vec = r.get(key_vec.upper())
-            if vec is None and key_vec == "x":
-                vec = r.get("features", r.get("vector"))
-            if vec is None and isinstance(r.get("theories"), dict):
-                theories = r["theories"]
-                if key_vec in theories:
-                    vec = theories[key_vec]
-                elif key_vec.upper() in theories:
-                    vec = theories[key_vec.upper()]
-                elif len(theories) == 1:
-                    vec = next(iter(theories.values()))
-            if vec is None:
-                return None, None
-            ids.append(rid)
-            rows.append(vec)
-        mat = np.asarray(rows, dtype=float)
-        return ids, mat
-
-    return None, None
+def _contract_error(message: str) -> None:
+    print(f"ERROR: {message}", file=sys.stderr)
+    raise SystemExit(2)
 
 
 def _coerce_vector(vec: Any) -> Optional[List[float]]:
@@ -156,87 +111,119 @@ def _load_sklearn() -> None:
     StandardScaler = _StandardScaler
 
 
-def load_feature_json(path: Path, kind: str) -> Tuple[Optional[List[Any]], np.ndarray, Dict[str, Any]]:
+def _resolve_feature_key(obj: Any, kind: str, feature_key_hint: Optional[str]) -> str:
+    if isinstance(obj, dict):
+        meta = obj.get("meta")
+        if isinstance(meta, dict) and meta.get("feature_key"):
+            return str(meta.get("feature_key"))
+    if feature_key_hint:
+        return str(feature_key_hint)
+    if kind == "atlas":
+        return "ratios"
+    if kind in {"features", "ringdown"}:
+        return "tangentes_locales_v1"
+    _contract_error(f"kind inválido: {kind}")
+    return ""
+
+
+def _extract_meta(obj: Any) -> Dict[str, Any]:
+    meta: Dict[str, Any] = {}
+    if not isinstance(obj, dict):
+        return meta
+    if "meta" in obj and isinstance(obj["meta"], dict):
+        meta.update(obj["meta"])
+    for mk in ["feature_key", "k", "dim", "source", "schema_version", "created"]:
+        if mk in obj:
+            meta[mk] = obj[mk]
+    if "columns" in obj:
+        meta["columns"] = obj["columns"]
+    if "feature_names" in obj and "columns" not in meta:
+        meta["columns"] = obj["feature_names"]
+    return meta
+
+
+def _coerce_matrix(rows: Any, path: Path, key_label: str) -> np.ndarray:
+    try:
+        mat = np.asarray(rows, dtype=float)
+    except Exception as exc:
+        _contract_error(f"Formato inválido en {path}: '{key_label}' no es matriz numérica ({exc}).")
+    if mat.ndim != 2:
+        _contract_error(f"Formato inválido en {path}: '{key_label}' debe ser 2D.")
+    return mat
+
+
+def load_feature_json(
+    path: Path,
+    kind: str,
+    feature_key_hint: Optional[str] = None,
+) -> Tuple[Optional[List[Any]], np.ndarray, Dict[str, Any]]:
     """Carga JSON y devuelve ids (si existen), matriz y metadatos mínimos."""
     with open(path, "r") as f:
         obj = json.load(f)
 
-    if kind == "atlas":
-        key = "x"
-    elif kind == "ringdown":
-        key = "y"
-    else:
-        raise ValueError(kind)
+    key_vec = "x" if kind == "atlas" else "y"
+    feature_key = _resolve_feature_key(obj, kind, feature_key_hint)
+    meta = _extract_meta(obj)
+    if feature_key and "feature_key" not in meta:
+        meta["feature_key"] = feature_key
 
-    if kind == "atlas" and isinstance(obj, dict):
-        for key in ["points", "theories"]:
-            if key in obj and isinstance(obj[key], list):
-                ids = []
-                rows = []
-                for point in obj.get(key, []):
-                    if not isinstance(point, dict):
-                        continue
-                    rid = point.get("id", point.get("uid", point.get("name")))
-                    vec = point.get(
-                        "features",
-                        point.get("ratios", point.get("vector", point.get("x"))),
-                    )
-                    vec_list = _coerce_vector(vec)
-                    if vec_list is None:
-                        continue
-                    ids.append(rid)
-                    rows.append(vec_list)
-                if rows:
-                    mat = np.asarray(rows, dtype=float)
-                    meta = {
-                        "feature_key": obj.get("feature_key"),
-                        "source_atlas": obj.get("source_atlas"),
-                        "n_points": obj.get("n_points"),
-                    }
-                    if "columns" in obj:
-                        meta["columns"] = obj.get("columns")
-                    if "columns" not in meta and meta.get("feature_key"):
-                        meta["columns"] = [f"{meta['feature_key']}_{i}" for i in range(mat.shape[1])]
-                    return ids, mat, meta
+    if isinstance(obj, dict) and "ids" in obj:
+        for candidate in (key_vec, key_vec.upper()):
+            if candidate in obj:
+                ids = obj["ids"]
+                mat = _coerce_matrix(obj[candidate], path, candidate)
+                if ids is not None and len(ids) != mat.shape[0]:
+                    _contract_error(f"{path}: ids no coincide con filas de '{candidate}'.")
+                if "columns" not in meta and meta.get("feature_key"):
+                    meta["columns"] = [f"{meta['feature_key']}_{i}" for i in range(mat.shape[1])]
+                return ids, mat, meta
 
-    if kind == "ringdown" and isinstance(obj, dict):
-        if "X" in obj and "ids" in obj:
-            ids = obj["ids"]
-            mat = np.asarray(obj["X"], dtype=float)
-            meta: Dict[str, Any] = {}
-            if "feature_names" in obj and "columns" not in meta:
-                meta["columns"] = obj.get("feature_names")
-            return ids, mat, meta
-        if "x" in obj and "ids" in obj:
-            ids = obj["ids"]
-            mat = np.asarray(obj["x"], dtype=float)
-            meta = {}
-            if "feature_names" in obj and "columns" not in meta:
-                meta["columns"] = obj.get("feature_names")
-            return ids, mat, meta
-
-    ids, mat = _normalize_records(obj, key)
-    if mat is None:
-        raise ValueError(
-            f"Formato no reconocido en {path}. Se esperaba lista de dicts con '{key}' (o theories) o dict con '{key.upper()}'/ids."  # noqa
-        )
-
-    meta: Dict[str, Any] = {}
+    rows = None
     if isinstance(obj, dict):
-        if "meta" in obj and isinstance(obj["meta"], dict):
-            meta.update(obj["meta"])
-        for mk in ["feature_key", "k", "dim", "source", "schema_version", "created"]:
-            if mk in obj:
-                meta[mk] = obj[mk]
-        if "columns" in obj:
-            meta["columns"] = obj["columns"]
-        if "feature_names" in obj and "columns" not in meta:
-            meta["columns"] = obj["feature_names"]
+        for k in ["points", "events", "rows", "data"]:
+            if isinstance(obj.get(k), list):
+                rows = obj[k]
+                break
+    elif isinstance(obj, list):
+        rows = obj
 
-    if "columns" not in meta and "feature_key" in meta and mat is not None:
-        feature_key = meta.get("feature_key")
-        if feature_key:
-            meta["columns"] = [f"{feature_key}_{i}" for i in range(mat.shape[1])]
+    if isinstance(rows, list):
+        ids: List[Any] = []
+        vectors: List[List[float]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                _contract_error(f"{path}: filas deben ser dicts con id y '{key_vec}'.")
+            rid = row.get("id", row.get("uid", row.get("name")))
+            vec = row.get(key_vec, row.get(key_vec.upper()))
+            if vec is None and key_vec == "x":
+                vec = row.get("features", row.get("vector"))
+            if vec is None and isinstance(row.get("theories"), dict):
+                theories = row["theories"]
+                if feature_key in theories:
+                    vec = theories[feature_key]
+                elif len(theories) == 1:
+                    only_key, only_val = next(iter(theories.items()))
+                    vec = only_val
+                    if "feature_key" not in meta:
+                        meta["feature_key"] = only_key
+                else:
+                    _contract_error(f"{path}: theories no contiene '{feature_key}'.")
+            if vec is None:
+                _contract_error(f"{path}: falta vector '{key_vec}' en fila.")
+            vec_list = _coerce_vector(vec)
+            if vec_list is None:
+                _contract_error(f"{path}: vector '{key_vec}' inválido.")
+            ids.append(rid)
+            vectors.append(vec_list)
+        mat = _coerce_matrix(vectors, path, key_vec)
+        if "columns" not in meta and meta.get("feature_key"):
+            meta["columns"] = [f"{meta['feature_key']}_{i}" for i in range(mat.shape[1])]
+        return ids, mat, meta
+
+    _contract_error(
+        f"Formato no reconocido en {path}. Se esperaba dict con ids+{key_vec.upper()} o lista de dicts con '{key_vec}'/theories."
+    )
+    raise SystemExit(2)
 
     return ids, mat, meta
 
@@ -836,6 +823,8 @@ class Config:
     run_y: str
     atlas: Optional[str]
     features: Optional[str]
+    atlas_feature_key: Optional[str] = None
+    features_feature_key: Optional[str] = None
     features_from_h5: bool = False
     pairing_policy: str = "id"
     n_components: int = 3
@@ -857,6 +846,8 @@ def parse_args() -> Config:
     p.add_argument("--allow-self-alignment", action="store_true", help="Permite run-x == run-y (no recomendado)")
     p.add_argument("--atlas", required=False, type=str, help="Path a atlas.json (X)")
     p.add_argument("--features", required=False, type=str, help="Path a features.json (Y)")
+    p.add_argument("--atlas-feature-key", required=False, type=str, help="Feature key override para atlas (X)")
+    p.add_argument("--features-feature-key", required=False, type=str, help="Feature key override para features (Y)")
     p.add_argument(
         "--features-from-h5",
         action="store_true",
@@ -893,6 +884,8 @@ def parse_args() -> Config:
         run_y=run_y,
         atlas=a.atlas,
         features=a.features,
+        atlas_feature_key=a.atlas_feature_key,
+        features_feature_key=a.features_feature_key,
         features_from_h5=bool(a.features_from_h5),
         pairing_policy=a.pairing_policy,
         n_components=int(a.n_components),
@@ -1113,14 +1106,22 @@ def main() -> int:
     }
 
     # Load
-    ids_x, X, meta_x = load_feature_json(atlas_path, kind="atlas")
+    ids_x, X, meta_x = load_feature_json(
+        atlas_path,
+        kind="atlas",
+        feature_key_hint=cfg.atlas_feature_key,
+    )
     try:
         if features_kind == "npz":
             ids_y, Y, meta_y = load_feature_npz(features_path)
         elif features_kind == "h5":
             ids_y, Y, meta_y = load_features_from_dictionary_h5(features_path)
         else:
-            ids_y, Y, meta_y = load_feature_json(features_path, kind="ringdown")
+            ids_y, Y, meta_y = load_feature_json(
+                features_path,
+                kind="features",
+                feature_key_hint=cfg.features_feature_key,
+            )
     except (ValueError, RuntimeError) as exc:
         print(
             "ERROR: no se pudieron resolver features canónicas. "
@@ -1171,6 +1172,9 @@ def main() -> int:
     if not leakage.get("executed"):
         should_abort = True
         abort_reason = leakage.get("reason") or "LEAKAGE_CHECK_NOT_EXECUTED"
+    elif leakage.get("feature_key_match") or leakage.get("columns_match"):
+        should_abort = True
+        abort_reason = leakage.get("reason") or "LEAKAGE_SUSPECTED"
     elif cfg.kill_switch and (not leakage.get("ok")):
         should_abort = True
         abort_reason = leakage.get("reason")
