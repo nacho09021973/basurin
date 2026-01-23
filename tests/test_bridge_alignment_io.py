@@ -1,3 +1,9 @@
+"""Tests de IO para stage de bridge alignment.
+
+Cambios para gobernanza BASURIN:
+- Todos los inputs se escriben bajo runs/pytest__<id>/inputs/ (no /tmp/)
+- Todas las invocaciones CLI incluyen --no-kill-switch para bypass del gate contract_run_valid
+"""
 import json
 import subprocess
 import sys
@@ -9,7 +15,7 @@ import pytest
 
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2))
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def _corrs_within_bounds(corrs: list[float]) -> bool:
@@ -21,7 +27,8 @@ def test_bridge_alignment_runs_with_features_points(tmp_path: Path) -> None:
 
     run_root = Path("runs") / f"pytest__{tmp_path.name}"
     run_root.mkdir(parents=True, exist_ok=True)
-    input_dir = tmp_path / "inputs"
+    # GOBERNANZA: inputs bajo run_root (no tmp_path)
+    input_dir = run_root / "inputs"
     input_dir.mkdir(parents=True, exist_ok=True)
 
     rng = np.random.default_rng(9)
@@ -58,8 +65,8 @@ def test_bridge_alignment_runs_with_features_points(tmp_path: Path) -> None:
     _write_json(atlas_path, atlas)
     _write_json(features_path, features)
 
-    stage_path = Path(__file__).resolve().parents[1] / "experiment" / "bridge" / "stage_F4_1_alignment.py"
-    repo_root = Path(__file__).resolve().parents[1]
+    stage_path = Path(__file__).resolve().parents[0] / "experiment" / "bridge" / "stage_F4_1_alignment.py"
+    repo_root = Path(__file__).resolve().parents[0]
     result = subprocess.run(
         [
             sys.executable,
@@ -70,6 +77,7 @@ def test_bridge_alignment_runs_with_features_points(tmp_path: Path) -> None:
             str(atlas_path),
             "--features",
             str(features_path),
+            "--no-kill-switch",  # GOBERNANZA: bypass contract_run_valid
             "--bootstrap",
             "2",
             "--perm",
@@ -107,7 +115,8 @@ def test_bridge_alignment_aborts_on_matching_feature_key(tmp_path: Path) -> None
 
     run_root = Path("runs") / f"pytest__{tmp_path.name}"
     run_root.mkdir(parents=True, exist_ok=True)
-    input_dir = tmp_path / "inputs"
+    # GOBERNANZA: inputs bajo run_root (no tmp_path)
+    input_dir = run_root / "inputs"
     input_dir.mkdir(parents=True, exist_ok=True)
 
     rng = np.random.default_rng(3)
@@ -135,8 +144,8 @@ def test_bridge_alignment_aborts_on_matching_feature_key(tmp_path: Path) -> None
     _write_json(atlas_path, atlas)
     _write_json(features_path, features)
 
-    stage_path = Path(__file__).resolve().parents[1] / "experiment" / "bridge" / "stage_F4_1_alignment.py"
-    repo_root = Path(__file__).resolve().parents[1]
+    stage_path = Path(__file__).resolve().parents[0] / "experiment" / "bridge" / "stage_F4_1_alignment.py"
+    repo_root = Path(__file__).resolve().parents[0]
     result = subprocess.run(
         [
             sys.executable,
@@ -147,6 +156,7 @@ def test_bridge_alignment_aborts_on_matching_feature_key(tmp_path: Path) -> None
             str(atlas_path),
             "--features",
             str(features_path),
+            "--no-kill-switch",  # GOBERNANZA: bypass contract_run_valid
             "--bootstrap",
             "1",
             "--perm",
@@ -179,7 +189,8 @@ def test_bridge_alignment_filters_constant_columns(tmp_path: Path) -> None:
 
     run_root = Path("runs") / f"pytest__{tmp_path.name}"
     run_root.mkdir(parents=True, exist_ok=True)
-    input_dir = tmp_path / "inputs"
+    # GOBERNANZA: inputs bajo run_root (no tmp_path)
+    input_dir = run_root / "inputs"
     input_dir.mkdir(parents=True, exist_ok=True)
 
     rng = np.random.default_rng(13)
@@ -208,8 +219,8 @@ def test_bridge_alignment_filters_constant_columns(tmp_path: Path) -> None:
     _write_json(atlas_path, atlas)
     _write_json(features_path, features)
 
-    stage_path = Path(__file__).resolve().parents[1] / "experiment" / "bridge" / "stage_F4_1_alignment.py"
-    repo_root = Path(__file__).resolve().parents[1]
+    stage_path = Path(__file__).resolve().parents[0] / "experiment" / "bridge" / "stage_F4_1_alignment.py"
+    repo_root = Path(__file__).resolve().parents[0]
     result = subprocess.run(
         [
             sys.executable,
@@ -220,6 +231,7 @@ def test_bridge_alignment_filters_constant_columns(tmp_path: Path) -> None:
             str(atlas_path),
             "--features",
             str(features_path),
+            "--no-kill-switch",  # GOBERNANZA: bypass contract_run_valid
             "--bootstrap",
             "1",
             "--perm",

@@ -1,3 +1,9 @@
+"""Tests de integración para pairing policy en stage de alignment.
+
+Cambios para gobernanza BASURIN:
+- Todos los inputs se escriben bajo runs/pytest__<id>/inputs/ (no /tmp/)
+- Ya tenía --no-kill-switch, mantenido
+"""
 import json
 import subprocess
 import sys
@@ -10,7 +16,8 @@ def test_stage_order_policy_ignores_ids(tmp_path: Path) -> None:
     pytest.importorskip("sklearn")
     run_root = Path("runs") / f"pytest__{tmp_path.name}"
     run_root.mkdir(parents=True, exist_ok=True)
-    input_dir = tmp_path / "inputs"
+    # GOBERNANZA: inputs bajo run_root (no tmp_path)
+    input_dir = run_root / "inputs"
     input_dir.mkdir(parents=True, exist_ok=True)
 
     atlas_path = input_dir / "atlas_points.json"
@@ -33,10 +40,10 @@ def test_stage_order_policy_ignores_ids(tmp_path: Path) -> None:
         ]
     }
 
-    atlas_path.write_text(json.dumps(atlas_payload))
-    features_path.write_text(json.dumps(features_payload))
+    atlas_path.write_text(json.dumps(atlas_payload), encoding="utf-8")
+    features_path.write_text(json.dumps(features_payload), encoding="utf-8")
 
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[0]
     stage_path = repo_root / "experiment" / "bridge" / "stage_F4_1_alignment.py"
     result = subprocess.run(
         [
@@ -60,7 +67,7 @@ def test_stage_order_policy_ignores_ids(tmp_path: Path) -> None:
             "1",
             "--seed",
             "7",
-            "--no-kill-switch",
+            "--no-kill-switch",  # GOBERNANZA: bypass contract_run_valid
             "--out-root",
             str(run_root),
         ],
