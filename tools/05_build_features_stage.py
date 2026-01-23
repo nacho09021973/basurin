@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import math
 import sys
 from pathlib import Path
-from typing import Any, Iterable, Optional, Tuple
+from typing import Any, Optional
 
 import numpy as np
 
@@ -18,14 +20,16 @@ if str(_REPO_ROOT) not in sys.path:
 from basurin_io import (
     assert_within_runs,
     ensure_stage_dirs,
+    load_feature_json,
     resolve_out_root,
     sha256_file,
+    utc_now_iso,
     validate_run_id,
     write_manifest,
     write_stage_summary,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 def _display_path(path: Path) -> str:
@@ -35,134 +39,74 @@ def _display_path(path: Path) -> str:
         return str(path)
 
 
-def _coerce_vector(value: Any) -> Optional[list[float]]:
-    if isinstance(value, list):
-        return [float(v) for v in value]
-    if isinstance(value, dict):
-        for key in ["values", "vector", "data", "features", "ratios", "x"]:
-            if key in value:
-                return _coerce_vector(value[key])
-    return None
+def _require_sklearn() -> bool:
+    if importlib.util.find_spec("sklearn") is None:
+        print("ERROR: sklearn no disponible; instala scikit-learn para generar features.", file=sys.stderr)
+        return False
+    return True
 
 
-def _extract_points(atlas: Any) -> Iterable[dict[str, Any]]:
-    if isinstance(atlas, dict):
-        for key in ["points", "theories", "data", "rows"]:
-            if key in atlas and isinstance(atlas[key], list):
-                return atlas[key]
-    if isinstance(atlas, list):
-        return atlas
-    return []
-
-
-def _load_atlas_features(
-    atlas_path: Path,
-) -> Tuple[list[Any], Optional[np.ndarray], list[str] | None]:
-    with open(atlas_path, "r", encoding="utf-8") as f:
-        atlas = json.load(f)
-
-    points = list(_extract_points(atlas))
-    if not points:
+def _compute_local_features(X: np.ndarray, k_neighbors: int) -> np.ndarray:
+    if X.ndim != 2:
+        raise ValueError("X debe ser matriz 2D.")
+    n_rows = X.shape[0]
+    if k_neighbors < 1:
+        raise ValueError("k_neighbors debe ser >= 1.")
+    if n_rows <= k_neighbors:
         raise ValueError(
-            f"atlas.json sin puntos reconocibles en {atlas_path}. "
-            "Se esperaba 'points'/'theories' o lista de dicts."
+            f"n_rows ({n_rows}) debe ser mayor que k_neighbors ({k_neighbors})."
         )
 
-    ids: list[Any] = []
-    rows: list[list[float]] = []
-    missing = 0
-    for idx, point in enumerate(points):
-        if not isinstance(point, dict):
-            missing += 1
-            continue
-        pid = point.get("id", point.get("uid", point.get("name", idx)))
-        ids.append(pid)
-        vec = None
-        for key in ["features", "ratios", "x", "vector"]:
-            if key in point:
-                vec = point[key]
-                break
-        vec_list = _coerce_vector(vec)
-        if vec_list is None:
-            missing += 1
-            continue
-        rows.append(vec_list)
+    from sklearn.neighbors import NearestNeighbors
 
-    if not rows:
-        return ids, None, None
-    if missing:
-        raise ValueError(
-            f"atlas.json en {atlas_path} tiene {missing} puntos sin features. "
-            "Asegura que todos los puntos contengan features/ratios."
-        )
+    nn = NearestNeighbors(n_neighbors=k_neighbors + 1)
+    nn.fit(X)
+    distances, indices = nn.kneighbors(X, return_distance=True)
+    distances = distances[:, 1:]
+    indices = indices[:, 1:]
 
-    feature_names: list[str] | None = None
-    if isinstance(atlas, dict):
-        if isinstance(atlas.get("feature_names"), list):
-            feature_names = [str(v) for v in atlas["feature_names"]]
-        elif isinstance(atlas.get("columns"), list):
-            feature_names = [str(v) for v in atlas["columns"]]
-        elif isinstance(atlas.get("feature_key"), str):
-            feature_key = atlas["feature_key"]
-            feature_names = [f"{feature_key}_{i}" for i in range(len(rows[0]))]
-
-    return ids, np.asarray(rows, dtype=float), feature_names
-
-
-def _decode_feature_names(raw: Any) -> Optional[list[str]]:
-    if raw is None:
-        return None
-    try:
-        values = np.asarray(raw)
-    except Exception:
-        return None
-    if values.ndim == 0:
-        return [str(values)]
-    decoded = []
-    for v in values.tolist():
-        if isinstance(v, (bytes, bytearray)):
-            decoded.append(v.decode("utf-8"))
+    eps = 1e-12
+    features = np.zeros((n_rows, 6), dtype=float)
+    for i in range(n_rows):
+        neighbors = X[indices[i]]
+        centered = neighbors - neighbors.mean(axis=0, keepdims=True)
+        denom = max(k_neighbors - 1, 1)
+        cov = (centered.T @ centered) / float(denom)
+        eigvals = np.linalg.eigvalsh(cov)
+        eigvals = np.sort(eigvals)[::-1]
+        sum_lambda = float(np.sum(eigvals))
+        sum_lambda_sq = float(np.sum(eigvals ** 2))
+        d_eff = (sum_lambda ** 2) / (sum_lambda_sq + eps)
+        lambda1 = float(eigvals[0]) if eigvals.size else 0.0
+        m = lambda1 / (sum_lambda + eps)
+        parallel = math.sqrt(max(lambda1, 0.0))
+        if eigvals.size > 1:
+            perp_val = float(np.mean(eigvals[1:]))
+            perp = math.sqrt(max(perp_val, 0.0))
         else:
-            decoded.append(str(v))
-    return decoded
+            perp = 0.0
+        mean_dist = float(np.mean(distances[i]))
+        rho = 1.0 / (mean_dist + eps)
+        rho_clipped = float(np.clip(rho, 1e-8, 1e8))
+        log10_rho = math.log10(rho_clipped)
+        features[i] = [
+            d_eff,
+            m,
+            parallel,
+            perp,
+            rho_clipped,
+            log10_rho,
+        ]
+    return features
 
 
-def _find_dataset(h5: Any, names: list[str]) -> Optional[np.ndarray]:
-    import h5py
-
-    for name in names:
-        if name in h5 and isinstance(h5[name], h5py.Dataset):
-            return np.asarray(h5[name])
-    if "features" in h5 and isinstance(h5["features"], h5py.Group):
-        grp = h5["features"]
-        for name in names:
-            if name in grp and isinstance(grp[name], h5py.Dataset):
-                return np.asarray(grp[name])
-    return None
-
-
-def _load_dictionary_features(dictionary_path: Path) -> tuple[Optional[list[Any]], Optional[np.ndarray], Optional[list[str]]]:
-    try:
-        import h5py
-    except ImportError:
-        print("ERROR: pip install h5py", file=sys.stderr)
-        raise
-
-    ids = None
-    features = None
-    feature_names = None
-
-    with h5py.File(dictionary_path, "r") as h5:
-        features = _find_dataset(h5, ["X", "features", "metrics"])
-        ids_dataset = _find_dataset(h5, ["ids", "id", "uids"])
-        if ids_dataset is not None:
-            ids = ids_dataset.tolist()
-        if "features" in h5 and isinstance(h5["features"], h5py.Group):
-            grp = h5["features"]
-            if "feature_names" in grp:
-                feature_names = _decode_feature_names(grp["feature_names"][...])
-
-    return ids, features, feature_names
+def _load_atlas_inputs(atlas_path: Path, feature_key_hint: str) -> tuple[list[Any], np.ndarray, dict[str, Any]]:
+    ids, X, meta = load_feature_json(atlas_path, kind="atlas", feature_key_hint=feature_key_hint)
+    if ids is None or len(ids) == 0:
+        raise ValueError("No se pudieron resolver ids desde atlas.")
+    if len(ids) != X.shape[0]:
+        raise ValueError("ids no coincide con filas de X.")
+    return ids, X, meta
 
 
 def parse_args() -> argparse.Namespace:
@@ -171,9 +115,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--run", required=True, help="run id under runs/<run>")
     parser.add_argument(
-        "--atlas",
-        default=None,
-        help="Optional atlas.json path (default runs/<run>/dictionary/outputs/atlas.json)",
+        "--k-neighbors",
+        type=int,
+        default=7,
+        help="k de vecinos para tangentes_locales_v1 (default: 7)",
     )
     parser.add_argument(
         "--out-root",
@@ -195,118 +140,95 @@ def main() -> int:
 
     run_dir = (out_root / args.run).resolve()
 
-    atlas_path = Path(args.atlas) if args.atlas else run_dir / "dictionary" / "outputs" / "atlas.json"
-    if not atlas_path.is_absolute():
-        atlas_path = (Path.cwd() / atlas_path).resolve()
-
-    dictionary_path = (run_dir / "dictionary" / "outputs" / "dictionary.h5").resolve()
+    atlas_points_path = (run_dir / "dictionary" / "outputs" / "atlas_points.json").resolve()
+    atlas_path = (run_dir / "dictionary" / "outputs" / "atlas.json").resolve()
 
     try:
+        assert_within_runs(run_dir, atlas_points_path)
         assert_within_runs(run_dir, atlas_path)
-        assert_within_runs(run_dir, dictionary_path)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    if not atlas_path.exists():
-        print(f"ERROR: no existe atlas: {atlas_path}", file=sys.stderr)
-        return 1
-    if not dictionary_path.exists():
-        print(f"ERROR: no existe dictionary.h5: {dictionary_path}", file=sys.stderr)
-        return 1
-
-    try:
-        atlas_ids, atlas_X, atlas_feature_names = _load_atlas_features(atlas_path)
-    except ValueError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 1
-
-    try:
-        dict_ids, dict_X, dict_feature_names = _load_dictionary_features(dictionary_path)
-    except ImportError:
-        return 1
-
-    if atlas_X is not None:
-        X = atlas_X
-    elif dict_X is not None:
-        X = dict_X
+    if atlas_points_path.exists():
+        atlas_source = atlas_points_path
+        ids_source = "dictionary/outputs/atlas_points.json"
+    elif atlas_path.exists():
+        atlas_source = atlas_path
+        ids_source = "dictionary/outputs/atlas.json"
     else:
         print(
-            "ERROR: no se pudo derivar X desde atlas.json o dictionary.h5. "
-            "Se esperaba 'points/theories' con features en atlas o datasets X/features/metrics en dictionary.h5.",
+            "ERROR: faltan inputs aguas arriba; ejecuta scripts 01-04 para generar dictionary/outputs/atlas.json.",
             file=sys.stderr,
         )
         return 1
 
-    ids = dict_ids if dict_ids is not None else atlas_ids
-    if ids is None:
-        print(
-            "ERROR: no se pudieron derivar ids desde dictionary.h5 ni atlas.json.",
-            file=sys.stderr,
-        )
-        return 1
-    if not ids:
-        print(
-            "ERROR: ids vacíos después de resolver atlas/dictionary. "
-            "Verifica que atlas.json tenga puntos con id o dictionary.h5 contenga ids.",
-            file=sys.stderr,
-        )
+    if not _require_sklearn():
         return 1
 
-    if len(ids) != X.shape[0]:
-        print(
-            f"ERROR: ids ({len(ids)}) no coinciden con filas de X ({X.shape[0]}).",
-            file=sys.stderr,
-        )
+    try:
+        ids, X, meta = _load_atlas_inputs(atlas_source, feature_key_hint="ratios")
+    except (ValueError, SystemExit) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    feature_names = None
-    if dict_feature_names and len(dict_feature_names) == X.shape[1]:
-        feature_names = dict_feature_names
-    elif dict_feature_names:
-        print(
-            "WARNING: feature_names en dictionary.h5 no coincide con X; "
-            "usando fallback.",
-            file=sys.stderr,
-        )
-    if feature_names is None and atlas_feature_names and len(atlas_feature_names) == X.shape[1]:
-        feature_names = atlas_feature_names
-    if feature_names is None:
-        feature_names = [f"feature_{i}" for i in range(X.shape[1])]
+    try:
+        Y = _compute_local_features(X, args.k_neighbors)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     stage_dir, outputs_dir = ensure_stage_dirs(args.run, "features", base_dir=out_root)
 
     features_path = outputs_dir / "features.json"
+    feature_key = "tangentes_locales_v1"
+    columns = [
+        "d_eff",
+        "m",
+        "parallel",
+        "perp",
+        "rho_clipped",
+        "log10_rho",
+    ]
     payload = {
-        "run": args.run,
-        "source": {
-            "atlas_path": _display_path(atlas_path),
-            "dictionary_path": _display_path(dictionary_path),
-            "atlas_sha256": sha256_file(atlas_path),
-            "dictionary_sha256": sha256_file(dictionary_path),
-        },
-        "feature_names": feature_names,
+        "schema_version": "1",
+        "feature_key": feature_key,
         "ids": ids,
-        "X": X.tolist(),
+        "Y": Y.tolist(),
+        "meta": {
+            "feature_key": feature_key,
+            "columns": columns,
+            "k_neighbors": args.k_neighbors,
+            "created": utc_now_iso(),
+            "ids_source": ids_source,
+            "source_atlas": f"runs/{args.run}/{ids_source}",
+            "atlas_feature_key": meta.get("feature_key"),
+        },
     }
 
     with open(features_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
+    input_hash = sha256_file(atlas_source)
+    output_hash = sha256_file(features_path)
     summary = {
         "stage": "features",
         "version": __version__,
         "script": "05_build_features_stage.py",
         "run": args.run,
         "inputs": {
-            "atlas_path": _display_path(atlas_path),
-            "dictionary_path": _display_path(dictionary_path),
-            "atlas_sha256": payload["source"]["atlas_sha256"],
-            "dictionary_sha256": payload["source"]["dictionary_sha256"],
+            "atlas_path": _display_path(atlas_source),
+            "atlas_sha256": input_hash,
         },
         "outputs": {"features": "outputs/features.json"},
-        "data": {"n_rows": len(ids), "n_features": int(X.shape[1])},
-        "hashes": {"outputs/features.json": sha256_file(features_path)},
+        "config": {"k_neighbors": args.k_neighbors},
+        "data": {
+            "n_rows": len(ids),
+            "n_features": int(Y.shape[1]),
+            "X_shape": [int(X.shape[0]), int(X.shape[1])],
+            "Y_shape": [int(Y.shape[0]), int(Y.shape[1])],
+        },
+        "hashes": {"outputs/features.json": output_hash},
     }
     summary_path = write_stage_summary(stage_dir, summary)
 
@@ -316,7 +238,13 @@ def main() -> int:
             "features": features_path,
             "summary": summary_path,
         },
-        extra={"version": __version__},
+        extra={
+            "version": __version__,
+            "inputs": {
+                "atlas": _display_path(atlas_source),
+                "atlas_sha256": input_hash,
+            },
+        },
     )
 
     print(f"features.json escrito en {features_path}")
