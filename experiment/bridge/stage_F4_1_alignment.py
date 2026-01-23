@@ -117,6 +117,14 @@ def _normalize_records(obj: Any, key_vec: str) -> Tuple[Optional[List[Any]], Opt
                 vec = r.get(key_vec.upper())
             if vec is None and key_vec == "x":
                 vec = r.get("features", r.get("vector"))
+            if vec is None and isinstance(r.get("theories"), dict):
+                theories = r["theories"]
+                if key_vec in theories:
+                    vec = theories[key_vec]
+                elif key_vec.upper() in theories:
+                    vec = theories[key_vec.upper()]
+                elif len(theories) == 1:
+                    vec = next(iter(theories.values()))
             if vec is None:
                 return None, None
             ids.append(rid)
@@ -210,7 +218,7 @@ def load_feature_json(path: Path, kind: str) -> Tuple[Optional[List[Any]], np.nd
     ids, mat = _normalize_records(obj, key)
     if mat is None:
         raise ValueError(
-            f"Formato no reconocido en {path}. Se esperaba lista de dicts con '{key}' o dict con '{key.upper()}'/ids."  # noqa
+            f"Formato no reconocido en {path}. Se esperaba lista de dicts con '{key}' (o theories) o dict con '{key.upper()}'/ids."  # noqa
         )
 
     meta: Dict[str, Any] = {}
