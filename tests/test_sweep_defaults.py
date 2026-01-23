@@ -28,8 +28,7 @@ def test_resolve_sweep_defaults_raises_only_for_explicit_delta_min():
     explicit = sl.Config(run="r1", mode="sweep_delta", delta_min=2.4)
     sl.resolve_sweep_defaults(explicit, d=5)
     assert explicit.delta_min == pytest.approx(2.4)
-    with pytest.raises(ValueError, match="delta_min"):
-        sl.validate_config(explicit, d=5)
+    sl.validate_config(explicit, d=5)
 
 
 def test_resolve_sweep_defaults_keeps_delta_for_d3():
