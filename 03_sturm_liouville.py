@@ -191,8 +191,6 @@ def validate_config(cfg: Config, d: int) -> None:
     bf_bound = d / 2.0  # Δ_min = d/2 (BF bound saturado)
     
     if cfg.mode == "sweep_delta":
-        if cfg.delta_min <= bf_bound:
-            raise ValueError(f"delta_min ({cfg.delta_min}) debe ser > d/2 = {bf_bound} (BF bound)")
         if cfg.delta_max <= cfg.delta_min:
             raise ValueError("delta_max debe ser > delta_min")
         if cfg.n_delta < 2:
@@ -944,7 +942,6 @@ def main() -> int:
     # Construir lista de (Δ, m²L²) a procesar
     if cfg.mode == "sweep_delta":
         deltas = np.linspace(cfg.delta_min, cfg.delta_max, cfg.n_delta)
-        m2L2_list = [delta_to_m2L2(delta, d) for delta in deltas]
         print(f"Modo: sweep_delta")
         print(f"  Δ ∈ [{cfg.delta_min}, {cfg.delta_max}], n_delta={cfg.n_delta}")
     else:
@@ -957,6 +954,46 @@ def main() -> int:
     print()
     
     # --- Resolver para cada Δ ---
+    bf_bound = d / 2.0
+    bf_skipped = 0
+    bf_per_delta = []
+    if cfg.mode == "sweep_delta":
+        valid_deltas = []
+        valid_m2L2_list = []
+        for i, delta in enumerate(deltas):
+            if delta <= bf_bound:
+                bf_skipped += 1
+                print(
+                    f"  [{i+1:3d}/{len(deltas)}] (L) Δ={delta:.3f} "
+                    f"✗ BF (requiere Δ > {bf_bound:.3f})"
+                )
+                bf_per_delta.append({
+                    "delta": float(delta),
+                    "bf_bound": float(bf_bound),
+                    "bf_ok": False,
+                    "skipped": True,
+                    "skip_reason": "BF bound (requires delta > d/2)",
+                })
+                continue
+            bf_per_delta.append({
+                "delta": float(delta),
+                "bf_bound": float(bf_bound),
+                "bf_ok": True,
+                "skipped": False,
+            })
+            valid_deltas.append(delta)
+            valid_m2L2_list.append(delta_to_m2L2(delta, d))
+        if not valid_deltas:
+            raise ValueError("No hay deltas válidos: todos violan el BF bound (Δ > d/2).")
+        deltas = valid_deltas
+        m2L2_list = valid_m2L2_list
+    else:
+        bf_per_delta.append({
+            "delta": float(deltas[0]),
+            "bf_bound": float(bf_bound),
+            "bf_ok": bool(deltas[0] > bf_bound),
+            "skipped": False,
+        })
     results_N = None
     all_ortho_N = None
     all_resid_N = None
@@ -994,6 +1031,12 @@ def main() -> int:
             "residual_argmax_mode_global": max_resid.get("residual_argmax_mode"),
             "residual_threshold": residual_threshold,
             "per_delta": all_resid,
+        },
+        "bf": {
+            "bf_bound": float(bf_bound),
+            "bf_skipped": int(bf_skipped),
+            "bf_ok_global": bf_skipped == 0,
+            "per_delta": bf_per_delta,
         },
     }
     
