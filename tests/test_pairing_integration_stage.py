@@ -20,20 +20,24 @@ def test_stage_order_policy_ignores_ids(tmp_path: Path) -> None:
     features_path = input_dir / "event_features.json"
 
     atlas_payload = {
-        "points": [
-            {"id": "a", "x": [1.0, 0.0]},
-            {"id": "b", "x": [0.0, 1.0]},
-            {"id": "c", "x": [1.0, 1.0]},
-            {"id": "d", "x": [2.0, 3.0]},
-        ]
+        "ids": ["a", "b", "c", "d"],
+        "X": [
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+            [2.0, 3.0],
+        ],
+        "meta": {"feature_key": "atlas_vectors"},
     }
     features_payload = {
-        "events": [
-            {"id": "c", "y": [0.0, 2.0]},
-            {"id": "a", "y": [2.0, 0.0]},
-            {"id": "d", "y": [3.0, 1.0]},
-            {"id": "b", "y": [1.0, 3.0]},
-        ]
+        "ids": ["c", "a", "d", "b"],
+        "Y": [
+            [0.0, 2.0],
+            [2.0, 0.0],
+            [3.0, 1.0],
+            [1.0, 3.0],
+        ],
+        "meta": {"feature_key": "event_vectors"},
     }
 
     atlas_path.write_text(json.dumps(atlas_payload))

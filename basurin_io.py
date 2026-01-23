@@ -184,8 +184,17 @@ def write_manifest(
 ) -> Path:
     stage_dir_resolved = stage_dir.resolve()
     run_dir = stage_dir_resolved.parent
-    if run_dir.parent.name != "runs":
-        raise ValueError(f"stage_dir must be under runs/<run_id>/, got {stage_dir_resolved}")
+    runs_root = None
+    for parent in (stage_dir_resolved,) + tuple(stage_dir_resolved.parents):
+        if parent.name == "runs":
+            runs_root = parent
+            break
+    if runs_root is None:
+        raise ValueError(f"stage_dir must be under a runs/ directory, got {stage_dir_resolved}")
+    try:
+        run_dir.relative_to(runs_root)
+    except ValueError as exc:
+        raise ValueError(f"stage_dir must be under runs/<run_id>/, got {stage_dir_resolved}") from exc
     assert_within_runs(run_dir, stage_dir_resolved)
 
     files: dict[str, str] = {}

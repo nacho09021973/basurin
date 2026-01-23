@@ -129,8 +129,14 @@ def parse_args() -> Config:
         dest="geometry_json",
         help="Ruta geometry.json (default runs/<run>/geometry/outputs/geometry.json)",
     )
-    p.add_argument("--geometry-file", type=str, default="ads_puro.h5",
-                   dest="geometry_file", help="Archivo H5 de geometría")
+    p.add_argument(
+        "--geometry-file",
+        "--geometry-h5",
+        type=str,
+        default="ads_puro.h5",
+        dest="geometry_file",
+        help="Archivo H5 de geometría",
+    )
     p.add_argument("--mode", type=str, default="sweep_delta",
                    choices=["sweep_delta", "fixed_mass"],
                    help="Modo de operación")
