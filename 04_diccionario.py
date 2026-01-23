@@ -58,6 +58,18 @@ warnings.filterwarnings("ignore", category=UserWarning)
 __version__ = "1.5.0"
 
 
+def resolve_spectrum_path(
+    run: str,
+    spectrum_file: str,
+    base_dir: Path | str = "runs",
+) -> Path:
+    if Path(spectrum_file).is_absolute():
+        return Path(spectrum_file)
+    if spectrum_file.startswith("runs/"):
+        return Path(spectrum_file)
+    return Path(base_dir) / run / "spectrum" / spectrum_file
+
+
 # =============================================================================
 # Configuración
 # =============================================================================
