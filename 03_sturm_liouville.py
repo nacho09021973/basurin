@@ -40,7 +40,7 @@ import sys
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Iterable, Literal
 
 import numpy as np
 
@@ -223,6 +223,38 @@ def resolve_sweep_defaults(cfg: Config, d: int) -> None:
     bf_bound = d / 2.0
     if cfg.delta_min == 1.55 and cfg.delta_min <= bf_bound:
         object.__setattr__(cfg, "delta_min", bf_bound + 1e-3)
+
+
+def bf_filter_sweep_deltas(
+    d: int,
+    deltas: Iterable[float],
+) -> tuple[list[float], list[dict[str, float | bool | str]], int, float]:
+    bf_bound = d / 2.0
+    bf_skipped = 0
+    bf_per_delta = []
+    valid_deltas = []
+    for delta in deltas:
+        delta_f = float(delta)
+        if delta_f <= bf_bound:
+            bf_skipped += 1
+            bf_per_delta.append({
+                "delta": delta_f,
+                "bf_bound": float(bf_bound),
+                "bf_ok": False,
+                "skipped": True,
+                "skip_reason": "BF bound (requires delta > d/2)",
+            })
+            continue
+        bf_per_delta.append({
+            "delta": delta_f,
+            "bf_bound": float(bf_bound),
+            "bf_ok": True,
+            "skipped": False,
+        })
+        valid_deltas.append(delta_f)
+    if not valid_deltas:
+        raise ValueError("No hay deltas válidos: todos violan el BF bound (Δ > d/2).")
+    return valid_deltas, bf_per_delta, bf_skipped, float(bf_bound)
 
 
 # =============================================================================
