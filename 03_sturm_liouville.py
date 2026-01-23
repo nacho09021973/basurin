@@ -44,10 +44,12 @@ from typing import Literal
 
 import numpy as np
 
+DEFAULT_RESIDUAL_THRESHOLD = 1e-6
+DEFAULT_RESIDUAL_FIRST_K = 3
+
 # Residual validation policy (minimal, auditable):
 # - Global max is sensitive to high modes under stiff discretizations (e.g., d=5, z_min=1e-6).
 # - We therefore classify quality using both global max and max over the first K modes.
-RESIDUAL_FIRST_K_DEFAULT = 3
 
 # --- Repo root / runs root (NO depender de cwd) ---
 ROOT_DIR = Path(__file__).resolve().parent
@@ -110,6 +112,10 @@ class Config:
     z_min: float | None = None
     z_max: float | None = None
 
+    # Residual validation policy
+    residual_threshold: float = DEFAULT_RESIDUAL_THRESHOLD
+    residual_first_k: int = DEFAULT_RESIDUAL_FIRST_K
+
 
 def parse_args() -> Config:
     p = argparse.ArgumentParser(
@@ -156,9 +162,28 @@ def parse_args() -> Config:
     p.add_argument("--n-z", type=int, default=2048, dest="n_z")
     p.add_argument("--z-min", type=float, default=None, dest="z_min")
     p.add_argument("--z-max", type=float, default=None, dest="z_max")
+
+    # Residual validation controls (auditable, non-breaking defaults)
+    p.add_argument(
+        "--residual-threshold",
+        type=float,
+        default=DEFAULT_RESIDUAL_THRESHOLD,
+        help="Umbral para residuals_ok (backward error). Default conserva el comportamiento legacy (1e-6).",
+    )
+    p.add_argument(
+        "--residual-first-k",
+        type=int,
+        default=DEFAULT_RESIDUAL_FIRST_K,
+        help="K para residual_max_first_k (clasificación PASS/WARN/FAIL). Default=3.",
+    )
     
     args = p.parse_args()
-    return Config(**{k: v for k, v in vars(args).items()})
+    cfg = Config(**{k: v for k, v in vars(args).items()})
+
+    # Si Config es frozen, esto es seguro; si no, también funciona.
+    object.__setattr__(cfg, "residual_threshold", float(args.residual_threshold))
+    object.__setattr__(cfg, "residual_first_k", int(args.residual_first_k))
+    return cfg
 
 
 def validate_config(cfg: Config, d: int) -> None:
@@ -460,11 +485,13 @@ def validate_residuals(
     K: np.ndarray,
     W: np.ndarray,
     eigenvalues: np.ndarray,
-    eigenvectors: np.ndarray
+    eigenvectors: np.ndarray,
+    *,
+    cfg: Config
 ) -> dict:
     """Valida residuos con backward error de Kφ = λWφ."""
     residuals = []
-    residual_threshold = 1e-6
+    residual_threshold = float(cfg.residual_threshold)
     
     for i, lam in enumerate(eigenvalues):
         phi = eigenvectors[:, i]
@@ -480,8 +507,11 @@ def validate_residuals(
     argmax_mode = int(np.argmax(residuals)) if residuals.size else None
     argmax_value = float(residuals[argmax_mode]) if argmax_mode is not None else None
 
-    # First-K diagnostic (defaults to 3): targets the modes most often consumed downstream.
-    k = int(min(max(1, RESIDUAL_FIRST_K_DEFAULT), residuals.size)) if residuals.size else 0
+    # First-K diagnostic (downstream-relevant) targets the modes most often consumed downstream.
+    k_req = int(cfg.residual_first_k)
+    if k_req < 1:
+        raise ValueError("--residual-first-k debe ser >= 1")
+    k = int(min(k_req, residuals.size)) if residuals.size else 0
     residual_first_k = residuals[:k] if k > 0 else np.array([], dtype=float)
     residual_max_first_k = float(np.max(residual_first_k)) if residual_first_k.size else 0.0
     residuals_ok_first_k = bool(residual_max_first_k < residual_threshold) if residual_first_k.size else True
@@ -489,10 +519,6 @@ def validate_residuals(
     residual_max = float(np.max(residuals)) if residuals.size else 0.0
     residuals_ok = bool(residual_max < residual_threshold) if residuals.size else True
 
-    # Status:
-    # - PASS: global passes
-    # - WARN: global fails but first-K passes (typical "high-mode" degradation)
-    # - FAIL: first-K fails (downstream-relevant modes not reliable)
     if residuals_ok:
         residual_status = "PASS"
     elif residuals_ok_first_k:
@@ -785,7 +811,7 @@ def solve_channel(
         
         # Validar
         ortho = validate_orthonormality(eigenvectors, W, z[1:-1])
-        resid = validate_residuals(K, W, eigenvalues, eigenvectors)
+        resid = validate_residuals(K, W, eigenvalues, eigenvectors, cfg=cfg)
         
         all_ortho.append(ortho)
         all_resid.append(resid)
