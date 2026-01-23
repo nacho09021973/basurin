@@ -19,6 +19,8 @@ def resolve_out_root(out_root: str, runs_root: Path | str = "runs") -> Path:
     candidate = Path(out_root)
     if not candidate.is_absolute():
         candidate = (Path.cwd() / candidate).resolve()
+    if candidate.name == runs_root_path.name:
+        return candidate
     try:
         candidate.relative_to(runs_root_path)
     except ValueError as exc:
