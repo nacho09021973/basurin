@@ -29,32 +29,13 @@ def test_bridge_alignment_runs_with_features_points(tmp_path: Path) -> None:
 
     rng = np.random.default_rng(9)
     ids = [f"id_{i}" for i in range(30)]
-    atlas = {
-        "ids": ids,
-        "X": rng.normal(size=(30, 3)).tolist(),
-        "meta": {
-            "feature_key": "ratios",
-            "columns": ["ratios_0", "ratios_1", "ratios_2"],
-            "schema_version": "1",
-        },
-    }
-    features = {
-        "ids": ids,
-        "Y": rng.normal(size=(30, 6)).tolist(),
-        "meta": {
-            "feature_key": "tangentes_locales_v1",
-            "columns": [
-                "d_eff",
-                "m",
-                "parallel",
-                "perp",
-                "rho_clipped",
-                "log10_rho",
-            ],
-            "k_neighbors": 7,
-            "schema_version": "1",
-        },
-    }
+    x_values = rng.normal(size=(30, 3)).tolist()
+    atlas = [{"id": i, "theories": {"ratios": x}} for i, x in zip(ids, x_values)]
+    y_values = rng.normal(size=(30, 6)).tolist()
+    features = [
+        {"id": i, "theories": {"tangentes_locales_v1": y}}
+        for i, y in zip(ids, y_values)
+    ]
 
     atlas_path = input_dir / "atlas_bridge.json"
     features_path = input_dir / "features_points_k7.json"
@@ -120,22 +101,8 @@ def test_bridge_alignment_aborts_on_matching_feature_key(tmp_path: Path) -> None
     rng = np.random.default_rng(3)
     ids = [f"id_{i}" for i in range(20)]
     shared = rng.normal(size=(20, 3)).tolist()
-    atlas = {
-        "ids": ids,
-        "X": shared,
-        "meta": {
-            "feature_key": "ratios",
-            "columns": ["ratios_0", "ratios_1", "ratios_2"],
-        },
-    }
-    features = {
-        "ids": ids,
-        "Y": shared,
-        "meta": {
-            "feature_key": "ratios",
-            "columns": ["ratios_0", "ratios_1", "ratios_2"],
-        },
-    }
+    atlas = [{"id": i, "theories": {"ratios": x}} for i, x in zip(ids, shared)]
+    features = [{"id": i, "theories": {"ratios": y}} for i, y in zip(ids, shared)]
 
     atlas_path = input_dir / "atlas_bridge.json"
     features_path = input_dir / "features_points_k7.json"
@@ -195,24 +162,14 @@ def test_bridge_alignment_filters_constant_columns(tmp_path: Path) -> None:
 
     rng = np.random.default_rng(13)
     ids = [f"id_{i}" for i in range(25)]
-    atlas = {
-        "ids": ids,
-        "X": rng.normal(size=(25, 4)).tolist(),
-        "meta": {
-            "feature_key": "ratios",
-            "columns": ["ratios_0", "ratios_1", "ratios_2", "ratios_3"],
-        },
-    }
+    x_values = rng.normal(size=(25, 4)).tolist()
+    atlas = [{"id": i, "theories": {"ratios": x}} for i, x in zip(ids, x_values)]
     y_values = rng.normal(size=(25, 5))
     y_values[:, 2] = 0.0
-    features = {
-        "ids": ids,
-        "Y": y_values.tolist(),
-        "meta": {
-            "feature_key": "tangentes_locales_v1",
-            "columns": ["a", "b", "constant", "d", "e"],
-        },
-    }
+    features = [
+        {"id": i, "theories": {"tangentes_locales_v1": y.tolist()}}
+        for i, y in zip(ids, y_values)
+    ]
 
     atlas_path = input_dir / "atlas_bridge.json"
     features_path = input_dir / "features_points_k7.json"
