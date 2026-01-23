@@ -23,7 +23,8 @@ def test_validate_residuals_backward_error_exact_pair():
     eigenvalues = np.array([2.0, 3.0])
     eigenvectors = np.eye(2)
 
-    result = sl.validate_residuals(K, W, eigenvalues, eigenvectors)
+    cfg = sl.Config(run="test")
+    result = sl.validate_residuals(K, W, eigenvalues, eigenvectors, cfg=cfg)
 
     assert result["residual_metric"] == "backward_error"
     assert result["residual_max"] < 1e-12
