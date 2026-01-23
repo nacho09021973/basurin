@@ -200,40 +200,6 @@ def validate_config(cfg: Config, d: int) -> None:
         raise ValueError("n_modes debe ser >= 1")
 
 
-# =============================================================================
-# BF filter (testeable, contract-first)
-# =============================================================================
-def bf_filter_sweep_deltas(d, deltas):
-    """Filtra deltas aplicando BF bound per-Δ.
-
-    BF exige Δ > d/2 estrictamente.
-
-    Args:
-        d: int (dimensión)
-        deltas: np.ndarray (parrilla de Δ)
-
-    Returns:
-        bf_per_delta: lista de dicts con auditoría por punto
-        valid_deltas: np.ndarray con Δ que pasan el filtro (orden preservado)
-    """
-    bf_bound = d / 2.0
-    bf_per_delta = []
-    valid = []
-    for delta in deltas:
-        ok = bool(delta > bf_bound)
-        bf_per_delta.append({
-            "delta": float(delta),
-            "bf_bound": float(bf_bound),
-            "bf_ok": ok,
-            "skipped": (not ok),
-        })
-        if ok:
-            valid.append(float(delta))
-    import numpy as np
-    return bf_per_delta, np.array(valid, dtype=np.float64)
-
-
-
 def resolve_dual_defaults(cfg: Config) -> None:
     """Resuelve defaults para espectro dual respetando Config frozen."""
     if not cfg.dual_spectrum:
