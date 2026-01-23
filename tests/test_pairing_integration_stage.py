@@ -8,7 +8,8 @@ import pytest
 
 def test_stage_order_policy_ignores_ids(tmp_path: Path) -> None:
     pytest.importorskip("sklearn")
-    run_root = tmp_path / "runs"
+    run_root = Path("runs") / f"pytest__{tmp_path.name}"
+    run_root.mkdir(parents=True, exist_ok=True)
     input_dir = tmp_path / "inputs"
     input_dir.mkdir(parents=True, exist_ok=True)
 
@@ -35,7 +36,8 @@ def test_stage_order_policy_ignores_ids(tmp_path: Path) -> None:
     atlas_path.write_text(json.dumps(atlas_payload))
     features_path.write_text(json.dumps(features_payload))
 
-    stage_path = Path(__file__).resolve().parents[1] / "experiment" / "bridge" / "stage_F4_1_alignment.py"
+    repo_root = Path(__file__).resolve().parents[1]
+    stage_path = repo_root / "experiment" / "bridge" / "stage_F4_1_alignment.py"
     result = subprocess.run(
         [
             sys.executable,
@@ -62,6 +64,7 @@ def test_stage_order_policy_ignores_ids(tmp_path: Path) -> None:
             "--out-root",
             str(run_root),
         ],
+        cwd=repo_root,
         capture_output=True,
         text=True,
         check=False,
@@ -69,7 +72,7 @@ def test_stage_order_policy_ignores_ids(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
 
-    outputs_dir = run_root / "pairing-order" / "bridge_f4_1_alignment" / "outputs"
+    outputs_dir = repo_root / run_root / "pairing-order" / "bridge_f4_1_alignment" / "outputs"
     per_point_path = outputs_dir / "degeneracy_per_point.json"
     per_point = json.loads(per_point_path.read_text())
 
