@@ -9,9 +9,11 @@ import pytest
 def test_stage_order_policy_ignores_ids(tmp_path: Path) -> None:
     pytest.importorskip("sklearn")
     run_root = Path("runs") / f"pytest__{tmp_path.name}"
+    run_id = "pairing-order"
+    run_dir = run_root / run_id
     run_root.mkdir(parents=True, exist_ok=True)
-    # BASURIN IO governance: inputs must be under runs/, not /tmp
-    input_dir = run_root / "inputs"
+    # BASURIN IO governance: inputs must be under runs/<run_id>/inputs
+    input_dir = run_dir / "inputs"
     input_dir.mkdir(parents=True, exist_ok=True)
 
     atlas_path = input_dir / "atlas_points.json"
@@ -44,7 +46,7 @@ def test_stage_order_policy_ignores_ids(tmp_path: Path) -> None:
             sys.executable,
             str(stage_path),
             "--run",
-            "pairing-order",
+            run_id,
             "--atlas",
             str(atlas_path),
             "--features",
@@ -73,7 +75,7 @@ def test_stage_order_policy_ignores_ids(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
 
-    outputs_dir = repo_root / run_root / "pairing-order" / "bridge_f4_1_alignment" / "outputs"
+    outputs_dir = repo_root / run_root / run_id / "bridge_f4_1_alignment" / "outputs"
     per_point_path = outputs_dir / "degeneracy_per_point.json"
     per_point = json.loads(per_point_path.read_text())
 

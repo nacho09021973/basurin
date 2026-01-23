@@ -7,18 +7,15 @@ import pytest
 
 
 def _run_dictionary_pipeline(tmp_path: Path, run_id: str) -> Path:
-    """Run geometry → spectrum → dictionary pipeline.
-    
-    Note: 01/03/04 scripts use BASURIN_RUNS_ROOT env var, not --out-root flag.
-    """
+    """Run geometry → spectrum → dictionary pipeline."""
     repo_root = Path(__file__).resolve().parents[1]
-    run_root = Path("runs") / f"pytest__{tmp_path.name}"
-    run_root.mkdir(parents=True, exist_ok=True)
-    
+    out_root = Path("runs") / f"pytest__{tmp_path.name}"
+    out_root.mkdir(parents=True, exist_ok=True)
+
     # Scripts use env var, not --out-root
     env = os.environ.copy()
-    env["BASURIN_RUNS_ROOT"] = str(repo_root / run_root)
-    
+    env["BASURIN_RUNS_ROOT"] = str(repo_root / out_root)
+
     subprocess.run(
         [
             sys.executable,
@@ -32,12 +29,15 @@ def _run_dictionary_pipeline(tmp_path: Path, run_id: str) -> Path:
         env=env,
         check=True,
     )
+    geom_h5 = repo_root / out_root / run_id / "geometry" / "outputs" / "ads_puro.h5"
     subprocess.run(
         [
             sys.executable,
             str(repo_root / "03_sturm_liouville.py"),
             "--run",
             run_id,
+            "--geometry-file",
+            str(geom_h5),
             "--n-delta",
             "5",
             "--n-modes",
@@ -62,25 +62,22 @@ def _run_dictionary_pipeline(tmp_path: Path, run_id: str) -> Path:
         env=env,
         check=False,
     )
-    atlas_path = repo_root / run_root / run_id / "dictionary" / "outputs" / "atlas.json"
+    atlas_path = repo_root / out_root / run_id / "dictionary" / "outputs" / "atlas.json"
     if result.returncode != 0 and not atlas_path.exists():
         raise RuntimeError("04_diccionario.py no generó atlas.json en el pipeline de test.")
     return repo_root
 
 
 def _run_spectrum_only_pipeline(tmp_path: Path, run_id: str) -> Path:
-    """Run spectrum-only pipeline (01_genera_neutrino_sandbox → 04_diccionario).
-    
-    Note: Scripts use BASURIN_RUNS_ROOT env var, not --out-root flag.
-    """
+    """Run spectrum-only pipeline (01_genera_neutrino_sandbox → 04_diccionario)."""
     repo_root = Path(__file__).resolve().parents[1]
-    run_root = Path("runs") / f"pytest__{tmp_path.name}"
-    run_root.mkdir(parents=True, exist_ok=True)
-    
+    out_root = Path("runs") / f"pytest__{tmp_path.name}"
+    out_root.mkdir(parents=True, exist_ok=True)
+
     # Scripts use env var, not --out-root
     env = os.environ.copy()
-    env["BASURIN_RUNS_ROOT"] = str(repo_root / run_root)
-    
+    env["BASURIN_RUNS_ROOT"] = str(repo_root / out_root)
+
     subprocess.run(
         [
             sys.executable,
@@ -113,7 +110,7 @@ def _run_spectrum_only_pipeline(tmp_path: Path, run_id: str) -> Path:
         env=env,
         check=False,
     )
-    atlas_path = repo_root / run_root / run_id / "dictionary" / "outputs" / "atlas.json"
+    atlas_path = repo_root / out_root / run_id / "dictionary" / "outputs" / "atlas.json"
     if result.returncode != 0 and not atlas_path.exists():
         raise RuntimeError("04_diccionario.py no generó atlas.json en spectrum_only de test.")
     return repo_root

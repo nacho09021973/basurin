@@ -20,9 +20,11 @@ def test_bridge_alignment_runs_with_features_points(tmp_path: Path) -> None:
     pytest.importorskip("sklearn")
 
     run_root = Path("runs") / f"pytest__{tmp_path.name}"
+    run_id = "bridge-io"
+    run_dir = run_root / run_id
     run_root.mkdir(parents=True, exist_ok=True)
-    # BASURIN IO governance: inputs must be under runs/, not /tmp
-    input_dir = run_root / "inputs"
+    # BASURIN IO governance: inputs must be under runs/<run_id>/inputs
+    input_dir = run_dir / "inputs"
     input_dir.mkdir(parents=True, exist_ok=True)
 
     rng = np.random.default_rng(9)
@@ -66,7 +68,7 @@ def test_bridge_alignment_runs_with_features_points(tmp_path: Path) -> None:
             sys.executable,
             str(stage_path),
             "--run",
-            "bridge-io",
+            run_id,
             "--atlas",
             str(atlas_path),
             "--features",
@@ -93,7 +95,7 @@ def test_bridge_alignment_runs_with_features_points(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
 
-    outputs_dir = repo_root / run_root / "bridge-io" / "bridge_f4_1_alignment" / "outputs"
+    outputs_dir = repo_root / run_root / run_id / "bridge_f4_1_alignment" / "outputs"
     assert (outputs_dir / "metrics.json").exists()
     alignment = json.loads((outputs_dir / "alignment_map.json").read_text())
     corrs = alignment["cca"]["canonical_corrs"]
@@ -108,9 +110,11 @@ def test_bridge_alignment_aborts_on_matching_feature_key(tmp_path: Path) -> None
     pytest.importorskip("sklearn")
 
     run_root = Path("runs") / f"pytest__{tmp_path.name}"
+    run_id = "bridge-leakage"
+    run_dir = run_root / run_id
     run_root.mkdir(parents=True, exist_ok=True)
-    # BASURIN IO governance: inputs must be under runs/, not /tmp
-    input_dir = run_root / "inputs"
+    # BASURIN IO governance: inputs must be under runs/<run_id>/inputs
+    input_dir = run_dir / "inputs"
     input_dir.mkdir(parents=True, exist_ok=True)
 
     rng = np.random.default_rng(3)
@@ -145,7 +149,7 @@ def test_bridge_alignment_aborts_on_matching_feature_key(tmp_path: Path) -> None
             sys.executable,
             str(stage_path),
             "--run",
-            "bridge-leakage",
+            run_id,
             "--atlas",
             str(atlas_path),
             "--features",
@@ -172,7 +176,7 @@ def test_bridge_alignment_aborts_on_matching_feature_key(tmp_path: Path) -> None
 
     assert result.returncode == 2
 
-    outputs_dir = repo_root / run_root / "bridge-leakage" / "bridge_f4_1_alignment" / "outputs"
+    outputs_dir = repo_root / run_root / run_id / "bridge_f4_1_alignment" / "outputs"
     assert (outputs_dir / "abort_leakage.json").exists()
     manifest = json.loads((outputs_dir.parent / "manifest.json").read_text())
     assert manifest["files"]["abort_leakage"] == "outputs/abort_leakage.json"
@@ -182,9 +186,11 @@ def test_bridge_alignment_filters_constant_columns(tmp_path: Path) -> None:
     pytest.importorskip("sklearn")
 
     run_root = Path("runs") / f"pytest__{tmp_path.name}"
+    run_id = "bridge-constant-column"
+    run_dir = run_root / run_id
     run_root.mkdir(parents=True, exist_ok=True)
-    # BASURIN IO governance: inputs must be under runs/, not /tmp
-    input_dir = run_root / "inputs"
+    # BASURIN IO governance: inputs must be under runs/<run_id>/inputs
+    input_dir = run_dir / "inputs"
     input_dir.mkdir(parents=True, exist_ok=True)
 
     rng = np.random.default_rng(13)
@@ -220,7 +226,7 @@ def test_bridge_alignment_filters_constant_columns(tmp_path: Path) -> None:
             sys.executable,
             str(stage_path),
             "--run",
-            "bridge-constant-column",
+            run_id,
             "--atlas",
             str(atlas_path),
             "--features",
@@ -247,7 +253,7 @@ def test_bridge_alignment_filters_constant_columns(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
 
-    outputs_dir = repo_root / run_root / "bridge-constant-column" / "bridge_f4_1_alignment" / "outputs"
+    outputs_dir = repo_root / run_root / run_id / "bridge_f4_1_alignment" / "outputs"
     alignment = json.loads((outputs_dir / "alignment_map.json").read_text())
     data_used = alignment["cca"]["data_used"]
     assert 2 in data_used["y_dropped_idx"]
