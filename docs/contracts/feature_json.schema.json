@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Feature JSON (canonical)",
+  "type": "object",
+  "required": ["schema_version", "feature_key", "ids", "meta"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "feature_key": { "type": "string" },
+    "ids": {
+      "type": "array",
+      "items": {}
+    },
+    "X": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "number" }
+      }
+    },
+    "Y": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "number" }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "required": ["feature_key"],
+      "properties": {
+        "feature_key": { "type": "string" },
+        "columns": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "created": { "type": "string" },
+        "ids_source": { "type": "string" },
+        "source_atlas": { "type": "string" },
+        "k_neighbors": { "type": "integer" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "oneOf": [
+    { "required": ["X"] },
+    { "required": ["Y"] }
+  ],
+  "additionalProperties": true
+}

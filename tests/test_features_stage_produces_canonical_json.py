@@ -4,13 +4,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
+import numpy as np
+
+from basurin_io import load_feature_json
 
 
-def test_features_stage_builds_features_json(tmp_path: Path) -> None:
+def test_features_stage_produces_canonical_json(tmp_path: Path) -> None:
     if importlib.util.find_spec("sklearn") is None:
+        import pytest
+
         pytest.skip("scikit-learn no disponible en el entorno de test")
-    run_id = "features-stage"
+    run_id = "features-stage-canonical"
     repo_root = Path(__file__).resolve().parents[1]
 
     atlas_points_dir = tmp_path / "runs" / run_id / "dictionary" / "outputs"
@@ -21,14 +25,11 @@ def test_features_stage_builds_features_json(tmp_path: Path) -> None:
             {
                 "feature_key": "ratios",
                 "points": [
-                    {"id": "a", "features": [1.0, 2.0]},
-                    {"id": "b", "features": [2.0, 3.0]},
-                    {"id": "c", "features": [3.0, 4.0]},
-                    {"id": "d", "features": [4.0, 5.0]},
-                    {"id": "e", "features": [5.0, 6.0]},
-                    {"id": "f", "features": [6.0, 7.0]},
-                    {"id": "g", "features": [7.0, 8.0]},
-                    {"id": "h", "features": [8.0, 9.0]},
+                    {"id": "p0", "features": [0.0, 1.0]},
+                    {"id": "p1", "features": [1.0, 2.0]},
+                    {"id": "p2", "features": [2.0, 3.0]},
+                    {"id": "p3", "features": [3.0, 4.0]},
+                    {"id": "p4", "features": [4.0, 5.0]},
                 ],
             },
             indent=2,
@@ -43,7 +44,7 @@ def test_features_stage_builds_features_json(tmp_path: Path) -> None:
             "--run",
             run_id,
             "--k-neighbors",
-            "3",
+            "2",
             "--out-root",
             "runs",
         ],
@@ -52,10 +53,9 @@ def test_features_stage_builds_features_json(tmp_path: Path) -> None:
     )
 
     features_path = tmp_path / "runs" / run_id / "features" / "outputs" / "features.json"
-    payload = json.loads(features_path.read_text(encoding="utf-8"))
+    ids, Y, meta = load_feature_json(features_path, kind="features")
 
-    assert payload["schema_version"] == "1"
-    assert payload["feature_key"] == "tangentes_locales_v1"
-    assert "ids" in payload
-    assert "Y" in payload
-    assert len(payload["ids"]) == len(payload["Y"])
+    assert ids == ["p0", "p1", "p2", "p3", "p4"]
+    assert np.asarray(Y).shape == (5, 6)
+    assert meta["schema_version"] == "1"
+    assert meta["feature_key"] == "tangentes_locales_v1"
