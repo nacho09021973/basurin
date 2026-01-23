@@ -19,7 +19,8 @@ def _corrs_within_bounds(corrs: list[float]) -> bool:
 def test_bridge_alignment_runs_with_features_points(tmp_path: Path) -> None:
     pytest.importorskip("sklearn")
 
-    run_root = tmp_path / "runs"
+    run_root = Path("runs") / f"pytest__{tmp_path.name}"
+    run_root.mkdir(parents=True, exist_ok=True)
     input_dir = tmp_path / "inputs"
     input_dir.mkdir(parents=True, exist_ok=True)
 
@@ -58,6 +59,7 @@ def test_bridge_alignment_runs_with_features_points(tmp_path: Path) -> None:
     _write_json(features_path, features)
 
     stage_path = Path(__file__).resolve().parents[1] / "experiment" / "bridge" / "stage_F4_1_alignment.py"
+    repo_root = Path(__file__).resolve().parents[1]
     result = subprocess.run(
         [
             sys.executable,
@@ -81,6 +83,7 @@ def test_bridge_alignment_runs_with_features_points(tmp_path: Path) -> None:
             "--out-root",
             str(run_root),
         ],
+        cwd=repo_root,
         capture_output=True,
         text=True,
         check=False,
@@ -88,7 +91,7 @@ def test_bridge_alignment_runs_with_features_points(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
 
-    outputs_dir = run_root / "bridge-io" / "bridge_f4_1_alignment" / "outputs"
+    outputs_dir = repo_root / run_root / "bridge-io" / "bridge_f4_1_alignment" / "outputs"
     assert (outputs_dir / "metrics.json").exists()
     alignment = json.loads((outputs_dir / "alignment_map.json").read_text())
     corrs = alignment["cca"]["canonical_corrs"]
@@ -102,7 +105,8 @@ def test_bridge_alignment_runs_with_features_points(tmp_path: Path) -> None:
 def test_bridge_alignment_aborts_on_matching_feature_key(tmp_path: Path) -> None:
     pytest.importorskip("sklearn")
 
-    run_root = tmp_path / "runs"
+    run_root = Path("runs") / f"pytest__{tmp_path.name}"
+    run_root.mkdir(parents=True, exist_ok=True)
     input_dir = tmp_path / "inputs"
     input_dir.mkdir(parents=True, exist_ok=True)
 
@@ -132,6 +136,7 @@ def test_bridge_alignment_aborts_on_matching_feature_key(tmp_path: Path) -> None
     _write_json(features_path, features)
 
     stage_path = Path(__file__).resolve().parents[1] / "experiment" / "bridge" / "stage_F4_1_alignment.py"
+    repo_root = Path(__file__).resolve().parents[1]
     result = subprocess.run(
         [
             sys.executable,
@@ -155,6 +160,7 @@ def test_bridge_alignment_aborts_on_matching_feature_key(tmp_path: Path) -> None
             "--out-root",
             str(run_root),
         ],
+        cwd=repo_root,
         capture_output=True,
         text=True,
         check=False,
@@ -162,7 +168,7 @@ def test_bridge_alignment_aborts_on_matching_feature_key(tmp_path: Path) -> None
 
     assert result.returncode == 2
 
-    outputs_dir = run_root / "bridge-leakage" / "bridge_f4_1_alignment" / "outputs"
+    outputs_dir = repo_root / run_root / "bridge-leakage" / "bridge_f4_1_alignment" / "outputs"
     assert (outputs_dir / "abort_leakage.json").exists()
     manifest = json.loads((outputs_dir.parent / "manifest.json").read_text())
     assert manifest["files"]["abort_leakage"] == "outputs/abort_leakage.json"
@@ -171,7 +177,8 @@ def test_bridge_alignment_aborts_on_matching_feature_key(tmp_path: Path) -> None
 def test_bridge_alignment_filters_constant_columns(tmp_path: Path) -> None:
     pytest.importorskip("sklearn")
 
-    run_root = tmp_path / "runs"
+    run_root = Path("runs") / f"pytest__{tmp_path.name}"
+    run_root.mkdir(parents=True, exist_ok=True)
     input_dir = tmp_path / "inputs"
     input_dir.mkdir(parents=True, exist_ok=True)
 
@@ -202,6 +209,7 @@ def test_bridge_alignment_filters_constant_columns(tmp_path: Path) -> None:
     _write_json(features_path, features)
 
     stage_path = Path(__file__).resolve().parents[1] / "experiment" / "bridge" / "stage_F4_1_alignment.py"
+    repo_root = Path(__file__).resolve().parents[1]
     result = subprocess.run(
         [
             sys.executable,
@@ -225,6 +233,7 @@ def test_bridge_alignment_filters_constant_columns(tmp_path: Path) -> None:
             "--out-root",
             str(run_root),
         ],
+        cwd=repo_root,
         capture_output=True,
         text=True,
         check=False,
@@ -232,7 +241,7 @@ def test_bridge_alignment_filters_constant_columns(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
 
-    outputs_dir = run_root / "bridge-constant-column" / "bridge_f4_1_alignment" / "outputs"
+    outputs_dir = repo_root / run_root / "bridge-constant-column" / "bridge_f4_1_alignment" / "outputs"
     alignment = json.loads((outputs_dir / "alignment_map.json").read_text())
     data_used = alignment["cca"]["data_used"]
     assert 2 in data_used["y_dropped_idx"]

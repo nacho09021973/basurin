@@ -7,6 +7,8 @@ import pytest
 
 def _run_dictionary_pipeline(tmp_path: Path, run_id: str) -> Path:
     repo_root = Path(__file__).resolve().parents[1]
+    run_root = Path("runs") / f"pytest__{tmp_path.name}"
+    run_root.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
             sys.executable,
@@ -15,8 +17,10 @@ def _run_dictionary_pipeline(tmp_path: Path, run_id: str) -> Path:
             run_id,
             "--n",
             "20",
+            "--out-root",
+            str(run_root),
         ],
-        cwd=tmp_path,
+        cwd=repo_root,
         check=True,
     )
     subprocess.run(
@@ -29,8 +33,10 @@ def _run_dictionary_pipeline(tmp_path: Path, run_id: str) -> Path:
             "5",
             "--n-modes",
             "4",
+            "--out-root",
+            str(run_root),
         ],
-        cwd=tmp_path,
+        cwd=repo_root,
         check=True,
     )
     result = subprocess.run(
@@ -43,11 +49,13 @@ def _run_dictionary_pipeline(tmp_path: Path, run_id: str) -> Path:
             "2",
             "--n-bootstrap",
             "0",
+            "--out-root",
+            str(run_root),
         ],
-        cwd=tmp_path,
+        cwd=repo_root,
         check=False,
     )
-    atlas_path = tmp_path / "runs" / run_id / "dictionary" / "outputs" / "atlas.json"
+    atlas_path = repo_root / run_root / run_id / "dictionary" / "outputs" / "atlas.json"
     if result.returncode != 0 and not atlas_path.exists():
         raise RuntimeError("04_diccionario.py no generó atlas.json en el pipeline de test.")
     return repo_root
@@ -55,6 +63,8 @@ def _run_dictionary_pipeline(tmp_path: Path, run_id: str) -> Path:
 
 def _run_spectrum_only_pipeline(tmp_path: Path, run_id: str) -> Path:
     repo_root = Path(__file__).resolve().parents[1]
+    run_root = Path("runs") / f"pytest__{tmp_path.name}"
+    run_root.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
             sys.executable,
@@ -67,8 +77,10 @@ def _run_spectrum_only_pipeline(tmp_path: Path, run_id: str) -> Path:
             "3",
             "--noise-rel",
             "0.0",
+            "--out-root",
+            str(run_root),
         ],
-        cwd=tmp_path,
+        cwd=repo_root,
         check=True,
     )
     result = subprocess.run(
@@ -81,11 +93,13 @@ def _run_spectrum_only_pipeline(tmp_path: Path, run_id: str) -> Path:
             "2",
             "--n-bootstrap",
             "0",
+            "--out-root",
+            str(run_root),
         ],
-        cwd=tmp_path,
+        cwd=repo_root,
         check=False,
     )
-    atlas_path = tmp_path / "runs" / run_id / "dictionary" / "outputs" / "atlas.json"
+    atlas_path = repo_root / run_root / run_id / "dictionary" / "outputs" / "atlas.json"
     if result.returncode != 0 and not atlas_path.exists():
         raise RuntimeError("04_diccionario.py no generó atlas.json en spectrum_only de test.")
     return repo_root
@@ -96,6 +110,7 @@ def test_bridge_alignment_defaults_require_features_stage(tmp_path: Path) -> Non
 
     run_id = "bridge-defaults"
     repo_root = _run_dictionary_pipeline(tmp_path, run_id)
+    run_root = Path("runs") / f"pytest__{tmp_path.name}"
 
     features_result = subprocess.run(
         [
@@ -103,8 +118,10 @@ def test_bridge_alignment_defaults_require_features_stage(tmp_path: Path) -> Non
             str(repo_root / "tools" / "05_build_features_stage.py"),
             "--run",
             run_id,
+            "--out-root",
+            str(run_root),
         ],
-        cwd=tmp_path,
+        cwd=repo_root,
         capture_output=True,
         text=True,
         check=False,
@@ -126,8 +143,10 @@ def test_bridge_alignment_defaults_require_features_stage(tmp_path: Path) -> Non
             "2",
             "--n-components",
             "2",
+            "--out-root",
+            str(run_root),
         ],
-        cwd=tmp_path,
+        cwd=repo_root,
         capture_output=True,
         text=True,
     )
@@ -144,6 +163,7 @@ def test_bridge_alignment_multi_run(tmp_path: Path) -> None:
     run_y = "bridge-run-y"
     repo_root = _run_dictionary_pipeline(tmp_path, run_x)
     _run_spectrum_only_pipeline(tmp_path, run_y)
+    run_root = Path("runs") / f"pytest__{tmp_path.name}"
 
     for run_id in (run_x, run_y):
         features_result = subprocess.run(
@@ -152,8 +172,10 @@ def test_bridge_alignment_multi_run(tmp_path: Path) -> None:
                 str(repo_root / "tools" / "05_build_features_stage.py"),
                 "--run",
                 run_id,
+                "--out-root",
+                str(run_root),
             ],
-            cwd=tmp_path,
+            cwd=repo_root,
             capture_output=True,
             text=True,
             check=False,
@@ -177,8 +199,10 @@ def test_bridge_alignment_multi_run(tmp_path: Path) -> None:
             "2",
             "--n-components",
             "2",
+            "--out-root",
+            str(run_root),
         ],
-        cwd=tmp_path,
+        cwd=repo_root,
         capture_output=True,
         text=True,
     )
