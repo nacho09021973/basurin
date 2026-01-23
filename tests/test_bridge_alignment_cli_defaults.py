@@ -1,9 +1,3 @@
-"""Tests de CLI defaults para stage de bridge alignment.
-
-Cambios para gobernanza BASURIN:
-- Usa variable de entorno BASURIN_RUNS_ROOT para scripts que no soportan --out-root
-- Todas las invocaciones al stage de alignment incluyen --no-kill-switch
-"""
 import os
 import subprocess
 import sys
@@ -13,14 +7,17 @@ import pytest
 
 
 def _run_dictionary_pipeline(tmp_path: Path, run_id: str) -> Path:
-    """Ejecuta el pipeline hasta diccionario para preparar el run."""
-    repo_root = Path(__file__).resolve().parents[0]
+    """Run geometry → spectrum → dictionary pipeline.
+    
+    Note: 01/03/04 scripts use BASURIN_RUNS_ROOT env var, not --out-root flag.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
     run_root = Path("runs") / f"pytest__{tmp_path.name}"
     run_root.mkdir(parents=True, exist_ok=True)
     
-    # GOBERNANZA: usar BASURIN_RUNS_ROOT para scripts que no soportan --out-root
+    # Scripts use env var, not --out-root
     env = os.environ.copy()
-    env["BASURIN_RUNS_ROOT"] = str(run_root)
+    env["BASURIN_RUNS_ROOT"] = str(repo_root / run_root)
     
     subprocess.run(
         [
@@ -72,14 +69,17 @@ def _run_dictionary_pipeline(tmp_path: Path, run_id: str) -> Path:
 
 
 def _run_spectrum_only_pipeline(tmp_path: Path, run_id: str) -> Path:
-    """Ejecuta pipeline spectrum_only hasta diccionario."""
-    repo_root = Path(__file__).resolve().parents[0]
+    """Run spectrum-only pipeline (01_genera_neutrino_sandbox → 04_diccionario).
+    
+    Note: Scripts use BASURIN_RUNS_ROOT env var, not --out-root flag.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
     run_root = Path("runs") / f"pytest__{tmp_path.name}"
     run_root.mkdir(parents=True, exist_ok=True)
     
-    # GOBERNANZA: usar BASURIN_RUNS_ROOT para scripts que no soportan --out-root
+    # Scripts use env var, not --out-root
     env = os.environ.copy()
-    env["BASURIN_RUNS_ROOT"] = str(run_root)
+    env["BASURIN_RUNS_ROOT"] = str(repo_root / run_root)
     
     subprocess.run(
         [
@@ -125,10 +125,6 @@ def test_bridge_alignment_defaults_require_features_stage(tmp_path: Path) -> Non
     run_id = "bridge-defaults"
     repo_root = _run_dictionary_pipeline(tmp_path, run_id)
     run_root = Path("runs") / f"pytest__{tmp_path.name}"
-    
-    # GOBERNANZA: usar BASURIN_RUNS_ROOT
-    env = os.environ.copy()
-    env["BASURIN_RUNS_ROOT"] = str(run_root)
 
     features_result = subprocess.run(
         [
@@ -140,7 +136,6 @@ def test_bridge_alignment_defaults_require_features_stage(tmp_path: Path) -> Non
             str(run_root),
         ],
         cwd=repo_root,
-        env=env,
         capture_output=True,
         text=True,
         check=False,
@@ -153,7 +148,7 @@ def test_bridge_alignment_defaults_require_features_stage(tmp_path: Path) -> Non
             str(repo_root / "experiment" / "bridge" / "stage_F4_1_alignment.py"),
             "--run",
             run_id,
-            "--no-kill-switch",  # GOBERNANZA: bypass contract_run_valid
+            "--no-kill-switch",  # Bypass RUN_VALID gate (not testing that)
             "--bootstrap",
             "2",
             "--perm",
@@ -166,7 +161,6 @@ def test_bridge_alignment_defaults_require_features_stage(tmp_path: Path) -> Non
             str(run_root),
         ],
         cwd=repo_root,
-        env=env,
         capture_output=True,
         text=True,
     )
@@ -184,10 +178,6 @@ def test_bridge_alignment_multi_run(tmp_path: Path) -> None:
     repo_root = _run_dictionary_pipeline(tmp_path, run_x)
     _run_spectrum_only_pipeline(tmp_path, run_y)
     run_root = Path("runs") / f"pytest__{tmp_path.name}"
-    
-    # GOBERNANZA: usar BASURIN_RUNS_ROOT
-    env = os.environ.copy()
-    env["BASURIN_RUNS_ROOT"] = str(run_root)
 
     for run_id in (run_x, run_y):
         features_result = subprocess.run(
@@ -200,7 +190,6 @@ def test_bridge_alignment_multi_run(tmp_path: Path) -> None:
                 str(run_root),
             ],
             cwd=repo_root,
-            env=env,
             capture_output=True,
             text=True,
             check=False,
@@ -215,7 +204,7 @@ def test_bridge_alignment_multi_run(tmp_path: Path) -> None:
             run_x,
             "--run-y",
             run_y,
-            "--no-kill-switch",  # GOBERNANZA: bypass contract_run_valid
+            "--no-kill-switch",  # Bypass RUN_VALID gate (not testing that)
             "--bootstrap",
             "2",
             "--perm",
@@ -228,7 +217,6 @@ def test_bridge_alignment_multi_run(tmp_path: Path) -> None:
             str(run_root),
         ],
         cwd=repo_root,
-        env=env,
         capture_output=True,
         text=True,
     )
