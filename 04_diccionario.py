@@ -54,6 +54,43 @@ from basurin_io import (
     sha256_file,
 )
 
+# -----------------------------------------------------------------------------
+# Compat shim requerido por tests/test_spectrum_resolution.py
+# -----------------------------------------------------------------------------
+from pathlib import Path
+from typing import Union
+
+PathLike = Union[str, Path]
+
+
+def resolve_spectrum_path(
+    run: str,
+    spectrum_file: str = "outputs/spectrum.h5",
+    base_dir: PathLike = "runs",
+) -> Path:
+    """
+    Preferido (canónico):
+      runs/<run>/spectrum/<spectrum_file>   (típicamente outputs/spectrum.h5)
+    Fallback legacy:
+      runs/<run>/spectrum/spectrum.h5
+
+    Devuelve Path relativo (sin .resolve()).
+    """
+    run_dir = Path(base_dir) / str(run)
+    spectrum_dir = run_dir / "spectrum"
+
+    candidate = spectrum_dir / spectrum_file
+    legacy = spectrum_dir / "spectrum.h5"
+
+    if candidate.exists():
+        return candidate
+    if legacy.exists():
+        return legacy
+
+    raise FileNotFoundError(
+        f"spectrum.h5 no encontrado; rutas esperadas: {candidate} | {legacy}"
+    )
+
 if __name__ not in sys.modules:
     _shim_module = types.ModuleType(__name__)
     _shim_module.__dict__.update(globals())
@@ -62,25 +99,6 @@ if __name__ not in sys.modules:
 warnings.filterwarnings("ignore", category=UserWarning)
 
 __version__ = "1.5.0"
-
-
-def resolve_spectrum_path(
-    run: str,
-    spectrum_file: str = "outputs/spectrum.h5",
-    base_dir: str | Path = "runs",
-) -> Path:
-    run_dir = Path(base_dir) / run
-    spectrum_dir = run_dir / "spectrum"
-    candidate = spectrum_dir / spectrum_file
-    legacy = spectrum_dir / "spectrum.h5"
-    if candidate.exists():
-        return candidate
-    if legacy.exists():
-        return legacy
-    raise FileNotFoundError(
-        "spectrum.h5 no encontrado; rutas esperadas: "
-        f"{candidate} o {legacy}"
-    )
 
 
 # =============================================================================
