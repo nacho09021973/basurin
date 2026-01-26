@@ -56,6 +56,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -283,7 +284,8 @@ def main() -> int:
 
     np.random.seed(cfg.seed)
 
-    stage_dir = Path("runs") / cfg.run / "spectrum"
+    runs_root = Path(os.environ.get("BASURIN_RUNS_ROOT", "runs"))
+    stage_dir = runs_root / cfg.run / "spectrum"
     outputs_dir = stage_dir / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
 

@@ -180,7 +180,7 @@ def load_feature_json(
 
     rows = None
     if isinstance(obj, dict):
-        for k in ["points", "events", "rows", "data"]:
+        for k in ["points", "theories", "events", "rows", "data"]:
             if isinstance(obj.get(k), list):
                 rows = obj[k]
                 break
@@ -196,7 +196,10 @@ def load_feature_json(
             rid = row.get("id", row.get("uid", row.get("name")))
             vec = row.get(key_vec, row.get(key_vec.upper()))
             if vec is None and key_vec == "x":
-                vec = row.get("features", row.get("vector"))
+                for fallback in ["features", "ratios", "vector"]:
+                    if fallback in row:
+                        vec = row[fallback]
+                        break
             if vec is None and isinstance(row.get("theories"), dict):
                 theories = row["theories"]
                 if feature_key in theories:
@@ -1133,6 +1136,7 @@ def main() -> int:
     _load_sklearn()
 
     remap_info = {"applied": False, "reason": None}
+    effective_pairing_policy = cfg.pairing_policy
     if cfg.pairing_policy == "id":
         ids_x, ids_y, remap_info = reconcile_ids(
             ids_x, ids_y, meta_x, meta_y, atlas_path
@@ -1143,16 +1147,26 @@ def main() -> int:
                 file=sys.stderr,
             )
         if ids_x is not None and ids_y is not None and ids_x != ids_y:
-            sample_x = [str(x) for x in ids_x[:5]]
-            sample_y = [str(y) for y in ids_y[:5]]
-            raise ValueError(
-                "IDs no coinciden para pairing-policy id. "
-                f"ids_x[0:5]={sample_x}, ids_y[0:5]={sample_y}. "
-                "Sugerencia: usa --pairing-policy order."
-            )
+            # If lengths differ, automatically fall back to order pairing
+            if len(ids_x) != len(ids_y):
+                n_common = min(len(ids_x), len(ids_y))
+                print(
+                    f"WARNING: N_X ({len(ids_x)}) != N_Y ({len(ids_y)}); "
+                    f"usando pairing-policy order con primeros {n_common} elementos.",
+                    file=sys.stderr,
+                )
+                effective_pairing_policy = "order"
+            else:
+                sample_x = [str(x) for x in ids_x[:5]]
+                sample_y = [str(y) for y in ids_y[:5]]
+                raise ValueError(
+                    "IDs no coinciden para pairing-policy id. "
+                    f"ids_x[0:5]={sample_x}, ids_y[0:5]={sample_y}. "
+                    "Sugerencia: usa --pairing-policy order."
+                )
 
     # Pair
-    ids, Xp, Yp, pairing_info = pair_frames(ids_x, X, ids_y, Y, cfg.pairing_policy)
+    ids, Xp, Yp, pairing_info = pair_frames(ids_x, X, ids_y, Y, effective_pairing_policy)
     pairing_info["ids_remap"] = remap_info
 
     # Basic dims
