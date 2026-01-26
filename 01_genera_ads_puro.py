@@ -18,9 +18,11 @@ El H5 contiene:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 import numpy as np
 
 from basurin_io import (
@@ -79,8 +81,11 @@ def validate(cfg: Config) -> None:
 def main() -> int:
     cfg = parse_args()
     validate(cfg)
-    
-    stage_dir, out_dir = ensure_stage_dirs(cfg.run, "geometry")
+
+    runs_root = Path(os.environ.get("BASURIN_RUNS_ROOT", "runs"))
+    run_dir = runs_root / str(cfg.run)
+    stage_dir = run_dir / "geometry"
+    stage_dir, out_dir = ensure_stage_dirs(cfg.run, "geometry", base_dir=runs_root)
     out_path = out_dir / "ads_puro.h5"
     
     # Generar datos
