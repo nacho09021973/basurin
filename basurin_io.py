@@ -22,6 +22,8 @@ def resolve_out_root(out_root: str, runs_root: Path | str = "runs") -> Path:
     candidate = Path(out_root)
     if not candidate.is_absolute():
         candidate = (Path.cwd() / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
     if candidate.name == runs_root_path.name:
         return candidate
     try:
