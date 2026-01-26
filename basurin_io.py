@@ -46,6 +46,14 @@ def validate_run_id(run_id: str, out_root: Path) -> None:
         raise ValueError("run_id escapes out_root") from exc
 
 
+def get_runs_root() -> Path:
+    """Return the runs root directory, respecting BASURIN_RUNS_ROOT env var."""
+    env_root = os.environ.get("BASURIN_RUNS_ROOT")
+    if env_root:
+        return Path(env_root).expanduser()
+    return Path("runs")
+
+
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -54,16 +62,18 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def get_run_dir(run_id: str, base_dir: Path | str = "runs") -> Path:
+def get_run_dir(run_id: str, base_dir: Path | str | None = None) -> Path:
+    if base_dir is None:
+        base_dir = get_runs_root()
     return Path(base_dir) / run_id
 
 
-def stage_dir(run_id: str, stage_name: str, base_dir: Path | str = "runs") -> Path:
+def stage_dir(run_id: str, stage_name: str, base_dir: Path | str | None = None) -> Path:
     return get_run_dir(run_id, base_dir=base_dir) / stage_name
 
 
 def ensure_stage_dirs(
-    run_id: str, stage_name: str, base_dir: Path | str = "runs"
+    run_id: str, stage_name: str, base_dir: Path | str | None = None
 ) -> tuple[Path, Path]:
     sdir = stage_dir(run_id, stage_name, base_dir=base_dir)
     outputs_dir = sdir / "outputs"
@@ -112,7 +122,7 @@ def assert_within_runs(run_dir: Path, path: Path) -> None:
 def resolve_geometry_path(
     run: str,
     geometry_file: str,
-    base_dir: Path | str = "runs",
+    base_dir: Path | str | None = None,
 ) -> tuple[Path, str, str | None, str]:
     """Resolve the geometry path for a run.
 
