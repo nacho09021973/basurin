@@ -60,14 +60,20 @@ __version__ = "1.5.0"
 
 def resolve_spectrum_path(
     run: str,
-    spectrum_file: str,
-    base_dir: Path | str = "runs",
+    spectrum_file: str = "outputs/spectrum.h5",
+    base_dir: str | Path = "runs",
 ) -> Path:
-    if Path(spectrum_file).is_absolute():
-        return Path(spectrum_file)
-    if spectrum_file.startswith("runs/"):
-        return Path(spectrum_file)
-    return Path(base_dir) / run / "spectrum" / spectrum_file
+    run_dir = Path(base_dir) / run
+    spectrum_dir = run_dir / "spectrum"
+    candidate = spectrum_dir / spectrum_file
+    legacy = spectrum_dir / "spectrum.h5"
+    if candidate.exists():
+        return candidate
+    if legacy.exists():
+        return legacy
+    raise FileNotFoundError(
+        f"No se encontró espectro en {candidate} ni en {legacy}"
+    )
 
 
 # =============================================================================
