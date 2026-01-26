@@ -68,7 +68,6 @@ from basurin_io import (
     assert_within_runs,
     ensure_stage_dirs,
     load_feature_json,
-    resolve_out_root,
     sha256_file,
     validate_run_id,
     write_manifest,
@@ -100,6 +99,34 @@ def _load_sklearn() -> None:
     CCA = _CCA
     NearestNeighbors = _NearestNeighbors
     StandardScaler = _StandardScaler
+
+
+def _is_under(child: Path, parent: Path) -> bool:
+    try:
+        child.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _validate_out_root(out_root: Path, repo_runs: Path) -> Path:
+    repo_runs_resolved = repo_runs.resolve()
+    candidate = Path(out_root)
+    if candidate == Path("runs"):
+        return repo_runs_resolved
+    if not candidate.is_absolute():
+        candidate = (Path.cwd() / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+    if candidate.name == "runs":
+        return candidate
+    if _is_under(candidate, repo_runs_resolved):
+        return candidate
+    _contract_error(
+        "out_root must be 'runs', a directory named 'runs', "
+        f"or a subdir under {repo_runs_resolved}"
+    )
+    raise SystemExit(2)
 
 
 def _decode_feature_names(raw: Any) -> Optional[List[str]]:
@@ -883,7 +910,7 @@ def main() -> int:
     cfg = parse_args()
 
     try:
-        out_root = resolve_out_root(cfg.out_root)
+        out_root = _validate_out_root(Path(cfg.out_root), _REPO_ROOT / "runs")
         validate_run_id(cfg.run, out_root)
         validate_run_id(cfg.run_x, out_root)
         validate_run_id(cfg.run_y, out_root)
