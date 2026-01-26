@@ -7,21 +7,16 @@ import runpy
 import sys
 from pathlib import Path
 
-from basurin_io import resolve_spectrum_path as resolve_run_spectrum_path
+from basurin_io import resolve_spectrum_path
 
 
-def resolve_in_spectrum(run_id: str, base_dir: str | Path = "runs") -> Path:
-    run_dir = Path(base_dir) / run_id
+def resolve_in_spectrum(run: str | Path, base_dir: str | Path = "runs") -> Path:
+    run_dir = Path(base_dir) / str(run)
+    resolved = resolve_spectrum_path(run_dir)
     try:
-        return resolve_run_spectrum_path(run_dir)
-    except FileNotFoundError:
-        outputs = run_dir / "spectrum" / "outputs" / "spectrum.h5"
-        legacy = run_dir / "spectrum" / "spectrum.h5"
-        if outputs.exists():
-            return outputs
-        if legacy.exists():
-            return legacy
-        raise
+        return resolved.relative_to(Path.cwd())
+    except ValueError:
+        return Path(base_dir) / str(run) / "spectrum" / "outputs" / "spectrum.h5"
 
 
 def main() -> int:
