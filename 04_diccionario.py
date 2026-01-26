@@ -78,7 +78,8 @@ def resolve_spectrum_path(
     if legacy.exists():
         return legacy
     raise FileNotFoundError(
-        f"No se encontró espectro en {candidate} ni en {legacy}"
+        "spectrum.h5 no encontrado; rutas esperadas: "
+        f"{candidate} o {legacy}"
     )
 
 
