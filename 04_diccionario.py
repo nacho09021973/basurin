@@ -1744,11 +1744,12 @@ def main() -> int:
         return 1
     
     spectrum = load_spectrum(spec_path)
-    run_dir = get_run_dir(cfg.run)
+    runs_root = Path(os.environ.get("BASURIN_RUNS_ROOT", "runs"))
+    run_dir = get_run_dir(cfg.run, base_dir=runs_root)
     try:
         spectrum_rel_path = str(spec_path.relative_to(run_dir))
     except ValueError:
-        print(f"ERROR: spectrum fuera de runs/{cfg.run}: {spec_path}", file=sys.stderr)
+        print(f"ERROR: spectrum fuera de {run_dir}: {spec_path}", file=sys.stderr)
         return 1
     
     print(f"Bloque C v{__version__}")
@@ -1896,7 +1897,7 @@ def main() -> int:
     atlas = build_atlas(spectrum["delta_uv"], spectrum["M2"], cfg.k_features)
     
     # --- Escribir outputs ---
-    stage_dir, outputs_dir = ensure_stage_dirs(cfg.run, "dictionary")
+    stage_dir, outputs_dir = ensure_stage_dirs(cfg.run, "dictionary", base_dir=runs_root)
     paths = write_outputs(
         stage_dir,
         outputs_dir,

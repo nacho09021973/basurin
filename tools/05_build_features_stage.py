@@ -46,20 +46,27 @@ def _require_sklearn() -> bool:
     return True
 
 
-def _compute_local_features(X: np.ndarray, k_neighbors: int) -> np.ndarray:
+def _compute_local_features(X: np.ndarray, k_neighbors: int) -> tuple[np.ndarray, int]:
+    """Compute local tangent features.
+
+    Returns (features, effective_k) where effective_k may be smaller than
+    k_neighbors if dataset is too small.
+    """
     if X.ndim != 2:
         raise ValueError("X debe ser matriz 2D.")
     n_rows = X.shape[0]
     if k_neighbors < 1:
         raise ValueError("k_neighbors debe ser >= 1.")
-    if n_rows <= k_neighbors:
+    # Adapt k_neighbors for small datasets
+    effective_k = min(k_neighbors, n_rows - 1)
+    if effective_k < 1:
         raise ValueError(
-            f"n_rows ({n_rows}) debe ser mayor que k_neighbors ({k_neighbors})."
+            f"n_rows ({n_rows}) insuficiente para calcular features locales (necesita >= 2)."
         )
 
     from sklearn.neighbors import NearestNeighbors
 
-    nn = NearestNeighbors(n_neighbors=k_neighbors + 1)
+    nn = NearestNeighbors(n_neighbors=effective_k + 1)
     nn.fit(X)
     distances, indices = nn.kneighbors(X, return_distance=True)
     distances = distances[:, 1:]
@@ -70,7 +77,7 @@ def _compute_local_features(X: np.ndarray, k_neighbors: int) -> np.ndarray:
     for i in range(n_rows):
         neighbors = X[indices[i]]
         centered = neighbors - neighbors.mean(axis=0, keepdims=True)
-        denom = max(k_neighbors - 1, 1)
+        denom = max(effective_k - 1, 1)
         cov = (centered.T @ centered) / float(denom)
         eigvals = np.linalg.eigvalsh(cov)
         eigvals = np.sort(eigvals)[::-1]
@@ -97,7 +104,7 @@ def _compute_local_features(X: np.ndarray, k_neighbors: int) -> np.ndarray:
             rho_clipped,
             log10_rho,
         ]
-    return features
+    return features, effective_k
 
 
 def _load_atlas_inputs(atlas_path: Path, feature_key_hint: str) -> tuple[list[Any], np.ndarray, dict[str, Any]]:
@@ -173,7 +180,7 @@ def main() -> int:
         return 1
 
     try:
-        Y = _compute_local_features(X, args.k_neighbors)
+        Y, effective_k = _compute_local_features(X, args.k_neighbors)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -198,7 +205,7 @@ def main() -> int:
         "meta": {
             "feature_key": feature_key,
             "columns": columns,
-            "k_neighbors": args.k_neighbors,
+            "k_neighbors": effective_k,
             "created": utc_now_iso(),
             "ids_source": ids_source,
             "source_atlas": f"runs/{args.run}/{ids_source}",
@@ -221,7 +228,7 @@ def main() -> int:
             "atlas_sha256": input_hash,
         },
         "outputs": {"features": "outputs/features.json"},
-        "config": {"k_neighbors": args.k_neighbors},
+        "config": {"k_neighbors": effective_k},
         "data": {
             "n_rows": len(ids),
             "n_features": int(Y.shape[1]),
