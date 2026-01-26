@@ -1137,6 +1137,7 @@ def main() -> int:
 
     remap_info = {"applied": False, "reason": None}
     effective_pairing_policy = cfg.pairing_policy
+    pairing_fallback_reason = None
     if cfg.pairing_policy == "id":
         ids_x, ids_y, remap_info = reconcile_ids(
             ids_x, ids_y, meta_x, meta_y, atlas_path
@@ -1150,9 +1151,9 @@ def main() -> int:
             # If lengths differ, automatically fall back to order pairing
             if len(ids_x) != len(ids_y):
                 n_common = min(len(ids_x), len(ids_y))
+                pairing_fallback_reason = f"N_X ({len(ids_x)}) != N_Y ({len(ids_y)}); using first {n_common} elements"
                 print(
-                    f"WARNING: N_X ({len(ids_x)}) != N_Y ({len(ids_y)}); "
-                    f"usando pairing-policy order con primeros {n_common} elementos.",
+                    f"WARNING: {pairing_fallback_reason}",
                     file=sys.stderr,
                 )
                 effective_pairing_policy = "order"
@@ -1168,6 +1169,11 @@ def main() -> int:
     # Pair
     ids, Xp, Yp, pairing_info = pair_frames(ids_x, X, ids_y, Y, effective_pairing_policy)
     pairing_info["ids_remap"] = remap_info
+    # Governance: explicitly record requested vs effective pairing policy
+    pairing_info["pairing_policy_requested"] = cfg.pairing_policy
+    pairing_info["pairing_policy_effective"] = effective_pairing_policy
+    if pairing_fallback_reason:
+        pairing_info["fallback_reason"] = pairing_fallback_reason
 
     # Basic dims
     N = Xp.shape[0]
@@ -1490,6 +1496,9 @@ def main() -> int:
         p = outdir / png
         if p.exists():
             summary["hashes"][f"outputs/{png}"] = sha256_file(p)
+    # Governance: record plots error if matplotlib unavailable
+    if "plots_error" in plot_files:
+        summary["plots_error"] = plot_files["plots_error"]
 
     write_stage_summary(stage_dir, summary)
 
@@ -1503,7 +1512,9 @@ def main() -> int:
         "knn_preservation_control_positive": outdir / "knn_preservation_control_positive.json",
         "summary": stage_dir / "stage_summary.json",
     }
-    for _, fn in plot_files.items():
+    for key, fn in plot_files.items():
+        if key == "plots_error":
+            continue  # Don't treat error messages as file paths
         manifest_artifacts[Path(fn).stem] = outdir / fn
     write_manifest(
         stage_dir,

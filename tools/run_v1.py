@@ -19,7 +19,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from basurin_io import get_run_dir, validate_run_id
+from basurin_io import get_run_dir, get_runs_root, validate_run_id
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,7 +58,7 @@ def run_cmd(args: list[str]) -> int:
 
 def main() -> int:
     args = parse_args()
-    validate_run_id(args.run, Path("runs"))
+    validate_run_id(args.run, get_runs_root())
     run_dir = get_run_dir(args.run)
 
     if not args.keep_runs and run_dir.exists():

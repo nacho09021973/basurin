@@ -206,6 +206,8 @@ def main() -> int:
             "feature_key": feature_key,
             "columns": columns,
             "k_neighbors": effective_k,
+            "k_neighbors_requested": args.k_neighbors,
+            "k_neighbors_effective": effective_k,
             "created": utc_now_iso(),
             "ids_source": ids_source,
             "source_atlas": f"runs/{args.run}/{ids_source}",
@@ -228,7 +230,15 @@ def main() -> int:
             "atlas_sha256": input_hash,
         },
         "outputs": {"features": "outputs/features.json"},
-        "config": {"k_neighbors": effective_k},
+        "config": {
+            "k_neighbors_requested": args.k_neighbors,
+            "k_neighbors_effective": effective_k,
+            "k_neighbors": effective_k,  # backward compat
+            "fallback_reason": (
+                f"k_neighbors reduced from {args.k_neighbors} to {effective_k} (n_rows={len(ids)})"
+                if effective_k < args.k_neighbors else None
+            ),
+        },
         "data": {
             "n_rows": len(ids),
             "n_features": int(Y.shape[1]),
