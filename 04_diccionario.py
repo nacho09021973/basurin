@@ -36,6 +36,7 @@ import argparse
 import json
 import subprocess
 import sys
+import types
 import warnings
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
@@ -52,6 +53,11 @@ from basurin_io import (
     write_stage_summary,
     sha256_file,
 )
+
+if __name__ not in sys.modules:
+    _shim_module = types.ModuleType(__name__)
+    _shim_module.__dict__.update(globals())
+    sys.modules[__name__] = _shim_module
 # Silenciar warnings de convergencia en CV con pocos datos
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -1935,6 +1941,10 @@ def main() -> int:
                 print(f"    C3b (cycle):   {c3['c3b_cycle']['global']:.4f}")
             print(f"    threshold:     {c3['threshold']['effective']:.4f}")
         return 1
+
+
+if __name__ in sys.modules:
+    sys.modules[__name__].__dict__.update(globals())
 
 
 if __name__ == "__main__":
