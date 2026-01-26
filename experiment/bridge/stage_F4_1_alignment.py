@@ -67,13 +67,12 @@ if str(_REPO_ROOT) not in sys.path:
 from basurin_io import (
     assert_within_runs,
     ensure_stage_dirs,
-    load_feature_json,
+    resolve_out_root,
     sha256_file,
     validate_run_id,
     write_manifest,
     write_stage_summary,
 )
-from experiment.bridge._out_root import validate_out_root
 from experiment.bridge.pairing import pair_frames
 __version__ = "0.1.0"
 
@@ -91,6 +90,16 @@ def _contract_error(message: str) -> None:
     raise SystemExit(2)
 
 
+def _coerce_vector(vec: Any) -> Optional[List[float]]:
+    if isinstance(vec, list):
+        return [float(x) for x in vec]
+    if isinstance(vec, dict):
+        for key in ["values", "vector", "data", "features"]:
+            if key in vec:
+                return _coerce_vector(vec[key])
+    return None
+
+
 def _load_sklearn() -> None:
     global CCA, NearestNeighbors, StandardScaler
     from sklearn.cross_decomposition import CCA as _CCA
@@ -100,6 +109,123 @@ def _load_sklearn() -> None:
     CCA = _CCA
     NearestNeighbors = _NearestNeighbors
     StandardScaler = _StandardScaler
+
+
+def _resolve_feature_key(obj: Any, kind: str, feature_key_hint: Optional[str]) -> str:
+    if isinstance(obj, dict):
+        meta = obj.get("meta")
+        if isinstance(meta, dict) and meta.get("feature_key"):
+            return str(meta.get("feature_key"))
+    if feature_key_hint:
+        return str(feature_key_hint)
+    if kind == "atlas":
+        return "ratios"
+    if kind in {"features", "ringdown"}:
+        return "tangentes_locales_v1"
+    _contract_error(f"kind inválido: {kind}")
+    return ""
+
+
+def _extract_meta(obj: Any) -> Dict[str, Any]:
+    meta: Dict[str, Any] = {}
+    if not isinstance(obj, dict):
+        return meta
+    if "meta" in obj and isinstance(obj["meta"], dict):
+        meta.update(obj["meta"])
+    for mk in ["feature_key", "k", "dim", "source", "schema_version", "created"]:
+        if mk in obj:
+            meta[mk] = obj[mk]
+    if "columns" in obj:
+        meta["columns"] = obj["columns"]
+    if "feature_names" in obj and "columns" not in meta:
+        meta["columns"] = obj["feature_names"]
+    return meta
+
+
+def _coerce_matrix(rows: Any, path: Path, key_label: str) -> np.ndarray:
+    try:
+        mat = np.asarray(rows, dtype=float)
+    except Exception as exc:
+        _contract_error(f"Formato inválido en {path}: '{key_label}' no es matriz numérica ({exc}).")
+    if mat.ndim != 2:
+        _contract_error(f"Formato inválido en {path}: '{key_label}' debe ser 2D.")
+    return mat
+
+
+def load_feature_json(
+    path: Path,
+    kind: str,
+    feature_key_hint: Optional[str] = None,
+) -> Tuple[Optional[List[Any]], np.ndarray, Dict[str, Any]]:
+    """Carga JSON y devuelve ids (si existen), matriz y metadatos mínimos."""
+    with open(path, "r") as f:
+        obj = json.load(f)
+
+    key_vec = "x" if kind == "atlas" else "y"
+    feature_key = _resolve_feature_key(obj, kind, feature_key_hint)
+    meta = _extract_meta(obj)
+    if feature_key and "feature_key" not in meta:
+        meta["feature_key"] = feature_key
+
+    if isinstance(obj, dict) and "ids" in obj:
+        for candidate in (key_vec, key_vec.upper()):
+            if candidate in obj:
+                ids = obj["ids"]
+                mat = _coerce_matrix(obj[candidate], path, candidate)
+                if ids is not None and len(ids) != mat.shape[0]:
+                    _contract_error(f"{path}: ids no coincide con filas de '{candidate}'.")
+                if "columns" not in meta and meta.get("feature_key"):
+                    meta["columns"] = [f"{meta['feature_key']}_{i}" for i in range(mat.shape[1])]
+                return ids, mat, meta
+
+    rows = None
+    if isinstance(obj, dict):
+        for k in ["points", "events", "rows", "data"]:
+            if isinstance(obj.get(k), list):
+                rows = obj[k]
+                break
+    elif isinstance(obj, list):
+        rows = obj
+
+    if isinstance(rows, list):
+        ids: List[Any] = []
+        vectors: List[List[float]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                _contract_error(f"{path}: filas deben ser dicts con id y '{key_vec}'.")
+            rid = row.get("id", row.get("uid", row.get("name")))
+            vec = row.get(key_vec, row.get(key_vec.upper()))
+            if vec is None and key_vec == "x":
+                vec = row.get("features", row.get("vector"))
+            if vec is None and isinstance(row.get("theories"), dict):
+                theories = row["theories"]
+                if feature_key in theories:
+                    vec = theories[feature_key]
+                elif len(theories) == 1:
+                    only_key, only_val = next(iter(theories.items()))
+                    vec = only_val
+                    if "feature_key" not in meta:
+                        meta["feature_key"] = only_key
+                else:
+                    _contract_error(f"{path}: theories no contiene '{feature_key}'.")
+            if vec is None:
+                _contract_error(f"{path}: falta vector '{key_vec}' en fila.")
+            vec_list = _coerce_vector(vec)
+            if vec_list is None:
+                _contract_error(f"{path}: vector '{key_vec}' inválido.")
+            ids.append(rid)
+            vectors.append(vec_list)
+        mat = _coerce_matrix(vectors, path, key_vec)
+        if "columns" not in meta and meta.get("feature_key"):
+            meta["columns"] = [f"{meta['feature_key']}_{i}" for i in range(mat.shape[1])]
+        return ids, mat, meta
+
+    _contract_error(
+        f"Formato no reconocido en {path}. Se esperaba dict con ids+{key_vec.upper()} o lista de dicts con '{key_vec}'/theories."
+    )
+    raise SystemExit(2)
+
+    return ids, mat, meta
 
 
 def _decode_feature_names(raw: Any) -> Optional[List[str]]:
@@ -883,7 +1009,7 @@ def main() -> int:
     cfg = parse_args()
 
     try:
-        out_root = validate_out_root(cfg.out_root, _REPO_ROOT / "runs")
+        out_root = resolve_out_root(cfg.out_root)
         validate_run_id(cfg.run, out_root)
         validate_run_id(cfg.run_x, out_root)
         validate_run_id(cfg.run_y, out_root)
@@ -893,15 +1019,6 @@ def main() -> int:
 
     if cfg.kill_switch:
         for run_id in {cfg.run_x, cfg.run_y}:
-            run_dir = (out_root / run_id).resolve()
-            run_dir_markers = [
-                run_dir / "geometry",
-                run_dir / "spectrum",
-                run_dir / "RUN_VALID",
-            ]
-            run_dir_looks_real = any(marker.exists() for marker in run_dir_markers)
-            if not run_dir_looks_real:
-                continue
             contract_cmd = [
                 sys.executable,
                 str(_REPO_ROOT / "tools" / "contract_run_valid.py"),
@@ -935,6 +1052,7 @@ def main() -> int:
             path = (Path.cwd() / path).resolve()
         else:
             path = path.resolve()
+        assert_within_runs(run_dir, path)
         return path, used_default
 
     def _resolve_features_path(run_dir: Path, run_label: str) -> Tuple[Path, str]:
@@ -1105,13 +1223,6 @@ def main() -> int:
             "status": "ABORT",
             "abort_reason": abort_reason,
             "config": asdict(cfg),
-            "inputs": {
-                "atlas": str(atlas_path),
-                "features": str(features_path),
-                "features_kind": features_kind,
-                "run_x": cfg.run_x,
-                "run_y": cfg.run_y,
-            },
             "pairing": pairing_info,
             "data": {"N": N, "dx": dx, "dy": dy, "meta_atlas": meta_x, "meta_ringdown": meta_y},
             "leakage_check": leakage_summary,
@@ -1345,13 +1456,6 @@ def main() -> int:
         "run": cfg.run,
         "status": "OK",
         "config": asdict(cfg),
-        "inputs": {
-            "atlas": str(atlas_path),
-            "features": str(features_path),
-            "features_kind": features_kind,
-            "run_x": cfg.run_x,
-            "run_y": cfg.run_y,
-        },
         "pairing": pairing_info,
         "data": {"N": N, "dx": dx, "dy": dy, "meta_atlas": meta_x, "meta_ringdown": meta_y},
         "results": metrics["results"],
