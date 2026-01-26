@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import types
@@ -280,32 +281,9 @@ def load_spectrum(h5_path: Path) -> dict:
     return data
 
 
-def resolve_input_spectrum_path(run: str, spectrum_file: str) -> Path:
-    """Resuelve la ruta del espectro.
-
-    Contrato IO (canónico):
-      runs/<run>/spectrum/outputs/spectrum.h5
-
-    Legado:
-      runs/<run>/spectrum/spectrum.h5
-
-    Si spectrum_file es ruta absoluta o empieza por 'runs/', se usa tal cual
-    para evitar duplicación de prefijos.
-    """
-    sf = Path(spectrum_file)
-    if sf.is_absolute() or spectrum_file.startswith("runs/"):
-        return sf
-
-    run_dir = get_run_dir(run)
-    if spectrum_file in ("outputs/spectrum.h5", "spectrum.h5"):
-        return resolve_run_spectrum_path(run_dir)
-
-    stage_dir = run_dir / "spectrum"
-    cand = stage_dir / spectrum_file
-    if cand.exists():
-        return cand
-
-    return resolve_run_spectrum_path(run_dir)
+def resolve_input_spectrum_path(run: str, spectrum_file: str = "outputs/spectrum.h5") -> Path:
+    runs_root = Path(os.environ.get("BASURIN_RUNS_ROOT", "runs"))
+    return resolve_spectrum_path(run, spectrum_file=spectrum_file, base_dir=runs_root)
 
 
 def verify_invariants(X: np.ndarray, y: Optional[np.ndarray] = None, *, name: str = "X") -> None:
