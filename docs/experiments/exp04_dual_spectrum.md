@@ -7,4 +7,4 @@ Artefactos esperados:
 - runs/<run_id>/dictionary/validation.json (C2/C3)
 - experiment/exp04_dual_spectrum/results/summary.json
 
-Ejecución: ver plan.json y comandos en este README.
+Ejecución: ver plan.json y comandos en este documento.
