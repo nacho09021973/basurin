@@ -49,10 +49,12 @@ import numpy as np
 from basurin_io import (
     ensure_stage_dirs,
     get_run_dir,
+    get_runs_root,
     resolve_spectrum_path as resolve_run_spectrum_path,
+    sha256_file,
+    utc_now_iso,
     write_manifest,
     write_stage_summary,
-    sha256_file,
 )
 
 # -----------------------------------------------------------------------------
@@ -282,7 +284,7 @@ def load_spectrum(h5_path: Path) -> dict:
 
 
 def resolve_input_spectrum_path(run: str, spectrum_file: str = "outputs/spectrum.h5") -> Path:
-    runs_root = Path(os.environ.get("BASURIN_RUNS_ROOT", "runs"))
+    runs_root = get_runs_root()
     return resolve_spectrum_path(run, spectrum_file=spectrum_file, base_dir=runs_root)
 
 
@@ -1207,7 +1209,17 @@ def evaluate_c3_full(
 # Atlas de teorías efectivas
 # =============================================================================
 
-def build_atlas(delta: np.ndarray, M2: np.ndarray, k: int) -> dict:
+def build_atlas(
+    delta: np.ndarray,
+    M2: np.ndarray,
+    k: int,
+    *,
+    run: str,
+    created: str,
+    spectrum_path: str,
+    spectrum_sha256: Optional[str],
+    config: dict,
+) -> dict:
     """Construye atlas simple de teorías efectivas."""
     X = compute_ratio_features(M2, k)
     n_theories = len(delta)
@@ -1221,12 +1233,24 @@ def build_atlas(delta: np.ndarray, M2: np.ndarray, k: int) -> dict:
             "ratios": X[i].tolist(),
             "regime": "UV" if delta[i] < 2.0 else ("IR" if delta[i] > 4.0 else "intermediate"),
         })
-    
+
+    inputs = {"spectrum_path": spectrum_path}
+    if spectrum_sha256:
+        inputs["spectrum_sha256"] = spectrum_sha256
+
     return {
-        "n_theories": n_theories,
-        "delta_range": [float(delta.min()), float(delta.max())],
-        "theories": theories,
-        "clustering_method": "parametric_sweep",
+        "schema_version": "atlas_v1",
+        "run": run,
+        "created": created,
+        "source": "04_diccionario.py",
+        "inputs": inputs,
+        "config": config,
+        "atlas": {
+            "n_theories": n_theories,
+            "delta_range": [float(delta.min()), float(delta.max())],
+            "theories": theories,
+            "clustering_method": "parametric_sweep",
+        },
     }
 
 
@@ -1376,7 +1400,8 @@ def evaluate_c5(
 def write_outputs(stage_dir: Path, outputs_dir: Path, cfg: Config, spectrum: dict,
                   model_selection: dict, bootstrap: dict,
                   contracts: dict, atlas: dict, features_meta: dict,
-                  spectrum_rel_path: str, c5_contracts: dict) -> dict:
+                  spectrum_rel_path: str, spectrum_sha256: Optional[str],
+                  c5_contracts: dict, created: str) -> dict:
     """Escribe todos los outputs del Bloque C."""
     import h5py
 
@@ -1432,7 +1457,7 @@ def write_outputs(stage_dir: Path, outputs_dir: Path, cfg: Config, spectrum: dic
     # --- atlas.json ---
     atlas_path = outputs_dir / "atlas.json"
     with open(atlas_path, "w") as f:
-        json.dump(atlas, f, indent=2)
+        json.dump(atlas, f, indent=2, sort_keys=True)
 
     # --- atlas_points.json (opcional) ---
     atlas_points_path = outputs_dir / "atlas_points.json"
@@ -1571,7 +1596,7 @@ def write_outputs(stage_dir: Path, outputs_dir: Path, cfg: Config, spectrum: dic
         "stage": "dictionary",
         "stage_legacy": "04_diccionario",
         "version": __version__,
-        "created": datetime.now(timezone.utc).isoformat(),
+        "created": created,
         "run": cfg.run,
         "notes": "El modelo directo Δ→ratios es un proxy suave local usado solo para evaluar invertibilidad (C3). No es física; fallos en C3a indican proxy/modelo insuficiente.",
         "config": {
@@ -1625,6 +1650,16 @@ def write_outputs(stage_dir: Path, outputs_dir: Path, cfg: Config, spectrum: dic
             "C3_failure_mode": c3.get("failure_mode"),
             "all_hard_contracts_pass": all_hard_pass,
         },
+        "inputs": {
+            "spectrum_path": spectrum_rel_path,
+            **({"spectrum_sha256": spectrum_sha256} if spectrum_sha256 else {}),
+        },
+        "outputs": {
+            "dictionary": "outputs/dictionary.h5",
+            "atlas": "outputs/atlas.json",
+            "ising_comparison": "outputs/ising_comparison.json",
+            "validation": "outputs/validation.json",
+        },
         "hashes": {},
     }
 
@@ -1669,6 +1704,7 @@ def write_outputs(stage_dir: Path, outputs_dir: Path, cfg: Config, spectrum: dic
             "version": __version__,
             "stage_legacy": "04_diccionario",
             "input_spectrum": spectrum_rel_path,
+            "input_spectrum_sha256": spectrum_sha256,
             "atlas_points_status": atlas_points_status,
             "atlas_points_reason": atlas_points_reason,
         },
@@ -1744,7 +1780,8 @@ def main() -> int:
         return 1
     
     spectrum = load_spectrum(spec_path)
-    runs_root = Path(os.environ.get("BASURIN_RUNS_ROOT", "runs"))
+    spectrum_sha256 = sha256_file(spec_path)
+    runs_root = get_runs_root()
     run_dir = get_run_dir(cfg.run, base_dir=runs_root)
     try:
         spectrum_rel_path = str(spec_path.relative_to(run_dir))
@@ -1894,7 +1931,29 @@ def main() -> int:
     print()
     
     # --- Atlas ---
-    atlas = build_atlas(spectrum["delta_uv"], spectrum["M2"], cfg.k_features)
+    created = utc_now_iso()
+    atlas_config = {
+        "k_features": cfg.k_features,
+        "models": list(cfg.models),
+        "n_bootstrap": cfg.n_bootstrap,
+        "enable_c3": cfg.enable_c3,
+        "c3_metric": cfg.c3_metric,
+        "c3_weights": cfg.c3_weights,
+        "c3_threshold": cfg.c3_threshold,
+        "c3_adaptive_threshold": cfg.c3_adaptive_threshold,
+        "direct_model": cfg.direct_model,
+        "direct_degree": cfg.direct_degree,
+    }
+    atlas = build_atlas(
+        spectrum["delta_uv"],
+        spectrum["M2"],
+        cfg.k_features,
+        run=cfg.run,
+        created=created,
+        spectrum_path=spectrum_rel_path,
+        spectrum_sha256=spectrum_sha256,
+        config=atlas_config,
+    )
     
     # --- Escribir outputs ---
     stage_dir, outputs_dir = ensure_stage_dirs(cfg.run, "dictionary", base_dir=runs_root)
@@ -1909,7 +1968,9 @@ def main() -> int:
         atlas,
         features_meta,
         spectrum_rel_path,
+        spectrum_sha256,
         c5_contracts,
+        created,
     )
     
     print("Outputs escritos:")
