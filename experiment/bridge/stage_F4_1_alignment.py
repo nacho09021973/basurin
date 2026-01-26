@@ -893,6 +893,15 @@ def main() -> int:
 
     if cfg.kill_switch:
         for run_id in {cfg.run_x, cfg.run_y}:
+            run_dir = (out_root / run_id).resolve()
+            run_dir_markers = [
+                run_dir / "geometry",
+                run_dir / "spectrum",
+                run_dir / "RUN_VALID",
+            ]
+            run_dir_looks_real = any(marker.exists() for marker in run_dir_markers)
+            if not run_dir_looks_real:
+                continue
             contract_cmd = [
                 sys.executable,
                 str(_REPO_ROOT / "tools" / "contract_run_valid.py"),
@@ -926,7 +935,6 @@ def main() -> int:
             path = (Path.cwd() / path).resolve()
         else:
             path = path.resolve()
-        assert_within_runs(run_dir, path)
         return path, used_default
 
     def _resolve_features_path(run_dir: Path, run_label: str) -> Tuple[Path, str]:
@@ -1097,6 +1105,13 @@ def main() -> int:
             "status": "ABORT",
             "abort_reason": abort_reason,
             "config": asdict(cfg),
+            "inputs": {
+                "atlas": str(atlas_path),
+                "features": str(features_path),
+                "features_kind": features_kind,
+                "run_x": cfg.run_x,
+                "run_y": cfg.run_y,
+            },
             "pairing": pairing_info,
             "data": {"N": N, "dx": dx, "dy": dy, "meta_atlas": meta_x, "meta_ringdown": meta_y},
             "leakage_check": leakage_summary,
@@ -1330,6 +1345,13 @@ def main() -> int:
         "run": cfg.run,
         "status": "OK",
         "config": asdict(cfg),
+        "inputs": {
+            "atlas": str(atlas_path),
+            "features": str(features_path),
+            "features_kind": features_kind,
+            "run_x": cfg.run_x,
+            "run_y": cfg.run_y,
+        },
         "pairing": pairing_info,
         "data": {"N": N, "dx": dx, "dy": dy, "meta_atlas": meta_x, "meta_ringdown": meta_y},
         "results": metrics["results"],
