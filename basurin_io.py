@@ -26,6 +26,15 @@ def resolve_out_root(out_root: str, runs_root: Path | str = "runs") -> Path:
         candidate = candidate.resolve()
     if candidate.name == runs_root_path.name:
         return candidate
+    # Permitir roots alternativos tipo runs_tmp/... si están bajo el repo
+    # y el primer segmento es runs* (kill-switch: no escribir fuera del repo).
+    repo_root = Path.cwd().resolve()
+    try:
+        rel = candidate.relative_to(repo_root)
+        if rel.parts and rel.parts[0].startswith("runs"):
+            return candidate
+    except ValueError:
+        pass
     try:
         candidate.relative_to(runs_root_path)
     except ValueError as exc:
