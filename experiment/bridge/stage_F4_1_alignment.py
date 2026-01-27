@@ -1183,6 +1183,20 @@ def main() -> int:
     if ncomp < 1:
         print(f"ERROR: n_components inválido (dx={dx}, dy={dy})", file=sys.stderr)
         return 1
+    effective_k_nn = 0
+    if N >= 2:
+        effective_k_nn = int(min(max(3, cfg.k_nn), max(1, N - 1)))
+    fallback_reason_k_neighbors = None
+    if effective_k_nn != cfg.k_nn:
+        fallback_reason_k_neighbors = (
+            f"k_nn reduced from {cfg.k_nn} to {effective_k_nn} (N={N})"
+        )
+    fallback_reason_pairing_policy = pairing_fallback_reason
+    summary_config = asdict(cfg)
+    summary_config["fallback_reason_pairing_policy"] = fallback_reason_pairing_policy
+    summary_config["fallback_reason_k_neighbors"] = fallback_reason_k_neighbors
+    summary_config["out_root_requested"] = cfg.out_root
+    summary_config["out_root_effective"] = str(out_root)
 
     # Kill-switch leakage (estandariza internamente con ddof=1 para coherencia numérica)
     leakage = check_leakage(Xp, Yp, meta_x=meta_x, meta_y=meta_y)
@@ -1242,7 +1256,7 @@ def main() -> int:
             "run": cfg.run,
             "status": "ABORT",
             "abort_reason": abort_reason,
-            "config": asdict(cfg),
+            "config": summary_config,
             "pairing": pairing_info,
             "data": {"N": N, "dx": dx, "dy": dy, "meta_atlas": meta_x, "meta_ringdown": meta_y},
             "leakage_check": leakage_summary,
@@ -1475,7 +1489,7 @@ def main() -> int:
         "created": utcnow_iso(),
         "run": cfg.run,
         "status": "OK",
-        "config": asdict(cfg),
+        "config": summary_config,
         "pairing": pairing_info,
         "data": {"N": N, "dx": dx, "dy": dy, "meta_atlas": meta_x, "meta_ringdown": meta_y},
         "results": metrics["results"],
