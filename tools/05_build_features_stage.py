@@ -236,10 +236,12 @@ def main() -> int:
             "k_neighbors_requested": args.k_neighbors,
             "k_neighbors_effective": effective_k,
             "k_neighbors": effective_k,  # backward compat
-            "fallback_reason": (
+            "fallback_reason_k_neighbors": (
                 f"k_neighbors reduced from {args.k_neighbors} to {effective_k} (n_rows={len(ids)})"
                 if effective_k < args.k_neighbors else None
             ),
+            "out_root_requested": args.out_root,
+            "out_root_effective": _display_path(out_root),
         },
         "data": {
             "n_rows": len(ids),
