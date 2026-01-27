@@ -67,3 +67,11 @@ def test_dictionary_atlas_manifest_and_summary(tmp_path: Path) -> None:
     inputs = summary.get("inputs", {})
     assert inputs.get("spectrum_path")
     assert inputs.get("spectrum_sha256")
+
+    # Anti-regression: atlas.json must have top-level ids/X for features stage
+    atlas = json.loads(atlas_path.read_text())
+    assert "ids" in atlas, "atlas.json missing top-level 'ids'"
+    assert "X" in atlas, "atlas.json missing top-level 'X'"
+    assert len(atlas["ids"]) == len(atlas["X"]), "ids/X length mismatch"
+    k_features = 2  # from --k-features 2 above
+    assert len(atlas["X"][0]) == k_features, f"X[0] should have {k_features} features"

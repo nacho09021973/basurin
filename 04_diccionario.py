@@ -1238,6 +1238,15 @@ def build_atlas(
     if spectrum_sha256:
         inputs["spectrum_sha256"] = spectrum_sha256
 
+    # compat shim: expose ids/X for features stage
+    if not theories:
+        raise RuntimeError("build_atlas: theories list is empty")
+    for t in theories:
+        if "id" not in t or "ratios" not in t:
+            raise RuntimeError(f"build_atlas: theory missing id or ratios: {t}")
+    ids = [t["id"] for t in theories]
+    X_list = [t["ratios"] for t in theories]
+
     return {
         "schema_version": "atlas_v1",
         "run": run,
@@ -1251,6 +1260,9 @@ def build_atlas(
             "theories": theories,
             "clustering_method": "parametric_sweep",
         },
+        # compat shim: expose ids/X for features stage
+        "ids": ids,
+        "X": X_list,
     }
 
 
