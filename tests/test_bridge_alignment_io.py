@@ -6,6 +6,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from tests._helpers_features import write_minimal_canonical_features
+
 
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -40,12 +42,21 @@ def test_bridge_alignment_runs_with_features_points(tmp_path: Path) -> None:
         "ids": ids,
         "Y": y_values,
         "meta": {"feature_key": "tangentes_locales_v1"},
+        "X_path": "../features/outputs/X.npy",
     }
 
     atlas_path = input_dir / "atlas_bridge.json"
     features_path = input_dir / "features_points_k7.json"
     _write_json(atlas_path, atlas)
     _write_json(features_path, features)
+    write_minimal_canonical_features(
+        run_dir,
+        n=len(ids),
+        dx=3,
+        dy=6,
+        feature_key=features["meta"]["feature_key"],
+        seed=101,
+    )
 
     stage_path = Path(__file__).resolve().parents[1] / "experiment" / "bridge" / "stage_F4_1_alignment.py"
     repo_root = Path(__file__).resolve().parents[1]
@@ -115,12 +126,21 @@ def test_bridge_alignment_aborts_on_matching_feature_key(tmp_path: Path) -> None
         "ids": ids,
         "Y": shared,
         "meta": {"feature_key": "ratios"},
+        "X_path": "../features/outputs/X.npy",
     }
 
     atlas_path = input_dir / "atlas_bridge.json"
     features_path = input_dir / "features_points_k7.json"
     _write_json(atlas_path, atlas)
     _write_json(features_path, features)
+    write_minimal_canonical_features(
+        run_dir,
+        n=len(ids),
+        dx=3,
+        dy=3,
+        feature_key=features["meta"]["feature_key"],
+        seed=202,
+    )
 
     stage_path = Path(__file__).resolve().parents[1] / "experiment" / "bridge" / "stage_F4_1_alignment.py"
     repo_root = Path(__file__).resolve().parents[1]
@@ -187,12 +207,21 @@ def test_bridge_alignment_filters_constant_columns(tmp_path: Path) -> None:
         "ids": ids,
         "Y": y_values.tolist(),
         "meta": {"feature_key": "tangentes_locales_v1"},
+        "X_path": "../features/outputs/X.npy",
     }
 
     atlas_path = input_dir / "atlas_bridge.json"
     features_path = input_dir / "features_points_k7.json"
     _write_json(atlas_path, atlas)
     _write_json(features_path, features)
+    write_minimal_canonical_features(
+        run_dir,
+        n=len(ids),
+        dx=4,
+        dy=5,
+        feature_key=features["meta"]["feature_key"],
+        seed=303,
+    )
 
     stage_path = Path(__file__).resolve().parents[1] / "experiment" / "bridge" / "stage_F4_1_alignment.py"
     repo_root = Path(__file__).resolve().parents[1]
