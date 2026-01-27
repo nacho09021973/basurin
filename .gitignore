@@ -31,3 +31,6 @@ experiment/ringdown/data/
 
 # Ringdown local data/artifacts
 experiment/ringdown/data/
+
+# BASURIN runtime scratch (never commit)
+runs_tmp/
