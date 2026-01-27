@@ -113,6 +113,10 @@ def test_bridge_accepts_alternate_runs_root(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
 
     summary_path = (
-        repo_root / out_root / run_id / "bridge" / "stage_summary.json"
+        repo_root
+        / out_root
+        / run_id
+        / "bridge_f4_1_alignment"
+        / "stage_summary.json"
     )
     assert summary_path.exists()
