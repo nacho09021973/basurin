@@ -41,6 +41,9 @@ Formato exportado por `05_tangentes_locales.py`:
 {
   "ids": ["idx_0", "idx_1"],
   "Y": [[...], [...]],
+  "X_path": "X.npy",
+  "Y_path": "Y.npy",
+  "shapes": {"n": 2, "dx": 2, "dy": 6},
   "meta": {
     "feature_key": "tangentes_locales_v1",
     "columns": ["d_eff", "m", "parallel", "perp", "rho_clipped", "log10_rho"],

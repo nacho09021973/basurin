@@ -54,8 +54,12 @@ def test_features_stage_produces_canonical_json(tmp_path: Path) -> None:
 
     features_path = tmp_path / "runs" / run_id / "features" / "outputs" / "features.json"
     ids, Y, meta = load_feature_json(features_path, kind="features")
+    payload = json.loads(features_path.read_text(encoding="utf-8"))
 
     assert ids == ["p0", "p1", "p2", "p3", "p4"]
     assert np.asarray(Y).shape == (5, 6)
     assert meta["schema_version"] == "1"
     assert meta["feature_key"] == "tangentes_locales_v1"
+    assert payload["X_path"] == "X.npy"
+    assert payload["Y_path"] == "Y.npy"
+    assert payload["shapes"]["n"] == 5

@@ -96,4 +96,6 @@ def test_features_stage_respects_basurin_runs_root(tmp_path: Path) -> None:
     features = json.loads(features_path.read_text())
     assert "ids" in features, "features.json missing 'ids'"
     assert "Y" in features, "features.json missing 'Y'"
+    assert "X_path" in features, "features.json missing 'X_path'"
+    assert "Y_path" in features, "features.json missing 'Y_path'"
     assert features.get("feature_key") == "tangentes_locales_v1"

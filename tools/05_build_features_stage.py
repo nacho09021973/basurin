@@ -31,6 +31,7 @@ from basurin_io import (
 )
 
 __version__ = "0.2.0"
+_MAX_INLINE_VALUES = 10000
 
 
 def _display_path(path: Path) -> str:
@@ -106,6 +107,10 @@ def _compute_local_features(X: np.ndarray, k_neighbors: int) -> tuple[np.ndarray
             log10_rho,
         ]
     return features, effective_k
+
+
+def _should_inline(matrix: np.ndarray, max_values: int = _MAX_INLINE_VALUES) -> bool:
+    return int(matrix.size) <= max_values
 
 
 def _load_atlas_inputs(atlas_path: Path, feature_key_hint: str) -> tuple[list[Any], np.ndarray, dict[str, Any]]:
@@ -190,6 +195,8 @@ def main() -> int:
     stage_dir, outputs_dir = ensure_stage_dirs(args.run, "features", base_dir=out_root)
 
     features_path = outputs_dir / "features.json"
+    x_path = outputs_dir / "X.npy"
+    y_path = outputs_dir / "Y.npy"
     feature_key = "tangentes_locales_v1"
     columns = [
         "d_eff",
@@ -199,11 +206,17 @@ def main() -> int:
         "rho_clipped",
         "log10_rho",
     ]
+    np.save(x_path, X)
+    np.save(y_path, Y)
+    shapes = {"n": int(X.shape[0]), "dx": int(X.shape[1]), "dy": int(Y.shape[1])}
     payload = {
         "schema_version": "1",
         "feature_key": feature_key,
         "ids": ids,
         "Y": Y.tolist(),
+        "X_path": x_path.name,
+        "Y_path": y_path.name,
+        "shapes": shapes,
         "meta": {
             "feature_key": feature_key,
             "columns": columns,
@@ -214,14 +227,19 @@ def main() -> int:
             "ids_source": ids_source,
             "source_atlas": f"runs/{args.run}/{ids_source}",
             "atlas_feature_key": meta.get("feature_key"),
+            "shapes": shapes,
         },
     }
+    if _should_inline(X):
+        payload["X"] = X.tolist()
 
     with open(features_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
     input_hash = sha256_file(atlas_source)
     output_hash = sha256_file(features_path)
+    x_hash = sha256_file(x_path)
+    y_hash = sha256_file(y_path)
     summary = {
         "stage": "features",
         "version": __version__,
@@ -231,7 +249,11 @@ def main() -> int:
             "atlas_path": _display_path(atlas_source),
             "atlas_sha256": input_hash,
         },
-        "outputs": {"features": "outputs/features.json"},
+        "outputs": {
+            "features": "outputs/features.json",
+            "X": "outputs/X.npy",
+            "Y": "outputs/Y.npy",
+        },
         "config": {
             "k_neighbors_requested": args.k_neighbors,
             "k_neighbors_effective": effective_k,
@@ -248,8 +270,15 @@ def main() -> int:
             "n_features": int(Y.shape[1]),
             "X_shape": [int(X.shape[0]), int(X.shape[1])],
             "Y_shape": [int(Y.shape[0]), int(Y.shape[1])],
+            "n": shapes["n"],
+            "dx": shapes["dx"],
+            "dy": shapes["dy"],
         },
-        "hashes": {"outputs/features.json": output_hash},
+        "hashes": {
+            "outputs/features.json": output_hash,
+            "outputs/X.npy": x_hash,
+            "outputs/Y.npy": y_hash,
+        },
     }
     summary_path = write_stage_summary(stage_dir, summary)
 
@@ -257,6 +286,8 @@ def main() -> int:
         stage_dir,
         {
             "features": features_path,
+            "X": x_path,
+            "Y": y_path,
             "summary": summary_path,
         },
         extra={
