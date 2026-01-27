@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._helpers_features import write_minimal_canonical_features
+
 
 def test_stage_order_policy_ignores_ids(tmp_path: Path) -> None:
     pytest.importorskip("sklearn")
@@ -38,10 +40,19 @@ def test_stage_order_policy_ignores_ids(tmp_path: Path) -> None:
             [1.0, 3.0],
         ],
         "meta": {"feature_key": "event_vectors"},
+        "X_path": "../features/outputs/X.npy",
     }
 
     atlas_path.write_text(json.dumps(atlas_payload))
     features_path.write_text(json.dumps(features_payload))
+    write_minimal_canonical_features(
+        run_dir,
+        n=len(atlas_payload["ids"]),
+        dx=2,
+        dy=2,
+        feature_key=features_payload["meta"]["feature_key"],
+        seed=404,
+    )
 
     repo_root = Path(__file__).resolve().parents[1]
     stage_path = repo_root / "experiment" / "bridge" / "stage_F4_1_alignment.py"
