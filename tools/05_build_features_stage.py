@@ -20,6 +20,7 @@ if str(_REPO_ROOT) not in sys.path:
 from basurin_io import (
     assert_within_runs,
     ensure_stage_dirs,
+    get_runs_root,
     load_feature_json,
     resolve_out_root,
     sha256_file,
@@ -139,7 +140,8 @@ def main() -> int:
     args = parse_args()
 
     try:
-        out_root = resolve_out_root(args.out_root)
+        runs_root = get_runs_root()
+        out_root = resolve_out_root(args.out_root, runs_root=runs_root)
         validate_run_id(args.run, out_root)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
