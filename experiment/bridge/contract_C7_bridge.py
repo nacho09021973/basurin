@@ -7,6 +7,7 @@ C7 define tres posibles resultados:
 - PASS: evidencia de puente estable y no-aleatorio, sin degeneración severa.
 - FAIL_DEGENERATE (FAIL informativo): hay señal (significancia) pero el puente es no-inyectivo/degenerado.
 - FAIL_NO_BRIDGE: no hay evidencia estadística robusta vs permutación o es inestable.
+- UNDERDETERMINED: faltan métricas no-negociables para decidir (contrato de interfaz).
 
 IO determinista:
   runs/<run_id>/contract_C7_bridge/
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
@@ -42,6 +44,47 @@ __version__ = "0.1.0"
 
 def utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _as_float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        value_float = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value_float if math.isfinite(value_float) else None
+
+
+def _get_nested(mapping: Any, path: str) -> Any:
+    current = mapping
+    for part in path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def _first_present(mapping: dict[str, Any], paths: list[str]) -> Any:
+    for path in paths:
+        value = _get_nested(mapping, path)
+        if value is not None:
+            return value
+    return None
+
+
+def _resolve_alignment_dir(run_root: Path, alignment_stage: str) -> Path:
+    candidate = run_root / alignment_stage
+    if candidate.exists():
+        return candidate
+    experiment_candidate = run_root / "experiment" / alignment_stage
+    if experiment_candidate.exists():
+        return experiment_candidate
+    if alignment_stage.startswith("experiment/"):
+        explicit = run_root / alignment_stage
+        if explicit.exists():
+            return explicit
+    return candidate
 
 
 @dataclass(frozen=True)
@@ -108,7 +151,7 @@ def main() -> int:
         return 1
 
     run_root = get_run_dir(cfg.run, base_dir=out_root)
-    in_stage_dir = run_root / cfg.alignment_stage
+    in_stage_dir = _resolve_alignment_dir(run_root, cfg.alignment_stage)
     in_summary = in_stage_dir / "stage_summary.json"
     in_metrics = in_stage_dir / "outputs" / "metrics.json"
 
@@ -158,127 +201,178 @@ def main() -> int:
         }
     else:
         r = summary.get("results", {})
-        metrics_results = metrics.get("results", {})
-        structure = metrics.get("structure_preservation", {})
-        control = metrics.get("control_positive", {})
-        deg = metrics.get("degeneracy", {})
-        perm = metrics.get("permutation", {})
-        boot = metrics.get("bootstrap", {})
+        metrics_results = metrics.get("results") or metrics.get("metrics") or metrics
+        structure = metrics.get("structure_preservation") or metrics.get("diagnostics", {}).get("structure_preservation", {})
+        control = metrics.get("control_positive") or metrics.get("diagnostics", {}).get("control_positive", {})
+        deg = metrics.get("degeneracy") or metrics.get("diagnostics", {}).get("degeneracy", {})
+        perm = metrics.get("permutation") or metrics.get("diagnostics", {}).get("permutation", {})
+        boot = metrics.get("bootstrap") or metrics.get("diagnostics", {}).get("bootstrap", {})
         thr = cfg.thresholds
 
-        stability = float(metrics_results.get("stability_score", r.get("stability_score", 0.0)))
-        sig_ratio = float(metrics_results.get("significance_ratio", r.get("significance_ratio", 0.0)))
-        p_value = float(metrics_results.get("p_value", r.get("p_value", 1.0)))
-        deg_med = float(metrics_results.get("degeneracy_index_median", r.get("degeneracy_index_median", float("inf"))))
-        varx_ratio_med = float(metrics_results.get("varX_trace_ratio_median", r.get("varX_trace_ratio_median", float("inf"))))
-
-        knn_real = float(
-            metrics_results.get(
-                "knn_preservation_mean",
-                structure.get("real", {}).get("overlap_mean", r.get("knn_preservation_mean", 0.0)),
-            )
+        stability = _as_float_or_none(_first_present({"m": metrics_results, "r": r}, ["m.stability_score", "r.stability_score"]))
+        sig_ratio = _as_float_or_none(_first_present({"m": metrics_results, "r": r}, ["m.significance_ratio", "r.significance_ratio"]))
+        p_value = _as_float_or_none(_first_present({"m": metrics_results, "r": r}, ["m.p_value", "r.p_value"]))
+        deg_med = _as_float_or_none(
+            _first_present({"m": metrics_results, "r": r}, ["m.degeneracy_index_median", "r.degeneracy_index_median"])
         )
-        knn_neg = float(
-            metrics_results.get(
-                "knn_preservation_negative_mean",
-                structure.get("negative", {}).get("overlap_mean", r.get("knn_preservation_negative_mean", 0.0)),
-            )
+        varx_ratio_med = _as_float_or_none(
+            _first_present({"m": metrics_results, "r": r}, ["m.varX_trace_ratio_median", "r.varX_trace_ratio_median"])
         )
-        knn_ratio = float(
-            metrics_results.get(
-                "knn_preservation_ratio",
-                structure.get("ratio", r.get("knn_preservation_ratio", 0.0)),
-            )
+        canonical_corr_mean = _as_float_or_none(
+            _first_present({"m": metrics_results, "r": r}, ["m.canonical_corr_mean", "r.canonical_corr_mean"])
         )
-        control_status = metrics_results.get("control_positive_status", control.get("status", r.get("control_positive_status")))
-        control_overlap = float(
-            metrics_results.get(
-                "control_positive_overlap_mean",
-                control.get("overlap_mean", r.get("control_positive_overlap_mean", float("nan"))),
+        mean_axis_angle_deg = _as_float_or_none(
+            _first_present(
+                {"m": metrics_results, "r": r, "boot": boot},
+                ["m.mean_axis_angle_deg", "r.mean_axis_angle_deg", "boot.mean_angle_deg"],
             )
         )
 
-        # decisiones (suite C7a-C7e)
-        ok_signif = (sig_ratio >= thr.significance_ratio_min) and (p_value <= thr.p_value_max)
-        ok_stable = stability >= thr.stability_score_min
-        ok_degen = (deg_med <= thr.degeneracy_index_max_pass) and (varx_ratio_med <= thr.varX_trace_ratio_max)
-        ok_knn = (
-            (knn_real >= thr.knn_preservation_real_min)
-            and (knn_ratio >= thr.knn_preservation_ratio_min)
-            and (knn_neg < thr.knn_preservation_negative_max)
-        )
-        negative_pass = knn_neg >= thr.knn_preservation_negative_max
-
-        if negative_pass:
-            verdict = "ABORT_LEAKAGE"
-            reason = "Negative control shows structure; potential leakage (C7d)."
-        elif ok_signif and ok_stable and ok_degen and ok_knn:
-            verdict = "PASS"
-            reason = "Bridge evidence > permutation baseline, stable axes, acceptable degeneracy, and structure preserved."
-        elif ok_signif and ok_stable and ok_knn and (not ok_degen):
-            verdict = "FAIL_DEGENERATE"
-            reason = "Significant + stable alignment but degeneracy suggests non-injectivity (many-to-one)."
-        else:
-            verdict = "FAIL_NO_BRIDGE"
-            reason = "No robust evidence of bridge vs permutation and/or unstable axes."
-
-        if control_status != "OK":
-            warnings.append("Control positivo no disponible (split atlas).")
-        elif control_overlap < thr.control_positive_min:
-            warnings.append("Control positivo (split atlas) no alcanza el umbral.")
-
-        report = {
-            "contract": "C7_bridge",
-            "version": __version__,
-            "created": utcnow_iso(),
-            "run": cfg.run,
-            "verdict": verdict,
-            "reason": reason,
-            "thresholds": asdict(thr),
-            "warnings": warnings,
-            "checks": {
-                "C7a_structure_ok": bool(ok_knn),
-                "C7b_degeneracy_ok": bool(ok_degen),
-                "C7c_stability_ok": bool(ok_stable),
-                "C7d_negative_pass": bool(negative_pass),
-                "C7e_control_positive_ok": bool(control_status == "OK" and control_overlap >= thr.control_positive_min),
-                "significance_ok": bool(ok_signif),
-                "stability_ok": bool(ok_stable),
-                "degeneracy_ok": bool(ok_degen),
-            },
-            "metrics": {
-                "stability_score": stability,
-                "mean_axis_angle_deg": float(r.get("mean_axis_angle_deg", float("nan"))),
-                "significance_ratio": sig_ratio,
-                "p_value": p_value,
-                "degeneracy_index_median": deg_med,
-                "degeneracy_index_p90": float(metrics_results.get("degeneracy_index_p90", r.get("degeneracy_index_p90", float("nan")))),
-                "varX_trace_ratio_median": varx_ratio_med,
-                "canonical_corr_mean": float(r.get("canonical_corr_mean", float("nan"))),
-                "knn_preservation_mean": knn_real,
-                "knn_preservation_negative_mean": knn_neg,
-                "knn_preservation_ratio": knn_ratio,
-                "control_positive_status": control_status,
-                "control_positive_overlap_mean": control_overlap,
-                "perm_score_true": float(perm.get("score_true", float("nan"))),
-                "perm_score_median": float(perm.get("score_perm_median", float("nan"))),
-                "bootstrap_mean_angle_deg": float(boot.get("mean_angle_deg", float("nan"))),
-            },
-            "diagnostics": {
-                "permutation": perm,
-                "bootstrap": boot,
-                "degeneracy": deg,
-                "structure_preservation": structure,
-                "control_positive": control,
-            },
-            "upstream": {
-                "stage": cfg.alignment_stage,
-                "summary": str(in_summary),
-                "metrics": str(in_metrics),
-                "hash_summary": upstream_hashes["inputs/alignment_stage_summary"],
-                "hash_metrics": upstream_hashes["inputs/alignment_stage_metrics"],
-            },
+        required = {
+            "stability_score": stability,
+            "significance_ratio": sig_ratio,
+            "p_value": p_value,
+            "degeneracy_index_median": deg_med,
+            "varX_trace_ratio_median": varx_ratio_med,
+            "canonical_corr_mean": canonical_corr_mean,
+            "mean_axis_angle_deg": mean_axis_angle_deg,
         }
+        missing = [name for name, value in required.items() if value is None]
+
+        if missing:
+            verdict = "UNDERDETERMINED"
+            reason = "MISSING_METRICS: " + ",".join(missing)
+            report = {
+                "contract": "C7_bridge",
+                "version": __version__,
+                "created": utcnow_iso(),
+                "run": cfg.run,
+                "verdict": verdict,
+                "reason": reason,
+                "thresholds": asdict(thr),
+                "warnings": warnings,
+                "missing_metrics": missing,
+                "upstream": {
+                    "stage": cfg.alignment_stage,
+                    "summary": str(in_summary),
+                    "metrics": str(in_metrics),
+                    "hash_summary": upstream_hashes["inputs/alignment_stage_summary"],
+                    "hash_metrics": upstream_hashes["inputs/alignment_stage_metrics"],
+                },
+            }
+        else:
+            knn_real = float(
+                metrics_results.get(
+                    "knn_preservation_mean",
+                    structure.get("real", {}).get("overlap_mean", r.get("knn_preservation_mean", 0.0)),
+                )
+            )
+            knn_neg = float(
+                metrics_results.get(
+                    "knn_preservation_negative_mean",
+                    structure.get("negative", {}).get("overlap_mean", r.get("knn_preservation_negative_mean", 0.0)),
+                )
+            )
+            knn_ratio = float(
+                metrics_results.get(
+                    "knn_preservation_ratio",
+                    structure.get("ratio", r.get("knn_preservation_ratio", 0.0)),
+                )
+            )
+            control_status = metrics_results.get(
+                "control_positive_status",
+                control.get("status", r.get("control_positive_status")),
+            )
+            control_overlap = float(
+                metrics_results.get(
+                    "control_positive_overlap_mean",
+                    control.get("overlap_mean", r.get("control_positive_overlap_mean", float("nan"))),
+                )
+            )
+
+            # decisiones (suite C7a-C7e)
+            ok_signif = (sig_ratio >= thr.significance_ratio_min) and (p_value <= thr.p_value_max)
+            ok_stable = stability >= thr.stability_score_min
+            ok_degen = (deg_med <= thr.degeneracy_index_max_pass) and (varx_ratio_med <= thr.varX_trace_ratio_max)
+            ok_knn = (
+                (knn_real >= thr.knn_preservation_real_min)
+                and (knn_ratio >= thr.knn_preservation_ratio_min)
+                and (knn_neg < thr.knn_preservation_negative_max)
+            )
+            negative_pass = knn_neg >= thr.knn_preservation_negative_max
+
+            if negative_pass:
+                verdict = "ABORT_LEAKAGE"
+                reason = "Negative control shows structure; potential leakage (C7d)."
+            elif ok_signif and ok_stable and ok_degen and ok_knn:
+                verdict = "PASS"
+                reason = "Bridge evidence > permutation baseline, stable axes, acceptable degeneracy, and structure preserved."
+            elif ok_signif and ok_stable and ok_knn and (not ok_degen):
+                verdict = "FAIL_DEGENERATE"
+                reason = "Significant + stable alignment but degeneracy suggests non-injectivity (many-to-one)."
+            else:
+                verdict = "FAIL_NO_BRIDGE"
+                reason = "No robust evidence of bridge vs permutation and/or unstable axes."
+
+            if control_status != "OK":
+                warnings.append("Control positivo no disponible (split atlas).")
+            elif control_overlap < thr.control_positive_min:
+                warnings.append("Control positivo (split atlas) no alcanza el umbral.")
+
+            report = {
+                "contract": "C7_bridge",
+                "version": __version__,
+                "created": utcnow_iso(),
+                "run": cfg.run,
+                "verdict": verdict,
+                "reason": reason,
+                "thresholds": asdict(thr),
+                "warnings": warnings,
+                "checks": {
+                    "C7a_structure_ok": bool(ok_knn),
+                    "C7b_degeneracy_ok": bool(ok_degen),
+                    "C7c_stability_ok": bool(ok_stable),
+                    "C7d_negative_pass": bool(negative_pass),
+                    "C7e_control_positive_ok": bool(control_status == "OK" and control_overlap >= thr.control_positive_min),
+                    "significance_ok": bool(ok_signif),
+                    "stability_ok": bool(ok_stable),
+                    "degeneracy_ok": bool(ok_degen),
+                },
+                "metrics": {
+                    "stability_score": stability,
+                    "mean_axis_angle_deg": mean_axis_angle_deg,
+                    "significance_ratio": sig_ratio,
+                    "p_value": p_value,
+                    "degeneracy_index_median": deg_med,
+                    "degeneracy_index_p90": float(
+                        metrics_results.get("degeneracy_index_p90", r.get("degeneracy_index_p90", float("nan")))
+                    ),
+                    "varX_trace_ratio_median": varx_ratio_med,
+                    "canonical_corr_mean": canonical_corr_mean,
+                    "knn_preservation_mean": knn_real,
+                    "knn_preservation_negative_mean": knn_neg,
+                    "knn_preservation_ratio": knn_ratio,
+                    "control_positive_status": control_status,
+                    "control_positive_overlap_mean": control_overlap,
+                    "perm_score_true": float(perm.get("score_true", float("nan"))),
+                    "perm_score_median": float(perm.get("score_perm_median", float("nan"))),
+                    "bootstrap_mean_angle_deg": float(boot.get("mean_angle_deg", float("nan"))),
+                },
+                "diagnostics": {
+                    "permutation": perm,
+                    "bootstrap": boot,
+                    "degeneracy": deg,
+                    "structure_preservation": structure,
+                    "control_positive": control,
+                },
+                "upstream": {
+                    "stage": cfg.alignment_stage,
+                    "summary": str(in_summary),
+                    "metrics": str(in_metrics),
+                    "hash_summary": upstream_hashes["inputs/alignment_stage_summary"],
+                    "hash_metrics": upstream_hashes["inputs/alignment_stage_metrics"],
+                },
+            }
 
     # Escribir stage C7
     stage_dir, outdir = ensure_stage_dirs(cfg.run, "contract_C7_bridge", base_dir=out_root)
