@@ -231,6 +231,55 @@ def load_feature_json(
     return ids, mat, meta
 
 
+def _load_matrix_from_path(path: Path, label: str) -> np.ndarray:
+    if path.suffix == ".npy":
+        mat = np.load(path, mmap_mode="r")
+    elif path.suffix == ".npz":
+        with np.load(path, allow_pickle=True) as data:
+            if "X" in data:
+                mat = data["X"]
+            elif "features" in data:
+                mat = data["features"]
+            else:
+                _contract_error(f"{path} no contiene '{label}' en npz.")
+    else:
+        _contract_error(f"{path}: extensión no soportada para {label} (esperado .npy/.npz).")
+    mat = np.asarray(mat)
+    if mat.ndim != 2:
+        _contract_error(f"{path}: matriz {label} debe ser 2D.")
+    return mat
+
+
+def _features_has_X(features_path: Path, run_dir: Path) -> Tuple[bool, Optional[str]]:
+    with open(features_path, "r", encoding="utf-8") as f:
+        obj = json.load(f)
+
+    if isinstance(obj, dict) and "X" in obj:
+        mat = _coerce_matrix(obj["X"], features_path, "X")
+        if mat.shape[0] < 1 or mat.shape[1] < 1:
+            return False, "X_EMPTY"
+        return True, None
+
+    x_path_value = None
+    if isinstance(obj, dict):
+        x_path_value = obj.get("X_path") or obj.get("x_path")
+    if x_path_value:
+        x_path = Path(x_path_value)
+        if not x_path.is_absolute():
+            x_path = (features_path.parent / x_path).resolve()
+        else:
+            x_path = x_path.resolve()
+        assert_within_runs(run_dir, x_path)
+        if not x_path.exists():
+            return False, f"X_PATH_MISSING:{x_path}"
+        mat = _load_matrix_from_path(x_path, "X")
+        if mat.shape[0] < 1 or mat.shape[1] < 1:
+            return False, "X_EMPTY"
+        return True, None
+
+    return False, "X_MISSING"
+
+
 def _decode_feature_names(raw: Any) -> Optional[List[str]]:
     if raw is None:
         return None
@@ -913,6 +962,105 @@ def save_json(path: Path, obj: Any) -> None:
         json.dump(obj, f, indent=2)
 
 
+def _clean_stale_outputs(outdir: Path) -> List[str]:
+    cleaned = []
+    for stale_name in [
+        "alignment_map.json",
+        "metrics.json",
+        "degeneracy_per_point.json",
+        "knn_preservation_real.json",
+        "knn_preservation_negative.json",
+        "knn_preservation_control_positive.json",
+        "degeneracy_hist.png",
+        "degeneracy_scatter.png",
+        "abort_leakage.json",
+    ]:
+        stale_path = outdir / stale_name
+        if stale_path.exists():
+            stale_path.unlink()
+            cleaned.append(stale_name)
+    return cleaned
+
+
+def _abort_stage(
+    stage_dir: Path,
+    outdir: Path,
+    cfg: Config,
+    reason: str,
+    input_hashes: Dict[str, str],
+    atlas_path: Path,
+    features_path: Path,
+    features_kind: str,
+    out_root: Path,
+) -> int:
+    cleaned_ok_outputs = _clean_stale_outputs(outdir)
+    abort_payload = {
+        "stage": "bridge_f4_1_alignment",
+        "version": __version__,
+        "created": utcnow_iso(),
+        "run": cfg.run,
+        "status": "ABORT",
+        "abort_reason": reason,
+        "inputs": {
+            "atlas": str(atlas_path),
+            "features": str(features_path),
+            "features_kind": features_kind,
+        },
+        "cleaned_ok_outputs": cleaned_ok_outputs,
+        "config": asdict(cfg),
+        "hashes": dict(input_hashes),
+    }
+    abort_path = outdir / "abort_reason.json"
+    save_json(abort_path, abort_payload)
+    outputs_coherence = {
+        "aborted": True,
+        "has_abort_file": True,
+        "cleaned_stale_abort": bool(cleaned_ok_outputs),
+    }
+    summary_config = asdict(cfg)
+    summary_config["out_root_requested"] = cfg.out_root
+    summary_config["out_root_effective"] = str(out_root)
+    summary_path = write_stage_summary(stage_dir, {
+        "stage": "bridge_f4_1_alignment",
+        "version": __version__,
+        "created": abort_payload["created"],
+        "run": cfg.run,
+        "status": "ABORT",
+        "abort_reason": reason,
+        "config": summary_config,
+        "outputs_coherence": outputs_coherence,
+        "hashes": {
+            **input_hashes,
+            "outputs/abort_reason.json": sha256_file(abort_path),
+        },
+    })
+    write_manifest(
+        stage_dir,
+        {
+            "abort_reason": abort_path,
+            "summary": summary_path,
+        },
+        extra={
+            "version": __version__,
+            "status": "ABORT",
+            "inputs": {
+                "atlas": str(atlas_path),
+                "features": str(features_path),
+                "features_kind": features_kind,
+                "run_x": cfg.run_x,
+                "run_y": cfg.run_y,
+            },
+            "outputs_coherence": outputs_coherence,
+            "hashes": {
+                **input_hashes,
+                "outputs/abort_reason.json": sha256_file(abort_path),
+            },
+        },
+    )
+    print(f"ABORT: {reason}", file=sys.stderr)
+    return 2
+
+
 def add_pairing_trace(per_point: List[Dict[str, Any]], pairing_info: Dict[str, Any]) -> List[Dict[str, Any]]:
     pair_map = pairing_info.get("pair_map")
     traced = []
@@ -1107,6 +1255,21 @@ def main() -> int:
         "inputs/atlas": sha256_file(atlas_path),
         "inputs/features": sha256_file(features_path),
     }
+
+    if features_kind == "json":
+        has_x, missing_reason = _features_has_X(features_path, run_dir_y)
+        if not has_x:
+            return _abort_stage(
+                stage_dir,
+                outdir,
+                cfg,
+                "MISSING_X",
+                input_hashes,
+                atlas_path,
+                features_path,
+                features_kind,
+                out_root,
+            )
 
     # Load
     ids_x, X, meta_x = load_feature_json(

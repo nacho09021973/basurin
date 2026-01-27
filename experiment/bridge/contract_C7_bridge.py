@@ -158,19 +158,13 @@ def main() -> int:
     if not in_summary.exists():
         print(f"ERROR: no existe {in_summary}. Ejecuta primero el stage de alineación.", file=sys.stderr)
         return 1
-    if not in_metrics.exists():
-        print(f"ERROR: no existe {in_metrics}.", file=sys.stderr)
-        return 1
 
     with open(in_summary, "r") as f:
         summary = json.load(f)
-    with open(in_metrics, "r") as f:
-        metrics = json.load(f)
 
     warnings = []
     upstream_hashes = {
         "inputs/alignment_stage_summary": sha256_file(in_summary),
-        "inputs/alignment_stage_metrics": sha256_file(in_metrics),
     }
 
     if summary.get("status") != "OK":
@@ -180,6 +174,9 @@ def main() -> int:
         if status == "ABORT" and isinstance(abort_reason, str) and "LEAKAGE" in abort_reason.upper():
             verdict = "ABORT_LEAKAGE"
             reason = f"Upstream stage abort: {abort_reason}"
+        elif status == "ABORT" and abort_reason == "MISSING_X":
+            verdict = "UNDERDETERMINED"
+            reason = "Upstream stage abort: MISSING_X"
         else:
             verdict = "FAIL_NO_BRIDGE"
             reason = f"Upstream stage status={status}"
@@ -200,6 +197,12 @@ def main() -> int:
             },
         }
     else:
+        if not in_metrics.exists():
+            print(f"ERROR: no existe {in_metrics}.", file=sys.stderr)
+            return 1
+        with open(in_metrics, "r") as f:
+            metrics = json.load(f)
+        upstream_hashes["inputs/alignment_stage_metrics"] = sha256_file(in_metrics)
         r = summary.get("results", {})
         metrics_results = metrics.get("results") or metrics.get("metrics") or metrics
         structure = metrics.get("structure_preservation") or metrics.get("diagnostics", {}).get("structure_preservation", {})

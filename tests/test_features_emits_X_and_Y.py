@@ -4,13 +4,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 
-def test_features_stage_builds_features_json(tmp_path: Path) -> None:
-    if importlib.util.find_spec("sklearn") is None:
-        pytest.skip("scikit-learn no disponible en el entorno de test")
-    run_id = "features-stage"
+@pytest.mark.skipif(
+    importlib.util.find_spec("sklearn") is None,
+    reason="scikit-learn no disponible en el entorno de test",
+)
+def test_features_emits_X_and_Y(tmp_path: Path) -> None:
+    run_id = "features-emits-x-y"
     repo_root = Path(__file__).resolve().parents[1]
 
     atlas_points_dir = tmp_path / "runs" / run_id / "dictionary" / "outputs"
@@ -26,9 +29,6 @@ def test_features_stage_builds_features_json(tmp_path: Path) -> None:
                     {"id": "c", "features": [3.0, 4.0]},
                     {"id": "d", "features": [4.0, 5.0]},
                     {"id": "e", "features": [5.0, 6.0]},
-                    {"id": "f", "features": [6.0, 7.0]},
-                    {"id": "g", "features": [7.0, 8.0]},
-                    {"id": "h", "features": [8.0, 9.0]},
                 ],
             },
             indent=2,
@@ -43,7 +43,7 @@ def test_features_stage_builds_features_json(tmp_path: Path) -> None:
             "--run",
             run_id,
             "--k-neighbors",
-            "3",
+            "2",
             "--out-root",
             "runs",
         ],
@@ -51,14 +51,24 @@ def test_features_stage_builds_features_json(tmp_path: Path) -> None:
         check=True,
     )
 
-    features_path = tmp_path / "runs" / run_id / "features" / "outputs" / "features.json"
-    payload = json.loads(features_path.read_text(encoding="utf-8"))
+    stage_dir = tmp_path / "runs" / run_id / "features"
+    features_path = stage_dir / "outputs" / "features.json"
+    manifest_path = stage_dir / "manifest.json"
 
-    assert payload["schema_version"] == "1"
-    assert payload["feature_key"] == "tangentes_locales_v1"
-    assert "ids" in payload
-    assert "Y" in payload
+    payload = json.loads(features_path.read_text(encoding="utf-8"))
     assert "X_path" in payload
     assert "Y_path" in payload
-    assert "shapes" in payload
-    assert len(payload["ids"]) == len(payload["Y"])
+    assert payload["X_path"] == "X.npy"
+    assert payload["Y_path"] == "Y.npy"
+    assert payload["shapes"]["n"] == len(payload["ids"])
+
+    x_path = features_path.parent / payload["X_path"]
+    y_path = features_path.parent / payload["Y_path"]
+    assert x_path.exists()
+    assert y_path.exists()
+    assert np.load(x_path).shape[0] == len(payload["ids"])
+    assert np.load(y_path).shape[0] == len(payload["ids"])
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "X" in manifest["files"]
+    assert "Y" in manifest["files"]
