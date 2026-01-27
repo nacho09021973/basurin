@@ -123,6 +123,7 @@ def test_bridge_alignment_defaults_require_features_stage(tmp_path: Path) -> Non
     repo_root = _run_dictionary_pipeline(tmp_path, run_id)
     run_root = Path("runs") / f"pytest__{tmp_path.name}"
 
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(repo_root / run_root)}
     features_result = subprocess.run(
         [
             sys.executable,
@@ -136,6 +137,7 @@ def test_bridge_alignment_defaults_require_features_stage(tmp_path: Path) -> Non
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
     assert features_result.returncode == 0, features_result.stderr
 
@@ -160,6 +162,7 @@ def test_bridge_alignment_defaults_require_features_stage(tmp_path: Path) -> Non
         cwd=repo_root,
         capture_output=True,
         text=True,
+        env=env,
     )
 
     assert result.returncode == 0, result.stderr
@@ -175,6 +178,7 @@ def test_bridge_alignment_multi_run(tmp_path: Path) -> None:
     repo_root = _run_dictionary_pipeline(tmp_path, run_x)
     _run_spectrum_only_pipeline(tmp_path, run_y)
     run_root = Path("runs") / f"pytest__{tmp_path.name}"
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(repo_root / run_root)}
 
     for run_id in (run_x, run_y):
         features_result = subprocess.run(
@@ -190,6 +194,7 @@ def test_bridge_alignment_multi_run(tmp_path: Path) -> None:
             capture_output=True,
             text=True,
             check=False,
+            env=env,
         )
         assert features_result.returncode == 0, features_result.stderr
 
@@ -216,6 +221,7 @@ def test_bridge_alignment_multi_run(tmp_path: Path) -> None:
         cwd=repo_root,
         capture_output=True,
         text=True,
+        env=env,
     )
 
     assert result.returncode == 0, result.stderr
