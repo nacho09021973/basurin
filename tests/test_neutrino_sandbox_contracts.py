@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from importlib.util import module_from_spec, spec_from_file_location
@@ -38,6 +39,8 @@ def test_symmetron_A0_normalization() -> None:
 def test_eft_domain_abort(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     script = repo_root / "01_genera_neutrino_sandbox.py"
+    runs_root = tmp_path / "runs"
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
 
     result = subprocess.run(
         [
@@ -63,21 +66,28 @@ def test_eft_domain_abort(tmp_path: Path) -> None:
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        env=env,
     )
 
     assert result.returncode != 0
 
-    abort_path = tmp_path / "runs" / "abort_case" / "spectrum" / "outputs" / "abort_domain.json"
-    assert abort_path.exists()
-    payload = json.loads(abort_path.read_text(encoding="utf-8"))
+    stage_dir = runs_root / "abort_case" / "spectrum"
+    summary_path = stage_dir / "stage_summary.json"
+    assert summary_path.exists()
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert payload["reason"] == "EFT_DOMAIN_VIOLATION"
-    assert payload["model"] == "eft_power"
-    assert payload["max_abs_delta"] >= payload["threshold"]
+    assert payload["contracts"]["EFT_DOMAIN"]["status"] == "FAIL"
+    assert payload["contracts"]["EFT_DOMAIN"]["max_abs_A_minus_1"] >= payload["contracts"]["EFT_DOMAIN"]["threshold"]
+
+    assert not (stage_dir / "outputs" / "spectrum.h5").exists()
+    assert not (stage_dir / "manifest.json").exists()
 
 
 def test_eft_domain_pass(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     script = repo_root / "01_genera_neutrino_sandbox.py"
+    runs_root = tmp_path / "runs"
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
 
     result = subprocess.run(
         [
@@ -103,10 +113,16 @@ def test_eft_domain_pass(tmp_path: Path) -> None:
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        check=True,
+        env=env,
     )
 
     assert result.returncode == 0
 
-    abort_path = tmp_path / "runs" / "pass_case" / "spectrum" / "outputs" / "abort_domain.json"
-    assert not abort_path.exists()
+    stage_dir = runs_root / "pass_case" / "spectrum"
+    assert (stage_dir / "outputs" / "spectrum.h5").exists()
+    assert (stage_dir / "manifest.json").exists()
+
+    summary_path = stage_dir / "stage_summary.json"
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload["contracts"]["EFT_DOMAIN"]["status"] == "PASS"
+    assert payload["contracts"]["EFT_DOMAIN"]["max_abs_A_minus_1"] < payload["contracts"]["EFT_DOMAIN"]["threshold"]
