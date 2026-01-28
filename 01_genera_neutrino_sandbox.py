@@ -252,6 +252,8 @@ def A_symmetron_normalized(
 ) -> tuple[np.ndarray, float]:
     A_raw = A_symmetron_raw(rho, alpha_s0=alpha_s0, rho_crit=rho_crit)
     A0_raw = float(A_symmetron_raw(np.array([rho0], dtype=np.float64), alpha_s0=alpha_s0, rho_crit=rho_crit)[0])
+    if abs(A0_raw) < 1e-6:
+        raise ValueError("symmetron A0_raw demasiado cercano a 0 para normalizar")
     A_norm = A_raw / A0_raw
     return A_norm, A0_raw
 
@@ -315,6 +317,7 @@ def main() -> int:
     max_abs_where: dict | None = None
     clamp_applied = False
     symmetron_A0_raw_values: list[float] = []
+    symmetron_A0_zero_abort: dict | None = None
 
     for i, dlt in enumerate(delta_uv):
         alpha = delta_to_alpha(float(dlt), cfg)
@@ -325,9 +328,23 @@ def main() -> int:
             if cfg.family == "eft_power":
                 A = A_eft_power(rho, alpha=alpha, n=cfg.power_n, rho0=cfg.rho0)
             else:
-                A, symmetron_A0_raw = A_symmetron_normalized(
-                    rho, alpha_s0=alpha, rho_crit=cfg.rho_crit, rho0=cfg.rho0
-                )
+                try:
+                    A, symmetron_A0_raw = A_symmetron_normalized(
+                        rho, alpha_s0=alpha, rho_crit=cfg.rho_crit, rho0=cfg.rho0
+                    )
+                except ValueError:
+                    symmetron_A0_zero_abort = {
+                        "delta_index": int(i),
+                        "delta_uv": float(dlt),
+                        "alpha": float(alpha),
+                        "profile": pname,
+                        "rho0": float(cfg.rho0),
+                        "rho_crit": float(cfg.rho_crit),
+                    }
+                    break
+
+            if symmetron_A0_zero_abort:
+                break
 
             abs_delta = np.abs(A - 1.0)
             local_max = float(np.max(abs_delta))
@@ -359,6 +376,69 @@ def main() -> int:
 
         if cfg.family == "symmetron":
             symmetron_A0_raw_values.append(float(symmetron_A0_raw))
+
+        if symmetron_A0_zero_abort:
+            break
+
+    if symmetron_A0_zero_abort:
+        abort_payload = {
+            "reason": "EFT_DOMAIN_VIOLATION",
+            "detail": "symmetron_A0_raw_near_zero",
+            "max_abs_delta": float(max_abs_delta),
+            "threshold": 1.0,
+            "where": max_abs_where,
+            "model": cfg.family,
+            "params": asdict(cfg),
+            "clamp_applied": bool(clamp_applied),
+            "symmetron_normalize_by_A0": True,
+            "symmetron_A0_raw": symmetron_A0_raw_values if cfg.family == "symmetron" else None,
+            "symmetron_A0_zero_abort": symmetron_A0_zero_abort,
+        }
+        abort_path = outputs_dir / "abort_domain.json"
+        with open(abort_path, "w", encoding="utf-8") as f:
+            json.dump(abort_payload, f, indent=2)
+
+        summary = {
+            "stage": "spectrum",
+            "script": "01_genera_neutrino_sandbox.py",
+            "version": "0.1.0",
+            "created": datetime.now(timezone.utc).isoformat(),
+            "run": cfg.run,
+            "config": asdict(cfg),
+            "inputs": {
+                "generator": "neutrino_sandbox",
+                "generator_script": "01_genera_neutrino_sandbox.py",
+                "generator_seed": cfg.seed,
+                "generator_config": asdict(cfg),
+            },
+            "status": "ABORT",
+            "abort": abort_payload,
+            "outputs": {
+                "abort_domain": "outputs/abort_domain.json",
+            },
+            "hashes": {
+                "outputs/abort_domain.json": sha256_file(abort_path),
+            },
+        }
+        summary_path = stage_dir / "stage_summary.json"
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2)
+
+        manifest = {
+            "stage": "spectrum",
+            "run": cfg.run,
+            "created": datetime.now(timezone.utc).isoformat(),
+            "files": {
+                "abort_domain": "outputs/abort_domain.json",
+                "summary": "stage_summary.json",
+            },
+        }
+        manifest_path = stage_dir / "manifest.json"
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+
+        print("ABORT: EFT_DOMAIN_VIOLATION (symmetron A0_raw ~ 0)", file=sys.stderr)
+        return 2
 
     # Ruido relativo multiplicativo (opcional)
     if cfg.noise_rel > 0:
