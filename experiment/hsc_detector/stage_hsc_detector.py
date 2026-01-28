@@ -19,9 +19,8 @@ Inputs:
 Outputs:
   - manifest.json
   - stage_summary.json
+  - outputs/report.json
   - outputs/verdict.json
-  - outputs/phase_1_spectrum_analysis.json
-  - outputs/phase_2_ope_analysis.json
 """
 from __future__ import annotations
 
@@ -40,10 +39,10 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from basurin_io import (
+    assert_within_runs,
     ensure_stage_dirs,
     resolve_out_root,
     sha256_file,
-    utc_now_iso,
     validate_run_id,
     write_manifest,
     write_stage_summary,
@@ -367,6 +366,27 @@ def get_git_commit() -> Optional[str]:
         return None
 
 
+def _load_run_valid(run_dir: Path) -> tuple[bool, str]:
+    run_valid_path = run_dir / "RUN_VALID" / "outputs" / "run_valid.json"
+    if not run_valid_path.exists():
+        return False, f"RUN_VALID missing at {run_valid_path}"
+    try:
+        payload = json.loads(run_valid_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return False, f"RUN_VALID invalid JSON: {exc}"
+    verdict = payload.get("verdict")
+    if verdict != "PASS":
+        return False, f"RUN_VALID verdict is {verdict}"
+    return True, "ok"
+
+
+def _relative_to_run(run_dir: Path, path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(run_dir.resolve()))
+    except ValueError as exc:
+        raise ValueError(f"Path {path} is not under run dir {run_dir}") from exc
+
+
 # ----------------------------------------------------------------------
 # Stage Entry Point
 # ----------------------------------------------------------------------
@@ -401,12 +421,6 @@ def main() -> int:
     """Main entry point for HSC Detector stage."""
     args = parse_args()
 
-    # Check BASURIN abort condition
-    run_valid = os.getenv("RUN_VALID", "PASS")
-    if run_valid != "PASS":
-        print(f"[BASURIN ABORT] RUN_VALID={run_valid}", file=sys.stderr)
-        return 1
-
     # Validate paths
     try:
         out_root = resolve_out_root(args.out_root)
@@ -415,18 +429,43 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
+    run_dir = (out_root / args.run).resolve()
+
+    # Check BASURIN abort condition (RUN_VALID stage)
+    run_valid_ok, run_valid_reason = _load_run_valid(run_dir)
+    if not run_valid_ok:
+        print(f"[BASURIN ABORT] {run_valid_reason}", file=sys.stderr)
+        return 1
+
     input_path = Path(args.input)
     if not input_path.exists():
         print(f"ERROR: Input file not found: {input_path}", file=sys.stderr)
         return 1
 
     thresholds_path = Path(args.thresholds) if args.thresholds else None
+    if thresholds_path and not thresholds_path.exists():
+        print(f"ERROR: Thresholds file not found: {thresholds_path}", file=sys.stderr)
+        return 1
+
+    input_path = input_path.resolve()
+    try:
+        assert_within_runs(run_dir, input_path)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    if thresholds_path:
+        thresholds_path = thresholds_path.resolve()
+        try:
+            assert_within_runs(run_dir, thresholds_path)
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
 
     # Create stage directories
     stage_dir, outputs_dir = ensure_stage_dirs(
         args.run, "hsc_detector", base_dir=out_root
     )
-    run_dir = stage_dir.parent
 
     # Load input data
     input_data, input_hash = load_input(input_path)
@@ -477,19 +516,15 @@ def main() -> int:
 
     # Determine thresholds source
     thresholds_source = (
-        str(thresholds_path.relative_to(run_dir))
+        _relative_to_run(run_dir, thresholds_path)
         if thresholds_path and thresholds_path.exists()
         else "internal_defaults"
     )
 
-    # Compute relative input path
-    try:
-        input_rel = str(input_path.resolve().relative_to(run_dir.resolve()))
-    except ValueError:
-        input_rel = str(input_path)
+    input_rel = _relative_to_run(run_dir, input_path)
+    thresholds_rel = _relative_to_run(run_dir, thresholds_path) if thresholds_path else None
 
     # Build output artifacts
-    timestamp = utc_now_iso()
     git_commit = get_git_commit()
 
     # --- verdict.json ---
@@ -522,45 +557,45 @@ def main() -> int:
     with open(verdict_path, "w", encoding="utf-8") as f:
         json.dump(verdict_data, f, indent=2)
 
-    # --- phase_1_spectrum_analysis.json ---
-    phase_1_data = {
-        "phase": "phase_1_spectrum_analysis",
+    report_data = {
         "run_id": args.run,
-        "timestamp": timestamp,
-        "input_spectrum": {
-            "operator_count": len(input_data["spectrum"].get("operators", [])),
-            "d": d,
+        "input_path": input_rel,
+        "input_data_hash": input_hash,
+        "summary": {
+            "overall_verdict": overall,
+            "phase_1": {
+                "verdict": p1_verdict,
+                "features": p1_features,
+                "thresholds_applied": thresholds["phase_1"],
+            },
+            "phase_2": {
+                "verdict": p2_verdict,
+                "features": p2_features,
+                "thresholds_applied": thresholds["phase_2"],
+            },
         },
-        "verdict": p1_verdict,
-        "features": p1_features,
-        "thresholds": thresholds["phase_1"],
-    }
-    phase_1_path = outputs_dir / "phase_1_spectrum_analysis.json"
-    with open(phase_1_path, "w", encoding="utf-8") as f:
-        json.dump(phase_1_data, f, indent=2)
-
-    # --- phase_2_ope_analysis.json ---
-    phase_2_data = {
-        "phase": "phase_2_ope_analysis",
-        "run_id": args.run,
-        "timestamp": timestamp,
-        "input_ope": {
-            "coefficient_count": len(input_data["ope_coefficients"]),
+        "warnings": warnings,
+        "provenance": {
+            "stage": "experiment/hsc_detector",
+            "thresholds_source": thresholds_source,
+            "code_commit": git_commit,
+            "version": __version__,
+        },
+        "inputs": {
+            "spectrum_operator_count": len(input_data["spectrum"].get("operators", [])),
+            "ope_coefficient_count": len(input_data["ope_coefficients"]),
+            "d": d,
             "conventions": conventions,
         },
-        "verdict": p2_verdict,
-        "features": p2_features,
-        "thresholds": thresholds["phase_2"],
     }
-    phase_2_path = outputs_dir / "phase_2_ope_analysis.json"
-    with open(phase_2_path, "w", encoding="utf-8") as f:
-        json.dump(phase_2_data, f, indent=2)
+    report_path = outputs_dir / "report.json"
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(report_data, f, indent=2)
 
     # --- manifest.json ---
     artifacts = {
         "verdict": verdict_path,
-        "phase_1_analysis": phase_1_path,
-        "phase_2_analysis": phase_2_path,
+        "report": report_path,
     }
     write_manifest(
         stage_dir,
@@ -572,30 +607,55 @@ def main() -> int:
     )
 
     # --- stage_summary.json ---
+    verdict_status = (
+        "PASS" if overall == OVERALL_PASS_LOCAL_BULK_CANDIDATE
+        else "FAIL" if overall == OVERALL_FAIL_LOCAL_BULK
+        else "SKIP"
+    )
+    verdict_reason = None
+    if verdict_status == "SKIP":
+        verdict_reason = "UNDERDETERMINED"
+    out_root_rel = os.path.relpath(out_root.resolve(), Path.cwd())
+    output_hashes = {
+        "outputs/report.json": sha256_file(report_path),
+        "outputs/verdict.json": sha256_file(verdict_path),
+    }
     summary = {
-        "stage_name": "hsc_detector",
-        "run_id": args.run,
-        "timestamp": timestamp,
+        "stage": "hsc_detector",
+        "run": args.run,
         "version": __version__,
+        "config": {
+            "cli": {
+                "run": args.run,
+                "input": input_rel,
+                "thresholds": thresholds_rel,
+                "out_root": out_root_rel,
+            },
+            "seed": None,
+        },
         "inputs": [
             {
                 "path": input_rel,
                 "sha256": input_hash.replace("sha256:", ""),
                 "role": "primary",
-            }
-        ],
-        "parameters": thresholds,
-        "results": {
-            "overall_verdict": overall,
-            "phase_verdicts": {
-                "phase_1": p1_verdict,
-                "phase_2": p2_verdict,
             },
-            "outputs": {
-                "verdict": "outputs/verdict.json",
-                "phase_1_analysis": "outputs/phase_1_spectrum_analysis.json",
-                "phase_2_analysis": "outputs/phase_2_ope_analysis.json",
-            },
+        ]
+        + (
+            [
+                {
+                    "path": thresholds_rel,
+                    "sha256": sha256_file(thresholds_path),
+                    "role": "thresholds",
+                }
+            ]
+            if thresholds_path
+            else []
+        ),
+        "outputs": output_hashes,
+        "verdict": {
+            "status": verdict_status,
+            "reason": verdict_reason,
+            "overall": overall,
         },
     }
     write_stage_summary(stage_dir, summary)
