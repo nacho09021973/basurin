@@ -126,3 +126,81 @@ def test_eft_domain_pass(tmp_path: Path) -> None:
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert payload["contracts"]["EFT_DOMAIN"]["status"] == "PASS"
     assert payload["contracts"]["EFT_DOMAIN"]["max_abs_A_minus_1"] < payload["contracts"]["EFT_DOMAIN"]["threshold"]
+
+
+def _run_neutrino_grid(tmp_path: Path, args: list[str]) -> dict:
+    repo_root = Path(__file__).resolve().parents[1]
+    script = repo_root / "01_genera_neutrino_sandbox.py"
+    runs_root = tmp_path / "runs"
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+
+    result = subprocess.run(
+        [sys.executable, str(script), *args],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+
+    stage_dir = runs_root / args[args.index("--run") + 1] / "spectrum"
+    summary_path = stage_dir / "stage_summary.json"
+    assert summary_path.exists()
+    return json.loads(summary_path.read_text(encoding="utf-8"))
+
+
+def test_paired_grid_is_colinear(tmp_path: Path) -> None:
+    payload = _run_neutrino_grid(
+        tmp_path,
+        [
+            "--run",
+            "paired_case",
+            "--n-delta",
+            "10",
+            "--n-modes",
+            "2",
+            "--n-grid",
+            "32",
+            "--profiles",
+            "core,crust",
+            "--grid-mode",
+            "paired",
+        ],
+    )
+
+    grid = payload["grid"]
+    alpha = np.array(grid["alpha_per_point"], dtype=np.float64)
+    delta = np.array(grid["delta_per_point"], dtype=np.float64)
+    corr = np.corrcoef(alpha, delta)[0, 1]
+
+    assert corr > 0.99
+
+
+def test_cartesian_grid_breaks_colinearity(tmp_path: Path) -> None:
+    payload = _run_neutrino_grid(
+        tmp_path,
+        [
+            "--run",
+            "cartesian_case",
+            "--n-delta",
+            "5",
+            "--n-alpha",
+            "4",
+            "--n-modes",
+            "2",
+            "--n-grid",
+            "32",
+            "--profiles",
+            "core,crust",
+            "--grid-mode",
+            "cartesian",
+        ],
+    )
+
+    grid = payload["grid"]
+    assert grid["n_total"] == 20
+    alpha = np.array(grid["alpha_per_point"], dtype=np.float64)
+    delta = np.array(grid["delta_per_point"], dtype=np.float64)
+    corr = np.corrcoef(alpha, delta)[0, 1]
+
+    assert abs(corr) < 0.2

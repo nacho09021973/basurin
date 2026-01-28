@@ -80,6 +80,8 @@ class Config:
     delta_min: float
     delta_max: float
     n_delta: int
+    n_alpha: int
+    grid_mode: str
 
     # "Modos" (observables por perfil)
     n_modes: int
@@ -122,6 +124,11 @@ def parse_args() -> Config:
     p.add_argument("--delta-min", type=float, default=1.55, dest="delta_min")
     p.add_argument("--delta-max", type=float, default=5.50, dest="delta_max")
     p.add_argument("--n-delta", type=int, default=80, dest="n_delta")
+    p.add_argument("--n-alpha", type=int, default=None, dest="n_alpha",
+                   help="Número de puntos en alpha (default: = n_delta)")
+    p.add_argument("--grid-mode", type=str, default="paired", dest="grid_mode",
+                   choices=["paired", "cartesian"],
+                   help="paired: alpha ~ delta indexado; cartesian: producto cartesiano")
 
     # modos
     p.add_argument("--n-modes", type=int, default=None, dest="n_modes",
@@ -158,6 +165,7 @@ def parse_args() -> Config:
         p.error("--profiles no puede estar vacío")
 
     n_modes = a.n_modes if a.n_modes is not None else len(profiles)
+    n_alpha = a.n_alpha if a.n_alpha is not None else a.n_delta
 
     return Config(
         run=a.run,
@@ -166,6 +174,8 @@ def parse_args() -> Config:
         delta_min=a.delta_min,
         delta_max=a.delta_max,
         n_delta=a.n_delta,
+        n_alpha=n_alpha,
+        grid_mode=a.grid_mode,
         n_modes=n_modes,
         n_grid=a.n_grid,
         s_max=a.s_max,
@@ -189,6 +199,8 @@ def validate(cfg: Config) -> None:
         raise ValueError("delta_max debe ser > delta_min")
     if cfg.n_delta < 2:
         raise ValueError("n_delta debe ser >= 2")
+    if cfg.n_alpha < 1:
+        raise ValueError("n_alpha debe ser >= 1")
     if cfg.n_grid < 16:
         raise ValueError("n_grid debe ser >= 16")
     if cfg.s_max <= 0:
@@ -348,12 +360,25 @@ def main() -> int:
     # Grid s
     s = np.linspace(0.0, cfg.s_max, cfg.n_grid, dtype=np.float64)
 
-    # Sweep Δ
-    delta_uv = np.linspace(cfg.delta_min, cfg.delta_max, cfg.n_delta, dtype=np.float64)
+    # Sweep Δ y alpha
+    delta_values = np.linspace(cfg.delta_min, cfg.delta_max, cfg.n_delta, dtype=np.float64)
+    if cfg.grid_mode == "paired":
+        alpha_values = np.array([delta_to_alpha(float(dlt), cfg) for dlt in delta_values], dtype=np.float64)
+        delta_per_point = delta_values
+        alpha_per_point = alpha_values
+        grid_order = "paired_index"
+    else:
+        alpha_values = np.linspace(cfg.alpha_min, cfg.alpha_max, cfg.n_alpha, dtype=np.float64)
+        delta_per_point = np.repeat(delta_values, cfg.n_alpha)
+        alpha_per_point = np.tile(alpha_values, cfg.n_delta)
+        grid_order = "delta_outer_alpha_inner"
+
+    n_total = int(len(delta_per_point))
+    delta_uv = delta_per_point
 
     # Compute M2 (n_delta, n_modes)
     profiles = cfg.profiles[: cfg.n_modes]
-    M2 = np.zeros((cfg.n_delta, cfg.n_modes), dtype=np.float64)
+    M2 = np.zeros((n_total, cfg.n_modes), dtype=np.float64)
 
     # Precompute rho profiles
     rho_profiles = {name: profile_rho(s, name) for name in profiles}
@@ -364,8 +389,7 @@ def main() -> int:
     A0_raw_values: list[float] = []
     A0_raw_abort: dict | None = None
 
-    for i, dlt in enumerate(delta_uv):
-        alpha = delta_to_alpha(float(dlt), cfg)
+    for i, (dlt, alpha) in enumerate(zip(delta_per_point, alpha_per_point)):
         symmetron_A0_raw = None
 
         for j, pname in enumerate(profiles):
@@ -436,7 +460,7 @@ def main() -> int:
         M2 = np.maximum(M2, 1e-8)
 
     # Placeholder m2L2 (no usado por 04, pero requerido por el loader)
-    m2L2 = np.zeros(cfg.n_delta, dtype=np.float64)
+    m2L2 = np.zeros(n_total, dtype=np.float64)
 
     # Validación básica
     validation = {
@@ -489,7 +513,7 @@ def main() -> int:
         # attrs esperados por 04_diccionario.load_spectrum
         h5.attrs["d"] = int(cfg.d)
         h5.attrs["L"] = float(cfg.L)
-        h5.attrs["n_delta"] = int(cfg.n_delta)
+        h5.attrs["n_delta"] = int(n_total)
         h5.attrs["n_modes"] = int(cfg.n_modes)
 
         # extras de auditoría
@@ -522,7 +546,7 @@ def main() -> int:
         "version": "0.1.0",
         "created": datetime.now(timezone.utc).isoformat(),
         "run": cfg.run,
-        "config": asdict(cfg),
+        "config": {**asdict(cfg), "n_total": n_total},
         "inputs": {
             "generator": "neutrino_sandbox",
             "generator_script": "01_genera_neutrino_sandbox.py",
@@ -553,6 +577,17 @@ def main() -> int:
             "consumer": "04_diccionario.load_spectrum",
             "note": "Esquema mínimo compatible: delta_uv, m2L2, M2, z_grid y attrs d,L,n_delta,n_modes.",
         },
+        "grid": {
+            "mode": cfg.grid_mode,
+            "n_alpha": int(cfg.n_alpha),
+            "n_delta": int(cfg.n_delta),
+            "n_total": int(n_total),
+            "alpha_values": [float(x) for x in alpha_values],
+            "delta_values": [float(x) for x in delta_values],
+            "alpha_per_point": [float(x) for x in alpha_per_point],
+            "delta_per_point": [float(x) for x in delta_per_point],
+            "order": grid_order,
+        },
     }
     summary_path = stage_dir / "stage_summary.json"
     with open(summary_path, "w", encoding="utf-8") as f:
@@ -580,6 +615,7 @@ def main() -> int:
     print(f"  family: {cfg.family}")
     print(f"  profiles (modes): {profiles}")
     print(f"  Δ in [{cfg.delta_min:.3f}, {cfg.delta_max:.3f}], n_delta={cfg.n_delta}")
+    print(f"  grid_mode={cfg.grid_mode}, n_alpha={cfg.n_alpha}, n_total={n_total}")
     print(f"  n_modes={cfg.n_modes}, noise_rel={cfg.noise_rel}")
     print(f"  ratio range: [{validation['ratio_min_max'][0]:.6f}, {validation['ratio_min_max'][1]:.6f}]")
 
