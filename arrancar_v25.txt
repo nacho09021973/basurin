@@ -6,11 +6,7 @@
 cd ~/basurin/work
 source .venv/bin/activate
 
-seguimos con interpretación física de los outputs del bridge (degeneracy, CCA, leakage),
 
-o avanzamos con Contrato C7,
-
-o pasamos a Fase 4.2 / multi-run / robustez.
 
 ===================================================================
                       ACTUALIZAR REPO SIN CLONAR
