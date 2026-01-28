@@ -61,7 +61,7 @@ import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -249,11 +249,11 @@ def A_symmetron_raw(rho: np.ndarray, *, alpha_s0: float, rho_crit: float) -> np.
 
 def A_symmetron_normalized(
     rho: np.ndarray, *, alpha_s0: float, rho_crit: float, rho0: float
-) -> tuple[np.ndarray, float]:
+) -> Tuple[np.ndarray, float]:
     A_raw = A_symmetron_raw(rho, alpha_s0=alpha_s0, rho_crit=rho_crit)
     A0_raw = float(A_symmetron_raw(np.array([rho0], dtype=np.float64), alpha_s0=alpha_s0, rho_crit=rho_crit)[0])
-    if abs(A0_raw) < 1e-6:
-        raise ValueError("symmetron A0_raw demasiado cercano a 0 para normalizar")
+    if not np.isfinite(A0_raw) or abs(A0_raw) <= 1e-12:
+        raise ValueError("symmetron A0_raw no finito o demasiado cercano a 0 para normalizar")
     A_norm = A_raw / A0_raw
     return A_norm, A0_raw
 
@@ -271,6 +271,52 @@ def delta_to_alpha(delta: float, cfg: Config) -> float:
     else:
         u = t * t
     return cfg.alpha_min + (cfg.alpha_max - cfg.alpha_min) * u
+
+
+def A_raw_family(rho: np.ndarray, *, alpha: float, cfg: Config) -> np.ndarray:
+    if cfg.family == "eft_power":
+        return A_eft_power(rho, alpha=alpha, n=cfg.power_n, rho0=cfg.rho0)
+    return A_symmetron_raw(rho, alpha_s0=alpha, rho_crit=cfg.rho_crit)
+
+
+def normalize_A(rho: np.ndarray, *, alpha: float, cfg: Config) -> Tuple[np.ndarray, float]:
+    A_raw = A_raw_family(rho, alpha=alpha, cfg=cfg)
+    A0_raw = float(A_raw_family(np.array([cfg.rho0], dtype=np.float64), alpha=alpha, cfg=cfg)[0])
+    if not np.isfinite(A0_raw) or abs(A0_raw) <= 1e-12:
+        raise ValueError("A0_raw no finito o demasiado cercano a 0 para normalizar")
+    return A_raw / A0_raw, A0_raw
+
+
+def write_abort_summary(
+    *,
+    stage_dir: Path,
+    cfg: Config,
+    reason: str,
+    max_abs_A_minus_1: Optional[float],
+    threshold: float,
+    detail: Optional[str] = None,
+) -> None:
+    payload = {
+        "stage": "spectrum",
+        "status": "FAIL",
+        "reason": reason,
+        "contracts": {
+            "EFT_DOMAIN": {
+                "status": "FAIL",
+                "max_abs_A_minus_1": max_abs_A_minus_1,
+                "threshold": threshold,
+            }
+        },
+        "normalization": "A := A_raw/A_raw(rho0)",
+        "rho0_ref": float(cfg.rho0),
+        "out_root": str(stage_dir.parent),
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    if detail:
+        payload["detail"] = detail
+    summary_path = stage_dir / "stage_summary.json"
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
 
 
 # -----------------------------
@@ -297,8 +343,7 @@ def main() -> int:
 
     runs_root = Path(os.environ.get("BASURIN_RUNS_ROOT", "runs"))
     stage_dir = runs_root / cfg.run / "spectrum"
-    outputs_dir = stage_dir / "outputs"
-    outputs_dir.mkdir(parents=True, exist_ok=True)
+    stage_dir.mkdir(parents=True, exist_ok=True)
 
     # Grid s
     s = np.linspace(0.0, cfg.s_max, cfg.n_grid, dtype=np.float64)
@@ -313,11 +358,11 @@ def main() -> int:
     # Precompute rho profiles
     rho_profiles = {name: profile_rho(s, name) for name in profiles}
 
-    max_abs_delta = 0.0
-    max_abs_where: dict | None = None
+    max_abs_A_minus_1 = 0.0
+    max_abs_where: Optional[Dict[str, Any]] = None
     clamp_applied = False
-    symmetron_A0_raw_values: list[float] = []
-    symmetron_A0_zero_abort: dict | None = None
+    A0_raw_values: List[float] = []
+    A0_raw_abort: Optional[Dict[str, Any]] = None
 
     for i, dlt in enumerate(delta_uv):
         alpha = delta_to_alpha(float(dlt), cfg)
@@ -325,32 +370,25 @@ def main() -> int:
 
         for j, pname in enumerate(profiles):
             rho = rho_profiles[pname]
-            if cfg.family == "eft_power":
-                A = A_eft_power(rho, alpha=alpha, n=cfg.power_n, rho0=cfg.rho0)
-            else:
-                try:
-                    A, symmetron_A0_raw = A_symmetron_normalized(
-                        rho, alpha_s0=alpha, rho_crit=cfg.rho_crit, rho0=cfg.rho0
-                    )
-                except ValueError:
-                    symmetron_A0_zero_abort = {
-                        "delta_index": int(i),
-                        "delta_uv": float(dlt),
-                        "alpha": float(alpha),
-                        "profile": pname,
-                        "rho0": float(cfg.rho0),
-                        "rho_crit": float(cfg.rho_crit),
-                    }
-                    break
-
-            if symmetron_A0_zero_abort:
+            try:
+                A, symmetron_A0_raw = normalize_A(rho, alpha=alpha, cfg=cfg)
+            except ValueError:
+                A0_raw_abort = {
+                    "delta_index": int(i),
+                    "delta_uv": float(dlt),
+                    "alpha": float(alpha),
+                    "profile": pname,
+                    "rho0": float(cfg.rho0),
+                    "rho_crit": float(cfg.rho_crit),
+                    "family": cfg.family,
+                }
                 break
 
             abs_delta = np.abs(A - 1.0)
             local_max = float(np.max(abs_delta))
-            if local_max > max_abs_delta:
+            if local_max > max_abs_A_minus_1:
                 idx = int(np.argmax(abs_delta))
-                max_abs_delta = local_max
+                max_abs_A_minus_1 = local_max
                 max_abs_where = {
                     "delta_index": int(i),
                     "delta_uv": float(dlt),
@@ -374,71 +412,23 @@ def main() -> int:
             base = 1.0
             M2[i, j] = base + D_eff
 
-        if cfg.family == "symmetron":
-            symmetron_A0_raw_values.append(float(symmetron_A0_raw))
+        if symmetron_A0_raw is not None:
+            A0_raw_values.append(float(symmetron_A0_raw))
 
-        if symmetron_A0_zero_abort:
+        if A0_raw_abort:
             break
 
-    if symmetron_A0_zero_abort:
-        abort_payload = {
-            "reason": "EFT_DOMAIN_VIOLATION",
-            "detail": "symmetron_A0_raw_near_zero",
-            "max_abs_delta": float(max_abs_delta),
-            "threshold": 1.0,
-            "where": max_abs_where,
-            "model": cfg.family,
-            "params": asdict(cfg),
-            "clamp_applied": bool(clamp_applied),
-            "symmetron_normalize_by_A0": True,
-            "symmetron_A0_raw": symmetron_A0_raw_values if cfg.family == "symmetron" else None,
-            "symmetron_A0_zero_abort": symmetron_A0_zero_abort,
-        }
-        abort_path = outputs_dir / "abort_domain.json"
-        with open(abort_path, "w", encoding="utf-8") as f:
-            json.dump(abort_payload, f, indent=2)
-
-        summary = {
-            "stage": "spectrum",
-            "script": "01_genera_neutrino_sandbox.py",
-            "version": "0.1.0",
-            "created": datetime.now(timezone.utc).isoformat(),
-            "run": cfg.run,
-            "config": asdict(cfg),
-            "inputs": {
-                "generator": "neutrino_sandbox",
-                "generator_script": "01_genera_neutrino_sandbox.py",
-                "generator_seed": cfg.seed,
-                "generator_config": asdict(cfg),
-            },
-            "status": "ABORT",
-            "abort": abort_payload,
-            "outputs": {
-                "abort_domain": "outputs/abort_domain.json",
-            },
-            "hashes": {
-                "outputs/abort_domain.json": sha256_file(abort_path),
-            },
-        }
-        summary_path = stage_dir / "stage_summary.json"
-        with open(summary_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2)
-
-        manifest = {
-            "stage": "spectrum",
-            "run": cfg.run,
-            "created": datetime.now(timezone.utc).isoformat(),
-            "files": {
-                "abort_domain": "outputs/abort_domain.json",
-                "summary": "stage_summary.json",
-            },
-        }
-        manifest_path = stage_dir / "manifest.json"
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, indent=2)
-
-        print("ABORT: EFT_DOMAIN_VIOLATION (symmetron A0_raw ~ 0)", file=sys.stderr)
-        return 2
+    if A0_raw_abort:
+        write_abort_summary(
+            stage_dir=stage_dir,
+            cfg=cfg,
+            reason="EFT_DOMAIN_VIOLATION",
+            max_abs_A_minus_1=None,
+            threshold=1.0,
+            detail="A0_raw_nonfinite_or_near_zero",
+        )
+        print("ABORT: EFT_DOMAIN_VIOLATION (A0_raw non-finite/near-zero)", file=sys.stderr)
+        return 1
 
     # Ruido relativo multiplicativo (opcional)
     if cfg.noise_rel > 0:
@@ -457,11 +447,11 @@ def main() -> int:
         "M0_max": float(np.max(M2[:, 0])),
         "ratio_min_max": None,
         "notes": "M2 es un observable proxy (integral de A^2). No es SL.",
-        "eft_domain_max_abs_delta": float(max_abs_delta),
+        "eft_domain_max_abs_delta": float(max_abs_A_minus_1),
         "eft_domain_threshold": 1.0,
         "eft_domain_clamp_applied": bool(clamp_applied),
         "symmetron_normalize_by_A0": bool(cfg.family == "symmetron"),
-        "symmetron_A0_raw": symmetron_A0_raw_values if cfg.family == "symmetron" else None,
+        "symmetron_A0_raw": A0_raw_values if cfg.family == "symmetron" else None,
     }
     ratios = M2[:, 1:] / np.maximum(M2[:, [0]], 1e-12)
     validation["ratio_min_max"] = [float(np.min(ratios)), float(np.max(ratios))]
@@ -470,63 +460,16 @@ def main() -> int:
         print("ERROR: dataset inválido (NaN/Inf o no-positivo)", file=sys.stderr)
         return 1
 
-    if max_abs_delta >= 1.0:
-        abort_payload = {
-            "reason": "EFT_DOMAIN_VIOLATION",
-            "max_abs_delta": float(max_abs_delta),
-            "threshold": 1.0,
-            "where": max_abs_where,
-            "model": cfg.family,
-            "params": asdict(cfg),
-            "clamp_applied": bool(clamp_applied),
-            "symmetron_normalize_by_A0": bool(cfg.family == "symmetron"),
-            "symmetron_A0_raw": symmetron_A0_raw_values if cfg.family == "symmetron" else None,
-        }
-        abort_path = outputs_dir / "abort_domain.json"
-        with open(abort_path, "w", encoding="utf-8") as f:
-            json.dump(abort_payload, f, indent=2)
-
-        summary = {
-            "stage": "spectrum",
-            "script": "01_genera_neutrino_sandbox.py",
-            "version": "0.1.0",
-            "created": datetime.now(timezone.utc).isoformat(),
-            "run": cfg.run,
-            "config": asdict(cfg),
-            "inputs": {
-                "generator": "neutrino_sandbox",
-                "generator_script": "01_genera_neutrino_sandbox.py",
-                "generator_seed": cfg.seed,
-                "generator_config": asdict(cfg),
-            },
-            "status": "ABORT",
-            "abort": abort_payload,
-            "outputs": {
-                "abort_domain": "outputs/abort_domain.json",
-            },
-            "hashes": {
-                "outputs/abort_domain.json": sha256_file(abort_path),
-            },
-        }
-        summary_path = stage_dir / "stage_summary.json"
-        with open(summary_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2)
-
-        manifest = {
-            "stage": "spectrum",
-            "run": cfg.run,
-            "created": datetime.now(timezone.utc).isoformat(),
-            "files": {
-                "abort_domain": "outputs/abort_domain.json",
-                "summary": "stage_summary.json",
-            },
-        }
-        manifest_path = stage_dir / "manifest.json"
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, indent=2)
-
+    if max_abs_A_minus_1 >= 1.0:
+        write_abort_summary(
+            stage_dir=stage_dir,
+            cfg=cfg,
+            reason="EFT_DOMAIN_VIOLATION",
+            max_abs_A_minus_1=float(max_abs_A_minus_1),
+            threshold=1.0,
+        )
         print("ABORT: EFT_DOMAIN_VIOLATION (|A-1| >= 1)", file=sys.stderr)
-        return 2
+        return 1
 
     # Write spectrum.h5
     try:
@@ -535,6 +478,8 @@ def main() -> int:
         print("ERROR: pip install h5py", file=sys.stderr)
         return 1
 
+    outputs_dir = stage_dir / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
     h5_path = outputs_dir / "spectrum.h5"
     with h5py.File(h5_path, "w") as h5:
         h5.create_dataset("z_grid", data=s)  # compat: 04 espera z_grid
@@ -561,9 +506,9 @@ def main() -> int:
         h5.attrs["noise_rel"] = float(cfg.noise_rel)
         h5.attrs["seed"] = int(cfg.seed)
         h5.attrs["symmetron_normalize_by_A0"] = bool(cfg.family == "symmetron")
-        if symmetron_A0_raw_values:
-            h5.attrs["symmetron_A0_raw_min"] = float(np.min(symmetron_A0_raw_values))
-            h5.attrs["symmetron_A0_raw_max"] = float(np.max(symmetron_A0_raw_values))
+        if A0_raw_values:
+            h5.attrs["symmetron_A0_raw_min"] = float(np.min(A0_raw_values))
+            h5.attrs["symmetron_A0_raw_max"] = float(np.max(A0_raw_values))
         h5.attrs["created"] = datetime.now(timezone.utc).isoformat()
 
     # Write validation.json
@@ -590,8 +535,17 @@ def main() -> int:
             "validation": "outputs/validation.json",
         },
         "status": "PASS",
+        "contracts": {
+            "EFT_DOMAIN": {
+                "status": "PASS",
+                "max_abs_A_minus_1": float(max_abs_A_minus_1),
+                "threshold": 1.0,
+            }
+        },
+        "normalization": "A := A_raw/A_raw(rho0)",
+        "rho0_ref": float(cfg.rho0),
         "symmetron_normalize_by_A0": bool(cfg.family == "symmetron"),
-        "symmetron_A0_raw": symmetron_A0_raw_values if cfg.family == "symmetron" else None,
+        "symmetron_A0_raw": A0_raw_values if cfg.family == "symmetron" else None,
         "hashes": {
             "outputs/spectrum.h5": sha256_file(h5_path),
             "outputs/validation.json": sha256_file(val_path),
