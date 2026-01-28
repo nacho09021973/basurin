@@ -540,13 +540,30 @@ def main() -> int:
         json.dump(validation, f, indent=2)
 
     # stage_summary.json
+    config_payload = {**asdict(cfg), "n_total": n_total}
+    if cfg.grid_mode == "cartesian":
+        config_payload.update(
+            {
+                "alpha_values": [float(x) for x in alpha_values],
+                "delta_values": [float(x) for x in delta_values],
+                "grid_order": grid_order,
+            }
+        )
+    elif cfg.grid_mode == "paired":
+        config_payload.update(
+            {
+                "alpha_values": [float(x) for x in alpha_values],
+                "delta_values": [float(x) for x in delta_values],
+            }
+        )
+
     summary = {
         "stage": "spectrum",
         "script": "01_genera_neutrino_sandbox.py",
         "version": "0.1.0",
         "created": datetime.now(timezone.utc).isoformat(),
         "run": cfg.run,
-        "config": {**asdict(cfg), "n_total": n_total},
+        "config": config_payload,
         "inputs": {
             "generator": "neutrino_sandbox",
             "generator_script": "01_genera_neutrino_sandbox.py",

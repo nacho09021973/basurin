@@ -204,3 +204,48 @@ def test_cartesian_grid_breaks_colinearity(tmp_path: Path) -> None:
     corr = np.corrcoef(alpha, delta)[0, 1]
 
     assert abs(corr) < 0.2
+
+
+def test_cartesian_config_traces_grid_mapping(tmp_path: Path) -> None:
+    payload = _run_neutrino_grid(
+        tmp_path,
+        [
+            "--run",
+            "cartesian_config_case",
+            "--n-delta",
+            "5",
+            "--n-alpha",
+            "4",
+            "--n-modes",
+            "2",
+            "--n-grid",
+            "32",
+            "--profiles",
+            "core,crust",
+            "--grid-mode",
+            "cartesian",
+        ],
+    )
+
+    config = payload["config"]
+    assert config["grid_mode"] == "cartesian"
+    assert "alpha_values" in config
+    assert "delta_values" in config
+    assert "grid_order" in config
+    assert len(config["alpha_values"]) == int(config["n_alpha"])
+    assert len(config["delta_values"]) == int(config["n_delta"])
+
+    alpha_values = np.array(config["alpha_values"], dtype=np.float64)
+    delta_values = np.array(config["delta_values"], dtype=np.float64)
+
+    if config["grid_order"] == "delta_outer_alpha_inner":
+        delta_per_point = np.repeat(delta_values, int(config["n_alpha"]))
+        alpha_per_point = np.tile(alpha_values, int(config["n_delta"]))
+    else:
+        raise AssertionError(f"Unexpected grid_order: {config['grid_order']}")
+
+    n_total = len(alpha_per_point)
+    assert n_total == int(config["n_alpha"]) * int(config["n_delta"])
+
+    corr = np.corrcoef(alpha_per_point, delta_per_point)[0, 1]
+    assert abs(corr) < 0.2
