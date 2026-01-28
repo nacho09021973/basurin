@@ -399,6 +399,8 @@ def main() -> int:
             "model": cfg.family,
             "params": asdict(cfg),
             "clamp_applied": bool(clamp_applied),
+            "symmetron_normalize_by_A0": bool(cfg.family == "symmetron"),
+            "symmetron_A0_raw": symmetron_A0_raw_values if cfg.family == "symmetron" else None,
         }
         abort_path = outputs_dir / "abort_domain.json"
         with open(abort_path, "w", encoding="utf-8") as f:
