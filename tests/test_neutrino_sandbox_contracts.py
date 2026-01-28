@@ -249,3 +249,60 @@ def test_cartesian_config_traces_grid_mapping(tmp_path: Path) -> None:
 
     corr = np.corrcoef(alpha_per_point, delta_per_point)[0, 1]
     assert abs(corr) < 0.2
+
+
+def test_dictionary_proxy_hard_contracts(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    runs_root = tmp_path / "runs"
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+
+    run_name = "dictionary_proxy_case"
+    generator = repo_root / "01_genera_neutrino_sandbox.py"
+    dictionary = repo_root / "04_diccionario.py"
+
+    gen_result = subprocess.run(
+        [
+            sys.executable,
+            str(generator),
+            "--run",
+            run_name,
+            "--grid-mode",
+            "cartesian",
+            "--n-delta",
+            "5",
+            "--n-alpha",
+            "4",
+            "--n-grid",
+            "32",
+            "--noise-rel",
+            "0",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert gen_result.returncode == 0, gen_result.stderr
+
+    dict_result = subprocess.run(
+        [sys.executable, str(dictionary), "--run", run_name],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert dict_result.returncode == 0, dict_result.stderr
+
+    stage_dir = runs_root / run_name / "dictionary"
+    summary_path = stage_dir / "stage_summary.json"
+    assert summary_path.exists()
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    validation_summary = summary["validation_summary"]
+
+    assert validation_summary["hard_contracts_profile"] == "proxy"
+    assert validation_summary["all_hard_contracts_pass"] is True
+
+    outputs_dir = stage_dir / "outputs"
+    assert (outputs_dir / "dictionary.h5").exists()
+    assert (outputs_dir / "atlas.json").exists()
+    assert (stage_dir / "manifest.json").exists()
