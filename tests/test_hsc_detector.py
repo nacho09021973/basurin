@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -24,18 +23,11 @@ STAGE_PATH = Path(__file__).resolve().parents[1] / "experiment" / "hsc_detector"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _get_test_out_root(tmp_path: Path) -> tuple[Path, Path]:
-    """Get test output root following BASURIN conventions.
-
-    Returns:
-        (out_root_relative, out_root_absolute) where:
-        - out_root_relative: Path relative to repo root (e.g., "runs_tmp/pytest__xxx")
-        - out_root_absolute: Absolute path to output root
-    """
-    out_root_rel = Path("runs_tmp") / f"pytest__{tmp_path.name}"
-    out_root_abs = REPO_ROOT / out_root_rel
+def _get_test_out_root(tmp_path: Path) -> Path:
+    """Get test output root following BASURIN conventions."""
+    out_root_abs = tmp_path / "runs"
     out_root_abs.mkdir(parents=True, exist_ok=True)
-    return out_root_rel, out_root_abs
+    return out_root_abs
 
 
 def _create_hsc_input(
@@ -72,10 +64,18 @@ def _create_hsc_input(
     return input_path
 
 
+def _write_run_valid(run_dir: Path, verdict: str = "PASS") -> None:
+    outputs_dir = run_dir / "RUN_VALID" / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    run_valid_payload = {"run": run_dir.name, "verdict": verdict}
+    (outputs_dir / "run_valid.json").write_text(
+        json.dumps(run_valid_payload, indent=2), encoding="utf-8"
+    )
+
+
 def _run_stage(
     run_id: str,
     input_path: Path,
-    out_root_rel: Path,
     out_root_abs: Path,
     thresholds_path: Path | None = None,
 ) -> subprocess.CompletedProcess:
@@ -85,7 +85,7 @@ def _run_stage(
         str(STAGE_PATH),
         "--run", run_id,
         "--input", str(input_path),
-        "--out-root", str(out_root_rel),
+        "--out-root", str(out_root_abs),
     ]
     if thresholds_path:
         cmd.extend(["--thresholds", str(thresholds_path)])
@@ -106,19 +106,16 @@ def _run_stage(
 @pytest.fixture
 def test_run_dir(tmp_path: Path):
     """Fixture to create and cleanup test run directory."""
-    out_root_rel, out_root_abs = _get_test_out_root(tmp_path)
-    yield out_root_rel, out_root_abs
-    # Cleanup
-    if out_root_abs.exists():
-        shutil.rmtree(out_root_abs, ignore_errors=True)
+    out_root_abs = _get_test_out_root(tmp_path)
+    yield out_root_abs
 
 
 class TestHSCDetectorPassOnHSC:
     """Test that HSC detector passes on valid holographic-like spectrum."""
 
-    def test_passes_on_sparse_spectrum_with_hierarchy(self, test_run_dir: tuple[Path, Path]) -> None:
+    def test_passes_on_sparse_spectrum_with_hierarchy(self, test_run_dir: Path) -> None:
         """Sparse spectrum + strong OPE hierarchy → PASS_LOCAL_BULK_CANDIDATE."""
-        out_root_rel, out_root_abs = test_run_dir
+        out_root_abs = test_run_dir
         run_id = "test_pass_hsc"
         run_dir = out_root_abs / run_id
 
@@ -140,8 +137,9 @@ class TestHSCDetectorPassOnHSC:
             "epsilon_epsilon_[epsilon epsilon]_0": 0.015,
         }
 
+        _write_run_valid(run_dir, verdict="PASS")
         input_path = _create_hsc_input(run_dir, operators, ope_coefficients)
-        result = _run_stage(run_id, input_path, out_root_rel, out_root_abs)
+        result = _run_stage(run_id, input_path, out_root_abs)
 
         assert result.returncode == 0, f"Stage failed: {result.stderr}"
         assert "PASS_LOCAL_BULK_CANDIDATE" in result.stdout
@@ -158,9 +156,9 @@ class TestHSCDetectorPassOnHSC:
 class TestHSCDetectorFailOnGeneric:
     """Test that HSC detector fails on generic/dense CFT."""
 
-    def test_fails_on_dense_spectrum(self, test_run_dir: tuple[Path, Path]) -> None:
+    def test_fails_on_dense_spectrum(self, test_run_dir: Path) -> None:
         """Dense spectrum → FAIL (even if OPE might pass)."""
-        out_root_rel, out_root_abs = test_run_dir
+        out_root_abs = test_run_dir
         run_id = "test_fail_dense"
         run_dir = out_root_abs / run_id
 
@@ -185,8 +183,9 @@ class TestHSCDetectorFailOnGeneric:
             "sigma_sigma_[sigma sigma]_0": 0.02,
         }
 
+        _write_run_valid(run_dir, verdict="PASS")
         input_path = _create_hsc_input(run_dir, operators, ope_coefficients)
-        result = _run_stage(run_id, input_path, out_root_rel, out_root_abs)
+        result = _run_stage(run_id, input_path, out_root_abs)
 
         assert result.returncode == 0
         assert "FAIL_LOCAL_BULK" in result.stdout
@@ -196,9 +195,9 @@ class TestHSCDetectorFailOnGeneric:
         assert verdict["overall_verdict"] == "FAIL_LOCAL_BULK"
         assert verdict["phase_summary"]["phase_1"]["verdict"] == "FAIL"
 
-    def test_fails_on_no_ope_hierarchy(self, test_run_dir: tuple[Path, Path]) -> None:
+    def test_fails_on_no_ope_hierarchy(self, test_run_dir: Path) -> None:
         """No OPE hierarchy (ratio <= 1) → FAIL."""
-        out_root_rel, out_root_abs = test_run_dir
+        out_root_abs = test_run_dir
         run_id = "test_fail_no_hierarchy"
         run_dir = out_root_abs / run_id
 
@@ -217,8 +216,9 @@ class TestHSCDetectorFailOnGeneric:
             "sigma_sigma_[sigma sigma]_1": 0.4,
         }
 
+        _write_run_valid(run_dir, verdict="PASS")
         input_path = _create_hsc_input(run_dir, operators, ope_coefficients)
-        result = _run_stage(run_id, input_path, out_root_rel, out_root_abs)
+        result = _run_stage(run_id, input_path, out_root_abs)
 
         assert result.returncode == 0
         assert "FAIL_LOCAL_BULK" in result.stdout
@@ -232,9 +232,9 @@ class TestHSCDetectorFailOnGeneric:
 class TestHSCDetectorDeterminism:
     """Test that same input produces identical outputs."""
 
-    def test_deterministic_output(self, test_run_dir: tuple[Path, Path]) -> None:
+    def test_deterministic_output(self, test_run_dir: Path) -> None:
         """Running twice with same input → same verdict hash."""
-        out_root_rel, out_root_abs = test_run_dir
+        out_root_abs = test_run_dir
 
         operators = [
             {"id": "0", "dim": 0.0, "spin": 0, "degeneracy": 1},
@@ -248,15 +248,17 @@ class TestHSCDetectorDeterminism:
         # Run 1
         run_id_1 = "test_determinism_1"
         run_dir_1 = out_root_abs / run_id_1
+        _write_run_valid(run_dir_1, verdict="PASS")
         input_path_1 = _create_hsc_input(run_dir_1, operators, ope_coefficients)
-        result_1 = _run_stage(run_id_1, input_path_1, out_root_rel, out_root_abs)
+        result_1 = _run_stage(run_id_1, input_path_1, out_root_abs)
         assert result_1.returncode == 0
 
         # Run 2
         run_id_2 = "test_determinism_2"
         run_dir_2 = out_root_abs / run_id_2
+        _write_run_valid(run_dir_2, verdict="PASS")
         input_path_2 = _create_hsc_input(run_dir_2, operators, ope_coefficients)
-        result_2 = _run_stage(run_id_2, input_path_2, out_root_rel, out_root_abs)
+        result_2 = _run_stage(run_id_2, input_path_2, out_root_abs)
         assert result_2.returncode == 0
 
         # Compare verdicts (excluding run-specific fields)
@@ -277,9 +279,9 @@ class TestHSCDetectorDeterminism:
 class TestHSCDetectorIOContract:
     """Test that all required output files exist and are valid JSON."""
 
-    def test_all_required_files_exist(self, test_run_dir: tuple[Path, Path]) -> None:
+    def test_all_required_files_exist(self, test_run_dir: Path) -> None:
         """Verify manifest.json, stage_summary.json, and all outputs exist."""
-        out_root_rel, out_root_abs = test_run_dir
+        out_root_abs = test_run_dir
         run_id = "test_io_contract"
         run_dir = out_root_abs / run_id
 
@@ -287,9 +289,10 @@ class TestHSCDetectorIOContract:
             {"id": "sigma", "dim": 2.0, "spin": 0, "degeneracy": 1},
         ]
         ope_coefficients = {"sigma_sigma_sigma": 0.5}
+        _write_run_valid(run_dir, verdict="PASS")
         input_path = _create_hsc_input(run_dir, operators, ope_coefficients)
 
-        result = _run_stage(run_id, input_path, out_root_rel, out_root_abs)
+        result = _run_stage(run_id, input_path, out_root_abs)
         assert result.returncode == 0
 
         stage_dir = out_root_abs / run_id / "hsc_detector"
@@ -298,9 +301,8 @@ class TestHSCDetectorIOContract:
         required_files = [
             "manifest.json",
             "stage_summary.json",
+            "outputs/report.json",
             "outputs/verdict.json",
-            "outputs/phase_1_spectrum_analysis.json",
-            "outputs/phase_2_ope_analysis.json",
         ]
 
         for rel_path in required_files:
@@ -310,17 +312,18 @@ class TestHSCDetectorIOContract:
             content = json.loads(file_path.read_text())
             assert isinstance(content, dict), f"Invalid JSON in {rel_path}"
 
-    def test_manifest_contains_all_artifacts(self, test_run_dir: tuple[Path, Path]) -> None:
+    def test_manifest_contains_all_artifacts(self, test_run_dir: Path) -> None:
         """Manifest should list all generated output files."""
-        out_root_rel, out_root_abs = test_run_dir
+        out_root_abs = test_run_dir
         run_id = "test_manifest"
         run_dir = out_root_abs / run_id
 
         operators = [{"id": "sigma", "dim": 2.0, "spin": 0, "degeneracy": 1}]
         ope_coefficients = {"sigma_sigma_sigma": 0.5}
+        _write_run_valid(run_dir, verdict="PASS")
         input_path = _create_hsc_input(run_dir, operators, ope_coefficients)
 
-        result = _run_stage(run_id, input_path, out_root_rel, out_root_abs)
+        result = _run_stage(run_id, input_path, out_root_abs)
         assert result.returncode == 0
 
         manifest_path = out_root_abs / run_id / "hsc_detector" / "manifest.json"
@@ -328,49 +331,90 @@ class TestHSCDetectorIOContract:
 
         assert "files" in manifest
         assert "verdict" in manifest["files"]
-        assert "phase_1_analysis" in manifest["files"]
-        assert "phase_2_analysis" in manifest["files"]
+        assert "report" in manifest["files"]
 
         assert "hashes" in manifest
         # Each file should have a hash
         for label, rel_path in manifest["files"].items():
             assert rel_path in manifest["hashes"], f"Missing hash for {label}"
 
-    def test_stage_summary_structure(self, test_run_dir: tuple[Path, Path]) -> None:
+    def test_stage_summary_structure(self, test_run_dir: Path) -> None:
         """Stage summary should have required fields."""
-        out_root_rel, out_root_abs = test_run_dir
+        out_root_abs = test_run_dir
         run_id = "test_summary"
         run_dir = out_root_abs / run_id
 
         operators = [{"id": "sigma", "dim": 2.0, "spin": 0, "degeneracy": 1}]
         ope_coefficients = {"sigma_sigma_sigma": 0.5}
+        _write_run_valid(run_dir, verdict="PASS")
         input_path = _create_hsc_input(run_dir, operators, ope_coefficients)
 
-        result = _run_stage(run_id, input_path, out_root_rel, out_root_abs)
+        result = _run_stage(run_id, input_path, out_root_abs)
         assert result.returncode == 0
 
         summary_path = out_root_abs / run_id / "hsc_detector" / "stage_summary.json"
         summary = json.loads(summary_path.read_text())
 
-        assert summary["stage_name"] == "hsc_detector"
-        assert summary["run_id"] == run_id
-        assert "timestamp" in summary
+        assert summary["stage"] == "hsc_detector"
+        assert summary["run"] == run_id
+        assert "created" in summary
+        assert "config" in summary
         assert "inputs" in summary
-        assert "parameters" in summary
-        assert "results" in summary
-        assert summary["results"]["overall_verdict"] in [
+        assert "outputs" in summary
+        assert "verdict" in summary
+        assert summary["verdict"]["overall"] in [
             "PASS_LOCAL_BULK_CANDIDATE",
             "FAIL_LOCAL_BULK",
             "UNDERDETERMINED",
         ]
 
+    def test_no_writes_outside_runs_root(self, test_run_dir: Path) -> None:
+        """Stage should not write outside runs_root."""
+        out_root_abs = test_run_dir
+        run_id = "test_no_writes_outside"
+        run_dir = out_root_abs / run_id
+
+        operators = [{"id": "sigma", "dim": 2.0, "spin": 0, "degeneracy": 1}]
+        ope_coefficients = {"sigma_sigma_sigma": 0.5}
+        _write_run_valid(run_dir, verdict="PASS")
+        input_path = _create_hsc_input(run_dir, operators, ope_coefficients)
+
+        result = _run_stage(run_id, input_path, out_root_abs)
+        assert result.returncode == 0
+
+        tmp_root = out_root_abs.parent
+        for path in tmp_root.rglob("*"):
+            if path.is_file():
+                assert out_root_abs in path.parents, f"Unexpected write outside runs_root: {path}"
+
+
+class TestHSCDetectorRunValidGate:
+    """Test RUN_VALID gating behavior."""
+
+    def test_abort_when_run_valid_not_pass(self, test_run_dir: Path) -> None:
+        """RUN_VALID != PASS should abort and avoid outputs."""
+        out_root_abs = test_run_dir
+        run_id = "test_run_valid_fail"
+        run_dir = out_root_abs / run_id
+
+        operators = [{"id": "sigma", "dim": 2.0, "spin": 0, "degeneracy": 1}]
+        ope_coefficients = {"sigma_sigma_sigma": 0.5}
+        _write_run_valid(run_dir, verdict="FAIL")
+        input_path = _create_hsc_input(run_dir, operators, ope_coefficients)
+
+        result = _run_stage(run_id, input_path, out_root_abs)
+        assert result.returncode != 0
+
+        stage_dir = out_root_abs / run_id / "hsc_detector"
+        assert not stage_dir.exists()
+
 
 class TestHSCDetectorEdgeCases:
     """Test edge cases and error handling."""
 
-    def test_underdetermined_on_missing_conventions(self, test_run_dir: tuple[Path, Path]) -> None:
+    def test_underdetermined_on_missing_conventions(self, test_run_dir: Path) -> None:
         """Missing conventions → UNDERDETERMINED for phase 2."""
-        out_root_rel, out_root_abs = test_run_dir
+        out_root_abs = test_run_dir
         run_id = "test_no_conventions"
         run_dir = out_root_abs / run_id
 
@@ -397,7 +441,8 @@ class TestHSCDetectorEdgeCases:
         input_path = input_dir / "input.json"
         input_path.write_text(json.dumps(input_data, indent=2))
 
-        result = _run_stage(run_id, input_path, out_root_rel, out_root_abs)
+        _write_run_valid(run_dir, verdict="PASS")
+        result = _run_stage(run_id, input_path, out_root_abs)
         assert result.returncode == 0
 
         verdict_path = out_root_abs / run_id / "hsc_detector" / "outputs" / "verdict.json"
@@ -406,17 +451,18 @@ class TestHSCDetectorEdgeCases:
         # Phase 2 should be UNDERDETERMINED due to missing conventions
         assert verdict["phase_summary"]["phase_2"]["verdict"] == "UNDERDETERMINED"
 
-    def test_underdetermined_on_empty_spectrum(self, test_run_dir: tuple[Path, Path]) -> None:
+    def test_underdetermined_on_empty_spectrum(self, test_run_dir: Path) -> None:
         """Empty spectrum → UNDERDETERMINED for phase 1."""
-        out_root_rel, out_root_abs = test_run_dir
+        out_root_abs = test_run_dir
         run_id = "test_empty_spectrum"
         run_dir = out_root_abs / run_id
 
         operators: list[dict] = []  # No operators
         ope_coefficients = {"sigma_sigma_sigma": 0.5}
 
+        _write_run_valid(run_dir, verdict="PASS")
         input_path = _create_hsc_input(run_dir, operators, ope_coefficients)
-        result = _run_stage(run_id, input_path, out_root_rel, out_root_abs)
+        result = _run_stage(run_id, input_path, out_root_abs)
 
         assert result.returncode == 0
 
@@ -424,9 +470,9 @@ class TestHSCDetectorEdgeCases:
         verdict = json.loads(verdict_path.read_text())
         assert verdict["phase_summary"]["phase_1"]["verdict"] == "UNDERDETERMINED"
 
-    def test_custom_thresholds(self, test_run_dir: tuple[Path, Path]) -> None:
+    def test_custom_thresholds(self, test_run_dir: Path) -> None:
         """Custom thresholds should override defaults."""
-        out_root_rel, out_root_abs = test_run_dir
+        out_root_abs = test_run_dir
         run_id = "test_custom_thresholds"
         run_dir = out_root_abs / run_id
 
@@ -444,6 +490,7 @@ class TestHSCDetectorEdgeCases:
             "sigma_sigma_[sigma sigma]_0": 0.02,
         }
 
+        _write_run_valid(run_dir, verdict="PASS")
         input_path = _create_hsc_input(
             run_dir,
             operators,
@@ -458,7 +505,7 @@ class TestHSCDetectorEdgeCases:
         }
         thresholds_path.write_text(json.dumps(thresholds_data, indent=2))
 
-        result = _run_stage(run_id, input_path, out_root_rel, out_root_abs, thresholds_path)
+        result = _run_stage(run_id, input_path, out_root_abs, thresholds_path)
         assert result.returncode == 0
 
         verdict_path = out_root_abs / run_id / "hsc_detector" / "outputs" / "verdict.json"
@@ -468,19 +515,21 @@ class TestHSCDetectorEdgeCases:
         assert verdict["phase_summary"]["phase_1"]["verdict"] == "PASS"
         assert verdict["phase_summary"]["phase_1"]["thresholds_applied"]["max_density"] == 20
 
-    def test_error_on_missing_input(self, test_run_dir: tuple[Path, Path]) -> None:
+    def test_error_on_missing_input(self, test_run_dir: Path) -> None:
         """Missing input file should return error code."""
-        out_root_rel, out_root_abs = test_run_dir
+        out_root_abs = test_run_dir
         run_id = "test_missing_input"
+        run_dir = out_root_abs / run_id
         fake_input = out_root_abs / "nonexistent.json"
 
-        result = _run_stage(run_id, fake_input, out_root_rel, out_root_abs)
+        _write_run_valid(run_dir, verdict="PASS")
+        result = _run_stage(run_id, fake_input, out_root_abs)
         assert result.returncode != 0
         assert "not found" in result.stderr.lower() or "error" in result.stderr.lower()
 
-    def test_error_on_invalid_schema(self, test_run_dir: tuple[Path, Path]) -> None:
+    def test_error_on_invalid_schema(self, test_run_dir: Path) -> None:
         """Missing required fields should return contract error."""
-        out_root_rel, out_root_abs = test_run_dir
+        out_root_abs = test_run_dir
         run_id = "test_invalid_schema"
         run_dir = out_root_abs / run_id
 
@@ -496,16 +545,17 @@ class TestHSCDetectorEdgeCases:
         input_path = input_dir / "input.json"
         input_path.write_text(json.dumps(input_data, indent=2))
 
-        result = _run_stage(run_id, input_path, out_root_rel, out_root_abs)
+        _write_run_valid(run_dir, verdict="PASS")
+        result = _run_stage(run_id, input_path, out_root_abs)
         assert result.returncode == 2  # Contract violation
 
 
 class TestOPEKeyParsing:
     """Test OPE coefficient key parsing logic."""
 
-    def test_simple_keys(self, test_run_dir: tuple[Path, Path]) -> None:
+    def test_simple_keys(self, test_run_dir: Path) -> None:
         """Simple operator names parse correctly."""
-        out_root_rel, out_root_abs = test_run_dir
+        out_root_abs = test_run_dir
         run_id = "test_simple_keys"
         run_dir = out_root_abs / run_id
 
@@ -519,18 +569,19 @@ class TestOPEKeyParsing:
             "sigma_epsilon_epsilon": 0.2,
         }
 
+        _write_run_valid(run_dir, verdict="PASS")
         input_path = _create_hsc_input(run_dir, operators, ope_coefficients)
-        result = _run_stage(run_id, input_path, out_root_rel, out_root_abs)
+        result = _run_stage(run_id, input_path, out_root_abs)
         assert result.returncode == 0
 
-        phase_2_path = out_root_abs / run_id / "hsc_detector" / "outputs" / "phase_2_ope_analysis.json"
-        phase_2 = json.loads(phase_2_path.read_text())
+        report_path = out_root_abs / run_id / "hsc_detector" / "outputs" / "report.json"
+        report = json.loads(report_path.read_text())
         # All 3 should be classified as lambda_OOO
-        assert phase_2["features"]["lambda_OOO_count"] == 3
+        assert report["summary"]["phase_2"]["features"]["lambda_OOO_count"] == 3
 
-    def test_bracket_keys(self, test_run_dir: tuple[Path, Path]) -> None:
+    def test_bracket_keys(self, test_run_dir: Path) -> None:
         """Composite operator names with brackets parse correctly."""
-        out_root_rel, out_root_abs = test_run_dir
+        out_root_abs = test_run_dir
         run_id = "test_bracket_keys"
         run_dir = out_root_abs / run_id
 
@@ -544,11 +595,12 @@ class TestOPEKeyParsing:
             "sigma_sigma_[sigma sigma]_1": 0.01,
         }
 
+        _write_run_valid(run_dir, verdict="PASS")
         input_path = _create_hsc_input(run_dir, operators, ope_coefficients)
-        result = _run_stage(run_id, input_path, out_root_rel, out_root_abs)
+        result = _run_stage(run_id, input_path, out_root_abs)
         assert result.returncode == 0
 
-        phase_2_path = out_root_abs / run_id / "hsc_detector" / "outputs" / "phase_2_ope_analysis.json"
-        phase_2 = json.loads(phase_2_path.read_text())
-        assert phase_2["features"]["lambda_OOO_count"] == 1
-        assert phase_2["features"]["lambda_tower_count"] == 2
+        report_path = out_root_abs / run_id / "hsc_detector" / "outputs" / "report.json"
+        report = json.loads(report_path.read_text())
+        assert report["summary"]["phase_2"]["features"]["lambda_OOO_count"] == 1
+        assert report["summary"]["phase_2"]["features"]["lambda_tower_count"] == 2
