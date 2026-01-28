@@ -127,7 +127,7 @@ def test_bridge_alignment_defaults_require_features_stage(tmp_path: Path) -> Non
     features_result = subprocess.run(
         [
             sys.executable,
-            str(repo_root / "tools" / "05_build_features_stage.py"),
+            str(repo_root / "05_build_features_stage.py"),
             "--run",
             run_id,
             "--out-root",
@@ -167,7 +167,7 @@ def test_bridge_alignment_defaults_require_features_stage(tmp_path: Path) -> Non
 
     assert result.returncode == 0, result.stderr
     assert "dictionary/outputs" not in result.stderr
-    assert "tools/05_build_features_stage.py --run" not in result.stderr
+    assert "05_build_features_stage.py --run" not in result.stderr
 
 
 def test_bridge_alignment_multi_run(tmp_path: Path) -> None:
@@ -184,7 +184,7 @@ def test_bridge_alignment_multi_run(tmp_path: Path) -> None:
         features_result = subprocess.run(
             [
                 sys.executable,
-                str(repo_root / "tools" / "05_build_features_stage.py"),
+                str(repo_root / "05_build_features_stage.py"),
                 "--run",
                 run_id,
                 "--out-root",
@@ -226,4 +226,4 @@ def test_bridge_alignment_multi_run(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert "dictionary/outputs" not in result.stderr
-    assert "tools/05_build_features_stage.py --run" not in result.stderr
+    assert "05_build_features_stage.py --run" not in result.stderr

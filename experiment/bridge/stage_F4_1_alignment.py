@@ -1230,7 +1230,7 @@ def main() -> int:
             return dictionary_h5, "h5"
         raise FileNotFoundError(
             "faltan features canónicas. "
-            f"Ejecuta python tools/05_build_features_stage.py --run {run_label}"
+            f"Ejecuta python 05_build_features_stage.py --run {run_label}"
         )
 
     try:
@@ -1291,7 +1291,7 @@ def main() -> int:
     except (ValueError, RuntimeError) as exc:
         print(
             "ERROR: no se pudieron resolver features canónicas. "
-            f"{exc} Ejecuta python tools/05_build_features_stage.py --run {cfg.run_y}",
+            f"{exc} Ejecuta python 05_build_features_stage.py --run {cfg.run_y}",
             file=sys.stderr,
         )
         return 1

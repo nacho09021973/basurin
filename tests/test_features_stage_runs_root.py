@@ -68,7 +68,7 @@ def test_features_stage_respects_basurin_runs_root(tmp_path: Path) -> None:
     result = subprocess.run(
         [
             sys.executable,
-            str(repo_root / "tools" / "05_build_features_stage.py"),
+            str(repo_root / "05_build_features_stage.py"),
             "--run",
             run_id,
             "--out-root",
