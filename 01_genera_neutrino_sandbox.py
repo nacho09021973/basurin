@@ -252,6 +252,8 @@ def A_symmetron_normalized(
 ) -> tuple[np.ndarray, float]:
     A_raw = A_symmetron_raw(rho, alpha_s0=alpha_s0, rho_crit=rho_crit)
     A0_raw = float(A_symmetron_raw(np.array([rho0], dtype=np.float64), alpha_s0=alpha_s0, rho_crit=rho_crit)[0])
+    if abs(A0_raw) < 1e-6:
+        raise ValueError("symmetron A0_raw demasiado cercano a 0 para normalizar")
     A_norm = A_raw / A0_raw
     return A_norm, A0_raw
 
