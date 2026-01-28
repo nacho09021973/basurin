@@ -50,6 +50,66 @@ def _load_json(path: Path) -> Any:
         return json.load(f)
 
 
+def _diagnose_X_redundancy(X: np.ndarray, eps_rel: float = 1e-12) -> dict[str, Any]:
+    if X.size == 0:
+        return {
+            "X_singular_values": [],
+            "X_explained_var_1": 0.0,
+            "X_rank_eps_rel": eps_rel,
+            "X_rank": 0,
+            "X_pairwise_corr_max_offdiag": 0.0,
+            "X_effective_dim": 0,
+            "X_is_redundant": False,
+        }
+
+    X_centered = X - np.mean(X, axis=0, keepdims=True)
+    try:
+        _, svals, _ = np.linalg.svd(X_centered, full_matrices=False)
+    except np.linalg.LinAlgError:
+        svals = np.array([], dtype=float)
+
+    if svals.size:
+        s1 = float(svals[0])
+        svals_sq = np.square(svals)
+        denom = float(svals_sq.sum())
+        explained_var_1 = float(svals_sq[0] / denom) if denom > 0 else 0.0
+        rank = int(np.count_nonzero(svals > s1 * eps_rel)) if s1 > 0 else 0
+    else:
+        s1 = 0.0
+        explained_var_1 = 0.0
+        rank = 0
+
+    ncols = int(X.shape[1]) if X.ndim > 1 else 1
+    if ncols > 1:
+        with np.errstate(invalid="ignore", divide="ignore"):
+            corr = np.corrcoef(X_centered, rowvar=False)
+        abs_corr = np.abs(corr)
+        offdiag_mask = ~np.eye(ncols, dtype=bool)
+        offdiag_values = abs_corr[offdiag_mask]
+        max_offdiag = float(np.nanmax(offdiag_values)) if offdiag_values.size else 0.0
+        if not np.isfinite(max_offdiag):
+            max_offdiag = 0.0
+    else:
+        max_offdiag = 0.0
+
+    if explained_var_1 > 0.98:
+        effective_dim = 1
+    elif explained_var_1 > 0.90:
+        effective_dim = 2
+    else:
+        effective_dim = min(ncols, 3)
+
+    return {
+        "X_singular_values": [float(val) for val in svals.tolist()],
+        "X_explained_var_1": explained_var_1,
+        "X_rank_eps_rel": eps_rel,
+        "X_rank": rank,
+        "X_pairwise_corr_max_offdiag": max_offdiag,
+        "X_effective_dim": effective_dim,
+        "X_is_redundant": bool(max_offdiag > 0.999 or explained_var_1 > 0.98),
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build canonical atlas master stage aggregating multiple runs"
@@ -279,6 +339,7 @@ def main() -> int:
             },
         }
 
+    diagnostics = _diagnose_X_redundancy(atlas_matrix_all)
     stage_dir, outputs_dir = ensure_stage_dirs(args.run, "atlas_master", base_dir=out_root)
     output_path = outputs_dir / "BRIDGE_ATLAS_MASTER.json"
 
@@ -322,6 +383,7 @@ def main() -> int:
             "features_rows": int(features_matrix_all.shape[0]) if features_matrix_all is not None else 0,
             "features_dim": int(features_matrix_all.shape[1]) if features_matrix_all is not None else 0,
         },
+        "atlas_master_diagnostics": diagnostics,
         "hashes": {
             "outputs/BRIDGE_ATLAS_MASTER.json": output_hash,
         },
