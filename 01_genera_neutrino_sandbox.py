@@ -239,12 +239,21 @@ def A_eft_power(rho: np.ndarray, *, alpha: float, n: float, rho0: float) -> np.n
     return 1.0 + alpha * ((rho / rho0) ** n - 1.0)
 
 
-def A_symmetron(rho: np.ndarray, *, alpha_s0: float, rho_crit: float) -> np.ndarray:
+def A_symmetron_raw(rho: np.ndarray, *, alpha_s0: float, rho_crit: float) -> np.ndarray:
     A = np.ones_like(rho, dtype=np.float64)
     m = rho <= rho_crit
     A[m] = 1.0 + alpha_s0 * (1.0 - rho[m] / rho_crit)
     A[~m] = 1.0
     return A
+
+
+def A_symmetron_normalized(
+    rho: np.ndarray, *, alpha_s0: float, rho_crit: float, rho0: float
+) -> tuple[np.ndarray, float]:
+    A_raw = A_symmetron_raw(rho, alpha_s0=alpha_s0, rho_crit=rho_crit)
+    A0_raw = float(A_symmetron_raw(np.array([rho0], dtype=np.float64), alpha_s0=alpha_s0, rho_crit=rho_crit)[0])
+    A_norm = A_raw / A0_raw
+    return A_norm, A0_raw
 
 
 def line_integral_A2(s: np.ndarray, A: np.ndarray) -> float:
@@ -302,17 +311,43 @@ def main() -> int:
     # Precompute rho profiles
     rho_profiles = {name: profile_rho(s, name) for name in profiles}
 
+    max_abs_delta = 0.0
+    max_abs_where: dict | None = None
+    clamp_applied = False
+    symmetron_A0_raw_values: list[float] = []
+
     for i, dlt in enumerate(delta_uv):
         alpha = delta_to_alpha(float(dlt), cfg)
+        symmetron_A0_raw = None
 
         for j, pname in enumerate(profiles):
             rho = rho_profiles[pname]
             if cfg.family == "eft_power":
                 A = A_eft_power(rho, alpha=alpha, n=cfg.power_n, rho0=cfg.rho0)
             else:
-                A = A_symmetron(rho, alpha_s0=alpha, rho_crit=cfg.rho_crit)
+                A, symmetron_A0_raw = A_symmetron_normalized(
+                    rho, alpha_s0=alpha, rho_crit=cfg.rho_crit, rho0=cfg.rho0
+                )
+
+            abs_delta = np.abs(A - 1.0)
+            local_max = float(np.max(abs_delta))
+            if local_max > max_abs_delta:
+                idx = int(np.argmax(abs_delta))
+                max_abs_delta = local_max
+                max_abs_where = {
+                    "delta_index": int(i),
+                    "delta_uv": float(dlt),
+                    "alpha": float(alpha),
+                    "profile": pname,
+                    "s_index": idx,
+                    "s_value": float(s[idx]),
+                    "rho_value": float(rho[idx]),
+                    "A_value": float(A[idx]),
+                }
 
             # Positividad: evitar A<=0 (clamp suave, para no romper log/rel)
+            if np.any(A < 1e-6):
+                clamp_applied = True
             A = np.maximum(A, 1e-6)
 
             D_eff = line_integral_A2(s, A)
@@ -321,6 +356,9 @@ def main() -> int:
             # Escala base para evitar M0 ~ 0.
             base = 1.0
             M2[i, j] = base + D_eff
+
+        if cfg.family == "symmetron":
+            symmetron_A0_raw_values.append(float(symmetron_A0_raw))
 
     # Ruido relativo multiplicativo (opcional)
     if cfg.noise_rel > 0:
@@ -339,6 +377,11 @@ def main() -> int:
         "M0_max": float(np.max(M2[:, 0])),
         "ratio_min_max": None,
         "notes": "M2 es un observable proxy (integral de A^2). No es SL.",
+        "eft_domain_max_abs_delta": float(max_abs_delta),
+        "eft_domain_threshold": 1.0,
+        "eft_domain_clamp_applied": bool(clamp_applied),
+        "symmetron_normalize_by_A0": bool(cfg.family == "symmetron"),
+        "symmetron_A0_raw": symmetron_A0_raw_values if cfg.family == "symmetron" else None,
     }
     ratios = M2[:, 1:] / np.maximum(M2[:, [0]], 1e-12)
     validation["ratio_min_max"] = [float(np.min(ratios)), float(np.max(ratios))]
@@ -346,6 +389,62 @@ def main() -> int:
     if not (validation["finite_ok"] and validation["positive_ok"]):
         print("ERROR: dataset inválido (NaN/Inf o no-positivo)", file=sys.stderr)
         return 1
+
+    if max_abs_delta >= 1.0:
+        abort_payload = {
+            "reason": "EFT_DOMAIN_VIOLATION",
+            "max_abs_delta": float(max_abs_delta),
+            "threshold": 1.0,
+            "where": max_abs_where,
+            "model": cfg.family,
+            "params": asdict(cfg),
+            "clamp_applied": bool(clamp_applied),
+        }
+        abort_path = outputs_dir / "abort_domain.json"
+        with open(abort_path, "w", encoding="utf-8") as f:
+            json.dump(abort_payload, f, indent=2)
+
+        summary = {
+            "stage": "spectrum",
+            "script": "01_genera_neutrino_sandbox.py",
+            "version": "0.1.0",
+            "created": datetime.now(timezone.utc).isoformat(),
+            "run": cfg.run,
+            "config": asdict(cfg),
+            "inputs": {
+                "generator": "neutrino_sandbox",
+                "generator_script": "01_genera_neutrino_sandbox.py",
+                "generator_seed": cfg.seed,
+                "generator_config": asdict(cfg),
+            },
+            "status": "ABORT",
+            "abort": abort_payload,
+            "outputs": {
+                "abort_domain": "outputs/abort_domain.json",
+            },
+            "hashes": {
+                "outputs/abort_domain.json": sha256_file(abort_path),
+            },
+        }
+        summary_path = stage_dir / "stage_summary.json"
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2)
+
+        manifest = {
+            "stage": "spectrum",
+            "run": cfg.run,
+            "created": datetime.now(timezone.utc).isoformat(),
+            "files": {
+                "abort_domain": "outputs/abort_domain.json",
+                "summary": "stage_summary.json",
+            },
+        }
+        manifest_path = stage_dir / "manifest.json"
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+
+        print("ABORT: EFT_DOMAIN_VIOLATION (|A-1| >= 1)", file=sys.stderr)
+        return 2
 
     # Write spectrum.h5
     try:
@@ -379,6 +478,10 @@ def main() -> int:
         h5.attrs["rho_crit"] = float(cfg.rho_crit)
         h5.attrs["noise_rel"] = float(cfg.noise_rel)
         h5.attrs["seed"] = int(cfg.seed)
+        h5.attrs["symmetron_normalize_by_A0"] = bool(cfg.family == "symmetron")
+        if symmetron_A0_raw_values:
+            h5.attrs["symmetron_A0_raw_min"] = float(np.min(symmetron_A0_raw_values))
+            h5.attrs["symmetron_A0_raw_max"] = float(np.max(symmetron_A0_raw_values))
         h5.attrs["created"] = datetime.now(timezone.utc).isoformat()
 
     # Write validation.json
@@ -404,6 +507,9 @@ def main() -> int:
             "spectrum_h5": "outputs/spectrum.h5",
             "validation": "outputs/validation.json",
         },
+        "status": "PASS",
+        "symmetron_normalize_by_A0": bool(cfg.family == "symmetron"),
+        "symmetron_A0_raw": symmetron_A0_raw_values if cfg.family == "symmetron" else None,
         "hashes": {
             "outputs/spectrum.h5": sha256_file(h5_path),
             "outputs/validation.json": sha256_file(val_path),
