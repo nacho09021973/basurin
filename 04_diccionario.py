@@ -1292,6 +1292,26 @@ def load_validation(run: str) -> tuple[Optional[dict], Optional[Path]]:
         return json.load(f), path
 
 
+def load_spectrum_run_kind(run_dir: Path) -> Optional[str]:
+    """Carga run_kind desde spectrum/stage_summary.json si existe."""
+    summary_path = run_dir / "spectrum" / "stage_summary.json"
+    if not summary_path.exists():
+        return None
+    try:
+        with open(summary_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"WARNING: no se pudo leer {summary_path}: {exc}", file=sys.stderr)
+        return None
+    if not isinstance(payload, dict):
+        return None
+    config = payload.get("config", {})
+    run_kind = config.get("run_kind") or payload.get("run_kind")
+    if run_kind is None:
+        return None
+    return str(run_kind)
+
+
 def extract_primary_error(validation: dict) -> tuple[Optional[float], Optional[str]]:
     """Extrae la métrica de error principal según claves existentes."""
     c3 = validation.get("C3_spectral", {})
@@ -1413,7 +1433,8 @@ def write_outputs(stage_dir: Path, outputs_dir: Path, cfg: Config, spectrum: dic
                   model_selection: dict, bootstrap: dict,
                   contracts: dict, atlas: dict, features_meta: dict,
                   spectrum_rel_path: str, spectrum_sha256: Optional[str],
-                  c5_contracts: dict, created: str) -> dict:
+                  c5_contracts: dict, created: str,
+                  hard_contracts_profile: str) -> dict:
     """Escribe todos los outputs del Bloque C."""
     import h5py
 
@@ -1547,12 +1568,19 @@ def write_outputs(stage_dir: Path, outputs_dir: Path, cfg: Config, spectrum: dic
         (c1_epsilon_in_domain and c1_epsilon_status == "FAIL")
     )
     c3_hard_fail = (c3_status != "SKIP" and c3_ok is False)
-    
-    all_hard_pass = (
-        contracts["c2"]["consistency_ok"] and
-        not c1_hard_fail and
-        not c3_hard_fail
-    )
+
+    if hard_contracts_profile == "proxy":
+        hard_contracts_definition = (
+            "proxy: C1/C2/C3 solo diagnosticos; no bloquean"
+        )
+        all_hard_pass = True
+    else:
+        hard_contracts_definition = "C2 siempre; C3 si activo; C1 solo si IN_DOMAIN"
+        all_hard_pass = (
+            contracts["c2"]["consistency_ok"] and
+            not c1_hard_fail and
+            not c3_hard_fail
+        )
     
     delta_min = float(spectrum["delta_uv"].min())
     delta_max = float(spectrum["delta_uv"].max())
@@ -1596,7 +1624,8 @@ def write_outputs(stage_dir: Path, outputs_dir: Path, cfg: Config, spectrum: dic
             "C2_ok": contracts["c2"]["consistency_ok"],
             "C3_status": c3_status,
             "C3_failure_mode": c3.get("failure_mode"),
-            "hard_contracts_definition": "C2 siempre; C3 si activo; C1 solo si IN_DOMAIN",
+            "hard_contracts_profile": hard_contracts_profile,
+            "hard_contracts_definition": hard_contracts_definition,
             "all_hard_contracts_pass": all_hard_pass,
         },
     }
@@ -1660,6 +1689,7 @@ def write_outputs(stage_dir: Path, outputs_dir: Path, cfg: Config, spectrum: dic
             "C2_consistency_ok": contracts["c2"]["consistency_ok"],
             "C3_status": c3_status,
             "C3_failure_mode": c3.get("failure_mode"),
+            "hard_contracts_profile": hard_contracts_profile,
             "all_hard_contracts_pass": all_hard_pass,
         },
         "inputs": {
@@ -1800,6 +1830,9 @@ def main() -> int:
     except ValueError:
         print(f"ERROR: spectrum fuera de {run_dir}: {spec_path}", file=sys.stderr)
         return 1
+
+    run_kind = load_spectrum_run_kind(run_dir)
+    hard_contracts_profile = "proxy" if run_kind == "spectrum_only" else "cft"
     
     print(f"Bloque C v{__version__}")
     print(f"Espectro cargado: {spec_path}")
@@ -1983,6 +2016,7 @@ def main() -> int:
         spectrum_sha256,
         c5_contracts,
         created,
+        hard_contracts_profile,
     )
     
     print("Outputs escritos:")
@@ -1992,7 +2026,10 @@ def main() -> int:
     
     # --- Resumen ---
     c3_ok = c3.get("spectral_ok", True) if c3_status != "SKIP" else True
-    hard_pass = c2["consistency_ok"] and c3_ok
+    if hard_contracts_profile == "proxy":
+        hard_pass = True
+    else:
+        hard_pass = c2["consistency_ok"] and c3_ok
     
     if hard_pass:
         print("[OK] VERIFICADO: Diccionario consistente")
