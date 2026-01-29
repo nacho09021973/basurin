@@ -41,3 +41,6 @@ runs_tmp/
 
 # Windows download artifacts
 *:Zone.Identifier
+
+# legacy/scratch (do not commit)
+stages/
