@@ -24,24 +24,21 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from basurin_io import (
-    ensure_stage_dirs,
+from basurin_io import (  # noqa: E402
     resolve_out_root,
     sha256_file,
     utc_now_iso,
     validate_run_id,
-    write_manifest,
     write_stage_summary,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="RUN_VALID: sovereign run validity gate")
     p.add_argument("--run", required=True, help="run_id under runs/<run_id>")
     p.add_argument("--out-root", default="runs", help="Root directory for runs (default: runs)")
-    # opcional: lista de paths canónicos mínimos que deben existir para declarar PASS
     p.add_argument(
         "--require",
         action="append",
@@ -73,18 +70,20 @@ def main() -> int:
         print(f"[BASURIN ABORT] invalid run: {exc}", file=sys.stderr)
         return 1
 
-    stage_dir, outputs_dir = ensure_stage_dirs(out_root, args.run, "RUN_VALID")
+    # Canonical BASURIN directories (DO NOT use helpers that may shift stage_dir)
     run_root = out_root / args.run
+    stage_dir = run_root / "RUN_VALID"
+    outputs_dir = stage_dir / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
 
     # Checks mínimos (baseline): el run root debe existir
     base_required = ["."]
-    # + cualquier requisito explícito pasado por CLI
     required = base_required + list(args.require)
 
     ok, checks = _check_required_paths(run_root, required)
-
     overall = "PASS" if ok else "FAIL"
 
+    # --- outputs/run_valid.json ---
     out_path = outputs_dir / "run_valid.json"
     payload = {
         "schema_version": "run_valid_v1",
@@ -97,7 +96,7 @@ def main() -> int:
     }
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    # stage_summary + manifest (hashes)
+    # --- stage_summary.json (API real: write_stage_summary(stage_dir, summary_dict)) ---
     inputs = {
         "out_root": str(out_root),
         "required_paths": required,
@@ -116,9 +115,22 @@ def main() -> int:
     }
     write_stage_summary(stage_dir, summary)
 
-    files = {"run_valid": str(Path("outputs") / "run_valid.json")}
-    hashes = {files["run_valid"]: sha256_file(out_path)}
-    write_manifest(stage_dir=stage_dir, files=files, hashes=hashes)
+    # --- manifest.json (written locally to guarantee contract) ---
+    rel_out = str(Path("outputs") / "run_valid.json")
+    manifest = {
+        "schema_version": "manifest_v1",
+        "stage": "RUN_VALID",
+        "run_id": args.run,
+        "stage_version": __version__,
+        "timestamp": utc_now_iso(),
+        "artifacts": {
+            "run_valid": {
+                "path": rel_out,
+                "sha256": sha256_file(out_path),
+            }
+        },
+    }
+    (stage_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     print(overall)
     return 0 if overall == "PASS" else 1
