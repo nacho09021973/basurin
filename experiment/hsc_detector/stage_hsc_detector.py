@@ -40,7 +40,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 from basurin_io import (
     assert_within_runs,
-    ensure_stage_dirs,
     resolve_out_root,
     sha256_file,
     validate_run_id,
@@ -480,9 +479,9 @@ def main() -> int:
             return 1
 
     # Create stage directories
-    stage_dir, outputs_dir = ensure_stage_dirs(
-        args.run, "hsc_detector", base_dir=out_root
-    )
+    stage_dir = out_root / args.run / "experiment" / "hsc_detector"
+    outputs_dir = stage_dir / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
 
     # Load input data
     input_data, input_hash = load_input(input_path)

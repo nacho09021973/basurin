@@ -141,4 +141,6 @@ def test_features_stage_integrates_with_hsc_detector(tmp_path: Path) -> None:
         f"stdout:\n{result.stdout}\n"
         f"stderr:\n{result.stderr}"
     )
-    assert (run_dir / "hsc_detector" / "outputs" / "report.json").exists()
+    assert (
+        run_dir / "experiment" / "hsc_detector" / "outputs" / "report.json"
+    ).exists()
