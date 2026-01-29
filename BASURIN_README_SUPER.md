@@ -80,6 +80,25 @@ Consumes geometry, produces spectral data (no geometry mutation).
 
 Consumes spectrum; never governs run existence.
 
+### 3.4 Derived Canonical Stage: RUN_INDEX (Run Inventory / Audit Index)
+
+Purpose: deterministic inventory of stages and experiments for a run, gated by `RUN_VALID == PASS`.
+
+IO layout:
+
+```
+runs/<run_id>/RUN_INDEX/
+├── manifest.json
+├── stage_summary.json
+└── outputs/
+    └── index.json
+```
+
+Reference artifacts:
+- Schema: `schemas/run_index.schema.json`
+- Builder: `stages/stage_run_index.py`
+- Tests: `tests/test_run_index.py`
+
 ---
 
 ## 4. Canonical Artifact Semantic Contracts
@@ -248,4 +267,3 @@ This document is designed so that an automated agent can:
 - and fail correctly,
 
 **without asking a human a single question**.
-
