@@ -55,3 +55,21 @@ Verdicts:
 - DEGENERATE: corr/stability pass, degeneracy above degenerate_deg_median.
 - FAIL: leakage detected via negative ratio or permutation thresholds.
 - UNDERDETERMINED: missing or ambiguous inputs, or evidence does not meet any rule.
+
+## C8_WORK_RELEVANCE gate (bookkeeping vs extractable)
+Inputs:
+- Preferente: runs/<run_id>/<bridge_stage>/outputs/metrics.json
+- Opcional: knn_preservation_real.json, knn_preservation_negative.json,
+  knn_preservation_control_positive.json
+- Alternativo: runs/<run_id>/dictionary/outputs/metrics.json
+
+Outputs:
+- runs/<run_id>/C8_WORK_RELEVANCE/outputs/c8_report.json
+- runs/<run_id>/C8_WORK_RELEVANCE/stage_summary.json
+- runs/<run_id>/C8_WORK_RELEVANCE/manifest.json
+
+Verdicts:
+- PASS: book_score >= book_min_pass, extractable_score >= ext_min_pass, gap <= gap_max.
+- DEGENERATE: book_score alto, extractable_score pasa, degeneracy_index_median alto.
+- FAIL: book_score alto con extractable_score bajo/gap alto o leakage-like (negative >= neg_max).
+- UNDERDETERMINED: inputs insuficientes o evidencia débil para concluir.
