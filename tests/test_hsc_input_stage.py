@@ -68,3 +68,25 @@ def test_hsc_input_stage_builds_input_json(tmp_path: Path) -> None:
     assert "spectrum" in payload
     operators = payload["spectrum"].get("operators", [])
     assert operators
+
+
+def test_hsc_input_stage_accepts_run_valid_v1(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "hsc-input-v1"
+    run_dir = runs_root / run_id
+
+    outputs_dir = run_dir / "RUN_VALID" / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    payload = {"run": run_dir.name, "schema_version": "run_valid_v1", "overall_verdict": "PASS"}
+    (outputs_dir / "run_valid.json").write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    write_minimal_canonical_features(run_dir, n=1, dx=2, dy=2, feature_key="t", seed=42)
+    _write_spectrum(run_dir, [1.0, 2.0])
+
+    result = _run_stage(runs_root, run_id)
+    assert result.returncode == 0, result.stderr
+
+    input_path = run_dir / "HSC_INPUT" / "outputs" / "input.json"
+    assert input_path.exists()

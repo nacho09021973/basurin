@@ -137,7 +137,7 @@ def main() -> int:
         return 2
 
     run_valid_payload = _read_json(run_valid_path)
-    verdict = run_valid_payload.get("verdict")
+    verdict = run_valid_payload.get("verdict") or run_valid_payload.get("overall_verdict")
     if verdict != "PASS":
         print(f"ERROR: RUN_VALID verdict {verdict}", file=sys.stderr)
         return 2
