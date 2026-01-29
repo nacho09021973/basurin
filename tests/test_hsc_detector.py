@@ -145,7 +145,14 @@ class TestHSCDetectorPassOnHSC:
         assert "PASS_LOCAL_BULK_CANDIDATE" in result.stdout
 
         # Verify verdict.json
-        verdict_path = out_root_abs / run_id / "hsc_detector" / "outputs" / "verdict.json"
+        verdict_path = (
+            out_root_abs
+            / run_id
+            / "experiment"
+            / "hsc_detector"
+            / "outputs"
+            / "verdict.json"
+        )
         assert verdict_path.exists()
         verdict = json.loads(verdict_path.read_text())
         assert verdict["overall_verdict"] == "PASS_LOCAL_BULK_CANDIDATE"
@@ -190,7 +197,14 @@ class TestHSCDetectorFailOnGeneric:
         assert result.returncode == 0
         assert "FAIL_LOCAL_BULK" in result.stdout
 
-        verdict_path = out_root_abs / run_id / "hsc_detector" / "outputs" / "verdict.json"
+        verdict_path = (
+            out_root_abs
+            / run_id
+            / "experiment"
+            / "hsc_detector"
+            / "outputs"
+            / "verdict.json"
+        )
         verdict = json.loads(verdict_path.read_text())
         assert verdict["overall_verdict"] == "FAIL_LOCAL_BULK"
         assert verdict["phase_summary"]["phase_1"]["verdict"] == "FAIL"
@@ -223,7 +237,14 @@ class TestHSCDetectorFailOnGeneric:
         assert result.returncode == 0
         assert "FAIL_LOCAL_BULK" in result.stdout
 
-        verdict_path = out_root_abs / run_id / "hsc_detector" / "outputs" / "verdict.json"
+        verdict_path = (
+            out_root_abs
+            / run_id
+            / "experiment"
+            / "hsc_detector"
+            / "outputs"
+            / "verdict.json"
+        )
         verdict = json.loads(verdict_path.read_text())
         assert verdict["overall_verdict"] == "FAIL_LOCAL_BULK"
         assert verdict["phase_summary"]["phase_2"]["verdict"] == "FAIL"
@@ -263,10 +284,24 @@ class TestHSCDetectorDeterminism:
 
         # Compare verdicts (excluding run-specific fields)
         verdict_1 = json.loads(
-            (out_root_abs / run_id_1 / "hsc_detector" / "outputs" / "verdict.json").read_text()
+            (
+                out_root_abs
+                / run_id_1
+                / "experiment"
+                / "hsc_detector"
+                / "outputs"
+                / "verdict.json"
+            ).read_text()
         )
         verdict_2 = json.loads(
-            (out_root_abs / run_id_2 / "hsc_detector" / "outputs" / "verdict.json").read_text()
+            (
+                out_root_abs
+                / run_id_2
+                / "experiment"
+                / "hsc_detector"
+                / "outputs"
+                / "verdict.json"
+            ).read_text()
         )
 
         # Verdicts should match
@@ -295,7 +330,8 @@ class TestHSCDetectorIOContract:
         result = _run_stage(run_id, input_path, out_root_abs)
         assert result.returncode == 0
 
-        stage_dir = out_root_abs / run_id / "hsc_detector"
+        stage_dir = out_root_abs / run_id / "experiment" / "hsc_detector"
+        legacy_stage_dir = out_root_abs / run_id / "hsc_detector"
 
         # Required files
         required_files = [
@@ -304,6 +340,8 @@ class TestHSCDetectorIOContract:
             "outputs/report.json",
             "outputs/verdict.json",
         ]
+
+        assert not legacy_stage_dir.exists(), "Legacy hsc_detector dir should not exist"
 
         for rel_path in required_files:
             file_path = stage_dir / rel_path
@@ -326,7 +364,9 @@ class TestHSCDetectorIOContract:
         result = _run_stage(run_id, input_path, out_root_abs)
         assert result.returncode == 0
 
-        manifest_path = out_root_abs / run_id / "hsc_detector" / "manifest.json"
+        manifest_path = (
+            out_root_abs / run_id / "experiment" / "hsc_detector" / "manifest.json"
+        )
         manifest = json.loads(manifest_path.read_text())
 
         assert "files" in manifest
@@ -352,7 +392,9 @@ class TestHSCDetectorIOContract:
         result = _run_stage(run_id, input_path, out_root_abs)
         assert result.returncode == 0
 
-        summary_path = out_root_abs / run_id / "hsc_detector" / "stage_summary.json"
+        summary_path = (
+            out_root_abs / run_id / "experiment" / "hsc_detector" / "stage_summary.json"
+        )
         summary = json.loads(summary_path.read_text())
 
         assert summary["stage"] == "hsc_detector"
@@ -405,7 +447,7 @@ class TestHSCDetectorRunValidGate:
         result = _run_stage(run_id, input_path, out_root_abs)
         assert result.returncode != 0
 
-        stage_dir = out_root_abs / run_id / "hsc_detector"
+        stage_dir = out_root_abs / run_id / "experiment" / "hsc_detector"
         assert not stage_dir.exists()
 
 
@@ -445,7 +487,14 @@ class TestHSCDetectorEdgeCases:
         result = _run_stage(run_id, input_path, out_root_abs)
         assert result.returncode == 0
 
-        verdict_path = out_root_abs / run_id / "hsc_detector" / "outputs" / "verdict.json"
+        verdict_path = (
+            out_root_abs
+            / run_id
+            / "experiment"
+            / "hsc_detector"
+            / "outputs"
+            / "verdict.json"
+        )
         verdict = json.loads(verdict_path.read_text())
 
         # Phase 2 should be UNDERDETERMINED due to missing conventions
@@ -466,7 +515,14 @@ class TestHSCDetectorEdgeCases:
 
         assert result.returncode == 0
 
-        verdict_path = out_root_abs / run_id / "hsc_detector" / "outputs" / "verdict.json"
+        verdict_path = (
+            out_root_abs
+            / run_id
+            / "experiment"
+            / "hsc_detector"
+            / "outputs"
+            / "verdict.json"
+        )
         verdict = json.loads(verdict_path.read_text())
         assert verdict["phase_summary"]["phase_1"]["verdict"] == "UNDERDETERMINED"
 
@@ -508,7 +564,14 @@ class TestHSCDetectorEdgeCases:
         result = _run_stage(run_id, input_path, out_root_abs, thresholds_path)
         assert result.returncode == 0
 
-        verdict_path = out_root_abs / run_id / "hsc_detector" / "outputs" / "verdict.json"
+        verdict_path = (
+            out_root_abs
+            / run_id
+            / "experiment"
+            / "hsc_detector"
+            / "outputs"
+            / "verdict.json"
+        )
         verdict = json.loads(verdict_path.read_text())
 
         # With higher threshold, phase 1 should pass
@@ -574,7 +637,14 @@ class TestOPEKeyParsing:
         result = _run_stage(run_id, input_path, out_root_abs)
         assert result.returncode == 0
 
-        report_path = out_root_abs / run_id / "hsc_detector" / "outputs" / "report.json"
+        report_path = (
+            out_root_abs
+            / run_id
+            / "experiment"
+            / "hsc_detector"
+            / "outputs"
+            / "report.json"
+        )
         report = json.loads(report_path.read_text())
         # All 3 should be classified as lambda_OOO
         assert report["summary"]["phase_2"]["features"]["lambda_OOO_count"] == 3
@@ -600,7 +670,14 @@ class TestOPEKeyParsing:
         result = _run_stage(run_id, input_path, out_root_abs)
         assert result.returncode == 0
 
-        report_path = out_root_abs / run_id / "hsc_detector" / "outputs" / "report.json"
+        report_path = (
+            out_root_abs
+            / run_id
+            / "experiment"
+            / "hsc_detector"
+            / "outputs"
+            / "report.json"
+        )
         report = json.loads(report_path.read_text())
         assert report["summary"]["phase_2"]["features"]["lambda_OOO_count"] == 1
         assert report["summary"]["phase_2"]["features"]["lambda_tower_count"] == 2
