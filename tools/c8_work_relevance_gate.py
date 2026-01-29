@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -98,6 +99,33 @@ def _to_float(value: Any) -> float | None:
     if math.isnan(candidate) or math.isinf(candidate):
         return None
     return candidate
+
+
+def _get_by_path(payload: Any, path: str | None) -> Any:
+    if payload is None or not path:
+        return None
+    current: Any = payload
+    for segment in path.split("."):
+        if current is None:
+            return None
+        match = re.match(r"([^\[]+)(.*)", segment)
+        if not match:
+            return None
+        key = match.group(1)
+        remainder = match.group(2)
+        if key:
+            if not isinstance(current, dict) or key not in current:
+                return None
+            current = current[key]
+        if remainder:
+            for index_text in re.findall(r"\[(\d+)\]", remainder):
+                if not isinstance(current, list):
+                    return None
+                index = int(index_text)
+                if index < 0 or index >= len(current):
+                    return None
+                current = current[index]
+    return current
 
 
 def _parse_mean(payload: Any) -> float | None:
@@ -199,7 +227,7 @@ def _pick_book_score(
 ) -> tuple[float | None, str | None, list[str]]:
     notes: list[str] = []
     if book_key:
-        score = _to_float(payload.get(book_key))
+        score = _to_float(_get_by_path(payload, book_key))
         if score is None:
             notes.append(f"book_key '{book_key}' no encontrado o no numérico")
             return None, None, notes
@@ -219,7 +247,7 @@ def _pick_book_score(
         "score",
     ]
     for key in candidates:
-        score = _to_float(payload.get(key))
+        score = _to_float(_get_by_path(payload, key))
         if score is not None:
             return score, key, notes
 
@@ -278,7 +306,9 @@ def main() -> int:
         )
         notes.extend(book_notes)
 
-        degeneracy_index = _to_float(metrics_payload.get("degeneracy_index_median"))
+        degeneracy_index = _to_float(
+            _get_by_path(metrics_payload, "degeneracy.degeneracy_index_median")
+        )
 
         controls = {}
         if bridge_stage and bridge_stage != "dictionary":
@@ -306,6 +336,18 @@ def main() -> int:
         neg_mean = control_means.get("knn_preservation_negative")
         real_mean = control_means.get("knn_preservation_real")
         control_pos_mean = control_means.get("knn_preservation_control_positive")
+        if neg_mean is None:
+            neg_mean = _to_float(
+                _get_by_path(metrics_payload, "structure_preservation.negative.overlap_mean")
+            )
+        if real_mean is None:
+            real_mean = _to_float(
+                _get_by_path(metrics_payload, "structure_preservation.real.overlap_mean")
+            )
+        if control_pos_mean is None:
+            control_pos_mean = _to_float(
+                _get_by_path(metrics_payload, "control_positive.overlap_mean")
+            )
 
         controls_present = any(value is not None for value in control_means.values())
         if controls_present:
