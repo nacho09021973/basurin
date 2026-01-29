@@ -34,3 +34,5 @@ experiment/ringdown/data/
 
 # BASURIN runtime scratch (never commit)
 runs_tmp/
+
+*:Zone.Identifier
