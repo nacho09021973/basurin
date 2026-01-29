@@ -333,19 +333,11 @@ def load_input(input_path: Path) -> tuple[dict[str, Any], str]:
 
 
 def normalize_input_data(input_data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    """Normalize input data for compatibility with wrapped features.json."""
+    """Normalize input data for compatibility with alternate schemas."""
     warnings: list[str] = []
-    if (
-        "features" in input_data
-        and "metadata" in input_data
-        and ("spectrum" not in input_data or "ope_coefficients" not in input_data)
-    ):
-        if "spectrum" not in input_data:
-            input_data["spectrum"] = {"operators": []}
-            warnings.append("Input missing spectrum; using empty operators for features wrapper.")
-        if "ope_coefficients" not in input_data:
-            input_data["ope_coefficients"] = {}
-            warnings.append("Input missing ope_coefficients; using empty dict for features wrapper.")
+    if "operators" in input_data and "spectrum" not in input_data:
+        input_data["spectrum"] = {"operators": input_data["operators"]}
+        warnings.append("Input provided top-level operators; mapped to spectrum.operators.")
     return input_data, warnings
 
 
@@ -491,12 +483,6 @@ def main() -> int:
     if "metadata" not in input_data:
         print("ERROR: Input missing 'metadata' field", file=sys.stderr)
         return 2
-    if "spectrum" not in input_data:
-        print("ERROR: Input missing 'spectrum' field", file=sys.stderr)
-        return 2
-    if "ope_coefficients" not in input_data:
-        print("ERROR: Input missing 'ope_coefficients' field", file=sys.stderr)
-        return 2
 
     metadata = input_data["metadata"]
     d = metadata.get("d", 3)  # Default to d=3
@@ -505,28 +491,48 @@ def main() -> int:
     # Load thresholds
     thresholds = load_thresholds(thresholds_path)
 
-    # Execute phases
-    p1_verdict, p1_features = phase_1_verdict(
-        input_data["spectrum"],
-        d,
-        **thresholds["phase_1"],
-    )
-    p2_verdict, p2_features = phase_2_verdict(
-        input_data["ope_coefficients"],
-        conventions,
-        **thresholds["phase_2"],
-    )
+    has_spectrum = "spectrum" in input_data or "operators" in input_data
+    has_ope_coefficients = bool(input_data.get("ope_coefficients"))
+    missing_inputs: list[str] = []
+    if not has_spectrum:
+        missing_inputs.append("spectrum")
+    if not has_ope_coefficients:
+        missing_inputs.append("ope_coefficients")
+
+    if missing_inputs:
+        p1_verdict = VERDICT_UNDERDETERMINED
+        p2_verdict = VERDICT_UNDERDETERMINED
+        p1_features = {
+            "reason": "insufficient_inputs",
+            "missing_inputs": missing_inputs,
+        }
+        p2_features = {
+            "reason": "insufficient_inputs",
+            "missing_inputs": missing_inputs,
+        }
+    else:
+        # Execute phases
+        p1_verdict, p1_features = phase_1_verdict(
+            input_data["spectrum"],
+            d,
+            **thresholds["phase_1"],
+        )
+        p2_verdict, p2_features = phase_2_verdict(
+            input_data["ope_coefficients"],
+            conventions,
+            **thresholds["phase_2"],
+        )
 
     # Compute overall verdict
     overall = overall_verdict((p1_verdict, p1_features), (p2_verdict, p2_features))
 
     # Build warnings
     warnings: list[str] = list(input_warnings)
-    if p1_verdict == VERDICT_UNDERDETERMINED:
+    if p1_verdict == VERDICT_UNDERDETERMINED and not missing_inputs:
         reason = p1_features.get("reason", "")
         if reason:
             warnings.append(f"Phase 1: {reason}")
-    if p2_verdict == VERDICT_UNDERDETERMINED:
+    if p2_verdict == VERDICT_UNDERDETERMINED and not missing_inputs:
         reason = p2_features.get("reason", "")
         if reason:
             warnings.append(f"Phase 2: {reason}")
@@ -550,6 +556,8 @@ def main() -> int:
         "input_path": input_rel,
         "input_data_hash": input_hash,
         "overall_verdict": overall,
+        "reason": "insufficient_inputs" if missing_inputs else None,
+        "missing_inputs": missing_inputs if missing_inputs else None,
         "phase_summary": {
             "phase_1": {
                 "verdict": p1_verdict,
@@ -581,6 +589,8 @@ def main() -> int:
         "input_data_hash": input_hash,
         "summary": {
             "overall_verdict": overall,
+            "reason": "insufficient_inputs" if missing_inputs else None,
+            "missing_inputs": missing_inputs if missing_inputs else None,
             "phase_1": {
                 "verdict": p1_verdict,
                 "features": p1_features,
@@ -600,8 +610,10 @@ def main() -> int:
             "version": __version__,
         },
         "inputs": {
-            "spectrum_operator_count": len(input_data["spectrum"].get("operators", [])),
-            "ope_coefficient_count": len(input_data["ope_coefficients"]),
+            "spectrum_operator_count": len(
+                input_data.get("spectrum", {}).get("operators", [])
+            ),
+            "ope_coefficient_count": len(input_data.get("ope_coefficients", {})),
             "d": d,
             "conventions": conventions,
         },
