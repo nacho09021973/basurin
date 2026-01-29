@@ -599,9 +599,9 @@ class TestHSCDetectorEdgeCases:
         input_dir = run_dir / "inputs" / "hsc"
         input_dir.mkdir(parents=True, exist_ok=True)
 
-        # Invalid input: missing spectrum
+        # Invalid input: missing metadata
         input_data = {
-            "metadata": {"d": 3},
+            "spectrum": {"operators": []},
             "ope_coefficients": {},
         }
 
@@ -611,6 +611,49 @@ class TestHSCDetectorEdgeCases:
         _write_run_valid(run_dir, verdict="PASS")
         result = _run_stage(run_id, input_path, out_root_abs)
         assert result.returncode == 2  # Contract violation
+
+    def test_underdetermined_on_insufficient_inputs(self, test_run_dir: Path) -> None:
+        """Missing spectrum and OPE coefficients should return insufficient_inputs."""
+        out_root_abs = test_run_dir
+        run_id = "test_insufficient_inputs"
+        run_dir = out_root_abs / run_id
+
+        input_dir = run_dir / "inputs" / "hsc"
+        input_dir.mkdir(parents=True, exist_ok=True)
+
+        input_data = {
+            "metadata": {
+                "schema_version": "hsc_input_v1",
+                "theory_name": "Features Only",
+                "d": 3,
+            },
+            "features": {
+                "some_feature": 1.0,
+            },
+        }
+
+        input_path = input_dir / "input.json"
+        input_path.write_text(json.dumps(input_data, indent=2))
+
+        _write_run_valid(run_dir, verdict="PASS")
+        result = _run_stage(run_id, input_path, out_root_abs)
+        assert result.returncode == 0
+
+        verdict_path = (
+            out_root_abs
+            / run_id
+            / "experiment"
+            / "hsc_detector"
+            / "outputs"
+            / "verdict.json"
+        )
+        verdict = json.loads(verdict_path.read_text())
+        assert verdict["overall_verdict"] == "UNDERDETERMINED"
+        assert verdict["reason"] == "insufficient_inputs"
+        assert verdict["missing_inputs"] == ["spectrum", "ope_coefficients"]
+        assert verdict["phase_summary"]["phase_1"]["verdict"] == "UNDERDETERMINED"
+        assert verdict["phase_summary"]["phase_2"]["verdict"] == "UNDERDETERMINED"
+        assert "Missing OPE classes per conventions" not in json.dumps(verdict)
 
 
 class TestOPEKeyParsing:
