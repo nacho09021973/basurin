@@ -93,7 +93,10 @@ def test_features_stage_respects_basurin_runs_root(tmp_path: Path) -> None:
     assert manifest_path.exists(), f"manifest.json not created at {manifest_path}"
 
     # Verify features.json has expected structure
-    features = json.loads(features_path.read_text())
+    payload = json.loads(features_path.read_text())
+    assert "metadata" in payload
+    assert "features" in payload
+    features = payload["features"]
     assert "ids" in features, "features.json missing 'ids'"
     assert "Y" in features, "features.json missing 'Y'"
     assert "X_path" in features, "features.json missing 'X_path'"

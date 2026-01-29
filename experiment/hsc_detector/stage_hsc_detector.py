@@ -333,6 +333,23 @@ def load_input(input_path: Path) -> tuple[dict[str, Any], str]:
     return input_data, input_hash
 
 
+def normalize_input_data(input_data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Normalize input data for compatibility with wrapped features.json."""
+    warnings: list[str] = []
+    if (
+        "features" in input_data
+        and "metadata" in input_data
+        and ("spectrum" not in input_data or "ope_coefficients" not in input_data)
+    ):
+        if "spectrum" not in input_data:
+            input_data["spectrum"] = {"operators": []}
+            warnings.append("Input missing spectrum; using empty operators for features wrapper.")
+        if "ope_coefficients" not in input_data:
+            input_data["ope_coefficients"] = {}
+            warnings.append("Input missing ope_coefficients; using empty dict for features wrapper.")
+    return input_data, warnings
+
+
 def load_thresholds(
     thresholds_path: Optional[Path],
 ) -> dict[str, dict[str, Any]]:
@@ -469,6 +486,7 @@ def main() -> int:
 
     # Load input data
     input_data, input_hash = load_input(input_path)
+    input_data, input_warnings = normalize_input_data(input_data)
 
     # Validate input schema
     if "metadata" not in input_data:
@@ -504,7 +522,7 @@ def main() -> int:
     overall = overall_verdict((p1_verdict, p1_features), (p2_verdict, p2_features))
 
     # Build warnings
-    warnings: list[str] = []
+    warnings: list[str] = list(input_warnings)
     if p1_verdict == VERDICT_UNDERDETERMINED:
         reason = p1_features.get("reason", "")
         if reason:
@@ -555,7 +573,8 @@ def main() -> int:
     }
     verdict_path = outputs_dir / "verdict.json"
     with open(verdict_path, "w", encoding="utf-8") as f:
-        json.dump(verdict_data, f, indent=2)
+        json.dump(verdict_data, f, indent=2, sort_keys=True)
+        f.write("\n")
 
     report_data = {
         "run_id": args.run,
@@ -590,7 +609,8 @@ def main() -> int:
     }
     report_path = outputs_dir / "report.json"
     with open(report_path, "w", encoding="utf-8") as f:
-        json.dump(report_data, f, indent=2)
+        json.dump(report_data, f, indent=2, sort_keys=True)
+        f.write("\n")
 
     # --- manifest.json ---
     artifacts = {
