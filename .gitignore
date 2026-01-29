@@ -38,3 +38,6 @@ runs_tmp/
 *:Zone.Identifier
 
 *:Zone.Identifier
+
+# Windows download artifacts
+*:Zone.Identifier
