@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "run_index.schema.json",
+  "title": "BASURIN RUN_INDEX",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "stage",
+    "run",
+    "run_valid",
+    "entries"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "stage": {
+      "const": "RUN_INDEX"
+    },
+    "run": {
+      "type": "string"
+    },
+    "run_valid": {
+      "type": "object",
+      "required": [
+        "path",
+        "sha256",
+        "verdict"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^(?!/).+"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "verdict": {
+          "type": "string"
+        }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "stage_summary",
+          "manifest"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "stage",
+              "experiment"
+            ]
+          },
+          "verdict": {
+            "type": "string"
+          },
+          "stage_summary": {
+            "type": "object",
+            "required": [
+              "path",
+              "sha256"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "pattern": "^(?!/).+"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            }
+          },
+          "manifest": {
+            "type": "object",
+            "required": [
+              "path",
+              "sha256"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "pattern": "^(?!/).+"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
