@@ -32,7 +32,7 @@ def test_load_feature_json_atlas_contract(tmp_path: Path) -> None:
 
 def test_load_feature_json_features_contract(tmp_path: Path) -> None:
     features_path = tmp_path / "features.json"
-    payload = {
+    features_payload = {
         "schema_version": "1",
         "feature_key": "tangentes_locales_v1",
         "ids": ["a", "b", "c"],
@@ -41,6 +41,18 @@ def test_load_feature_json_features_contract(tmp_path: Path) -> None:
             "feature_key": "tangentes_locales_v1",
             "columns": ["d_eff", "m"],
         },
+    }
+    payload = {
+        "metadata": {
+            "schema_version": "1.0",
+            "stage": "features",
+            "run": "unit",
+            "created_utc": "2024-01-01T00:00:00Z",
+            "source": {},
+            "config": {},
+            "conventions": {},
+        },
+        "features": features_payload,
     }
     _write_json(features_path, payload)
 

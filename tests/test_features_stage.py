@@ -54,11 +54,14 @@ def test_features_stage_builds_features_json(tmp_path: Path) -> None:
     features_path = tmp_path / "runs" / run_id / "features" / "outputs" / "features.json"
     payload = json.loads(features_path.read_text(encoding="utf-8"))
 
-    assert payload["schema_version"] == "1"
-    assert payload["feature_key"] == "tangentes_locales_v1"
-    assert "ids" in payload
-    assert "Y" in payload
-    assert "X_path" in payload
-    assert "Y_path" in payload
-    assert "shapes" in payload
-    assert len(payload["ids"]) == len(payload["Y"])
+    assert "metadata" in payload
+    assert "features" in payload
+    features = payload["features"]
+    assert features["schema_version"] == "1"
+    assert features["feature_key"] == "tangentes_locales_v1"
+    assert "ids" in features
+    assert "Y" in features
+    assert "X_path" in features
+    assert "Y_path" in features
+    assert "shapes" in features
+    assert len(features["ids"]) == len(features["Y"])

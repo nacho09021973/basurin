@@ -37,7 +37,19 @@ def write_minimal_canonical_features(
             "generated_by": "tests._helpers_features",
         },
     }
+    wrapped_payload = {
+        "metadata": {
+            "schema_version": "1.0",
+            "stage": "features",
+            "run": run_dir.name,
+            "created_utc": "2024-01-01T00:00:00Z",
+            "source": {},
+            "config": {},
+            "conventions": {},
+        },
+        "features": payload,
+    }
     (outputs_dir / "features.json").write_text(
-        json.dumps(payload, indent=2),
+        json.dumps(wrapped_payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )

@@ -4,6 +4,37 @@ Este documento define el contrato canónico para `feature JSON` usado por
 `basurin_io.load_feature_json()` y los stages downstream (por ejemplo
 `experiment/bridge/stage_F4_1_alignment.py`). **Es el único punto de entrada**.
 
+## Wrapper canónico (recomendado)
+
+Desde la versión 2026-XX, los outputs de features usan un wrapper top-level
+con `metadata` + `features` para facilitar consumo downstream (e.g. `hsc_detector`).
+
+```json
+{
+  "metadata": {
+    "schema_version": "1.0",
+    "stage": "features",
+    "run": "<run_id>",
+    "created_utc": "ISO-8601",
+    "source": {
+      "spectrum_path": "spectrum/outputs/spectrum.h5",
+      "dictionary_validation_path": "dictionary/outputs/validation.json"
+    },
+    "config": {
+      "k_neighbors": 7
+    },
+    "conventions": {}
+  },
+  "features": {
+    "...": "ver formatos canónicos abajo"
+  }
+}
+```
+
+El bloque `features` mantiene exactamente el formato canónico previo.
+Los consumers deben leer `obj["features"]` (o usar `basurin_io.load_feature_json`,
+que ya acepta el wrapper).
+
 ## Formato canónico (recomendado)
 
 ### Atlas (X)

@@ -60,6 +60,7 @@ def test_features_stage_produces_canonical_json(tmp_path: Path) -> None:
     assert np.asarray(Y).shape == (5, 6)
     assert meta["schema_version"] == "1"
     assert meta["feature_key"] == "tangentes_locales_v1"
-    assert payload["X_path"] == "X.npy"
-    assert payload["Y_path"] == "Y.npy"
-    assert payload["shapes"]["n"] == 5
+    features = payload["features"]
+    assert features["X_path"] == "X.npy"
+    assert features["Y_path"] == "Y.npy"
+    assert features["shapes"]["n"] == 5

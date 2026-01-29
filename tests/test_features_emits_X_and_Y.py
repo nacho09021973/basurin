@@ -56,18 +56,19 @@ def test_features_emits_X_and_Y(tmp_path: Path) -> None:
     manifest_path = stage_dir / "manifest.json"
 
     payload = json.loads(features_path.read_text(encoding="utf-8"))
-    assert "X_path" in payload
-    assert "Y_path" in payload
-    assert payload["X_path"] == "X.npy"
-    assert payload["Y_path"] == "Y.npy"
-    assert payload["shapes"]["n"] == len(payload["ids"])
+    features = payload["features"]
+    assert "X_path" in features
+    assert "Y_path" in features
+    assert features["X_path"] == "X.npy"
+    assert features["Y_path"] == "Y.npy"
+    assert features["shapes"]["n"] == len(features["ids"])
 
-    x_path = features_path.parent / payload["X_path"]
-    y_path = features_path.parent / payload["Y_path"]
+    x_path = features_path.parent / features["X_path"]
+    y_path = features_path.parent / features["Y_path"]
     assert x_path.exists()
     assert y_path.exists()
-    assert np.load(x_path).shape[0] == len(payload["ids"])
-    assert np.load(y_path).shape[0] == len(payload["ids"])
+    assert np.load(x_path).shape[0] == len(features["ids"])
+    assert np.load(y_path).shape[0] == len(features["ids"])
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert "X" in manifest["files"]

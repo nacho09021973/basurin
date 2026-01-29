@@ -158,8 +158,10 @@ def load_feature_json(
     feature_key_hint: Optional[str] = None,
 ) -> Tuple[Optional[List[Any]], np.ndarray, Dict[str, Any]]:
     """Carga JSON y devuelve ids (si existen), matriz y metadatos mínimos."""
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         obj = json.load(f)
+    if isinstance(obj, dict) and isinstance(obj.get("features"), dict):
+        obj = obj["features"]
 
     key_vec = "x" if kind == "atlas" else "y"
     feature_key = _resolve_feature_key(obj, kind, feature_key_hint)
@@ -253,6 +255,8 @@ def _load_matrix_from_path(path: Path, label: str) -> np.ndarray:
 def _features_has_X(features_path: Path, run_dir: Path) -> Tuple[bool, Optional[str]]:
     with open(features_path, "r", encoding="utf-8") as f:
         obj = json.load(f)
+    if isinstance(obj, dict) and isinstance(obj.get("features"), dict):
+        obj = obj["features"]
 
     if isinstance(obj, dict) and "X" in obj:
         mat = _coerce_matrix(obj["X"], features_path, "X")

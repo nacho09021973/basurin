@@ -247,8 +247,9 @@ def write_manifest(
         manifest.update(extra)
 
     manifest_path = stage_dir / "manifest.json"
-    with open(manifest_path, "w") as f:
-        json.dump(manifest, f, indent=2)
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, sort_keys=True)
+        f.write("\n")
     return manifest_path
 
 
@@ -261,8 +262,9 @@ def write_stage_summary(stage_dir: Path, summary_dict: dict[str, Any]) -> Path:
         summary_dict["run"] = stage_dir.parent.name
 
     summary_path = stage_dir / "stage_summary.json"
-    with open(summary_path, "w") as f:
-        json.dump(summary_dict, f, indent=2)
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(summary_dict, f, indent=2, sort_keys=True)
+        f.write("\n")
     return summary_path
 
 
@@ -341,6 +343,8 @@ def load_feature_json(
     """
     with open(path, "r", encoding="utf-8") as f:
         obj = json.load(f)
+    if isinstance(obj, dict) and isinstance(obj.get("features"), dict):
+        obj = obj["features"]
 
     key_primary = "X" if kind == "atlas" else "Y"
     key_secondary = "x" if kind == "atlas" else "y"

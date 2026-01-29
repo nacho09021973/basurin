@@ -209,6 +209,7 @@ def main() -> int:
     np.save(x_path, X)
     np.save(y_path, Y)
     shapes = {"n": int(X.shape[0]), "dx": int(X.shape[1]), "dy": int(Y.shape[1])}
+    created_utc = utc_now_iso()
     payload = {
         "schema_version": "1",
         "feature_key": feature_key,
@@ -223,7 +224,7 @@ def main() -> int:
             "k_neighbors": effective_k,
             "k_neighbors_requested": args.k_neighbors,
             "k_neighbors_effective": effective_k,
-            "created": utc_now_iso(),
+            "created": created_utc,
             "ids_source": ids_source,
             "source_atlas": f"runs/{args.run}/{ids_source}",
             "atlas_feature_key": meta.get("feature_key"),
@@ -233,8 +234,34 @@ def main() -> int:
     if _should_inline(X):
         payload["X"] = X.tolist()
 
+    source: dict[str, str] = {}
+    spectrum_path = run_dir / "spectrum" / "outputs" / "spectrum.h5"
+    if spectrum_path.exists():
+        source["spectrum_path"] = "spectrum/outputs/spectrum.h5"
+    validation_path = run_dir / "dictionary" / "outputs" / "validation.json"
+    if validation_path.exists():
+        source["dictionary_validation_path"] = "dictionary/outputs/validation.json"
+
+    wrapped_payload = {
+        "metadata": {
+            "schema_version": "1.0",
+            "stage": "features",
+            "run": args.run,
+            "created_utc": created_utc,
+            "source": source,
+            "config": {
+                "k_neighbors": effective_k,
+                "k_neighbors_requested": args.k_neighbors,
+                "k_neighbors_effective": effective_k,
+            },
+            "conventions": {},
+        },
+        "features": payload,
+    }
+
     with open(features_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
+        json.dump(wrapped_payload, f, indent=2, sort_keys=True)
+        f.write("\n")
 
     input_hash = sha256_file(atlas_source)
     output_hash = sha256_file(features_path)
