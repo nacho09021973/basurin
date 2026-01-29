@@ -53,7 +53,7 @@ def test_c8_pass(tmp_path: Path) -> None:
         metrics_path,
         {
             "canonical_corr_median": 0.92,
-            "degeneracy_index_median": 0.2,
+            "degeneracy": {"degeneracy_index_median": 0.2},
         },
     )
     _write_json(
@@ -130,3 +130,37 @@ def test_c8_fail_negative_control(tmp_path: Path) -> None:
     report = json.loads(_report_path(tmp_path, run_id).read_text())
     assert report["verdict"] == "FAIL"
     assert report["failure_mode"] == "LEAKAGE_NEGATIVE"
+
+
+def test_c8_dotpath_book_score_and_degeneracy(tmp_path: Path) -> None:
+    run_id = "2026-02-01__dotpath"
+    bridge = "bridge_stage"
+    metrics_path = tmp_path / "runs" / run_id / bridge / "outputs" / "metrics.json"
+    _write_json(
+        metrics_path,
+        {
+            "results": {"canonical_corr_mean": 0.99},
+            "degeneracy": {"degeneracy_index_median": 1.0},
+            "structure_preservation": {
+                "negative": {"overlap_mean": 0.5},
+                "real": {"overlap_mean": 0.9},
+            },
+            "control_positive": {"overlap_mean": 1.0},
+        },
+    )
+
+    result = _run_gate(
+        tmp_path,
+        run_id,
+        [
+            "--bridge-stage",
+            bridge,
+            "--book-key",
+            "results.canonical_corr_mean",
+        ],
+    )
+    assert result.returncode == 0
+
+    report = json.loads(_report_path(tmp_path, run_id).read_text())
+    assert report["book_score"] == 0.99
+    assert report["penalties"]["degeneracy"]["value"] == 1.0
