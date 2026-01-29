@@ -164,7 +164,7 @@ def main() -> int:
         run_dir = (out_root / run_id).resolve()
         atlas_path = (run_dir / "dictionary" / "outputs" / "atlas.json").resolve()
         features_path = (run_dir / "features" / "outputs" / "features.json").resolve()
-        verdict_path = (run_dir / "RUN_VALID" / "verdict.json").resolve()
+        verdict_path = (run_dir / "RUN_VALID" / "outputs" / "run_valid.json").resolve()
 
         try:
             assert_within_runs(run_dir, atlas_path)
@@ -278,6 +278,23 @@ def main() -> int:
             except json.JSONDecodeError as exc:
                 print(f"ERROR: verdict.json inválido en {verdict_path}: {exc}", file=sys.stderr)
                 return 1
+            verdict = verdict_entry.get("overall_verdict")
+            if verdict != "PASS":
+                if args.allow_missing:
+                    skipped_runs.append(
+                        {"run": run_id, "reason": f"RUN_VALID={verdict} (skip)"}
+                    )
+                    continue
+                print(f"ERROR: RUN_VALID={verdict} en {verdict_path}", file=sys.stderr)
+                return 1
+        else:
+            if args.allow_missing:
+                skipped_runs.append(
+                    {"run": run_id, "reason": "missing RUN_VALID/outputs/run_valid.json"}
+                )
+                continue
+            print(f"ERROR: falta RUN_VALID en {verdict_path}", file=sys.stderr)
+            return 1
 
         inputs.append(
             {
