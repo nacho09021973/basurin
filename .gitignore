@@ -44,3 +44,6 @@ runs_tmp/
 
 # legacy/scratch (do not commit)
 stages/
+
+# Windows Mark-of-the-Web
+*:Zone.Identifier
