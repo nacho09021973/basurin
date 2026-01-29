@@ -349,7 +349,12 @@ def main() -> int:
                 _get_by_path(metrics_payload, "control_positive.overlap_mean")
             )
 
-        controls_present = any(value is not None for value in control_means.values())
+        controls_present = (
+            neg_mean is not None
+            or control_pos_mean is not None
+            or degeneracy_index is not None
+            or real_mean is not None
+        )
         if controls_present:
             evidence_strength = "strong"
 
@@ -432,7 +437,7 @@ def main() -> int:
                 failure_mode = failure_mode
                 reasons.append("No cumple reglas de decisión con la evidencia actual")
 
-            if evidence_strength == "weak" and verdict == "FAIL":
+            if not controls_present and verdict == "FAIL":
                 verdict = "UNDERDETERMINED"
                 failure_mode = "WEAK_EVIDENCE"
                 reasons.append("Controles ausentes; no se concluye FAIL")
