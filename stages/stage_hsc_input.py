@@ -93,6 +93,25 @@ def _load_features(features_path: Path) -> tuple[dict[str, Any], dict[str, Any]]
     return metadata, features
 
 
+def _load_ope_coefficients(ope_path: Path) -> tuple[dict[str, float], list[str], list[str]] | None:
+    if not ope_path.exists():
+        return None
+    payload = _read_json(ope_path)
+    if not isinstance(payload, dict):
+        raise ValueError("ope_coefficients.json debe ser un objeto JSON.")
+    coefficients = payload.get("ope_coefficients")
+    if not isinstance(coefficients, dict):
+        raise ValueError("ope_coefficients debe ser dict.")
+    conventions = payload.get("conventions", {})
+    if not isinstance(conventions, dict):
+        raise ValueError("conventions en ope_coefficients.json debe ser dict.")
+    light_ops = conventions.get("light_ops", [])
+    tower_prefixes = conventions.get("tower_prefixes", [])
+    if not isinstance(light_ops, list) or not isinstance(tower_prefixes, list):
+        raise ValueError("conventions.light_ops y tower_prefixes deben ser listas.")
+    return coefficients, [str(x) for x in light_ops], [str(x) for x in tower_prefixes]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Derived canonical stage HSC_INPUT")
     parser.add_argument("--run", required=True, help="Run ID")
@@ -125,6 +144,13 @@ def main() -> int:
 
     features_path = run_dir / "features" / "outputs" / "features.json"
     spectrum_path = run_dir / "spectrum" / "outputs" / "spectrum.h5"
+    ope_path = (
+        run_dir
+        / "experiment"
+        / "ope_coefficients_bulk_overlap"
+        / "outputs"
+        / "ope_coefficients.json"
+    )
     if not features_path.exists():
         print(f"ERROR: features.json missing at {features_path}", file=sys.stderr)
         return 2
@@ -135,6 +161,8 @@ def main() -> int:
     try:
         assert_within_runs(run_dir, features_path)
         assert_within_runs(run_dir, spectrum_path)
+        if ope_path.exists():
+            assert_within_runs(run_dir, ope_path)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
@@ -142,6 +170,11 @@ def main() -> int:
     features_metadata, features = _load_features(features_path)
     try:
         operators, dataset_path = _load_spectrum_operators(spectrum_path)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    try:
+        ope_data = _load_ope_coefficients(ope_path)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
@@ -158,6 +191,9 @@ def main() -> int:
     provenance = metadata.get("provenance")
     if not isinstance(provenance, dict):
         provenance = {}
+    conventions = metadata.get("conventions")
+    if not isinstance(conventions, dict):
+        conventions = {}
     provenance.update(
         {
             "assembled_by": "stages/stage_hsc_input.py",
@@ -171,12 +207,19 @@ def main() -> int:
         }
     )
     metadata["provenance"] = provenance
+    metadata["conventions"] = conventions
 
     input_payload = {
         "metadata": metadata,
         "features": features,
         "spectrum": {"operators": operators},
     }
+    if ope_data is not None:
+        ope_coeffs, light_ops, tower_prefixes = ope_data
+        conventions.setdefault("light_ops", light_ops)
+        conventions.setdefault("tower_prefixes", tower_prefixes)
+        conventions.setdefault("tower_ops_prefix", tower_prefixes)
+        input_payload["ope_coefficients"] = ope_coeffs
 
     input_path = outputs_dir / "input.json"
     _write_json(input_path, input_payload)
@@ -185,6 +228,7 @@ def main() -> int:
     run_valid_sha = sha256_file(run_valid_path)
     features_sha = sha256_file(features_path)
     spectrum_sha = sha256_file(spectrum_path)
+    ope_sha = sha256_file(ope_path) if ope_data is not None else None
 
     stage_summary_path = stage_dir / "stage_summary.json"
     stage_summary = {
@@ -206,6 +250,16 @@ def main() -> int:
                 "sha256": spectrum_sha,
                 "dataset": dataset_path,
             },
+            **(
+                {
+                    "ope_coefficients": {
+                        "path": str(ope_path.relative_to(run_dir)),
+                        "sha256": ope_sha,
+                    }
+                }
+                if ope_data is not None
+                else {}
+            ),
         },
         "outputs": {
             "input": "outputs/input.json",
