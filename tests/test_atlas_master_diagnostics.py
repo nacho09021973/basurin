@@ -2,7 +2,23 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+
+
+def _write_run_valid(out_root: Path, run_id: str, verdict: str = "PASS") -> None:
+    outputs_dir = out_root / run_id / "RUN_VALID" / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": "run_valid_v1",
+        "run_id": run_id,
+        "overall_verdict": verdict,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "required_paths": ["."],
+        "checks": [{"path": ".", "exists": True}],
+        "stage_version": "test",
+    }
+    (outputs_dir / "run_valid.json").write_text(json.dumps(payload, indent=2))
 
 
 def test_atlas_master_diagnostics(tmp_path: Path) -> None:
@@ -30,6 +46,7 @@ def test_atlas_master_diagnostics(tmp_path: Path) -> None:
         cwd=repo_root,
         env=env,
     )
+    _write_run_valid(runs_root, run_id, "PASS")
     subprocess.run(
         [
             sys.executable,
