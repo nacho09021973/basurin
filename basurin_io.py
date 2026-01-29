@@ -77,6 +77,26 @@ def get_run_dir(run_id: str, base_dir: Path | str | None = None) -> Path:
     return Path(base_dir) / run_id
 
 
+def require_run_valid(out_root: Path, run_id: str) -> dict[str, Any]:
+    run_valid_path = out_root / run_id / "RUN_VALID" / "outputs" / "run_valid.json"
+    if not run_valid_path.exists():
+        raise RuntimeError(f"[BASURIN ABORT] RUN_VALID missing at {run_valid_path}")
+    try:
+        payload = json.loads(run_valid_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"[BASURIN ABORT] RUN_VALID invalid JSON at {run_valid_path}: {exc}"
+        ) from exc
+    verdict = payload.get("overall_verdict")
+    if verdict is None:
+        verdict = payload.get("verdict")
+    if verdict is None:
+        verdict = payload.get("status")
+    if verdict != "PASS":
+        raise RuntimeError(f"[BASURIN ABORT] RUN_VALID={verdict} at {run_valid_path}")
+    return payload
+
+
 def stage_dir(run_id: str, stage_name: str, base_dir: Path | str | None = None) -> Path:
     return get_run_dir(run_id, base_dir=base_dir) / stage_name
 

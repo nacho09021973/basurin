@@ -40,6 +40,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from basurin_io import (
     assert_within_runs,
+    require_run_valid,
     resolve_out_root,
     sha256_file,
     validate_run_id,
@@ -374,20 +375,6 @@ def get_git_commit() -> Optional[str]:
         return None
 
 
-def _load_run_valid(run_dir: Path) -> tuple[bool, str]:
-    run_valid_path = run_dir / "RUN_VALID" / "outputs" / "run_valid.json"
-    if not run_valid_path.exists():
-        return False, f"RUN_VALID missing at {run_valid_path}"
-    try:
-        payload = json.loads(run_valid_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        return False, f"RUN_VALID invalid JSON: {exc}"
-    verdict = payload.get("verdict")
-    if verdict != "PASS":
-        return False, f"RUN_VALID verdict is {verdict}"
-    return True, "ok"
-
-
 def _relative_to_run(run_dir: Path, path: Path) -> str:
     try:
         return str(path.resolve().relative_to(run_dir.resolve()))
@@ -440,9 +427,10 @@ def main() -> int:
     run_dir = (out_root / args.run).resolve()
 
     # Check BASURIN abort condition (RUN_VALID stage)
-    run_valid_ok, run_valid_reason = _load_run_valid(run_dir)
-    if not run_valid_ok:
-        print(f"[BASURIN ABORT] {run_valid_reason}", file=sys.stderr)
+    try:
+        require_run_valid(out_root, args.run)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
         return 1
 
     input_path = Path(args.input)

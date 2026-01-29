@@ -1,7 +1,11 @@
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+HSC_STAGE = REPO_ROOT / "experiment" / "hsc_detector" / "stage_hsc_detector.py"
 
 
 def _run_cmd(args: list[str]) -> subprocess.CompletedProcess:
@@ -97,3 +101,80 @@ def test_contract_run_valid_fails_missing_spectrum() -> None:
     assert report_path.exists()
     payload = json.loads(report_path.read_text())
     assert payload["verdict"] == "FAIL"
+
+
+def _write_run_valid(run_dir: Path, verdict: str = "PASS") -> None:
+    outputs_dir = run_dir / "RUN_VALID" / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    payload = {"overall_verdict": verdict}
+    (outputs_dir / "run_valid.json").write_text(
+        json.dumps(payload, indent=2), encoding="utf-8"
+    )
+
+
+def _write_hsc_input(run_dir: Path) -> Path:
+    input_dir = run_dir / "inputs" / "hsc"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    input_payload = {
+        "metadata": {
+            "schema_version": "hsc_input_v1",
+            "theory_name": "Test Theory",
+            "d": 3.0,
+            "conventions": {
+                "light_ops": ["sigma", "epsilon"],
+                "tower_ops_prefix": ["[sigma sigma]_"],
+            },
+        },
+        "spectrum": {
+            "operators": [
+                {"id": "sigma", "dim": 2.0, "spin": 0, "degeneracy": 1},
+            ]
+        },
+        "ope_coefficients": {"sigma_sigma_sigma": 0.5},
+    }
+    input_path = input_dir / "input.json"
+    input_path.write_text(json.dumps(input_payload, indent=2), encoding="utf-8")
+    return input_path
+
+
+def _run_hsc_stage(run_id: str, out_root: Path, input_path: Path) -> subprocess.CompletedProcess:
+    cmd = [
+        sys.executable,
+        str(HSC_STAGE),
+        "--run",
+        run_id,
+        "--input",
+        str(input_path),
+        "--out-root",
+        str(out_root),
+    ]
+    return subprocess.run(
+        cmd,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_hsc_detector_aborts_when_run_valid_missing(tmp_path: Path) -> None:
+    out_root = tmp_path / "runs"
+    run_id = "run_valid_missing"
+    run_dir = out_root / run_id
+    input_path = _write_hsc_input(run_dir)
+
+    result = _run_hsc_stage(run_id, out_root, input_path)
+    combined = (result.stdout or "") + (result.stderr or "")
+    assert result.returncode != 0
+    assert "RUN_VALID missing" in combined
+
+
+def test_hsc_detector_runs_when_run_valid_pass(tmp_path: Path) -> None:
+    out_root = tmp_path / "runs"
+    run_id = "run_valid_pass"
+    run_dir = out_root / run_id
+    input_path = _write_hsc_input(run_dir)
+    _write_run_valid(run_dir, verdict="PASS")
+
+    result = _run_hsc_stage(run_id, out_root, input_path)
+    assert result.returncode == 0
