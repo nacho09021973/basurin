@@ -1,189 +1,115 @@
-# EXPERIMENTO Nº 1 — Neutrino sandbox: identificabilidad y colapso 1D en α  
-**Fecha:** 28 de enero de 2026
-
-## Resumen ejecutivo
-
-En el neutrino sandbox (familia `symmetron`) se ha demostrado de forma reproducible que:
-
-1) El eje efectivo del observable `X` (ratios derivados del espectro) es **1D** (colapso casi total en PC1).  
-2) Tras romper la colinealidad del muestreo (`paired` → `cartesian`), el eje 1D se atribuye de forma **identificable** a **α**.  
-3) El parámetro **δ es no-identificable** en este sandbox: el espectro `M2` resulta prácticamente **independiente de δ** en los rangos probados.
-
-Este resultado no es un “fallo” del pipeline: es **señal**, porque establece límites de identificabilidad del proxy.
+# EXPERIMENTO 01 — Neutrino sandbox (symmetron) → colapso a 1D en α
+**Fecha:** 28-01-2026  
+**Proyecto:** BASURIN  
+**Estado:** CERRADO (resultado científico negativo/degenerado, pero válido)
 
 ---
 
-## Gobernanza BASURIN
+## 1. Pregunta científica (contract-first)
 
-- Todo IO determinista bajo `runs/<run_id>/`.  
-- Stages canónicos escriben: `manifest.json`, `stage_summary.json`, `outputs/…`.  
-- `atlas_master` agrega runs sin inventar datasets y añade diagnóstico `atlas_master_diagnostics` en `stage_summary.json`.  
-- En `04_diccionario.py`, cuando `run_kind == "spectrum_only"`, se aplica perfil **proxy**: C1/C2 quedan como **diagnóstico**, no como hard gate.
+**Pregunta:** ¿Puede inferirse estructura “bulk” (o geometría efectiva) a partir de un conjunto limitado de observables espectrales, **sin inyectar teoría conocida como señal de entrenamiento**?
 
----
-
-## Cambios implementados
-
-### 1) `06_build_atlas_master_stage.py`: diagnóstico de redundancia/rango de X
-
-Se añadió un “contrato diagnóstico” en `stage_summary.json`:
-
-`atlas_master_diagnostics = { X_singular_values, X_explained_var_1, X_rank, X_pairwise_corr_max_offdiag, X_effective_dim, X_is_redundant, ... }`
-
-Objetivo: capturar de forma auditable cuándo `X` es efectivamente 1D (evitar interpretaciones 2D infladas).
-
-### 2) `01_genera_neutrino_sandbox.py`: `--grid-mode {paired,cartesian}` + trazabilidad
-
-Se añadió muestreo cartesian para romper colinealidad α–δ.  
-Se reforzó trazabilidad en `spectrum/stage_summary.json`:
-
-- `alpha_values`, `delta_values`  
-- `grid_order` (p.ej. `delta_outer_alpha_inner`)  
-- `n_alpha`, `n_delta`, `n_total`  
-
-### 3) `04_diccionario.py`: perfil proxy por `run_kind == "spectrum_only"`
-
-Para runs neutrino/proxy:
-
-- no hard-fail por C1/C2;  
-- mantiene forense de C1/C2 como diagnóstico;  
-- `hard_contracts_profile = proxy`, `all_hard_contracts_pass = True`.
+**Hipótesis operacional:** si el inverso *datos → geometría* es identificable en este sandbox, entonces variaciones independientes en parámetros de la familia (α, δ, …) deben reflejarse como variaciones independientes (≥2D) en el observable disponible (espectro de masas al cuadrado **M²**).
 
 ---
 
-## Reproducción: comandos exactos y runs
+## 2. Setup experimental
 
-### A) Generación cartesian (smoke) con trazabilidad completa
+### 2.1 Familia / generador
+- Sandbox “neutrino” (familia symmetron).
+- Parámetros relevantes: **α** y **δ** (δ pretendía aportar una segunda dirección física).
 
-Run: `2026-01-28__neutrino_cart_smoke2`
+> Nota epistemológica: el sandbox es sintético, pero la evaluación es estrictamente post-hoc. No se usa teoría conocida para “enseñar” el inverso.
 
-```bash
-python 01_genera_neutrino_sandbox.py   --run 2026-01-28__neutrino_cart_smoke2   --family symmetron   --profiles vacuum,crust,mantle   --grid-mode cartesian   --n-delta 5   --n-alpha 4   --alpha-min -0.05 --alpha-max 0.05   --delta-min 0.7 --delta-max 3.0   --rho0 2.6 --rho-crit 4.0   --noise-rel 0.0   --seed 123
-```
+### 2.2 Observable disponible
+- `spectrum.h5` con datasets mínimos:
+  - `M2` (matriz)  
+  - `delta_uv`  
+  - (opcional) `m2L2`, `z_grid`
 
-Verificación de independencia (reconstruida desde `stage_summary.json`):
-- `corr(alpha, delta) = 0.0` (cartesian correcto)
-
-### B) Diccionario + features (proxy)
-
-```bash
-python 04_diccionario.py --run 2026-01-28__neutrino_cart_smoke2 --k-features 2 --n-bootstrap 0
-python 05_build_features_stage.py --run 2026-01-28__neutrino_cart_smoke2
-```
-
-Verificación (esperado):
-- `hard_contracts_profile: proxy`
-- `all_hard_contracts_pass: True`
-- C1/C2 pueden seguir indicando OUT_OF_DOMAIN/False sin bloquear
-
-### C) Atlas master (agregación 1-run) + diagnóstico 1D
-
-```bash
-python 06_build_atlas_master_stage.py   --run 2026-01-28__atlas_master_C   --runs 2026-01-28__neutrino_cart_smoke2
-```
-
-Resultado observado:
-- `X_effective_dim = 1`
-- `X_explained_var_1 ≈ 0.999994` (colapso 1D fuerte)
+Este es el “dato” que el inverso intenta explicar.
 
 ---
 
-## Resultado principal: atribución del eje 1D a α
+## 3. Evidencias (resultado cuantitativo)
 
-Se calcula `pc1(X)` (PC1 por SVD de `X` centrado) y se ajusta:
+### 3.1 Estructura del H5 inspeccionada
+- keys: `['M2', 'delta_uv', 'm2L2', 'z_grid']`
+- `M2.shape = (20, 5)`  *(20 muestras, 5 modos)*
 
-- `pc1 ~ 1 + alpha`: **R² ≈ 0.999434**, `corr(pc1, alpha) ≈ 0.999717`  
-- `pc1 ~ 1 + delta`: **R² ≈ 0**, `corr(pc1, delta) ≈ 0`  
-- `pc1 ~ 1 + alpha + delta`: coeficiente de δ ≈ 0  
+### 3.2 Diagnóstico de identificabilidad (correlaciones)
+En la inspección del primer modo y modos siguientes:
 
-Conclusión: en este sandbox, el eje efectivo observable está gobernado por **α** y **δ no contribuye**.
+- **mode0**: `corr(M2, α) ≈ +1.000`  
+- **mode2/3/4**: correlaciones ~ ±1 con α (señal de dependencia 1D)  
+- **δ**: `corr(δ) ≈ 0.000` (o estadísticamente no informativo con el observable disponible)
 
----
-
-## Confirmación directa desde el espectro: δ no afecta a M2
-
-Se inspecciona `runs/<run>/spectrum/outputs/spectrum.h5` (datasets: `M2`, `delta_uv`, `m2L2`, `z_grid`) y se correlaciona `M2[:,mode]` con α y δ.
-
-Para `2026-01-28__neutrino_cart_modes5` (cartesian, `n_modes=5`):
-
-- Para modos con varianza no nula: `corr(M2, alpha) ≈ ±1.0`  
-- Para esos modos: `corr(M2, delta) ≈ 0.0`  
-- Existe un modo constante (`std = 0`), produciendo `corr = NaN` (esperado)
-
-También se probó `map_mode=quad` sin cambios: δ sigue ausente en `M2`.
-
-Interpretación: δ es **no-identificable** en este toy-model/rango; no hay “estructura 2D” que recuperar a partir del espectro.
+También se observó:
+- columnas/modos con **varianza efectiva ~ 0** → `corr = NaN` por degeneración numérica (constantes).
 
 ---
 
-## Artefactos canónicos esperados
+## 4. Conclusión científica (veredicto)
 
-Para cada run neutrino:
+### 4.1 Veredicto
+**El sandbox colapsa efectivamente a una variedad 1D gobernada por α** cuando el único observable es el espectro escalar `M²`.
 
-```
-runs/<run>/spectrum/
-  manifest.json
-  stage_summary.json      # incluye alpha_values/delta_values/grid_order en cartesian
-  outputs/spectrum.h5     # contiene dataset M2 (N x n_modes)
-```
+- **δ no es identificable** con el espectro `M²` disponible.
+- No hay estructura 2D recuperable en el inverso *datos → geometría* bajo este régimen de observables.
 
-Para diccionario:
+### 4.2 Interpretación (por qué esto es “buena ciencia”)
+Esto **no es un fallo del pipeline**: es una **señal de subdeterminación real** del problema inverso incluso en un entorno sintético limpio y determinista.
 
-```
-runs/<run>/dictionary/
-  manifest.json
-  stage_summary.json      # hard_contracts_profile=proxy si run_kind=spectrum_only
-  outputs/atlas.json
-  outputs/dictionary.h5
-  outputs/validation.json
-  outputs/ising_comparison.json   # diagnóstico (puede fallar sin gate)
-```
-
-Para features:
-
-```
-runs/<run>/features/
-  manifest.json
-  stage_summary.json
-  outputs/features.json
-  outputs/X.npy
-  outputs/Y.npy
-```
-
-Para atlas master:
-
-```
-runs/<run_master>/atlas_master/
-  manifest.json
-  stage_summary.json      # incluye atlas_master_diagnostics
-  outputs/BRIDGE_ATLAS_MASTER.json
-```
+En términos BASURIN:
+- el experimento demuestra un **modo de fallo estructural**: *observable insuficiente ⇒ degeneración del inverso*.
+- se obtiene un resultado falsable y trazable: “con este dato, δ no se puede recuperar”.
 
 ---
 
-## Tests relevantes
+## 5. Artefactos y trazabilidad esperada (BASURIN IO)
 
-- `tests/test_neutrino_sandbox_contracts.py`:
-  - cubre `grid_mode=cartesian` y trazabilidad en `stage_summary`.
-- Tests de `atlas_master`:
-  - verifican presencia/estructura de `atlas_master_diagnostics`.
-- Tests de `04_diccionario.py`:
-  - verifican que `run_kind=spectrum_only` activa perfil proxy (`all_hard_contracts_pass=True`).
+> Este experimento debe vivir en `runs/<run_id>/...` para IO determinista.  
+> La documentación (este fichero) vive en `docs/experiments/`.
 
----
-
-## Conclusiones y límites
-
-1) Resultado sólido: el sandbox actual es un proxy **1D en α**.  
-2) δ no es observable con `M2` en este setup (rango y modelo probados).  
-3) Si se desea un sandbox 2D real:
-   - redefinir el modelo para que el segundo parámetro afecte a la ecuación y al espectro; o
-   - introducir un segundo observable independiente (no solo ratios actuales).
+En el run:
+- `runs/<run_id>/spectrum/outputs/spectrum.h5`
+- `runs/<run_id>/spectrum/manifest.json`
+- `runs/<run_id>/spectrum/stage_summary.json`
+- `runs/<run_id>/RUN_VALID/outputs/run_valid.json` (gobierna existencia)
 
 ---
 
-## Próximo paso sugerido (opcional, contract-first)
+## 6. Tests mínimos que previenen regresión (recomendados)
 
-Formalizar un diagnóstico canónico de sensibilidad:
-- stage `param_sensitivity` (diagnóstico): por modo, reportar `std`, `corr(M2, alpha)`, `corr(M2, delta)` y banderas de “modo constante”.
-Esto evita perseguir parámetros no-identificables en futuros experimentos.
+1) **Test de columnas constantes / NaN-corr**
+- Detectar columnas con `std == 0` en `M2` y etiquetar explícitamente (no permitir NaN silencioso).
+
+2) **Test de dimensión efectiva**
+- SVD/PCA sobre `M2` (centrado):
+  - `explained_var_1 > 0.98` ⇒ colapso 1D (criterio reproducible).
+- Guardar diagnóstico en un JSON de auditoría.
+
+3) **Test de no-identificabilidad de δ**
+- Verificar `|corr(M2, δ)| < ε` con ε fijo (p.ej. 0.1) **en el dataset canónico del experimento**.
+
+---
+
+## 7. Próximo paso natural (EXPERIMENTO 02)
+
+**Pregunta:** ¿Cuál es el **mínimo nuevo observable** que rompe el colapso 1D → 2D?
+
+Candidatos “mínimos” y compatibles con BASURIN:
+- **Espectro dual Dirichlet/Neumann** (añade canal observable sin cambiar el generador).
+- **Múltiples sectores/modos** (p.ej. añadir un canal adicional o un observable derivado reproducible del mismo run).
+- **Ruido estructurado controlado** como stress-test de identificabilidad.
+
+---
+
+## 8. Notas de gobernanza
+
+- Si `RUN_VALID != PASS`, este experimento **no existe** y no se permiten conclusiones downstream.
+- No se inventan datasets intermedios: cualquier nuevo observable debe formalizarse como artefacto canónico de un stage.
+
+---
+
+**Fin del EXPERIMENTO 01.**
