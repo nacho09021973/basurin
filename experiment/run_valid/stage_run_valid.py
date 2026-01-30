@@ -68,7 +68,7 @@ def main() -> int:
         validate_run_id(args.run, out_root)
     except Exception as exc:
         print(f"[BASURIN ABORT] invalid run: {exc}", file=sys.stderr)
-        return 1
+        return 2
 
     # Canonical BASURIN directories (DO NOT use helpers that may shift stage_dir)
     run_root = out_root / args.run
@@ -95,6 +95,10 @@ def main() -> int:
         "stage_version": __version__,
     }
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    # --- verdict.json (preferred) ---
+    verdict_path = stage_dir / "verdict.json"
+    verdict_path.write_text(json.dumps({"verdict": overall}, indent=2), encoding="utf-8")
 
     # --- stage_summary.json (API real: write_stage_summary(stage_dir, summary_dict)) ---
     inputs = {
@@ -127,13 +131,17 @@ def main() -> int:
             "run_valid": {
                 "path": rel_out,
                 "sha256": sha256_file(out_path),
-            }
+            },
+            "verdict": {
+                "path": "verdict.json",
+                "sha256": sha256_file(verdict_path),
+            },
         },
     }
     (stage_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     print(overall)
-    return 0 if overall == "PASS" else 1
+    return 0 if overall == "PASS" else 2
 
 
 if __name__ == "__main__":

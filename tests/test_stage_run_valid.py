@@ -24,6 +24,7 @@ def test_run_valid_emits_contract_and_passes(tmp_path: Path) -> None:
     assert (stage_dir / "manifest.json").exists()
     assert (stage_dir / "stage_summary.json").exists()
     outp = stage_dir / "outputs" / "run_valid.json"
+    assert (stage_dir / "verdict.json").exists()
     assert outp.exists()
     data = json.loads(outp.read_text(encoding="utf-8"))
     assert data["overall_verdict"] == "PASS"
@@ -50,4 +51,4 @@ def test_run_valid_fails_on_missing_required_path(tmp_path: Path) -> None:
         text=True,
         check=False,
     )
-    assert r.returncode != 0
+    assert r.returncode == 2

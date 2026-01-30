@@ -112,6 +112,14 @@ def _write_run_valid(run_dir: Path, verdict: str = "PASS") -> None:
     )
 
 
+def _write_run_valid_verdict(run_dir: Path, verdict: str = "PASS") -> None:
+    stage_dir = run_dir / "RUN_VALID"
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    (stage_dir / "verdict.json").write_text(
+        json.dumps({"verdict": verdict}, indent=2), encoding="utf-8"
+    )
+
+
 def _write_hsc_input(run_dir: Path) -> Path:
     input_dir = run_dir / "inputs" / "hsc"
     input_dir.mkdir(parents=True, exist_ok=True)
@@ -175,6 +183,17 @@ def test_hsc_detector_runs_when_run_valid_pass(tmp_path: Path) -> None:
     run_dir = out_root / run_id
     input_path = _write_hsc_input(run_dir)
     _write_run_valid(run_dir, verdict="PASS")
+
+    result = _run_hsc_stage(run_id, out_root, input_path)
+    assert result.returncode == 0
+
+
+def test_hsc_detector_runs_when_verdict_json_pass(tmp_path: Path) -> None:
+    out_root = tmp_path / "runs"
+    run_id = "run_valid_pass_verdict"
+    run_dir = out_root / run_id
+    input_path = _write_hsc_input(run_dir)
+    _write_run_valid_verdict(run_dir, verdict="PASS")
 
     result = _run_hsc_stage(run_id, out_root, input_path)
     assert result.returncode == 0

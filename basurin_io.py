@@ -85,7 +85,10 @@ def get_run_dir(run_id: str, base_dir: Path | str | None = None) -> Path:
 
 
 def require_run_valid(out_root: Path, run_id: str) -> dict[str, Any]:
-    run_valid_path = out_root / run_id / "RUN_VALID" / "outputs" / "run_valid.json"
+    run_dir = out_root / run_id
+    preferred = run_dir / "RUN_VALID" / "verdict.json"
+    legacy = run_dir / "RUN_VALID" / "outputs" / "run_valid.json"
+    run_valid_path = preferred if preferred.exists() else legacy
     if not run_valid_path.exists():
         raise RuntimeError(f"[BASURIN ABORT] RUN_VALID missing at {run_valid_path}")
     try:
@@ -94,9 +97,9 @@ def require_run_valid(out_root: Path, run_id: str) -> dict[str, Any]:
         raise RuntimeError(
             f"[BASURIN ABORT] RUN_VALID invalid JSON at {run_valid_path}: {exc}"
         ) from exc
-    verdict = payload.get("overall_verdict")
+    verdict = payload.get("verdict")
     if verdict is None:
-        verdict = payload.get("verdict")
+        verdict = payload.get("overall_verdict")
     if verdict is None:
         verdict = payload.get("status")
     if verdict != "PASS":
