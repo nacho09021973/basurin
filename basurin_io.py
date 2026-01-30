@@ -16,8 +16,15 @@ def utc_now_iso() -> str:
 
 
 def resolve_out_root(out_root: str, runs_root: Path | str = "runs") -> Path:
-    runs_root_path = Path(runs_root).resolve()
-    if out_root == str(runs_root):
+        # Canon: if user passes "runs", it must respect BASURIN_RUNS_ROOT.
+    # runs_root may be overridden by env via get_runs_root().
+    runs_root_path = Path(get_runs_root()).expanduser()
+    if not runs_root_path.is_absolute():
+        runs_root_path = (Path.cwd() / runs_root_path).resolve()
+    else:
+        runs_root_path = runs_root_path.resolve()
+
+    if out_root == "runs" or out_root == str(runs_root) or out_root == runs_root_path.name:
         return runs_root_path
     candidate = Path(out_root)
     if not candidate.is_absolute():
