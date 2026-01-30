@@ -18,6 +18,7 @@ from basurin_io import (
     get_runs_root,
     resolve_out_root,
     sha256_file,
+    utc_now_iso,
     validate_run_id,
     write_manifest,
     write_stage_summary,
@@ -67,89 +68,23 @@ def _resolve_atlas_index_path(path_str: str) -> Path:
     return path.resolve()
 
 
-def _coerce_dim(value: Any) -> int | None:
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        if value.isdigit():
-            return int(value)
-        try:
-            return int(float(value))
-        except ValueError:
-            return None
-    return None
-
-
-def _find_run_entry(index: Any, run_id: str) -> dict[str, Any] | None:
-    if not isinstance(index, dict):
-        return None
-    runs = index.get("runs")
-    if isinstance(runs, dict):
-        entry = runs.get(run_id)
-        if isinstance(entry, dict):
-            return entry
-    if isinstance(runs, list):
-        for entry in runs:
-            if not isinstance(entry, dict):
-                continue
-            if entry.get("run") == run_id or entry.get("run_id") == run_id:
-                return entry
-    entries = index.get("entries")
-    if isinstance(entries, list):
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            if entry.get("run") == run_id or entry.get("run_id") == run_id:
-                return entry
-    return None
-
-
-def _coerce_atlas_entry(entry: Any) -> dict[str, Any] | None:
-    if isinstance(entry, str):
-        return {"path": entry}
-    if isinstance(entry, dict):
-        path = entry.get("path") or entry.get("atlas_master")
-        if path:
-            payload = {"path": path}
-            if "sha256" in entry:
-                payload["sha256"] = entry.get("sha256")
-            return payload
-    return None
-
-
-def _find_atlas_entry(index: dict[str, Any], run_entry: dict[str, Any], dim: int) -> dict[str, Any] | None:
-    for key in ("atlas_master", "atlas", "master"):
-        if key in run_entry:
-            payload = _coerce_atlas_entry(run_entry.get(key))
-            if payload:
-                return payload
-    if "atlas_master_path" in run_entry and isinstance(run_entry["atlas_master_path"], str):
-        return {"path": run_entry["atlas_master_path"]}
-
-    for key in ("by_dim", "atlas_by_dim", "masters_by_dim"):
-        by_dim = index.get(key)
-        if isinstance(by_dim, dict):
-            entry = None
-            if dim in by_dim:
-                entry = by_dim.get(dim)
-            if entry is None:
-                entry = by_dim.get(str(dim))
-            payload = _coerce_atlas_entry(entry)
-            if payload:
-                return payload
-
-    for key in ("items", "atlases"):
-        items = index.get(key)
-        if isinstance(items, list):
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                item_dim = _coerce_dim(item.get("dim") or item.get("dimension") or item.get("d"))
-                if item_dim == dim:
-                    payload = _coerce_atlas_entry(item)
-                    if payload:
-                        return payload
-    return None
+def _resolve_master_path(path_str: str, out_root: Path) -> tuple[Path, str]:
+    if Path(path_str).is_absolute():
+        candidate = Path(path_str).resolve()
+        display_path = _display_path(candidate)
+    elif path_str.startswith("runs/"):
+        candidate = (Path.cwd() / path_str).resolve()
+        display_path = path_str
+    else:
+        candidate = (out_root / path_str).resolve()
+        display_path = _display_path(candidate)
+    try:
+        candidate.relative_to(out_root.resolve())
+    except ValueError as exc:
+        raise ValueError(
+            f"atlas_master_path sale de out_root ({out_root}): {path_str}"
+        ) from exc
+    return candidate, display_path
 
 
 def parse_args() -> argparse.Namespace:
@@ -167,11 +102,23 @@ def parse_args() -> argparse.Namespace:
         default="runs",
         help="Root directory for runs (default: runs)",
     )
+    parser.add_argument(
+        "--force-dim",
+        type=int,
+        help="Forced dimension to select from ATLAS_INDEX (4 or 6).",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+
+    if args.force_dim not in (4, 6):
+        print(
+            "ATLAS_INDEX solo cataloga masters (dim4/dim6). Usa --force-dim 4|6.",
+            file=sys.stderr,
+        )
+        return 2
 
     try:
         runs_root = get_runs_root()
@@ -222,53 +169,91 @@ def main() -> int:
         print(f"ERROR: ATLAS_INDEX invalid JSON at {atlas_index_path}: {exc}", file=sys.stderr)
         return 1
 
-    run_entry = _find_run_entry(atlas_index, args.run)
-    if run_entry is None:
-        print(
-            f"ERROR: ATLAS_INDEX no tiene entrada para run '{args.run}' en {atlas_index_path}",
-            file=sys.stderr,
-        )
+    if not isinstance(atlas_index, dict):
+        print(f"ERROR: ATLAS_INDEX inválido en {atlas_index_path}", file=sys.stderr)
         return 1
 
-    dim = _coerce_dim(run_entry.get("dim") or run_entry.get("dimension") or run_entry.get("d"))
-    if dim is None:
-        print(
-            "ERROR: ATLAS_INDEX sin dim para run "
-            f"'{args.run}' en {atlas_index_path}",
-            file=sys.stderr,
-        )
+    items = atlas_index.get("items")
+    if not isinstance(items, list):
+        print(f"ERROR: ATLAS_INDEX sin items en {atlas_index_path}", file=sys.stderr)
         return 1
 
-    atlas_entry = _find_atlas_entry(atlas_index, run_entry, dim)
-    if atlas_entry is None:
+    dim = int(args.force_dim)
+    target_name = f"dim{dim}"
+    atlas_item = None
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("name") == target_name:
+            atlas_item = item
+            break
+
+    if atlas_item is None:
         print(
-            f"ERROR: ATLAS_INDEX sin atlas para dim={dim} (run {args.run}) en {atlas_index_path}",
+            f"ERROR: ATLAS_INDEX sin item '{target_name}' en {atlas_index_path}",
             file=sys.stderr,
         )
-        return 1
+        return 2
+
+    atlas_path_str = atlas_item.get("path")
+    atlas_sha_expected = atlas_item.get("sha256")
+    if not atlas_path_str or not isinstance(atlas_path_str, str):
+        print(
+            f"ERROR: ATLAS_INDEX item '{target_name}' sin path en {atlas_index_path}",
+            file=sys.stderr,
+        )
+        return 2
+    if not atlas_sha_expected or not isinstance(atlas_sha_expected, str):
+        print(
+            f"ERROR: ATLAS_INDEX item '{target_name}' sin sha256 en {atlas_index_path}",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        atlas_path, atlas_path_display = _resolve_master_path(atlas_path_str, out_root)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    if not atlas_path.exists():
+        print(f"ERROR: atlas master no existe en {atlas_path}", file=sys.stderr)
+        return 2
+
+    atlas_sha_computed = sha256_file(atlas_path)
+    if atlas_sha_computed != atlas_sha_expected:
+        print(
+            "ERROR: sha256 mismatch para atlas master "
+            f"(index={atlas_sha_expected}, computed={atlas_sha_computed})",
+            file=sys.stderr,
+        )
+        return 2
 
     selection: dict[str, Any] = {
         "schema_version": "atlas_selection_v1",
+        "stage": "atlas_select",
+        "version": __version__,
         "run": args.run,
-        "dim": int(dim),
-        "atlas_master": atlas_entry,
-        "atlas_index": {
-            "path": str(atlas_index_path),
+        "created": utc_now_iso(),
+        "index_source": {
+            "path": _display_path(atlas_index_path),
             "sha256": sha256_file(atlas_index_path),
         },
-        "run_valid": {
-            "path": str(run_valid_path),
-            "verdict": verdict,
+        "selected": {
+            "dim": dim,
+            "atlas_master_path": atlas_path_display,
+            "atlas_master_sha256": atlas_sha_expected,
+            "atlas_master_sha256_computed": atlas_sha_computed,
         },
+        "inputs": {
+            "RUN_VALID": {
+                "path": _display_path(run_valid_path),
+                "sha256": sha256_file(run_valid_path),
+                "verdict": verdict,
+            }
+        },
+        "decision": {"rule": "forced"},
     }
-
-    atlas_path = None
-    if atlas_entry.get("path"):
-        atlas_path = Path(str(atlas_entry["path"]))
-        if not atlas_path.is_absolute():
-            atlas_path = (Path.cwd() / atlas_path).resolve()
-        if atlas_path.exists():
-            selection["atlas_master"]["sha256"] = sha256_file(atlas_path)
 
     stage_dir, outputs_dir = ensure_stage_dirs(args.run, "atlas_select", base_dir=out_root)
     output_path = outputs_dir / "ATLAS_SELECTION.json"
@@ -283,20 +268,18 @@ def main() -> int:
         "version": __version__,
         "script": "work/07_atlas_select_stage.py",
         "run": args.run,
-        "inputs": {
-            "atlas_index": _display_path(atlas_index_path),
-            "run_valid": _display_path(run_valid_path),
-        },
+        "inputs": selection["inputs"],
+        "index_source": selection["index_source"],
         "outputs": {
             "atlas_selection": "outputs/ATLAS_SELECTION.json",
         },
         "config": {
             "out_root_requested": args.out_root,
             "out_root_effective": _display_path(out_root),
+            "force_dim": dim,
         },
-        "data": {
-            "dim": int(dim),
-        },
+        "data": selection["selected"],
+        "decision": selection["decision"],
         "hashes": {
             "outputs/ATLAS_SELECTION.json": output_hash,
         },
