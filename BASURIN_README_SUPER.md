@@ -205,30 +205,75 @@ Skipping a check invalidates the experiment.
 
 ---
 
-## Uso del atlas/diccionario (v1): selección manual dim4/dim6
+## 8. Atlas / Dictionary Usage (v1) — Manual dim4/dim6 selection
 
-El índice soberano de atlas master es:
+This section documents the *operational* usage of the atlas/dictionary inventory for downstream consumers.
+It does **not** introduce automation: the user explicitly selects the dimension (dim4 vs dim6).
+
+### 8.1 Sovereign atlas index (catalog of masters)
+
+The sovereign inventory of atlas masters is:
 
 - `runs/2026-01-29__ATLAS_MASTER__INDEX__v1/atlas_index/outputs/ATLAS_INDEX.json`
 
-Este índice **no asigna runs → dim**; solo cataloga los masters disponibles (`dim4`, `dim6`) con `path`+`sha256`.
-La selección de dimensión es explícita y auditada vía `atlas_select`.
+This index **does not assign runs → dim**. It only catalogs available masters (`dim4`, `dim6`) with `path` + `sha256`.
 
-### Flujo canónico (sin automatismo)
+### 8.2 Canonical flow (no automation)
 
-1) **Gate soberano**: el run consumidor debe tener `RUN_VALID=PASS`:
+#### 1) Sovereign gate: run must exist (`RUN_VALID == PASS`)
 
-- `runs/<run_id>/RUN_VALID/outputs/run_valid.json` (legacy) o `runs/<run_id>/RUN_VALID/verdict.json` (preferred)
+A consuming run must have:
 
-2) **Seleccionar atlas master** (manual):
+- `runs/<run_id>/RUN_VALID/outputs/run_valid.json` (legacy), or
+- `runs/<run_id>/RUN_VALID/verdict.json` (preferred)
+
+If missing or not PASS → abort downstream stages.
+
+#### 2) Select atlas master (manual)
+
+From repo root:
 
 ```bash
-python 07_atlas_select_stage.py \
-  --run <run_id> \
-  --atlas-index runs/2026-01-29__ATLAS_MASTER__INDEX__v1/atlas_index/outputs/ATLAS_INDEX.json \
-  --force-dim 4
+python 07_atlas_select_stage.py   --run <run_id>   --atlas-index runs/2026-01-29__ATLAS_MASTER__INDEX__v1/atlas_index/outputs/ATLAS_INDEX.json   --force-dim 4
+```
 
+For dim6:
 
+```bash
+python 07_atlas_select_stage.py   --run <run_id>   --atlas-index runs/2026-01-29__ATLAS_MASTER__INDEX__v1/atlas_index/outputs/ATLAS_INDEX.json   --force-dim 6
+```
+
+#### 3) Canonical selection artifact
+
+`atlas_select` produces:
+
+- `runs/<run_id>/atlas_select/outputs/ATLAS_SELECTION.json`
+
+It must contain at minimum:
+
+- `index_source.path` + `index_source.sha256`
+- `inputs.RUN_VALID.path` + `inputs.RUN_VALID.sha256` + `inputs.RUN_VALID.verdict`
+- `selected.dim`
+- `selected.atlas_master_path`
+- `selected.atlas_master_sha256` (from index)
+- `selected.atlas_master_sha256_computed` (computed from file; must match)
+
+#### 4) Resolve the selected atlas master (“dictionary”)
+
+```bash
+MASTER=$(jq -r '.selected.atlas_master_path' runs/<run_id>/atlas_select/outputs/ATLAS_SELECTION.json)
+jq -r '.schema_version, .run_id, .stage' "$MASTER"
+```
+
+The selected `BRIDGE_ATLAS_MASTER.json` is the consumable atlas/dictionary for downstream stages/experiments.
+
+### 8.3 Governance invariants (non-negotiable)
+
+- If `RUN_VALID` is missing or not PASS → `atlas_select` must abort (exit=2) and produce no outputs.
+- If the computed `sha256` of the selected master does not match the index → `atlas_select` must abort (exit=2).
+- `atlas_select` must write only under `runs/<run_id>/atlas_select/`.
+
+---
 
 ## Appendix A — Canonical Example 1  
 ### Derived Holographic f-Consistency (B4 Pattern)
