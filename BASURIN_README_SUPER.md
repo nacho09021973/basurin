@@ -5,6 +5,10 @@
 
 This document is **authoritative**. Any execution or experiment that contradicts it is **invalid by definition**.
 
+Subsystem IO specifications (e.g. ringdown) may be defined in **versioned documents under `docs/`**.
+When referenced by a canonical stage or contract, those specs are **normative** for producers/consumers,
+and must not contradict this master document.
+
 ---
 
 ## 1. Core Principle (Non-Negotiable)
@@ -62,7 +66,38 @@ runs/<run_id>/geometry/
     └── geometry.h5
 ```
 
-Produces the **only allowed synthetic data source** in the pipeline.
+Produces the **only allowed synthetic data source** for the geometry→spectrum→dictionary pipeline.
+
+### 3.1b Ringdown Synth Stage (Canonical Synthetic Event Index)
+
+```
+runs/<run_id>/ringdown_synth/
+├── manifest.json
+├── stage_summary.json
+└── outputs/
+    ├── synthetic_events.json
+    └── cases/<case_id>/
+        ├── strain_<DET>.npz
+        ├── psd_<DET>.npz          # optional (only if the run uses PSD as an input)
+        └── meta.json              # optional (non-numeric metadata)
+```
+
+`ringdown_synth` is the **only authorized generator** of ringdown synthetic datasets.
+
+It must publish a canonical case index:
+
+- `runs/<run_id>/ringdown_synth/outputs/synthetic_events.json`
+
+**Executive rules:**
+
+- Ringdown experiments under `runs/<run_id>/experiment/ringdown/*` **must not** reconstruct paths; they **must** consume paths from `synthetic_events.json`.
+- Any new synthetic condition (multi-detector, PSD families, glitches, labels, etc.) must be formalized as:
+  - an extension of `ringdown_synth`, or
+  - a new canonical stage (with its own deterministic IO and contracts).
+- `synthetic_events.json` + referenced NPZ files are subject to contract validation; if the ringdown data contract fails, downstream ringdown experiments are **invalid**.
+
+Reference spec (normative for IO details):
+- `docs/ringdown/IO_RINGDOWN_SYNTH_v1.md`
 
 ### 3.2 Spectrum Stage
 
@@ -188,6 +223,12 @@ Experiments:
 - **must not** generate new synthetic data,
 - **must not** mutate canonical artifacts,
 - **must abort** if `RUN_VALID != PASS`.
+
+**Ringdown-specific executive constraints:**
+
+- Experiments under `runs/<run_id>/experiment/ringdown/*` consume exclusively canonical artifacts produced by `ringdown_synth`.
+- They **must abort** (invalid) if `ringdown_synth/outputs/synthetic_events.json` is missing or fails its data contract.
+- They **must not** infer/estimate missing canonical inputs ad-hoc (e.g. PSD) unless an explicit canonical artifact exists.
 
 ---
 
