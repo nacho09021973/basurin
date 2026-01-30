@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from basurin_io import resolve_out_root, validate_run_id, ensure_stage_dirs, write_manifest, write_stage_summary
+from basurin_io import resolve_out_root, validate_run_id, ensure_stage_dirs, write_manifest, write_stage_summary, require_run_valid
 
 
 def abort_contract(msg: str) -> None:
@@ -21,16 +21,11 @@ def read_json(path: Path) -> Any:
         return json.load(f)
 
 
-def load_run_valid(run_dir: Path) -> Dict[str, Any]:
-    p = run_dir / "RUN_VALID" / "stage_summary.json"
-    if not p.exists():
-        abort_contract(f"RUN_VALID missing: {p}")
-    payload = read_json(p)
-    verdict = (((payload.get("results") or {}).get("overall_verdict")) or "").upper()
-    if verdict != "PASS":
-        abort_contract(f"RUN_VALID != PASS (got {verdict}): {p}")
-    return payload
-
+def check_run_valid(out_root: Path, run_id: str) -> Dict[str, Any]:
+    try:
+        return require_run_valid(out_root, run_id)
+    except Exception as e:
+        abort_contract(str(e))
 
 def percentile(xs: List[float], q: float) -> float:
     xs2 = sorted(xs)
@@ -89,7 +84,7 @@ def main() -> int:
     validate_run_id(args.run, out_root)
 
     run_dir = (out_root / args.run).resolve()
-    run_valid = load_run_valid(run_dir)
+    run_valid = check_run_valid(out_root, args.run)
 
     stage_name = "experiment/ringdown_01_injection_recovery"
     stage_dir, outputs_dir = ensure_stage_dirs(args.run, stage_name, base_dir=out_root)
