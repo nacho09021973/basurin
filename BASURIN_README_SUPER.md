@@ -205,6 +205,31 @@ Skipping a check invalidates the experiment.
 
 ---
 
+## Uso del atlas/diccionario (v1): selección manual dim4/dim6
+
+El índice soberano de atlas master es:
+
+- `runs/2026-01-29__ATLAS_MASTER__INDEX__v1/atlas_index/outputs/ATLAS_INDEX.json`
+
+Este índice **no asigna runs → dim**; solo cataloga los masters disponibles (`dim4`, `dim6`) con `path`+`sha256`.
+La selección de dimensión es explícita y auditada vía `atlas_select`.
+
+### Flujo canónico (sin automatismo)
+
+1) **Gate soberano**: el run consumidor debe tener `RUN_VALID=PASS`:
+
+- `runs/<run_id>/RUN_VALID/outputs/run_valid.json` (legacy) o `runs/<run_id>/RUN_VALID/verdict.json` (preferred)
+
+2) **Seleccionar atlas master** (manual):
+
+```bash
+python 07_atlas_select_stage.py \
+  --run <run_id> \
+  --atlas-index runs/2026-01-29__ATLAS_MASTER__INDEX__v1/atlas_index/outputs/ATLAS_INDEX.json \
+  --force-dim 4
+
+
+
 ## Appendix A — Canonical Example 1  
 ### Derived Holographic f-Consistency (B4 Pattern)
 
