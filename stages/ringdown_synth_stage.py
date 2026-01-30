@@ -59,10 +59,35 @@ def _case_id(idx: int, snr: float, seed: int) -> str:
     return f"case_{idx:04d}_snr_{snr_tag}_seed_{seed}"
 
 
-def _write_strain_npz(path: Path, seed: int, snr: float) -> None:
+def _write_strain_npz(
+    path: Path,
+    seed: int,
+    snr: float,
+    f_220: float,
+    tau_220: float,
+    *,
+    fs: float = 4096.0,
+    n_samples: int = 1024,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    strain = np.asarray([float(seed), float(snr)], dtype=float)
-    np.savez(path, strain=strain)
+    rng = np.random.default_rng(int(seed))
+    t = np.arange(n_samples, dtype=float) / float(fs)
+    signal = np.exp(-t / float(tau_220)) * np.sin(2.0 * math.pi * float(f_220) * t)
+    noise = rng.normal(0.0, 1.0, size=n_samples)
+    signal_rms = math.sqrt(float(np.mean(signal**2))) if signal.size else 1.0
+    noise_rms = math.sqrt(float(np.mean(noise**2))) if noise.size else 1.0
+    scale = float(snr) * noise_rms / (signal_rms + 1e-12)
+    h = scale * signal + noise
+    np.savez(
+        path,
+        t=t,
+        h=h,
+        fs=np.asarray(fs, dtype=float),
+        snr_target=np.asarray(snr, dtype=float),
+        seed=np.asarray(seed, dtype=int),
+        f_220=np.asarray(f_220, dtype=float),
+        tau_220=np.asarray(tau_220, dtype=float),
+    )
 
 
 def main() -> None:
@@ -120,13 +145,18 @@ def main() -> None:
             for seed in seeds:
                 case_id = _case_id(idx, snr, seed)
                 strain_path = cases_dir / case_id / "strain.npz"
-                _write_strain_npz(strain_path, seed, snr)
+                _write_strain_npz(strain_path, seed, snr, f_220, tau_220)
                 events.append(
                     {
                         **base_event,
                         "case_id": case_id,
                         "seed": int(seed),
+                        "snr": float(snr),
                         "snr_target": float(snr),
+                        "strain_npz": f"cases/{case_id}/strain.npz",
+                        "paths": {
+                            "strain_npz": f"ringdown_synth/outputs/cases/{case_id}/strain.npz"
+                        },
                         "outputs": {"strain": f"outputs/cases/{case_id}/strain.npz"},
                     }
                 )
@@ -148,6 +178,9 @@ def main() -> None:
                 "tau_220": args.tau_220,
                 "snr_grid": snr_grid,
                 "seeds": seeds,
+            },
+            "inputs": {
+                "batch_json": args.batch_json,
             },
             "outputs": {
                 "synthetic_events": "outputs/synthetic_events.json",
