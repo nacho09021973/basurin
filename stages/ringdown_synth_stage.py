@@ -16,9 +16,17 @@ for _cand in [_here.parents[1], _here.parents[2], _here.parents[3]]:
 import argparse
 import json
 import math
-from pathlib import Path
 
-from basurin_io import ensure_stage_dirs, get_run_dir, sha256_file, write_manifest, write_stage_summary
+import numpy as np
+
+from basurin_io import (
+    ensure_stage_dirs,
+    resolve_out_root,
+    sha256_file,
+    validate_run_id,
+    write_manifest,
+    write_stage_summary,
+)
 
 
 def _compute_qnm_from_mass_spin(mass_msun: float, spin: float) -> tuple[float, float]:
@@ -32,9 +40,36 @@ def _compute_qnm_from_mass_spin(mass_msun: float, spin: float) -> tuple[float, f
     raise ValueError("QNM from (mass,spin) no implementado en v1: usa --f-220 y --tau-220.")
 
 
+def _load_batch(path: Path) -> tuple[list[float], list[int]]:
+    with open(path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    if not isinstance(payload, dict):
+        raise SystemExit("ERROR: --batch-json debe ser un objeto JSON.")
+    snr_grid = payload.get("snr_grid")
+    seeds = payload.get("seeds")
+    if not isinstance(snr_grid, list) or not isinstance(seeds, list):
+        raise SystemExit("ERROR: --batch-json requiere keys 'snr_grid' y 'seeds' (listas).")
+    if not snr_grid or not seeds:
+        raise SystemExit("ERROR: --batch-json requiere snr_grid y seeds no vacíos.")
+    return [float(x) for x in snr_grid], [int(x) for x in seeds]
+
+
+def _case_id(idx: int, snr: float, seed: int) -> str:
+    snr_tag = f"{snr:.6g}".replace(".", "p").replace("-", "m")
+    return f"case_{idx:04d}_snr_{snr_tag}_seed_{seed}"
+
+
+def _write_strain_npz(path: Path, seed: int, snr: float) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    strain = np.asarray([float(seed), float(snr)], dtype=float)
+    np.savez(path, strain=strain)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Canonical ringdown synthetic event generator (ringdown_synth).")
     ap.add_argument("--run", required=True)
+    ap.add_argument("--out-root", default="runs", help="Runs root (default: runs)")
+    ap.add_argument("--batch-json", default=None, help="Batch JSON schema: {'snr_grid':[...], 'seeds':[...]}")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--snr", type=float, default=12.0)
     ap.add_argument("--mass-msun", type=float, default=None)
@@ -43,8 +78,14 @@ def main() -> None:
     ap.add_argument("--tau-220", type=float, default=None, help="seconds (required unless mass/spin implemented)")
     args = ap.parse_args()
 
-    run_dir = get_run_dir(args.run).resolve()
-    stage_dir, outputs_dir = ensure_stage_dirs(args.run, "ringdown_synth")
+    try:
+        out_root = resolve_out_root(args.out_root)
+        validate_run_id(args.run, out_root)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    stage_dir, outputs_dir = ensure_stage_dirs(args.run, "ringdown_synth", base_dir=out_root)
 
     out_json = outputs_dir / "synthetic_event.json"
 
@@ -58,10 +99,8 @@ def main() -> None:
 
     q_220 = math.pi * f_220 * tau_220
 
-    payload = {
+    base_event = {
         "schema_version": "ringdown_synth_event_v1",
-        "seed": int(args.seed),
-        "snr_target": float(args.snr),
         "truth": {"f_220": f_220, "tau_220": tau_220, "Q_220": q_220},
         "notes": {
             "source": "stages/ringdown_synth_stage.py",
@@ -70,28 +109,82 @@ def main() -> None:
         },
     }
 
-    with open(out_json, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
+    artifacts: dict[str, Path] = {}
 
-    summary = {
-        "stage": "ringdown_synth",
-        "params": {
+    if args.batch_json:
+        snr_grid, seeds = _load_batch(Path(args.batch_json))
+        cases_dir = outputs_dir / "cases"
+        events: list[dict[str, object]] = []
+        idx = 0
+        for snr in snr_grid:
+            for seed in seeds:
+                case_id = _case_id(idx, snr, seed)
+                strain_path = cases_dir / case_id / "strain.npz"
+                _write_strain_npz(strain_path, seed, snr)
+                events.append(
+                    {
+                        **base_event,
+                        "case_id": case_id,
+                        "seed": int(seed),
+                        "snr_target": float(snr),
+                        "outputs": {"strain": f"outputs/cases/{case_id}/strain.npz"},
+                    }
+                )
+                artifacts[f"case_{case_id}_strain"] = strain_path
+                idx += 1
+
+        out_events = outputs_dir / "synthetic_events.json"
+        with open(out_events, "w", encoding="utf-8") as f:
+            json.dump(events, f, indent=2)
+        artifacts["synthetic_events"] = out_events
+
+        summary = {
+            "stage": "ringdown_synth",
+            "params": {
+                "batch_json": args.batch_json,
+                "mass_msun": args.mass_msun,
+                "spin": args.spin,
+                "f_220": args.f_220,
+                "tau_220": args.tau_220,
+                "snr_grid": snr_grid,
+                "seeds": seeds,
+            },
+            "outputs": {
+                "synthetic_events": "outputs/synthetic_events.json",
+                "cases_dir": "outputs/cases",
+            },
+        }
+        write_stage_summary(stage_dir, summary)
+        write_manifest(stage_dir, artifacts, extra={"verdict": "PASS"})
+        _ = sha256_file(out_events)
+    else:
+        payload = {
+            **base_event,
             "seed": int(args.seed),
             "snr_target": float(args.snr),
-            "mass_msun": args.mass_msun,
-            "spin": args.spin,
-            "f_220": args.f_220,
-            "tau_220": args.tau_220,
-        },
-        "outputs": {"synthetic_event": "outputs/synthetic_event.json"},
-    }
-    write_stage_summary(stage_dir, summary)
+        }
 
-    artifacts = {"synthetic_event": out_json}
-    write_manifest(stage_dir, artifacts, extra={"verdict": "PASS"})
+        with open(out_json, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
 
-    # Sanity: ensure file hash stable in summary (optional)
-    _ = sha256_file(out_json)
+        summary = {
+            "stage": "ringdown_synth",
+            "params": {
+                "seed": int(args.seed),
+                "snr_target": float(args.snr),
+                "mass_msun": args.mass_msun,
+                "spin": args.spin,
+                "f_220": args.f_220,
+                "tau_220": args.tau_220,
+            },
+            "outputs": {"synthetic_event": "outputs/synthetic_event.json"},
+        }
+        write_stage_summary(stage_dir, summary)
+
+        artifacts["synthetic_event"] = out_json
+        write_manifest(stage_dir, artifacts, extra={"verdict": "PASS"})
+
+        _ = sha256_file(out_json)
 
 
 if __name__ == "__main__":
