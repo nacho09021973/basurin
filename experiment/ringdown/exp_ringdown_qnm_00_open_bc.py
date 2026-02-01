@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
+from scipy.signal import hilbert
 
 from basurin_io import (
     ensure_stage_dirs,
@@ -47,6 +48,7 @@ DEFAULT_DECAY_EPS = 1e-8
 DEFAULT_OMEGA_R_REL_TOL = 0.05  # 5% relative tolerance for omega_R stability
 DEFAULT_OMEGA_I_REL_TOL = 0.10  # 10% relative tolerance for omega_I stability
 DEFAULT_FIT_R2_MIN = 0.90       # minimum R^2 for fit quality
+DEFAULT_FIT_EPS = 1e-12         # numerical floor for log-envelope fits
 
 
 def utc_now_iso() -> str:
@@ -110,6 +112,10 @@ def _fit_damped_sinusoid(
     signal: np.ndarray,
     f_guess: float | None = None,
     tau_guess: float | None = None,
+    fit_eps: float = DEFAULT_FIT_EPS,
+    signal_for_envelope: np.ndarray | None = None,
+    decay_t: np.ndarray | None = None,
+    decay_signal: np.ndarray | None = None,
 ) -> dict[str, Any]:
     """Fit damped sinusoid to extract omega_R (frequency) and omega_I (decay rate).
 
@@ -125,42 +131,96 @@ def _fit_damped_sinusoid(
     freqs = np.fft.rfftfreq(n, dt)
     fft_mag = np.abs(np.fft.rfft(signal))
 
-    # Find dominant frequency
-    peak_idx = np.argmax(fft_mag[1:]) + 1  # skip DC
+    # Find dominant frequency (use deterministic bounds around guess if provided)
+    peak_idx: int | None = None
+    if f_guess is not None and f_guess > 0:
+        rel_band = 0.05
+        f_low = f_guess * (1.0 - rel_band)
+        f_high = f_guess * (1.0 + rel_band)
+        band_idx = np.where((freqs >= f_low) & (freqs <= f_high))[0]
+        if band_idx.size > 0:
+            peak_idx = int(band_idx[np.argmax(fft_mag[band_idx])])
+    if peak_idx is None:
+        peak_idx = int(np.argmax(fft_mag[1:]) + 1)  # skip DC
     omega_R = 2 * np.pi * freqs[peak_idx]
 
-    # Estimate decay from envelope (using Hilbert transform approximation)
+    # Estimate decay from envelope (Hilbert transform)
     # |h(t)| ~ A * exp(omega_I * t)
-    analytic = np.abs(signal + 1j * np.imag(np.fft.ifft(np.fft.fft(signal) * (1 - np.sign(np.fft.fftfreq(n))))))
-    envelope = np.maximum(analytic, 1e-12)
+    fit_t = decay_t if decay_t is not None else t
+    env_signal = decay_signal if decay_signal is not None else signal_for_envelope
+    if env_signal is None:
+        env_signal = signal
+    if len(env_signal) != len(fit_t):
+        env_signal = signal if len(signal) == len(fit_t) else env_signal
+
+    envelope = np.maximum(np.abs(hilbert(env_signal)), fit_eps)
+    n_decay = len(envelope)
+    dt_decay = fit_t[1] - fit_t[0]
+    if n_decay >= 5:
+        if f_guess is not None and f_guess > 0:
+            samples_per_period = max(1, int(round((1.0 / f_guess) / dt_decay)))
+            window_len = max(5, samples_per_period // 2)
+        else:
+            window_len = 5
+        window_len = min(window_len, max(5, n_decay // 5))
+        if window_len % 2 == 0:
+            window_len += 1
+        kernel = np.ones(window_len) / float(window_len)
+        envelope = np.convolve(envelope, kernel, mode="same")
+        envelope = np.maximum(envelope, fit_eps)
 
     # Linear fit on log envelope to get decay rate
-    log_env = np.log(envelope + 1e-12)
-    # Use only first half to avoid noise floor
-    n_fit = n // 2
-    if n_fit < 10:
-        n_fit = n
-    coeffs = np.polyfit(t[:n_fit], log_env[:n_fit], 1)
+    log_env = np.log(envelope)
+    fit_mask = np.ones_like(fit_t, dtype=bool)
+    if tau_guess is not None and tau_guess > 0:
+        t_max = min(fit_t[-1], 6.0 * tau_guess)
+        fit_mask &= fit_t <= t_max
+
+    env_threshold = np.max(envelope) * 0.01
+    fit_mask &= envelope >= env_threshold
+
+    if np.count_nonzero(fit_mask) < 10:
+        if tau_guess is not None and tau_guess > 0:
+            t_max = min(fit_t[-1], 6.0 * tau_guess)
+            fit_mask = fit_t <= t_max
+        else:
+            n_fit = max(len(fit_t) // 2, 10)
+            fit_mask = np.zeros_like(fit_t, dtype=bool)
+            fit_mask[:n_fit] = True
+
+    if np.count_nonzero(fit_mask) < 10:
+        fit_mask = np.ones_like(t, dtype=bool)
+
+    t_fit = fit_t[fit_mask]
+    log_env_fit = log_env[fit_mask]
+
+    coeffs = np.polyfit(t_fit, log_env_fit, 1)
     omega_I = coeffs[0]  # slope = omega_I (should be negative for decay)
 
-    # Compute fit quality (R^2)
-    y_pred = np.exp(coeffs[0] * t[:n_fit] + coeffs[1])
-    ss_res = np.sum((envelope[:n_fit] - y_pred) ** 2)
-    ss_tot = np.sum((envelope[:n_fit] - np.mean(envelope[:n_fit])) ** 2)
-    fit_r2 = 1.0 - (ss_res / (ss_tot + 1e-12))
+    # Compute fit quality (R^2) on log-envelope regression
+    y_pred = coeffs[0] * t_fit + coeffs[1]
+    ss_res = np.sum((log_env_fit - y_pred) ** 2)
+    ss_tot = np.sum((log_env_fit - np.mean(log_env_fit)) ** 2)
+    fit_r2 = 1.0 - (ss_res / (ss_tot + fit_eps))
 
     # Residual norm
-    residual_norm = np.sqrt(ss_res / n_fit)
+    residual_norm = np.sqrt(ss_res / len(t_fit))
+
+    tau_s = None
+    if omega_I < 0:
+        tau_s = 1.0 / max(-omega_I, fit_eps)
 
     return {
         "omega_R": float(omega_R),
         "omega_I": float(omega_I),
         "omega_complex": [float(omega_R), float(omega_I)],
         "f_hz": float(omega_R / (2 * np.pi)),
-        "tau_s": float(-1.0 / omega_I) if omega_I < 0 else float("inf"),
+        "tau_s": None if tau_s is None else float(tau_s),
         "fit_r2": float(fit_r2),
         "residual_norm": float(residual_norm),
         "n_samples": int(n),
+        "fit_method": "log_envelope_linear",
+        "fit_eps": float(fit_eps),
     }
 
 
@@ -170,6 +230,9 @@ def _run_single_case(
     signal: np.ndarray,
     n_grid: int,
     window_id: str,
+    f_guess: float | None = None,
+    tau_guess: float | None = None,
+    fit_eps: float = DEFAULT_FIT_EPS,
 ) -> dict[str, Any]:
     """Run QNM fit for a single grid/window configuration."""
     # Resample to specified grid size
@@ -195,7 +258,16 @@ def _run_single_case(
 
     signal_windowed = signal_resampled * window
 
-    fit_result = _fit_damped_sinusoid(t_resampled, signal_windowed)
+    fit_result = _fit_damped_sinusoid(
+        t_resampled,
+        signal_windowed,
+        f_guess=f_guess,
+        tau_guess=tau_guess,
+        fit_eps=fit_eps,
+        signal_for_envelope=signal_resampled,
+        decay_t=t,
+        decay_signal=signal,
+    )
 
     return {
         "case_id": case_id,
@@ -208,6 +280,8 @@ def _run_single_case(
         "tau_s": fit_result["tau_s"],
         "fit_r2": fit_result["fit_r2"],
         "residual_norm": fit_result["residual_norm"],
+        "fit_method": fit_result["fit_method"],
+        "fit_eps": fit_result["fit_eps"],
     }
 
 
@@ -380,6 +454,7 @@ def main() -> int:
     ap.add_argument("--omega-r-rel-tol", type=float, default=DEFAULT_OMEGA_R_REL_TOL)
     ap.add_argument("--omega-i-rel-tol", type=float, default=DEFAULT_OMEGA_I_REL_TOL)
     ap.add_argument("--fit-r2-min", type=float, default=DEFAULT_FIT_R2_MIN)
+    ap.add_argument("--fit-eps", type=float, default=DEFAULT_FIT_EPS)
 
     # Synthetic signal parameters (for surrogate mode)
     ap.add_argument("--f-hz", type=float, default=250.0, help="Frequency in Hz")
@@ -445,7 +520,16 @@ def main() -> int:
     for n_grid in grid_sizes:
         for window_id in window_ids:
             case_id = f"case_{case_idx:03d}"
-            result = _run_single_case(case_id, t, signal, n_grid, window_id)
+            result = _run_single_case(
+                case_id,
+                t,
+                signal,
+                n_grid,
+                window_id,
+                f_guess=truth["f_hz"],
+                tau_guess=truth["tau_s"],
+                fit_eps=args.fit_eps,
+            )
             result["truth"] = truth
             cases.append(result)
             case_idx += 1
@@ -477,6 +561,13 @@ def main() -> int:
     # Use first case as reference (or mean across cases)
     omega_Rs = [c["omega_R"] for c in cases]
     omega_Is = [c["omega_I"] for c in cases]
+    fit_r2s = [c["fit_r2"] for c in cases]
+    residual_norms = [c["residual_norm"] for c in cases]
+
+    tau_s_mean = None
+    omega_I_mean = float(np.mean(omega_Is))
+    if omega_I_mean < 0:
+        tau_s_mean = 1.0 / max(-omega_I_mean, args.fit_eps)
 
     qnm_fit = {
         "schema_version": "qnm_fit_v1",
@@ -484,11 +575,15 @@ def main() -> int:
         "model": args.model,
         "omega_complex": [float(np.mean(omega_Rs)), float(np.mean(omega_Is))],
         "omega_R": float(np.mean(omega_Rs)),
-        "omega_I": float(np.mean(omega_Is)),
+        "omega_I": omega_I_mean,
         "omega_R_std": float(np.std(omega_Rs)),
         "omega_I_std": float(np.std(omega_Is)),
         "f_hz": float(np.mean(omega_Rs) / (2 * np.pi)),
-        "tau_s": float(-1.0 / np.mean(omega_Is)) if np.mean(omega_Is) < 0 else None,
+        "tau_s": None if tau_s_mean is None else float(tau_s_mean),
+        "fit_r2": float(np.mean(fit_r2s)),
+        "residual_norm": float(np.mean(residual_norms)),
+        "fit_method": "log_envelope_linear",
+        "fit_eps": float(args.fit_eps),
         "n_cases": len(cases),
         "grid_sizes": grid_sizes,
         "window_ids": window_ids,
@@ -540,6 +635,16 @@ def main() -> int:
     with open(contract_verdict_path, "w", encoding="utf-8") as f:
         json.dump(contract_verdict, f, indent=2)
 
+    meta = {
+        "created": utc_now_iso(),
+        "fit_method": "log_envelope_linear",
+        "fit_eps": float(args.fit_eps),
+        "decay_eps": float(args.decay_eps),
+    }
+    meta_path = outputs_dir / "meta.json"
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+
     # Write stage_summary
     summary = {
         "stage": stage_name,
@@ -555,12 +660,14 @@ def main() -> int:
             "omega_r_rel_tol": args.omega_r_rel_tol,
             "omega_i_rel_tol": args.omega_i_rel_tol,
             "fit_r2_min": args.fit_r2_min,
+            "fit_eps": args.fit_eps,
         },
         "inputs": contract_verdict["inputs"],
         "outputs": {
             "qnm_fit": "outputs/qnm_fit.json",
             "contract_verdict": "outputs/contract_verdict.json",
             "per_case_dir": "outputs/per_case/",
+            "meta": "outputs/meta.json",
         },
         "verdict": overall_verdict,
     }
@@ -570,6 +677,7 @@ def main() -> int:
     artifacts = {
         "qnm_fit": qnm_fit_path,
         "contract_verdict": contract_verdict_path,
+        "meta": meta_path,
     }
     for p in sorted(per_case_dir.glob("case_*.json")):
         artifacts[f"per_case::{p.name}"] = p
