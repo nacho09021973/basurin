@@ -131,10 +131,19 @@ def test_c3_closed_limit_recovery(tmp_path: Path, repo_root: Path):
 
     outputs_dir = run_dir / "experiment" / "ringdown" / "EXP_RINGDOWN_QNM_01_closed_open_limit" / "outputs"
     verdict = _rjson(outputs_dir / "contract_verdict.json")
+    per_mode = _rjson(outputs_dir / "per_mode_results.json")
 
     # C3 should PASS
     c3 = verdict["contracts"]["C3_closed_limit_recovery"]
     assert c3["verdict"] == "PASS", f"C3 failed: {c3}"
+
+    # Gamma=0 closed limit should recover M² and zero decay
+    for mode_key, results in per_mode.items():
+        gamma_zero = next(r for r in results if r["gamma"] == 0.0)
+        omega_I_abs = abs(gamma_zero["omega_I"])
+        rel_error = gamma_zero["omega_R_sq_rel_error"]
+        assert omega_I_abs <= 1e-6, f"{mode_key} omega_I too large: {omega_I_abs}"
+        assert rel_error <= 0.05, f"{mode_key} ω_R² rel error too large: {rel_error}"
 
 
 def test_c4_monotonicity(tmp_path: Path, repo_root: Path):
@@ -164,10 +173,21 @@ def test_c4_monotonicity(tmp_path: Path, repo_root: Path):
 
     outputs_dir = run_dir / "experiment" / "ringdown" / "EXP_RINGDOWN_QNM_01_closed_open_limit" / "outputs"
     verdict = _rjson(outputs_dir / "contract_verdict.json")
+    per_mode = _rjson(outputs_dir / "per_mode_results.json")
 
     # C4 should PASS
     c4 = verdict["contracts"]["C4_monotonicity"]
     assert c4["verdict"] == "PASS", f"C4 failed: {c4}"
+
+    # Monotonicity should hold for strictly increasing gamma
+    results = sorted(per_mode["mode_0"], key=lambda r: r["gamma"])
+    for i in range(len(results) - 1):
+        gamma_i = results[i]["gamma"]
+        gamma_j = results[i + 1]["gamma"]
+        assert gamma_j > gamma_i
+        omega_i = abs(results[i]["omega_I"])
+        omega_j = abs(results[i + 1]["omega_I"])
+        assert omega_j >= omega_i, f"omega_I decreased from {gamma_i} to {gamma_j}"
 
 
 def test_per_mode_results_structure(tmp_path: Path, repo_root: Path):
@@ -209,10 +229,12 @@ def test_per_mode_results_structure(tmp_path: Path, repo_root: Path):
     # Check structure of individual result
     result = per_mode["mode_0"][0]
     assert "gamma" in result
-    assert "omega_R_fit" in result
-    assert "omega_I_fit" in result
-    assert "M2_target" in result
-    assert "omega_R_sq_error" in result
+    assert "omega_R" in result
+    assert "omega_I" in result
+    assert "M2" in result
+    assert "omega_R_sq_rel_error" in result
+    assert "omega_I_abs" in result
+    assert "temporal_convention" in result
 
 
 def test_comparison_json_structure(tmp_path: Path, repo_root: Path):
