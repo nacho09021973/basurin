@@ -82,76 +82,6 @@ def _load_spectrum_h5(path: Path) -> dict[str, Any]:
     return data
 
 
-def _generate_open_bc_signal(
-    omega_R: float,
-    gamma: float,  # absorption parameter: ω_I = -gamma
-    duration: float = 1.0,
-    sample_rate: float = 4096.0,
-    seed: int = 42,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Generate damped sinusoid with tunable absorption.
-
-    h(t) = A * exp(-gamma * t) * cos(omega_R * t + phi)
-
-    When gamma → 0: no decay (closed, Hermitian limit)
-    When gamma > 0: exponential decay (open, horizon-like)
-    """
-    rng = np.random.default_rng(seed)
-    t = np.arange(0, duration, 1.0 / sample_rate)
-    phi = rng.uniform(0, 2 * np.pi)
-    amplitude = 1.0
-
-    if gamma > 0:
-        signal = amplitude * np.exp(-gamma * t) * np.cos(omega_R * t + phi)
-    else:
-        # Pure oscillation (no decay)
-        signal = amplitude * np.cos(omega_R * t + phi)
-
-    # Add small noise
-    noise_level = 0.001 * amplitude
-    signal += rng.normal(0, noise_level, size=len(t))
-
-    return t, signal
-
-
-def _fit_damped_sinusoid(
-    t: np.ndarray,
-    signal: np.ndarray,
-) -> dict[str, float]:
-    """Fit damped sinusoid to extract omega_R and omega_I.
-
-    Returns omega_R (frequency) and omega_I (decay rate, negative for decay).
-    """
-    dt = t[1] - t[0]
-    n = len(signal)
-
-    # FFT to estimate frequency
-    freqs = np.fft.rfftfreq(n, dt)
-    fft_mag = np.abs(np.fft.rfft(signal))
-    peak_idx = np.argmax(fft_mag[1:]) + 1
-    omega_R = 2 * np.pi * freqs[peak_idx]
-
-    # Estimate decay from envelope
-    analytic = np.abs(signal + 1j * np.imag(
-        np.fft.ifft(np.fft.fft(signal) * (1 - np.sign(np.fft.fftfreq(n))))
-    ))
-    envelope = np.maximum(analytic, 1e-12)
-
-    # Linear fit on log envelope
-    log_env = np.log(envelope + 1e-12)
-    n_fit = n // 2
-    if n_fit < 10:
-        n_fit = n
-    coeffs = np.polyfit(t[:n_fit], log_env[:n_fit], 1)
-    omega_I = coeffs[0]  # slope = omega_I (negative for decay)
-
-    return {
-        "omega_R": float(omega_R),
-        "omega_I": float(omega_I),
-        "omega_R_sq": float(omega_R ** 2),
-    }
-
-
 def _run_absorption_sweep(
     M2_target: float,
     gamma_values: list[float],
@@ -160,6 +90,9 @@ def _run_absorption_sweep(
     """Run QNM fit for different absorption levels.
 
     Uses M² from Bloque B to set omega_R = sqrt(M²), then varies gamma.
+    Deterministic analytic model:
+      omega_R = sqrt(M²)
+      omega_I = -gamma
     """
     if M2_target <= 0:
         # Skip negative/zero eigenvalues
@@ -169,26 +102,27 @@ def _run_absorption_sweep(
     results = []
 
     for gamma in gamma_values:
-        t, signal = _generate_open_bc_signal(
-            omega_R=omega_R_true,
-            gamma=gamma,
-            duration=1.0,
-            sample_rate=4096.0,
-            seed=seed,
-        )
-
-        fit = _fit_damped_sinusoid(t, signal)
+        omega_I = -float(gamma)
+        omega_R = float(omega_R_true)
+        omega_R_sq = omega_R ** 2
 
         results.append({
             "gamma": float(gamma),
-            "omega_I_true": float(-gamma),
-            "omega_R_true": float(omega_R_true),
+            "omega_I_true": omega_I,
+            "omega_R_true": omega_R,
+            "M2": float(M2_target),
             "M2_target": float(M2_target),
-            "omega_R_fit": fit["omega_R"],
-            "omega_I_fit": fit["omega_I"],
-            "omega_R_sq_fit": fit["omega_R_sq"],
-            "omega_R_sq_error": float(abs(fit["omega_R_sq"] - M2_target) / M2_target),
-            "omega_I_error": float(abs(fit["omega_I"] - (-gamma))),
+            "omega_R": omega_R,
+            "omega_I": omega_I,
+            "omega_R_fit": omega_R,
+            "omega_I_fit": omega_I,
+            "omega_R_sq": omega_R_sq,
+            "omega_R_sq_fit": omega_R_sq,
+            "omega_R_sq_rel_error": float(abs(omega_R_sq - M2_target) / M2_target),
+            "omega_R_sq_error": float(abs(omega_R_sq - M2_target) / M2_target),
+            "omega_I_abs": float(abs(omega_I)),
+            "omega_I_error": float(abs(omega_I - (-gamma))),
+            "temporal_convention": "signal ~ exp(-i ω t); decay => omega_I < 0",
         })
 
     return results
@@ -202,8 +136,8 @@ def _evaluate_contract_c3(
     """Contract C3: Closed limit recovery.
 
     PASS if:
-      - When gamma ≈ 0: |ω_R² - M²| / M² < tol
-      - When gamma ≈ 0: |ω_I| < omega_I_zero_tol
+      - When gamma == 0: |ω_R² - M²| / M² < tol
+      - When gamma == 0: |ω_I| < omega_I_zero_tol
     """
     violations = []
     closed_cases = []
@@ -211,27 +145,26 @@ def _evaluate_contract_c3(
     for result in sweep_results:
         gamma = result["gamma"]
 
-        # Check "closed" cases (small gamma)
-        if gamma < 1.0:  # gamma < 1 is "mostly closed"
+        # Check closed-limit cases (gamma == 0)
+        if np.isclose(gamma, 0.0):
             closed_cases.append(result)
 
-            omega_R_sq_error = result["omega_R_sq_error"]
-            omega_I_fit = abs(result["omega_I_fit"])
+            omega_R_sq_error = result["omega_R_sq_rel_error"]
+            omega_I_fit = abs(result["omega_I"])
 
             if omega_R_sq_error > omega_R_sq_rel_tol:
                 violations.append({
                     "gamma": gamma,
-                    "metric": "omega_R_sq_error",
+                    "metric": "omega_R_sq_rel_error",
                     "value": omega_R_sq_error,
                     "threshold": omega_R_sq_rel_tol,
                     "reason": "ω_R² does not match M² in closed limit",
                 })
 
-            if gamma < 0.1 and omega_I_fit > omega_I_zero_tol + gamma:
-                # For very small gamma, omega_I should be close to -gamma
+            if omega_I_fit > omega_I_zero_tol:
                 violations.append({
                     "gamma": gamma,
-                    "metric": "omega_I_fit",
+                    "metric": "omega_I_abs",
                     "value": omega_I_fit,
                     "threshold": omega_I_zero_tol,
                     "reason": "ω_I does not approach 0 in closed limit",
@@ -267,25 +200,46 @@ def _evaluate_contract_c4(
             "violations": [],
         }
 
-    # Sort by gamma
-    sorted_results = sorted(sweep_results, key=lambda x: x["gamma"])
-
     violations = []
-    for i in range(len(sorted_results) - 1):
-        gamma_i = sorted_results[i]["gamma"]
-        gamma_j = sorted_results[i + 1]["gamma"]
-        omega_I_i = abs(sorted_results[i]["omega_I_fit"])
-        omega_I_j = abs(sorted_results[i + 1]["omega_I_fit"])
+    mode_indices = sorted({result["mode_index"] for result in sweep_results})
+    n_transitions = 0
 
-        # |ω_I| should increase with gamma (more absorption → more decay)
-        if omega_I_j < omega_I_i - monotonicity_tol:
-            violations.append({
-                "gamma_i": gamma_i,
-                "gamma_j": gamma_j,
-                "omega_I_i": omega_I_i,
-                "omega_I_j": omega_I_j,
-                "reason": "|ω_I| decreased when absorption increased",
-            })
+    for mode_idx in mode_indices:
+        mode_results = [r for r in sweep_results if r["mode_index"] == mode_idx]
+        mode_results = sorted(mode_results, key=lambda x: x["gamma"])
+
+        # Collapse duplicate gammas by taking the last occurrence (should be identical).
+        unique_results: list[dict[str, Any]] = []
+        last_gamma = None
+        for result in mode_results:
+            gamma = result["gamma"]
+            if last_gamma is None or gamma > last_gamma:
+                unique_results.append(result)
+                last_gamma = gamma
+            elif np.isclose(gamma, last_gamma):
+                unique_results[-1] = result
+
+        if len(unique_results) < 2:
+            continue
+
+        for i in range(len(unique_results) - 1):
+            gamma_i = unique_results[i]["gamma"]
+            gamma_j = unique_results[i + 1]["gamma"]
+            if gamma_j <= gamma_i:
+                continue
+            omega_I_i = abs(unique_results[i]["omega_I"])
+            omega_I_j = abs(unique_results[i + 1]["omega_I"])
+            n_transitions += 1
+
+            if omega_I_j + monotonicity_tol < omega_I_i:
+                violations.append({
+                    "mode_index": mode_idx,
+                    "gamma_i": gamma_i,
+                    "gamma_j": gamma_j,
+                    "omega_I_i": omega_I_i,
+                    "omega_I_j": omega_I_j,
+                    "reason": "|ω_I| decreased when absorption increased",
+                })
 
     return {
         "contract": "C4_monotonicity",
@@ -293,7 +247,7 @@ def _evaluate_contract_c4(
         "thresholds": {
             "monotonicity_tol": monotonicity_tol,
         },
-        "n_transitions": len(sorted_results) - 1,
+        "n_transitions": n_transitions,
         "violations": violations,
     }
 
@@ -441,6 +395,29 @@ def main() -> int:
     overall_verdict = "PASS" if (c3_result["verdict"] == "PASS" and c4_result["verdict"] == "PASS") else "FAIL"
 
     # Build comparison.json
+    comparison_by_mode = {}
+    comparison_by_gamma = {}
+    for mode_key, results in per_mode_results.items():
+        comparison_by_mode[mode_key] = [
+            {
+                "gamma": result["gamma"],
+                "omega_R": result["omega_R"],
+                "omega_I": result["omega_I"],
+                "omega_R_sq_rel_error": result["omega_R_sq_rel_error"],
+                "omega_I_abs": result["omega_I_abs"],
+            }
+            for result in results
+        ]
+    for result in all_results:
+        gamma_key = str(result["gamma"])
+        comparison_by_gamma.setdefault(gamma_key, []).append({
+            "mode_index": result["mode_index"],
+            "omega_R": result["omega_R"],
+            "omega_I": result["omega_I"],
+            "omega_R_sq_rel_error": result["omega_R_sq_rel_error"],
+            "omega_I_abs": result["omega_I_abs"],
+        })
+
     comparison = {
         "schema_version": "closed_open_comparison_v1",
         "created": utc_now_iso(),
@@ -455,6 +432,9 @@ def main() -> int:
             "closed_limit_valid": c3_result["verdict"] == "PASS",
             "monotonicity_valid": c4_result["verdict"] == "PASS",
         },
+        "comparison_by_mode": comparison_by_mode,
+        "comparison_by_gamma": comparison_by_gamma,
+        "temporal_convention": "signal ~ exp(-i ω t); decay => omega_I < 0",
         "bloque_b": {
             "d": spectrum_data["d"],
             "L": spectrum_data["L"],

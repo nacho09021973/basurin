@@ -26,6 +26,21 @@ echo "=============================================="
 cd "$SCRIPT_DIR"
 
 # -----------------------------------------------------------------------------
+# Executive gate: RUN_VALID must exist and PASS
+# -----------------------------------------------------------------------------
+RUN_VALID_PATH="runs/$RUN_ID/RUN_VALID/verdict.json"
+if [[ ! -f "$RUN_VALID_PATH" ]]; then
+    echo "ERROR: RUN_VALID missing: $RUN_VALID_PATH"
+    exit 2
+fi
+
+VERDICT_RUN_VALID=$(jq -r '.verdict // .results.overall_verdict // empty' "$RUN_VALID_PATH")
+if [[ "$VERDICT_RUN_VALID" != "PASS" ]]; then
+    echo "ERROR: RUN_VALID != PASS (got: ${VERDICT_RUN_VALID:-empty})"
+    exit 2
+fi
+
+# -----------------------------------------------------------------------------
 # Step 1: Generate Bloque B spectrum (closed BC, Hermitian)
 # -----------------------------------------------------------------------------
 echo ""
