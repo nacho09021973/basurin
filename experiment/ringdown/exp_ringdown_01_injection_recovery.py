@@ -17,7 +17,24 @@ import json
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from basurin_io import resolve_out_root, validate_run_id, ensure_stage_dirs, write_manifest, write_stage_summary, require_run_valid
+# --- BASURIN import bootstrap (no depende de PYTHONPATH) ---
+_here = Path(__file__).resolve()
+for _cand in [_here.parents[1], _here.parents[2], _here.parents[3]]:
+    if (_cand / "basurin_io.py").exists():
+        sys.path.insert(0, str(_cand))
+        break
+# -----------------------------------------------------------
+
+import numpy as np
+
+from basurin_io import (
+    resolve_out_root,
+    validate_run_id,
+    ensure_stage_dirs,
+    write_manifest,
+    write_stage_summary,
+    require_run_valid,
+)
 
 
 def abort_contract(msg: str) -> None:
@@ -53,17 +70,120 @@ def in_interval(x: float, lo: float, hi: float) -> bool:
 
 def recover_ringdown(strain_npz_path: Path) -> Dict[str, Any]:
     """
-    TODO: conectar aquí tu recuperador real (el de EXP_RINGDOWN_00).
-    Debe devolver, como mínimo:
-      {
-        "f_220_hat": float,
-        "tau_220_hat": float,
-        "Q_220_hat": float,
-        "ci68": {"f_220": [lo,hi], "tau_220":[lo,hi]}  # opcional
-        "ci95": {"f_220": [lo,hi], "tau_220":[lo,hi]}  # opcional
-      }
+    Recuperador determinista mínimo (contract-first).
+
+    Estimación:
+      - f_220: pico espectral rFFT en banda 20..500 Hz.
+      - tau_220: señal analítica (Hilbert por FFT) en ventana post-t0,
+        demodulación a banda base con f_hat y ajuste lineal temprano de log(envolvente).
+
+    Notas:
+      - Sin aleatoriedad.
+      - Evita cola/noise mediante umbral de envolvente y ventana temporal.
     """
-    abort_contract("recover_ringdown() no implementado: conecta el recuperador de EXP_RINGDOWN_00")
+    data = np.load(strain_npz_path)
+    keys = set(data.files)
+
+    # serie
+    if "strain" in keys:
+        x = np.asarray(data["strain"], dtype=float)
+    elif "h" in keys:
+        x = np.asarray(data["h"], dtype=float)
+    else:
+        x = None
+        for k in data.files:
+            arr = np.asarray(data[k])
+            if arr.ndim == 1 and arr.size > 32:
+                x = np.asarray(arr, dtype=float)
+                break
+        if x is None:
+            abort_contract(f"strain_npz sin serie 1D utilizable: {strain_npz_path}")
+
+    # tiempo / dt
+    if "t" in keys:
+        t = np.asarray(data["t"], dtype=float)
+        if t.shape != x.shape:
+            abort_contract(f"t shape != strain shape en {strain_npz_path}")
+        dt = float(np.median(np.diff(t)))
+    elif "dt" in keys:
+        dt = float(np.asarray(data["dt"]).reshape(-1)[0])
+        t = dt * np.arange(x.size, dtype=float)
+    else:
+        dt = 1.0 / 4096.0
+        t = dt * np.arange(x.size, dtype=float)
+
+    if not np.isfinite(dt) or dt <= 0:
+        abort_contract(f"dt inválido en {strain_npz_path}")
+
+    x = x - float(np.mean(x))
+
+    # f_hat
+    freqs = np.fft.rfftfreq(x.size, d=dt)
+    X = np.fft.rfft(x)
+    mag = np.abs(X)
+    band = (freqs >= 20.0) & (freqs <= 500.0)
+    if not np.any(band):
+        abort_contract("banda 20..500 Hz vacía (n demasiado pequeño)")
+    f_hat = float(freqs[band][int(np.argmax(mag[band]))])
+
+    # --- estimar tau: demodulación a f_hat + fit temprano (determinista) ---
+    i0 = int(np.argmax(np.abs(x)))
+    n = x.size
+    # ventana corta (tau real ~0.02s => con 0.12s hay varias e-folds sin caer a noise)
+    i1 = min(n, i0 + int(max(128, round(0.12 / dt))))
+    xw = x[i0:i1]
+    tw = t[i0:i1]
+    if xw.size < 128:
+        abort_contract("ventana post-t0 demasiado corta para estimar tau")
+
+    # Hilbert por FFT en ventana
+    nw = xw.size
+    Xfw = np.fft.fft(xw)
+    hw = np.zeros(nw)
+    if nw % 2 == 0:
+        hw[0] = 1.0
+        hw[nw // 2] = 1.0
+        hw[1:nw // 2] = 2.0
+    else:
+        hw[0] = 1.0
+        hw[1:(nw + 1) // 2] = 2.0
+    xa = np.fft.ifft(Xfw * hw)  # señal analítica
+
+    # demodular a banda base usando f_hat (ya estimado arriba)
+    tt = (tw - float(tw[0]))
+    z = xa * np.exp(-1j * 2.0 * np.pi * f_hat * tt)
+    env = np.abs(z).astype(float)
+
+    env_max = float(np.max(env))
+    if not np.isfinite(env_max) or env_max <= 0:
+        abort_contract("envolvente inválida tras demodulación")
+
+    # fit temprano: limitar tiempo y evitar cola
+    tmax = 0.08  # s (determinista)
+    base_mask = tt <= tmax
+
+    thr = env_max * 0.30
+    mask = base_mask & (env >= thr)
+    if np.count_nonzero(mask) < 32:
+        thr = env_max * 0.15
+        mask = base_mask & (env >= thr)
+    if np.count_nonzero(mask) < 32:
+        thr = env_max * 0.08
+        mask = base_mask & (env >= thr)
+
+    if np.count_nonzero(mask) < 32:
+        abort_contract("pocos puntos para fit de tau (ni con thr=8%)")
+
+    yy = np.log(env[mask])
+    xx = tt[mask]
+
+    b, a = np.polyfit(xx, yy, deg=1)
+    if not np.isfinite(b) or b >= 0:
+        abort_contract("pendiente no negativa en log(envolvente demodulada); tau no identificable")
+    tau_hat = float(-1.0 / b)
+    q_hat = float(np.pi * f_hat * tau_hat)
+
+    return {"f_220_hat": f_hat, "tau_220_hat": tau_hat, "Q_220_hat": q_hat}
 
 
 @dataclass(frozen=True)
@@ -124,7 +244,8 @@ def main() -> int:
 
     cases_path = outputs_dir / "recovery_cases.jsonl"
     summary_path = outputs_dir / "recovery_summary.json"
-    contract_path = outputs_dir / "recovery_contract.json"
+    contract_path = outputs_dir / "contract_verdict.json"
+    contract_compat_path = outputs_dir / "recovery_contract.json"
 
     err_f_abs: List[float] = []
     err_tau_abs: List[float] = []
@@ -263,6 +384,8 @@ def main() -> int:
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
     with open(contract_path, "w", encoding="utf-8") as f:
+        json.dump(contract, f, indent=2)
+    with open(contract_compat_path, "w", encoding="utf-8") as f:
         json.dump(contract, f, indent=2)
 
     stage_summary = {
