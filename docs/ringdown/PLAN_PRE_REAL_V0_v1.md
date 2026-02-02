@@ -7,6 +7,11 @@ Regla soberana:
 - Ningún experimento se ejecuta si `RUN_VALID != PASS`.
 - Un FAIL invalida el run para downstream.
 
+## Ops quick commands (para no buscar rutas)
+- Comando:
+  python tools/basurin_where.py --run "$RUN_ID" --ringdown-min
+- Regla: si READY: NO, no ejecutar gates downstream.
+
 ## Artefactos canónicos requeridos (upstream)
 - `geometry/outputs/*.h5` (p.ej. `ads_puro.h5`)
 - `spectrum/outputs/spectrum.h5` (Bloque B)
