@@ -33,6 +33,10 @@ def test_basurin_where_ready_when_run_valid_and_synth_present(tmp_path: Path) ->
 
     # ringdown_synth
     _write_json(run_dir / "ringdown_synth" / "outputs" / "synthetic_event.json", {"truth": {"f_220": 250.0, "tau_220": 0.02}})
+    _write_json(
+        run_dir / "ringdown_synth" / "outputs" / "synthetic_events.json",
+        {"schema_version": "ringdown_synth_events_index_v1", "n_events": 1, "events": [{"path": "synthetic_event.json"}]},
+    )
     _write_json(run_dir / "ringdown_synth" / "stage_summary.json", {"stage": "ringdown_synth"})
     (run_dir / "ringdown_synth" / "manifest.json").write_text("{}", encoding="utf-8")
 

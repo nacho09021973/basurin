@@ -1,11 +1,20 @@
 # experiment/ringdown/exp_ringdown_01_injection_recovery.py
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# --- BASURIN import bootstrap (no depende de PYTHONPATH) ---
+_here = Path(__file__).resolve()
+for _cand in [_here.parents[1], _here.parents[2], _here.parents[3]]:
+    if (_cand / "basurin_io.py").exists():
+        sys.path.insert(0, str(_cand))
+        break
+# -----------------------------------------------------------
+
 import argparse
 import json
-import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from basurin_io import resolve_out_root, validate_run_id, ensure_stage_dirs, write_manifest, write_stage_summary, require_run_valid

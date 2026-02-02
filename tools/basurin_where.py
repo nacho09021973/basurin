@@ -30,6 +30,7 @@ RINGDOWN_MIN_SPECS = (
         entrypoint="stages/ringdown_synth_stage.py",
         required_files=(
             "ringdown_synth/outputs/synthetic_event.json",
+            "ringdown_synth/outputs/synthetic_events.json",
             "ringdown_synth/stage_summary.json",
             "ringdown_synth/manifest.json",
         ),

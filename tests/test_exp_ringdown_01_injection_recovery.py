@@ -1,5 +1,8 @@
 import json
+import os
+import subprocess
 from pathlib import Path
+
 import pytest
 
 def write_json(p: Path, obj):
@@ -98,3 +101,19 @@ def test_exp_ringdown_01_fail_exit2(monkeypatch, runs_root):
     with pytest.raises(SystemExit) as e:
         mod.main()
     assert e.value.code == 2
+
+
+def test_exp_ringdown_01_help_runs_without_pythonpath() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    proc = subprocess.run(
+        ["python", "experiment/ringdown/exp_ringdown_01_injection_recovery.py", "--help"],
+        cwd=str(repo_root),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0
+    assert "usage:" in proc.stdout.lower()
