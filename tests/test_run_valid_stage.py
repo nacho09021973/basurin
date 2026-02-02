@@ -23,8 +23,8 @@ def test_run_valid_creates_verdict_and_manifest(tmp_path: Path):
     (g / "stage_summary.json").write_text("{}", encoding="utf-8")
 
     # write stage file under test env (copied from repo in real usage)
-    stage_py = Path("stages/stage_run_valid.py").resolve()
-    assert stage_py.exists(), "missing stages/stage_run_valid.py in repo"
+    stage_py = Path("experiment/run_valid/stage_run_valid.py").resolve()
+    assert stage_py.exists(), "missing experiment/run_valid/stage_run_valid.py in repo"
 
     env = dict(**{**dict(), "BASURIN_RUNS_ROOT": str(work / "runs")})
     p = subprocess.run(
