@@ -113,6 +113,7 @@ def main() -> None:
     stage_dir, outputs_dir = ensure_stage_dirs(args.run, "ringdown_synth", base_dir=out_root)
 
     out_json = outputs_dir / "synthetic_event.json"
+    out_events_index = outputs_dir / "synthetic_events.json"
 
     if args.f_220 is not None and args.tau_220 is not None:
         f_220 = float(args.f_220)
@@ -210,14 +211,33 @@ def main() -> None:
                 "f_220": args.f_220,
                 "tau_220": args.tau_220,
             },
-            "outputs": {"synthetic_event": "outputs/synthetic_event.json"},
+            "outputs": {
+                "synthetic_event": "outputs/synthetic_event.json",
+                "synthetic_events": "outputs/synthetic_events.json",
+            },
         }
         write_stage_summary(stage_dir, summary)
 
+        index_payload = {
+            "schema_version": "ringdown_synth_events_index_v1",
+            "n_events": 1,
+            "events": [
+                {
+                    "path": "synthetic_event.json",
+                    "truth": base_event["truth"],
+                    "snr_target": float(args.snr),
+                }
+            ],
+        }
+        with open(out_events_index, "w", encoding="utf-8") as f:
+            json.dump(index_payload, f, indent=2)
+
         artifacts["synthetic_event"] = out_json
+        artifacts["synthetic_events"] = out_events_index
         write_manifest(stage_dir, artifacts, extra={"verdict": "PASS"})
 
         _ = sha256_file(out_json)
+        _ = sha256_file(out_events_index)
 
 
 if __name__ == "__main__":
