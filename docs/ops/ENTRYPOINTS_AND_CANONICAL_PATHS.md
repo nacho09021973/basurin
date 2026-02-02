@@ -12,6 +12,11 @@ Evitar “búsqueda manual” de:
 - Un run "existe" sólo si RUN_VALID == PASS.
 - Los experimentos deben abortar downstream si falta un input canónico.
 
+## Comando único de estado
+- Comando:
+  python tools/basurin_where.py --run "$RUN_ID" --ringdown-min
+- Nota: si READY: NO, estás bloqueado upstream.
+
 ---
 
 ## Mapa mínimo: Ringdown pre-real (00..01)
