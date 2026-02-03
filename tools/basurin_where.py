@@ -79,6 +79,7 @@ def main() -> int:
     ap.add_argument("--ringdown-exp04", action="store_true", help="report Ringdown EXP04 chain (RUN_VALID + ringdown_synth + EXP04)")
     ap.add_argument("--ringdown-exp05", action="store_true", help="report Ringdown EXP05 chain (RUN_VALID + ringdown_synth + EXP01 + EXP05)")
     ap.add_argument("--ringdown-exp06", action="store_true", help="report Ringdown EXP06 chain (RUN_VALID + ringdown_synth + EXP01 + EXP06)")
+    ap.add_argument("--ringdown-exp07", action="store_true", help="report Ringdown EXP07 chain (RUN_VALID + ringdown_synth + EXP01 + EXP07)")
     args = ap.parse_args()
 
     rr = _repo_root()
@@ -96,6 +97,8 @@ def main() -> int:
     if args.ringdown_exp04:
         specs = RINGDOWN_MIN_SPECS
     elif args.ringdown_exp06:
+        specs = RINGDOWN_MIN_SPECS
+    elif args.ringdown_exp07:
         specs = RINGDOWN_MIN_SPECS
     elif args.ringdown_exp05:
         specs = RINGDOWN_MIN_SPECS
@@ -224,6 +227,51 @@ def main() -> int:
             print(f"    - {path}")
         print("  outputs:")
         for path in exp06_outputs:
+            print(f"    - {path}")
+        if missing:
+            overall_ok = False
+            for m in missing:
+                print(f"  missing: {m}")
+        print("  hint: requiere RUN_VALID PASS + ringdown_synth + EXP01 outputs.")
+
+    if args.ringdown_exp07:
+        exp01_cases = (
+            "experiment/ringdown_01_injection_recovery/outputs/recovery_cases.jsonl"
+        )
+        exp07_entry = (
+            "PYTHONPATH=. python experiment/ringdown/exp_ringdown_07_nonstationary_stress.py --run \"$RUN\""
+        )
+        exp07_inputs = (
+            "RUN_VALID/verdict.json",
+            "ringdown_synth/outputs/synthetic_events_list.json",
+            exp01_cases,
+            "nonstationary_noise/outputs/nonstationary_variants.json",
+        )
+        exp07_outputs = (
+            "experiment/ringdown/EXP_RINGDOWN_07__nonstationary_stress/outputs/nonstationary_report.json",
+            "experiment/ringdown/EXP_RINGDOWN_07__nonstationary_stress/outputs/failure_catalog.jsonl",
+            "experiment/ringdown/EXP_RINGDOWN_07__nonstationary_stress/outputs/contract_verdict.json",
+        )
+
+        ok, missing = _exists_all(run_dir, (exp01_cases,))
+        tag = "OK" if ok else "MISSING"
+        print(f"- EXP_RINGDOWN_01_injection_recovery: {tag}")
+        print("  entrypoint: experiment/ringdown/exp_ringdown_01_injection_recovery.py")
+        if missing:
+            overall_ok = False
+            for m in missing:
+                print(f"  missing: {m}")
+        print("  hint: EXP07 requiere recovery_cases.jsonl de EXP01.")
+
+        ok, missing = _exists_all(run_dir, exp07_outputs)
+        tag = "OK" if ok else "MISSING"
+        print(f"- EXP_RINGDOWN_07__nonstationary_stress: {tag}")
+        print(f"  entrypoint: {exp07_entry}")
+        print("  inputs:")
+        for path in exp07_inputs:
+            print(f"    - {path}")
+        print("  outputs:")
+        for path in exp07_outputs:
             print(f"    - {path}")
         if missing:
             overall_ok = False
