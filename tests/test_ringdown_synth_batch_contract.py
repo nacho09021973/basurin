@@ -46,7 +46,14 @@ def test_ringdown_synth_batch_contract(tmp_path: Path) -> None:
 
     run_dir = tmp_path / "runs" / run_id
     events_path = run_dir / "ringdown_synth" / "outputs" / "synthetic_events.json"
+    synthetic_event_path = run_dir / "ringdown_synth" / "outputs" / "synthetic_event.json"
+    manifest_path = run_dir / "ringdown_synth" / "manifest.json"
     assert events_path.exists()
+    assert synthetic_event_path.exists()
+    assert manifest_path.exists()
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["files"]["synthetic_event"].endswith("outputs/synthetic_event.json")
 
     events = json.loads(events_path.read_text(encoding="utf-8"))
     assert isinstance(events, list)
