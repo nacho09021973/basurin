@@ -121,4 +121,6 @@ def test_basurin_where_exp07_entrypoints(tmp_path: Path) -> None:
     )
     assert res.returncode == 2
     assert "EXP_RINGDOWN_07__nonstationary_stress" in res.stdout
-    assert "PYTHONPATH=. python experiment/ringdown/exp_ringdown_07_nonstationary_stress.py --run \"$RUN\"" in res.stdout
+    assert "exp_ringdown_07_nonstationary_stress.py" in res.stdout
+    assert "--p95-bias-rel-threshold 0.25" in res.stdout
+    assert "--max-bias-rel-hardcap 0.5" in res.stdout
