@@ -46,6 +46,24 @@ def read_json(path: Path) -> Any:
         return json.load(f)
 
 
+def _extract_overall_verdict(payload: dict) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    v = (payload.get("results") or {}).get("overall_verdict")
+    if v is not None:
+        return v
+    v = payload.get("overall_verdict")
+    if v is not None:
+        return v
+    v = (payload.get("results") or {}).get("verdict")
+    if v is not None:
+        return v
+    v = payload.get("verdict")
+    if v is not None:
+        return v
+    return None
+
+
 def parse_csv_floats(value: str) -> List[float]:
     return [float(v.strip()) for v in value.split(",") if v.strip()]
 
@@ -63,7 +81,7 @@ def check_run_valid_stage_summary(run_dir: Path) -> Dict[str, Any]:
     if not path.exists():
         abort_contract(f"RUN_VALID stage_summary.json missing at {path}")
     payload = read_json(path)
-    verdict = payload.get("overall_verdict", payload.get("verdict"))
+    verdict = _extract_overall_verdict(payload)
     if verdict != "PASS":
         abort_contract(f"RUN_VALID overall_verdict={verdict}")
     return payload
@@ -96,7 +114,7 @@ def resolve_exp01_contract(run_dir: Path) -> Tuple[Path, Dict[str, Any]]:
     if not path.exists():
         abort_contract(f"EXP01 contract_verdict.json missing at {preferred} (legacy {legacy})")
     payload = read_json(path)
-    verdict = payload.get("overall_verdict", payload.get("verdict"))
+    verdict = _extract_overall_verdict(payload)
     if verdict != "PASS":
         abort_contract(f"EXP01 contract_verdict={verdict}")
     return path, payload
