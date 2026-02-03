@@ -78,6 +78,7 @@ def main() -> int:
     ap.add_argument("--ringdown-exp03", action="store_true", help="report Ringdown EXP03 chain (EXP01 + OBSERVABLES_V1 + EXP03)")
     ap.add_argument("--ringdown-exp04", action="store_true", help="report Ringdown EXP04 chain (RUN_VALID + ringdown_synth + EXP04)")
     ap.add_argument("--ringdown-exp05", action="store_true", help="report Ringdown EXP05 chain (RUN_VALID + ringdown_synth + EXP01 + EXP05)")
+    ap.add_argument("--ringdown-exp06", action="store_true", help="report Ringdown EXP06 chain (RUN_VALID + ringdown_synth + EXP01 + EXP06)")
     args = ap.parse_args()
 
     rr = _repo_root()
@@ -93,6 +94,8 @@ def main() -> int:
         return 2
 
     if args.ringdown_exp04:
+        specs = RINGDOWN_MIN_SPECS
+    elif args.ringdown_exp06:
         specs = RINGDOWN_MIN_SPECS
     elif args.ringdown_exp05:
         specs = RINGDOWN_MIN_SPECS
@@ -183,6 +186,50 @@ def main() -> int:
             for m in missing:
                 print(f"  missing: {m}")
         print("  hint: requiere RUN_VALID PASS + EXP01 outputs.")
+
+    if args.ringdown_exp06:
+        exp01_cases = (
+            "experiment/ringdown_01_injection_recovery/outputs/recovery_cases.jsonl"
+        )
+        exp06_entry = (
+            "PYTHONPATH=. python experiment/ringdown/exp_ringdown_06_psd_robustness.py --run \"$RUN\""
+        )
+        exp06_inputs = (
+            "RUN_VALID/verdict.json",
+            "ringdown_synth/outputs/synthetic_events_list.json",
+            exp01_cases,
+        )
+        exp06_outputs = (
+            "experiment/ringdown/EXP_RINGDOWN_06__psd_robustness/outputs/psd_sweep_metrics.json",
+            "experiment/ringdown/EXP_RINGDOWN_06__psd_robustness/outputs/psd_cases.jsonl",
+            "experiment/ringdown/EXP_RINGDOWN_06__psd_robustness/outputs/contract_verdict.json",
+        )
+
+        ok, missing = _exists_all(run_dir, (exp01_cases,))
+        tag = "OK" if ok else "MISSING"
+        print(f"- EXP_RINGDOWN_01_injection_recovery: {tag}")
+        print("  entrypoint: experiment/ringdown/exp_ringdown_01_injection_recovery.py")
+        if missing:
+            overall_ok = False
+            for m in missing:
+                print(f"  missing: {m}")
+        print("  hint: EXP06 requiere recovery_cases.jsonl de EXP01.")
+
+        ok, missing = _exists_all(run_dir, exp06_outputs)
+        tag = "OK" if ok else "MISSING"
+        print(f"- EXP_RINGDOWN_06__psd_robustness: {tag}")
+        print(f"  entrypoint: {exp06_entry}")
+        print("  inputs:")
+        for path in exp06_inputs:
+            print(f"    - {path}")
+        print("  outputs:")
+        for path in exp06_outputs:
+            print(f"    - {path}")
+        if missing:
+            overall_ok = False
+            for m in missing:
+                print(f"  missing: {m}")
+        print("  hint: requiere RUN_VALID PASS + ringdown_synth + EXP01 outputs.")
 
     if args.ringdown_exp03:
         exp01_pref = (
