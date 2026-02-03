@@ -169,6 +169,12 @@ def main() -> None:
             json.dump(events, f, indent=2)
         artifacts["synthetic_events"] = out_events
 
+        # canonical list for EXP01/EXP02 consumption
+        out_events_list = outputs_dir / "synthetic_events_list.json"
+        with open(out_events_list, "w", encoding="utf-8") as f:
+            json.dump(events, f, indent=2)
+        artifacts["synthetic_events_list"] = out_events_list
+
         summary = {
             "stage": "ringdown_synth",
             "params": {
@@ -232,12 +238,19 @@ def main() -> None:
         with open(out_events_index, "w", encoding="utf-8") as f:
             json.dump(index_payload, f, indent=2)
 
+        # canonical list for EXP01/EXP02 consumption
+        out_events_list = outputs_dir / "synthetic_events_list.json"
+        with open(out_events_list, "w", encoding="utf-8") as f:
+            json.dump(index_payload["events"], f, indent=2)
+
         artifacts["synthetic_event"] = out_json
         artifacts["synthetic_events"] = out_events_index
+        artifacts["synthetic_events_list"] = out_events_list
         write_manifest(stage_dir, artifacts, extra={"verdict": "PASS"})
 
         _ = sha256_file(out_json)
         _ = sha256_file(out_events_index)
+        _ = sha256_file(out_events_list)
 
 
 if __name__ == "__main__":

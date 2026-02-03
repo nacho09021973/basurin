@@ -53,3 +53,11 @@ def test_ringdown_synth_writes_plural_index(tmp_path: Path) -> None:
     assert index_payload["events"][0]["path"] == "synthetic_event.json"
     assert "truth" in index_payload["events"][0]
     assert index_payload["events"][0]["snr_target"] == 11.0
+
+    # Contract: synthetic_events_list.json must exist and be a list
+    list_path = outputs_dir / "synthetic_events_list.json"
+    assert list_path.exists(), "synthetic_events_list.json not created"
+    list_payload = json.loads(list_path.read_text(encoding="utf-8"))
+    assert isinstance(list_payload, list), "synthetic_events_list.json must be a list"
+    assert len(list_payload) == 1
+    assert list_payload == index_payload["events"]
