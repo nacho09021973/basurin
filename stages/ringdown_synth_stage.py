@@ -175,6 +175,30 @@ def main() -> None:
             json.dump(events, f, indent=2)
         artifacts["synthetic_events_list"] = out_events_list
 
+        # --- Canonical single-event alias (mínimo requerido) ---
+        synthetic_event_path = outputs_dir / "synthetic_event.json"
+        synthetic_event_created = False
+        if isinstance(events, list) and len(events) >= 1:
+            first = events[0]
+            synth_event = {
+                "schema_version": "ringdown_synth_event_v1",
+                "event_id": first.get("event_id", "event_000"),
+                "truth": first.get("truth", {}),
+                "snr_target": float(first.get("snr_target", 12.0)),
+                "path": first.get("path"),
+            }
+            with open(synthetic_event_path, "w", encoding="utf-8") as f:
+                json.dump(synth_event, f, indent=2)
+            artifacts["synthetic_event"] = synthetic_event_path
+            synthetic_event_created = True
+        # -------------------------------------------------------
+
+        outputs = {
+            "synthetic_events": "outputs/synthetic_events.json",
+            "cases_dir": "outputs/cases",
+        }
+        if synthetic_event_created:
+            outputs["synthetic_event"] = "outputs/synthetic_event.json"
         summary = {
             "stage": "ringdown_synth",
             "params": {
@@ -189,10 +213,7 @@ def main() -> None:
             "inputs": {
                 "batch_json": args.batch_json,
             },
-            "outputs": {
-                "synthetic_events": "outputs/synthetic_events.json",
-                "cases_dir": "outputs/cases",
-            },
+            "outputs": outputs,
         }
         write_stage_summary(stage_dir, summary)
         write_manifest(stage_dir, artifacts, extra={"verdict": "PASS"})
