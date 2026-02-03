@@ -210,7 +210,7 @@ def main() -> None:
         # Generate strain.npz for EXP01 consumption
         out_strain = outputs_dir / "strain.npz"
         _write_strain_npz(out_strain, int(args.seed), float(args.snr), f_220, tau_220)
-        artifacts["strain"] = out_strain
+        artifacts["strain_npz"] = out_strain
 
         summary = {
             "stage": "ringdown_synth",
@@ -225,7 +225,7 @@ def main() -> None:
             "outputs": {
                 "synthetic_event": "outputs/synthetic_event.json",
                 "synthetic_events": "outputs/synthetic_events.json",
-                "strain": "outputs/strain.npz",
+                "strain_npz": "outputs/strain.npz",
             },
         }
         write_stage_summary(stage_dir, summary)
