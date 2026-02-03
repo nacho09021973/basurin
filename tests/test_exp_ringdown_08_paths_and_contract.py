@@ -25,6 +25,13 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+def _write_run_valid_pass(run_dir: Path) -> None:
+    _write_json(
+        run_dir / "RUN_VALID" / "outputs" / "run_valid.json",
+        {"overall_verdict": "PASS"},
+    )
+
+
 def _write_strain_npz(
     path: Path,
     f0: float = 220.0,
@@ -53,7 +60,7 @@ def test_exp_ringdown_08_missing_real_data_contract(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     run_dir = runs_root / run_id
 
-    _write_json(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    _write_run_valid_pass(run_dir)
 
     env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
     cmd = [
@@ -101,7 +108,7 @@ def test_exp_ringdown_08_with_valid_real_data(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     run_dir = runs_root / run_id
 
-    _write_json(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    _write_run_valid_pass(run_dir)
 
     real_v0_dir = run_dir / "ringdown_real_v0" / "outputs"
     cases_dir = real_v0_dir / "cases"
@@ -164,7 +171,7 @@ def test_exp_ringdown_08_dry_run_mode(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     run_dir = runs_root / run_id
 
-    _write_json(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    _write_run_valid_pass(run_dir)
 
     real_v0_dir = run_dir / "ringdown_real_v0" / "outputs"
     cases_dir = real_v0_dir / "cases"
@@ -205,6 +212,7 @@ def test_exp_ringdown_08_dry_run_mode(tmp_path: Path) -> None:
 
     smoke = next(c for c in contract["contracts"] if c["id"] == "R08_PIPELINE_SMOKE")
     assert smoke["verdict"] == "PASS"
+    assert smoke["violations"] == []
     assert smoke["metrics"]["dry_run"] is True
     assert smoke["metrics"]["n_smoke_ok"] == 0
 
@@ -215,7 +223,7 @@ def test_exp_ringdown_08_explicit_real_v0_json_path(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     run_dir = runs_root / run_id
 
-    _write_json(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    _write_run_valid_pass(run_dir)
 
     custom_data_dir = tmp_path / "custom_real_data"
     cases_dir = custom_data_dir / "cases"
@@ -263,7 +271,7 @@ def test_exp_ringdown_08_failure_catalog_categorization(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     run_dir = runs_root / run_id
 
-    _write_json(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    _write_run_valid_pass(run_dir)
 
     real_v0_dir = run_dir / "ringdown_real_v0" / "outputs"
     cases_dir = real_v0_dir / "cases"
@@ -322,7 +330,7 @@ def test_exp_ringdown_08_deterministic_rerun(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     run_dir = runs_root / run_id
 
-    _write_json(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    _write_run_valid_pass(run_dir)
 
     real_v0_dir = run_dir / "ringdown_real_v0" / "outputs"
     cases_dir = real_v0_dir / "cases"
@@ -366,3 +374,54 @@ def test_exp_ringdown_08_deterministic_rerun(tmp_path: Path) -> None:
     assert report1["overall_verdict"] == report2["overall_verdict"]
     assert report1["smoke_inference"]["n_smoke_ok"] == report2["smoke_inference"]["n_smoke_ok"]
     assert len(report1["smoke_inference"]["results"]) == len(report2["smoke_inference"]["results"])
+
+
+def test_exp_ringdown_08_requires_run_valid_pass(tmp_path: Path) -> None:
+    """EXP08 must abort if RUN_VALID is missing or fails."""
+    runs_root = tmp_path / "runs"
+
+    run_id_missing = "2040-08-01__unit_test__exp08_missing_run_valid"
+    run_dir_missing = runs_root / run_id_missing
+    run_dir_missing.mkdir(parents=True, exist_ok=True)
+
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+    cmd_missing = [
+        "python",
+        "experiment/ringdown/exp_ringdown_08_real_v0_smoke.py",
+        "--run",
+        run_id_missing,
+        "--dry-run",
+    ]
+    res_missing = subprocess.run(
+        cmd_missing, capture_output=True, text=True, check=False, env=env
+    )
+    assert res_missing.returncode == 2
+
+    stage_dir_missing = (
+        run_dir_missing / "experiment" / "ringdown" / "EXP_RINGDOWN_08__real_v0_smoke"
+    )
+    outputs_missing = stage_dir_missing / "outputs"
+    assert (stage_dir_missing / "manifest.json").exists()
+    assert (stage_dir_missing / "stage_summary.json").exists()
+    assert (outputs_missing / "contract_verdict.json").exists()
+    assert (outputs_missing / "real_v0_smoke_report.json").exists()
+    assert (outputs_missing / "failure_catalog.jsonl").exists()
+
+    run_id_fail = "2040-08-01__unit_test__exp08_run_valid_fail"
+    run_dir_fail = runs_root / run_id_fail
+    _write_json(
+        run_dir_fail / "RUN_VALID" / "outputs" / "run_valid.json",
+        {"overall_verdict": "FAIL"},
+    )
+
+    cmd_fail = [
+        "python",
+        "experiment/ringdown/exp_ringdown_08_real_v0_smoke.py",
+        "--run",
+        run_id_fail,
+        "--dry-run",
+    ]
+    res_fail = subprocess.run(
+        cmd_fail, capture_output=True, text=True, check=False, env=env
+    )
+    assert res_fail.returncode == 2

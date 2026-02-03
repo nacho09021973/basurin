@@ -28,13 +28,12 @@ for _cand in [_here.parents[0], _here.parents[1], _here.parents[2]]:
 import argparse
 import json
 import subprocess
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from basurin_io import (
     ensure_stage_dirs,
-    require_run_valid,
     resolve_out_root,
     sha256_file,
     utc_now_iso,
@@ -58,6 +57,18 @@ def abort_contract(message: str) -> None:
 def _read_json(path: Path) -> Any:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _load_run_valid_payload(run_dir: Path) -> Tuple[Optional[dict], Optional[str], Optional[str]]:
+    run_valid_path = run_dir / "RUN_VALID" / "outputs" / "run_valid.json"
+    if not run_valid_path.exists():
+        return None, None, f"RUN_VALID missing at {run_valid_path}"
+    try:
+        payload = json.loads(run_valid_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return None, None, f"RUN_VALID invalid JSON at {run_valid_path}: {exc}"
+    verdict = payload.get("overall_verdict")
+    return payload, verdict, None
 
 
 def _maybe_git_sha() -> Optional[str]:
@@ -195,13 +206,58 @@ def main() -> int:
     validate_run_id(args.run, out_root)
     run_dir = (out_root / args.run).resolve()
 
-    try:
-        require_run_valid(out_root, args.run)
-    except Exception as exc:
-        abort_contract(str(exc))
-
     stage_dir, outputs_dir = ensure_stage_dirs(args.run, STAGE_NAME, base_dir=out_root)
     cases_dir = outputs_dir / "cases"
+
+    _, run_valid_verdict, run_valid_error = _load_run_valid_payload(run_dir)
+    if run_valid_error is not None or run_valid_verdict != "PASS":
+        reason = run_valid_error or f"RUN_VALID overall_verdict={run_valid_verdict}"
+        contract_path = outputs_dir / "contract_verdict.json"
+        contract_verdict = {
+            "overall_verdict": "FAIL",
+            "timestamp": utc_now_iso(),
+            "schema_version": "ringdown_real_v0_stage_v1",
+            "contracts": [
+                {
+                    "id": "REAL_V0_RUN_VALID_PASS",
+                    "verdict": "FAIL",
+                    "violations": [reason],
+                    "metrics": {
+                        "run_valid_path": str(run_dir / "RUN_VALID" / "outputs" / "run_valid.json"),
+                    },
+                }
+            ],
+        }
+        with open(contract_path, "w", encoding="utf-8") as f:
+            json.dump(contract_verdict, f, indent=2, sort_keys=True)
+            f.write("\n")
+
+        summary = {
+            "stage": STAGE_NAME,
+            "run": args.run,
+            "created": utc_now_iso(),
+            "inputs": {},
+            "parameters": {
+                "data_source_dir": str(args.data_source_dir) if args.data_source_dir else None,
+                "dry_run": args.dry_run,
+            },
+            "outputs": {"contract_verdict": "outputs/contract_verdict.json"},
+            "results": {
+                "overall_verdict": "FAIL",
+                "fail_reason": reason,
+                "n_events": 0,
+            },
+            "version": {"git_sha": _maybe_git_sha()},
+        }
+
+        summary_written = write_stage_summary(stage_dir, summary)
+        write_manifest(
+            stage_dir,
+            {"contract": contract_path, "stage_summary": summary_written},
+            extra={"version": "1"},
+        )
+
+        abort_contract(reason)
 
     data_source_dir = None
     if args.data_source_dir:
@@ -210,6 +266,7 @@ def main() -> int:
     raw_events = []
     if data_source_dir is not None:
         raw_events = _discover_real_events(data_source_dir)
+        raw_events = sorted(raw_events, key=lambda ev: ev["event_id"])
 
     if not raw_events:
         contract_verdict = {
@@ -238,7 +295,7 @@ def main() -> int:
                 "data_source_dir": str(data_source_dir) if data_source_dir else None,
                 "dry_run": args.dry_run,
             },
-            "outputs": {},
+            "outputs": {"contract_verdict": "outputs/contract_verdict.json"},
             "results": {
                 "overall_verdict": "FAIL",
                 "fail_reason": "missing_real_v0_inputs",
@@ -247,21 +304,20 @@ def main() -> int:
             "version": {"git_sha": _maybe_git_sha()},
         }
 
-        if not args.dry_run:
-            contract_path = outputs_dir / "contract_verdict.json"
-            with open(contract_path, "w", encoding="utf-8") as f:
-                json.dump(contract_verdict, f, indent=2, sort_keys=True)
-                f.write("\n")
+        contract_path = outputs_dir / "contract_verdict.json"
+        with open(contract_path, "w", encoding="utf-8") as f:
+            json.dump(contract_verdict, f, indent=2, sort_keys=True)
+            f.write("\n")
 
-            summary_written = write_stage_summary(stage_dir, summary)
-            write_manifest(
-                stage_dir,
-                {
-                    "contract": contract_path,
-                    "stage_summary": summary_written,
-                },
-                extra={"version": "1"},
-            )
+        summary_written = write_stage_summary(stage_dir, summary)
+        write_manifest(
+            stage_dir,
+            {
+                "contract": contract_path,
+                "stage_summary": summary_written,
+            },
+            extra={"version": "1"},
+        )
 
         abort_contract(
             "MISSING_REAL_DATA: no real v0 events found. "
@@ -384,25 +440,25 @@ def main() -> int:
             json.dump(events_list, f, indent=2, sort_keys=True)
             f.write("\n")
 
-        with open(contract_path, "w", encoding="utf-8") as f:
-            json.dump(contract_verdict, f, indent=2, sort_keys=True)
-            f.write("\n")
+    with open(contract_path, "w", encoding="utf-8") as f:
+        json.dump(contract_verdict, f, indent=2, sort_keys=True)
+        f.write("\n")
 
-        summary_written = write_stage_summary(stage_dir, summary)
+    summary_written = write_stage_summary(stage_dir, summary)
 
-        artifacts = {
-            "real_v0_events_list": events_list_path,
-            "contract": contract_path,
-            "stage_summary": summary_written,
-        }
-
+    artifacts = {
+        "contract": contract_path,
+        "stage_summary": summary_written,
+    }
+    if not args.dry_run:
+        artifacts["real_v0_events_list"] = events_list_path
         for entry in events_list:
             event_id = entry["event_id"]
             strain_path = outputs_dir / entry["strain_npz"]
             if strain_path.exists():
                 artifacts[f"strain_{event_id}"] = strain_path
 
-        write_manifest(stage_dir, artifacts, extra={"version": "1"})
+    write_manifest(stage_dir, artifacts, extra={"version": "1"})
 
     if overall_verdict != "PASS":
         abort_contract(
