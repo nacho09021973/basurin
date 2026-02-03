@@ -61,3 +61,14 @@ def test_ringdown_synth_writes_plural_index(tmp_path: Path) -> None:
     assert isinstance(list_payload, list), "synthetic_events_list.json must be a list"
     assert len(list_payload) == 1
     assert list_payload == index_payload["events"]
+
+    # Contract: strain.npz must exist and be referenced in events
+    strain_path = outputs_dir / "strain.npz"
+    assert strain_path.exists(), "strain.npz not created in non-batch mode"
+    assert list_payload[0].get("strain_npz") == "strain.npz", "strain_npz missing or wrong in events"
+
+    # Contract: manifest.json must register strain_npz
+    manifest_path = outputs_dir.parent / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "strain_npz" in manifest.get("files", {}), "strain_npz not in manifest.files"
+    assert manifest["files"]["strain_npz"] == "outputs/strain.npz"
