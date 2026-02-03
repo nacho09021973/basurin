@@ -7,6 +7,8 @@ from pathlib import Path
 
 import numpy as np
 
+from experiment.ringdown.exp_ringdown_07_nonstationary_stress import _robustness_verdict
+
 
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -74,7 +76,9 @@ def test_exp_ringdown_07_paths_and_contract(tmp_path: Path) -> None:
         "v1",
         "--max-fail-rate",
         "1.0",
-        "--max-bias-rel",
+        "--p95-bias-rel-threshold",
+        "10.0",
+        "--max-bias-rel-hardcap",
         "10.0",
     ]
     res = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
@@ -106,3 +110,41 @@ def test_exp_ringdown_07_paths_and_contract(tmp_path: Path) -> None:
     assert report_first["n_total"] == report_second["n_total"]
     assert report_first["n_fail"] == report_second["n_fail"]
     assert len(report_first["variants"]) == len(report_second["variants"])
+
+
+def _make_bias_values(outlier: float, n_variants: int = 2) -> list[float]:
+    base = [0.1] * 23 + [outlier]
+    values = []
+    for _ in range(n_variants):
+        values.extend(base)
+    return values
+
+
+def test_exp_ringdown_07_contract_allows_p95_passes_with_soft_outlier() -> None:
+    bias_values = _make_bias_values(0.35)
+    verdict, p95_bias_rel, max_bias_rel = _robustness_verdict(
+        n_total_rows=len(bias_values),
+        fail_rate=0.0,
+        max_fail_rate_threshold=0.10,
+        bias_values=bias_values,
+        p95_bias_rel_threshold=0.20,
+        max_bias_rel_hardcap=0.50,
+    )
+    assert p95_bias_rel <= 0.20
+    assert max_bias_rel == 0.35
+    assert verdict is True
+
+
+def test_exp_ringdown_07_contract_fails_hardcap_outlier() -> None:
+    bias_values = _make_bias_values(0.80)
+    verdict, p95_bias_rel, max_bias_rel = _robustness_verdict(
+        n_total_rows=len(bias_values),
+        fail_rate=0.0,
+        max_fail_rate_threshold=0.10,
+        bias_values=bias_values,
+        p95_bias_rel_threshold=0.20,
+        max_bias_rel_hardcap=0.50,
+    )
+    assert p95_bias_rel <= 0.20
+    assert max_bias_rel == 0.80
+    assert verdict is False
