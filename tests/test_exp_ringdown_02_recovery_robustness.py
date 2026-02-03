@@ -21,7 +21,7 @@ def runs_root(tmp_path, monkeypatch):
 def make_run_valid(run_dir: Path) -> None:
     write_json(
         run_dir / "RUN_VALID" / "stage_summary.json",
-        {"overall_verdict": "PASS"},
+        {"results": {"overall_verdict": "PASS"}},
     )
 
 
