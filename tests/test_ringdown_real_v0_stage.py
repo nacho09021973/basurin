@@ -23,6 +23,13 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+def _write_run_valid_pass(run_dir: Path) -> None:
+    _write_json(
+        run_dir / "RUN_VALID" / "outputs" / "run_valid.json",
+        {"overall_verdict": "PASS"},
+    )
+
+
 def _write_strain_npz(path: Path, n_samples: int = 2048, fs: float = 4096.0) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     t = np.arange(n_samples, dtype=float) / fs
@@ -36,7 +43,7 @@ def test_ringdown_real_v0_stage_missing_data_contract(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     run_dir = runs_root / run_id
 
-    _write_json(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    _write_run_valid_pass(run_dir)
 
     env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
     cmd = [
@@ -74,7 +81,7 @@ def test_ringdown_real_v0_stage_with_valid_data(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     run_dir = runs_root / run_id
 
-    _write_json(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    _write_run_valid_pass(run_dir)
 
     data_source = tmp_path / "real_data"
     for event_id in ["GW150914", "GW170817"]:
@@ -122,7 +129,7 @@ def test_ringdown_real_v0_stage_dry_run(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     run_dir = runs_root / run_id
 
-    _write_json(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    _write_run_valid_pass(run_dir)
 
     env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
     cmd = [
@@ -136,6 +143,13 @@ def test_ringdown_real_v0_stage_dry_run(tmp_path: Path) -> None:
 
     assert res.returncode == 2
 
+    stage_dir = run_dir / "ringdown_real_v0"
+    outputs_dir = stage_dir / "outputs"
+
+    assert (stage_dir / "manifest.json").exists()
+    assert (stage_dir / "stage_summary.json").exists()
+    assert (outputs_dir / "contract_verdict.json").exists()
+
 
 def test_ringdown_real_v0_stage_invalid_strain_files(tmp_path: Path) -> None:
     """Test that stage handles invalid strain files gracefully."""
@@ -143,7 +157,7 @@ def test_ringdown_real_v0_stage_invalid_strain_files(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     run_dir = runs_root / run_id
 
-    _write_json(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    _write_run_valid_pass(run_dir)
 
     data_source = tmp_path / "real_data"
     valid_dir = data_source / "valid_event"

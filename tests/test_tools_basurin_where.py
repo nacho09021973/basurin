@@ -27,7 +27,7 @@ def test_basurin_where_ready_when_run_valid_and_synth_present(tmp_path: Path) ->
     run_dir = tmp_path / "runs" / run_id
 
     # RUN_VALID
-    _write_json(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    _write_json(run_dir / "RUN_VALID" / "outputs" / "run_valid.json", {"overall_verdict": "PASS"})
     _write_json(run_dir / "RUN_VALID" / "stage_summary.json", {"results": {"overall_verdict": "PASS"}})
     (run_dir / "RUN_VALID" / "manifest.json").write_text("{}", encoding="utf-8")
 
@@ -58,7 +58,7 @@ def test_basurin_where_exp06_entrypoints(tmp_path: Path) -> None:
     run_id = "2038-02-01__unit_test__where_exp06"
     run_dir = tmp_path / "runs" / run_id
 
-    _write_json(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    _write_json(run_dir / "RUN_VALID" / "outputs" / "run_valid.json", {"overall_verdict": "PASS"})
     _write_json(run_dir / "RUN_VALID" / "stage_summary.json", {"results": {"overall_verdict": "PASS"}})
     (run_dir / "RUN_VALID" / "manifest.json").write_text("{}", encoding="utf-8")
 
@@ -93,7 +93,7 @@ def test_basurin_where_exp07_entrypoints(tmp_path: Path) -> None:
     run_id = "2038-02-01__unit_test__where_exp07"
     run_dir = tmp_path / "runs" / run_id
 
-    _write_json(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    _write_json(run_dir / "RUN_VALID" / "outputs" / "run_valid.json", {"overall_verdict": "PASS"})
     _write_json(run_dir / "RUN_VALID" / "stage_summary.json", {"results": {"overall_verdict": "PASS"}})
     (run_dir / "RUN_VALID" / "manifest.json").write_text("{}", encoding="utf-8")
 

@@ -13,7 +13,7 @@ it only ensures:
 3. All failures are categorized and traceable (R08_FAIL_CATEGORIZED)
 
 Inputs:
-  - RUN_VALID/verdict.json (must be PASS)
+  - RUN_VALID/outputs/run_valid.json (must be PASS)
   - ringdown_synth/outputs/synthetic_events_list.json (optional, for control)
   - ringdown_real_v0/outputs/real_v0_events_list.json (or --real-v0-events-json)
 
@@ -48,7 +48,6 @@ import numpy as np
 
 from basurin_io import (
     ensure_stage_dirs,
-    require_run_valid,
     resolve_out_root,
     sha256_file,
     utc_now_iso,
@@ -101,9 +100,7 @@ def _maybe_git_sha() -> Optional[str]:
 
 
 def _resolve_run_valid_path(run_dir: Path) -> Path:
-    preferred = run_dir / "RUN_VALID" / "verdict.json"
-    legacy = run_dir / "RUN_VALID" / "outputs" / "run_valid.json"
-    return preferred if preferred.exists() else legacy
+    return run_dir / "RUN_VALID" / "outputs" / "run_valid.json"
 
 
 def _resolve_real_v0_events_path(run_dir: Path) -> Optional[Path]:
@@ -116,6 +113,119 @@ def _resolve_synth_events_path(run_dir: Path) -> Optional[Path]:
     """Resolve synthetic events list for control comparison."""
     path = run_dir / "ringdown_synth" / "outputs" / "synthetic_events_list.json"
     return path if path.exists() else None
+
+
+def _load_run_valid_payload(run_dir: Path) -> Tuple[Optional[dict], Optional[str], Optional[str]]:
+    run_valid_path = _resolve_run_valid_path(run_dir)
+    if not run_valid_path.exists():
+        return None, None, f"RUN_VALID missing at {run_valid_path}"
+    try:
+        payload = json.loads(run_valid_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return None, None, f"RUN_VALID invalid JSON at {run_valid_path}: {exc}"
+    verdict = payload.get("overall_verdict")
+    return payload, verdict, None
+
+
+def _write_run_valid_failure(
+    run_id: str,
+    out_root: Path,
+    run_valid_path: Path,
+    reason: str,
+    dry_run: bool,
+) -> None:
+    run_dir = (out_root / run_id).resolve()
+    stage_dir, outputs_dir = ensure_stage_dirs(run_id, STAGE_NAME, base_dir=out_root)
+    failure_catalog_path = outputs_dir / "failure_catalog.jsonl"
+    report_path = outputs_dir / "real_v0_smoke_report.json"
+    contract_path = outputs_dir / "contract_verdict.json"
+
+    sentinel_row = {
+        "event_id": "<none>",
+        "strain_path": "",
+        "status": "FAIL",
+        "fail_reason_code": "missing_real_v0_inputs",
+        "notes": "run_valid_blocked",
+        "metrics": {},
+    }
+    with open(failure_catalog_path, "w", encoding="utf-8") as catalog_f:
+        catalog_f.write(json.dumps(sentinel_row, sort_keys=True) + "\n")
+
+    contracts = [
+        {
+            "id": "R08_RUN_VALID_PASS",
+            "verdict": "FAIL",
+            "violations": [reason],
+            "metrics": {
+                "run_valid_path": str(run_valid_path),
+            },
+        }
+    ]
+
+    contract_payload = {
+        "overall_verdict": "FAIL",
+        "contracts": contracts,
+        "timestamp": utc_now_iso(),
+        "schema_version": "exp_ringdown_08_v1",
+    }
+    with open(contract_path, "w", encoding="utf-8") as f:
+        json.dump(contract_payload, f, indent=2, sort_keys=True)
+        f.write("\n")
+
+    report_payload = {
+        "run_id": run_id,
+        "dry_run": dry_run,
+        "io_validation": {
+            "n_events_total": 0,
+            "n_valid": 0,
+            "n_invalid": 0,
+            "validation_results": [],
+        },
+        "smoke_inference": {
+            "n_smoke_ok": 0,
+            "n_smoke_fail": 0,
+            "n_smoke_error": 0,
+            "results": [],
+        },
+        "overall_verdict": "FAIL",
+        "run_valid_status": reason,
+        "sentinel_failure_emitted": True,
+    }
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(report_payload, f, indent=2, sort_keys=True)
+        f.write("\n")
+
+    summary = {
+        "stage": stage_dir.name,
+        "run": run_id,
+        "created": utc_now_iso(),
+        "inputs": {
+            "run_valid": {"path": str(run_valid_path.relative_to(run_dir))},
+        },
+        "parameters": {"dry_run": dry_run},
+        "outputs": {
+            "real_v0_smoke_report": "outputs/real_v0_smoke_report.json",
+            "failure_catalog": "outputs/failure_catalog.jsonl",
+            "contract_verdict": "outputs/contract_verdict.json",
+        },
+        "results": {
+            "overall_verdict": "FAIL",
+            "contracts": contracts,
+        },
+        "version": {"git_sha": _maybe_git_sha()},
+    }
+
+    summary_written = write_stage_summary(stage_dir, summary)
+    write_manifest(
+        stage_dir,
+        {
+            "real_v0_smoke_report": report_path,
+            "failure_catalog": failure_catalog_path,
+            "contract": contract_path,
+            "stage_summary": summary_written,
+        },
+        extra={"version": "1"},
+    )
 
 
 def _load_strain(path: Path) -> Tuple[np.ndarray, np.ndarray, float]:
@@ -376,10 +486,17 @@ def main() -> int:
     validate_run_id(args.run, out_root)
     run_dir = (out_root / args.run).resolve()
 
-    try:
-        require_run_valid(out_root, args.run)
-    except Exception as exc:
-        abort_contract(str(exc))
+    _, run_valid_verdict, run_valid_error = _load_run_valid_payload(run_dir)
+    if run_valid_error is not None or run_valid_verdict != "PASS":
+        reason = run_valid_error or f"RUN_VALID overall_verdict={run_valid_verdict}"
+        _write_run_valid_failure(
+            args.run,
+            out_root,
+            _resolve_run_valid_path(run_dir),
+            reason,
+            args.dry_run,
+        )
+        abort_contract(reason)
 
     if args.real_v0_events_json:
         real_v0_events_path = Path(args.real_v0_events_json).expanduser().resolve()
@@ -401,6 +518,14 @@ def main() -> int:
             real_v0_events = _read_json(real_v0_events_path)
             if not isinstance(real_v0_events, list):
                 real_v0_events = []
+            else:
+                real_v0_events = sorted(
+                    real_v0_events,
+                    key=lambda ev: (
+                        str(ev.get("event_id", "")),
+                        str(ev.get("strain_npz", "")),
+                    ),
+                )
             real_v0_base_dir = real_v0_events_path.parent
         except Exception:
             real_v0_events = []
@@ -438,12 +563,18 @@ def main() -> int:
     n_smoke_error = 0
 
     with open(failure_catalog_path, "w", encoding="utf-8") as catalog_f:
-        if io_compat_pass and not args.dry_run:
-            valid_events = [
-                (ev, vr) for ev, vr in zip(real_v0_events, validation_results)
-                if vr["valid"]
-            ]
+        valid_events = [
+            (ev, vr)
+            for ev, vr in zip(real_v0_events, validation_results)
+            if vr["valid"]
+        ]
+        invalid_events = [
+            (ev, vr)
+            for ev, vr in zip(real_v0_events, validation_results)
+            if not vr["valid"]
+        ]
 
+        if io_compat_pass and not args.dry_run:
             for idx, (event, _) in enumerate(valid_events[: args.n_max_cases]):
                 event_id = event.get("event_id", f"event_{idx:03d}")
                 strain_rel = event.get("strain_npz", "")
@@ -483,12 +614,10 @@ def main() -> int:
                     n_smoke_error += 1
 
                 smoke_results.append(row)
-                catalog_f.write(json.dumps(row) + "\n")
+                catalog_f.write(json.dumps(row, sort_keys=True) + "\n")
 
         elif args.dry_run and io_compat_pass:
-            for idx, (event, _) in enumerate(
-                [(ev, vr) for ev, vr in zip(real_v0_events, validation_results) if vr["valid"]][:args.n_max_cases]
-            ):
+            for idx, (event, _) in enumerate(valid_events[: args.n_max_cases]):
                 row = {
                     "event_id": event.get("event_id", f"event_{idx:03d}"),
                     "strain_path": str(real_v0_base_dir / event.get("strain_npz", "")),
@@ -498,18 +627,34 @@ def main() -> int:
                     "metrics": {},
                 }
                 smoke_results.append(row)
-                catalog_f.write(json.dumps(row) + "\n")
+                catalog_f.write(json.dumps(row, sort_keys=True) + "\n")
 
         if not io_compat_pass:
-            row = {
-                "event_id": "<none>",
-                "strain_path": "",
-                "status": "FAIL",
-                "fail_reason_code": "missing_real_v0_inputs",
-                "notes": "no real v0 events available",
-                "metrics": {},
-            }
-            catalog_f.write(json.dumps(row) + "\n")
+            if len(real_v0_events) == 0:
+                row = {
+                    "event_id": "<none>",
+                    "strain_path": "",
+                    "status": "FAIL",
+                    "fail_reason_code": "missing_real_v0_inputs",
+                    "notes": "no real v0 events available",
+                    "metrics": {},
+                }
+                smoke_results.append(row)
+                n_smoke_fail += 1
+                catalog_f.write(json.dumps(row, sort_keys=True) + "\n")
+            else:
+                for event, vr in invalid_events:
+                    row = {
+                        "event_id": event.get("event_id", "<unknown>"),
+                        "strain_path": str(real_v0_base_dir / event.get("strain_npz", "")),
+                        "status": "FAIL",
+                        "fail_reason_code": "invalid_input",
+                        "notes": vr.get("error") or "invalid_real_v0_event",
+                        "metrics": {},
+                    }
+                    smoke_results.append(row)
+                    n_smoke_fail += 1
+                    catalog_f.write(json.dumps(row, sort_keys=True) + "\n")
 
     categorized_pass = True
     categorized_violations: List[str] = []
@@ -531,11 +676,7 @@ def main() -> int:
             categorized_pass = False
             categorized_violations.append(f"invalid_code:{code_in_catalog}")
 
-    smoke_pass = (
-        io_compat_pass
-        and (args.dry_run or n_smoke_ok > 0)
-        and n_smoke_error == 0
-    )
+    smoke_pass = io_compat_pass and (args.dry_run or n_smoke_ok > 0) and n_smoke_error == 0
 
     contracts = [
         {
@@ -551,8 +692,8 @@ def main() -> int:
         },
         {
             "id": "R08_PIPELINE_SMOKE",
-            "verdict": "PASS" if smoke_pass else "FAIL",
-            "violations": [] if smoke_pass else ["smoke_inference_failed"],
+            "verdict": "PASS" if (args.dry_run or smoke_pass) else "FAIL",
+            "violations": [] if (args.dry_run or smoke_pass) else ["smoke_inference_failed"],
             "metrics": {
                 "n_max_cases": args.n_max_cases,
                 "n_smoke_ok": n_smoke_ok,
@@ -571,7 +712,10 @@ def main() -> int:
         },
     ]
 
-    overall_verdict = "PASS" if all(c["verdict"] == "PASS" for c in contracts) else "FAIL"
+    if args.dry_run:
+        overall_verdict = "PASS" if (io_compat_pass and categorized_pass) else "FAIL"
+    else:
+        overall_verdict = "PASS" if all(c["verdict"] == "PASS" for c in contracts) else "FAIL"
 
     contract_payload = {
         "overall_verdict": overall_verdict,
@@ -590,6 +734,7 @@ def main() -> int:
         "synth_events_path": str(synth_events_path) if synth_events_path else None,
         "n_max_cases": args.n_max_cases,
         "dry_run": args.dry_run,
+        "sentinel_failure_emitted": len(real_v0_events) == 0,
         "io_validation": {
             "n_events_total": len(real_v0_events),
             "n_valid": sum(1 for vr in validation_results if vr.get("valid")),

@@ -19,7 +19,7 @@ RINGDOWN_MIN_SPECS = (
         name="RUN_VALID",
         entrypoint="experiment/run_valid/stage_run_valid.py",
         required_files=(
-            "RUN_VALID/verdict.json",
+            "RUN_VALID/outputs/run_valid.json",
             "RUN_VALID/stage_summary.json",
             "RUN_VALID/manifest.json",
         ),
@@ -55,13 +55,13 @@ def _exists_all(base: Path, rel_paths: Iterable[str]) -> Tuple[bool, list[str]]:
     return (len(missing) == 0), missing
 
 def _read_run_valid_verdict(run_dir: Path) -> Optional[str]:
-    p = run_dir / "RUN_VALID" / "verdict.json"
+    p = run_dir / "RUN_VALID" / "outputs" / "run_valid.json"
     if not p.exists():
         return None
     try:
         import json
         v = json.loads(p.read_text(encoding="utf-8"))
-        verdict = str(v.get("verdict", v.get("status", ""))).upper()
+        verdict = str(v.get("overall_verdict", v.get("verdict", v.get("status", "")))).upper()
         return verdict or None
     except Exception:
         return "UNREADABLE"
@@ -201,7 +201,7 @@ def main() -> int:
             "PYTHONPATH=. python experiment/ringdown/exp_ringdown_06_psd_robustness.py --run \"$RUN\""
         )
         exp06_inputs = (
-            "RUN_VALID/verdict.json",
+            "RUN_VALID/outputs/run_valid.json",
             "ringdown_synth/outputs/synthetic_events_list.json",
             exp01_cases,
         )
@@ -245,7 +245,7 @@ def main() -> int:
             "PYTHONPATH=. python experiment/ringdown/exp_ringdown_07_nonstationary_stress.py --run \"$RUN\" --p95-bias-rel-threshold 0.25 --max-bias-rel-hardcap 0.5"
         )
         exp07_inputs = (
-            "RUN_VALID/verdict.json",
+            "RUN_VALID/outputs/run_valid.json",
             "ringdown_synth/outputs/synthetic_events_list.json",
             exp01_cases,
             "nonstationary_noise/outputs/nonstationary_variants.json",
@@ -353,7 +353,7 @@ def main() -> int:
             "PYTHONPATH=. python experiment/ringdown/exp_ringdown_08_real_v0_smoke.py --run \"$RUN\""
         )
         exp08_inputs = (
-            "RUN_VALID/verdict.json",
+            "RUN_VALID/outputs/run_valid.json",
             "ringdown_real_v0/outputs/real_v0_events_list.json",
         )
         exp08_outputs = (
