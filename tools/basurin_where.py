@@ -31,6 +31,7 @@ RINGDOWN_MIN_SPECS = (
         required_files=(
             "ringdown_synth/outputs/synthetic_event.json",
             "ringdown_synth/outputs/synthetic_events.json",
+            "ringdown_synth/outputs/synthetic_events_list.json",
             "ringdown_synth/stage_summary.json",
             "ringdown_synth/manifest.json",
         ),
@@ -65,12 +66,17 @@ def _read_run_valid_verdict(run_dir: Path) -> Optional[str]:
     except Exception:
         return "UNREADABLE"
 
+def _has_strain_cases(run_dir: Path) -> bool:
+    cases_dir = run_dir / "ringdown_synth" / "outputs" / "cases"
+    return bool(list(cases_dir.glob("*/strain.npz")))
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="BASURIN where: entrypoints + missing canonical artifacts for a RUN_ID.")
     ap.add_argument("--run", required=True, help="run_id (folder name under runs/)")
     ap.add_argument("--out-root", default=None, help="runs root override (default: ./runs)")
     ap.add_argument("--ringdown-min", action="store_true", help="report minimal Ringdown chain (RUN_VALID + ringdown_synth)")
     ap.add_argument("--ringdown-exp03", action="store_true", help="report Ringdown EXP03 chain (EXP01 + OBSERVABLES_V1 + EXP03)")
+    ap.add_argument("--ringdown-exp04", action="store_true", help="report Ringdown EXP04 chain (RUN_VALID + ringdown_synth + EXP04)")
     args = ap.parse_args()
 
     rr = _repo_root()
@@ -85,7 +91,9 @@ def main() -> int:
         print(f"ENTRYPOINT: {RINGDOWN_MIN_SPECS[0].entrypoint}")
         return 2
 
-    if args.ringdown_exp03:
+    if args.ringdown_exp04:
+        specs = RINGDOWN_MIN_SPECS
+    elif args.ringdown_exp03:
         specs = RINGDOWN_MIN_SPECS
     elif args.ringdown_min:
         specs = RINGDOWN_MIN_SPECS
@@ -115,6 +123,32 @@ def main() -> int:
                 print(f"  verdict: {verdict}")
                 if verdict != "PASS":
                     overall_ok = False
+
+    if args.ringdown_exp04:
+        exp04_entry = "experiment/ringdown/exp_ringdown_04_psd_validity.py"
+        exp04_outputs = (
+            "experiment/ringdown/EXP_RINGDOWN_04__psd_validity/outputs/psd_diagnostics.json",
+            "experiment/ringdown/EXP_RINGDOWN_04__psd_validity/outputs/per_case_psd.jsonl",
+            "experiment/ringdown/EXP_RINGDOWN_04__psd_validity/outputs/contract_verdict.json",
+        )
+
+        if not _has_strain_cases(run_dir):
+            overall_ok = False
+            print("- ringdown_synth strain cases: MISSING")
+            print("  missing: ringdown_synth/outputs/cases/*/strain.npz")
+        else:
+            print("- ringdown_synth strain cases: OK")
+        print("  hint: requiere al menos un strain.npz en cases/.")
+
+        ok, missing = _exists_all(run_dir, exp04_outputs)
+        tag = "OK" if ok else "MISSING"
+        print(f"- EXP_RINGDOWN_04__psd_validity: {tag}")
+        print(f"  entrypoint: {exp04_entry}")
+        if missing:
+            overall_ok = False
+            for m in missing:
+                print(f"  missing: {m}")
+        print("  hint: requiere RUN_VALID PASS + ringdown_synth outputs.")
 
     if args.ringdown_exp03:
         exp01_pref = (
