@@ -80,6 +80,7 @@ def main() -> int:
     ap.add_argument("--ringdown-exp05", action="store_true", help="report Ringdown EXP05 chain (RUN_VALID + ringdown_synth + EXP01 + EXP05)")
     ap.add_argument("--ringdown-exp06", action="store_true", help="report Ringdown EXP06 chain (RUN_VALID + ringdown_synth + EXP01 + EXP06)")
     ap.add_argument("--ringdown-exp07", action="store_true", help="report Ringdown EXP07 chain (RUN_VALID + ringdown_synth + EXP01 + EXP07)")
+    ap.add_argument("--ringdown-exp08", action="store_true", help="report Ringdown EXP08 chain (RUN_VALID + ringdown_real_v0 + EXP08)")
     args = ap.parse_args()
 
     rr = _repo_root()
@@ -94,7 +95,9 @@ def main() -> int:
         print(f"ENTRYPOINT: {RINGDOWN_MIN_SPECS[0].entrypoint}")
         return 2
 
-    if args.ringdown_exp04:
+    if args.ringdown_exp08:
+        specs = RINGDOWN_MIN_SPECS
+    elif args.ringdown_exp04:
         specs = RINGDOWN_MIN_SPECS
     elif args.ringdown_exp06:
         specs = RINGDOWN_MIN_SPECS
@@ -341,6 +344,49 @@ def main() -> int:
             for m in missing:
                 print(f"  missing: {m}")
         print("  hint: requiere RUN_VALID PASS + EXP01/OBSERVABLES_V1.")
+
+    if args.ringdown_exp08:
+        real_v0_stage = (
+            "ringdown_real_v0/outputs/real_v0_events_list.json"
+        )
+        exp08_entry = (
+            "PYTHONPATH=. python experiment/ringdown/exp_ringdown_08_real_v0_smoke.py --run \"$RUN\""
+        )
+        exp08_inputs = (
+            "RUN_VALID/verdict.json",
+            "ringdown_real_v0/outputs/real_v0_events_list.json",
+        )
+        exp08_outputs = (
+            "experiment/ringdown/EXP_RINGDOWN_08__real_v0_smoke/outputs/real_v0_smoke_report.json",
+            "experiment/ringdown/EXP_RINGDOWN_08__real_v0_smoke/outputs/failure_catalog.jsonl",
+            "experiment/ringdown/EXP_RINGDOWN_08__real_v0_smoke/outputs/contract_verdict.json",
+        )
+
+        ok, missing = _exists_all(run_dir, (real_v0_stage,))
+        tag = "OK" if ok else "MISSING"
+        print(f"- ringdown_real_v0: {tag}")
+        print("  entrypoint: stages/ringdown_real_v0_stage.py")
+        if missing:
+            overall_ok = False
+            for m in missing:
+                print(f"  missing: {m}")
+        print("  hint: EXP08 requiere real_v0_events_list.json de ringdown_real_v0 stage.")
+
+        ok, missing = _exists_all(run_dir, exp08_outputs)
+        tag = "OK" if ok else "MISSING"
+        print(f"- EXP_RINGDOWN_08__real_v0_smoke: {tag}")
+        print(f"  entrypoint: {exp08_entry}")
+        print("  inputs:")
+        for path in exp08_inputs:
+            print(f"    - {path}")
+        print("  outputs:")
+        for path in exp08_outputs:
+            print(f"    - {path}")
+        if missing:
+            overall_ok = False
+            for m in missing:
+                print(f"  missing: {m}")
+        print("  hint: requiere RUN_VALID PASS + ringdown_real_v0 outputs.")
 
     print("\n[result]")
     if overall_ok:
