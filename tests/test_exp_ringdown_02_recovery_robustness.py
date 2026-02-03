@@ -89,7 +89,10 @@ def test_exp_ringdown_02_pass(monkeypatch, runs_root):
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
     assert contract["overall_verdict"] == "PASS"
     assert (out_dir / "manifest.json").exists()
-    assert (out_dir / "stage_summary.json").exists()
+    stage_summary_path = out_dir / "stage_summary.json"
+    assert stage_summary_path.exists()
+    stage_summary = json.loads(stage_summary_path.read_text(encoding="utf-8"))
+    assert stage_summary["results"]["overall_verdict"] == "PASS"
     per_case = out_dir / "outputs" / "per_case.jsonl"
     assert per_case.exists()
     assert len(per_case.read_text(encoding="utf-8").strip().splitlines()) == 1

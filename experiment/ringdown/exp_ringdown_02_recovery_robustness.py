@@ -49,9 +49,11 @@ def read_json(path: Path) -> Any:
 def _extract_overall_verdict(payload: dict) -> str | None:
     if not isinstance(payload, dict):
         return None
+    # canonical stage_summary_v1
     v = (payload.get("results") or {}).get("overall_verdict")
     if v is not None:
         return v
+    # compat fallbacks
     v = payload.get("overall_verdict")
     if v is not None:
         return v
