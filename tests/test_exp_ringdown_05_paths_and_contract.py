@@ -40,16 +40,30 @@ def test_exp_ringdown_05_paths_and_contract(tmp_path: Path) -> None:
 
     cases_dir = run_dir / "ringdown_synth" / "outputs" / "cases"
     cases = []
+    synth_index = []
     for idx, seed in enumerate([7, 13, 29]):
         case_id = f"case_{idx:03d}"
         _write_ringdown_npz(cases_dir / case_id / "strain.npz", f0=240.0 + idx * 5, tau=0.02, seed=seed)
+        snr = 12.0
         cases.append(
             {
                 "case_id": case_id,
                 "truth": {"f_220": 240.0 + idx * 5, "tau_220": 0.02},
+                "seed": seed,
+                "snr": snr,
+            }
+        )
+        synth_index.append(
+            {
+                "seed": seed,
+                "snr_target": snr,
                 "strain_npz": f"cases/{case_id}/strain.npz",
             }
         )
+
+    synth_index_path = run_dir / "ringdown_synth" / "outputs" / "synthetic_events_list.json"
+    synth_index_path.parent.mkdir(parents=True, exist_ok=True)
+    synth_index_path.write_text(json.dumps(synth_index, indent=2), encoding="utf-8")
 
     exp01_outputs = run_dir / "experiment" / "ringdown_01_injection_recovery" / "outputs"
     exp01_outputs.mkdir(parents=True, exist_ok=True)
@@ -96,6 +110,7 @@ def test_exp_ringdown_05_paths_and_contract(tmp_path: Path) -> None:
     payload = json.loads(contract.read_text(encoding="utf-8"))
     assert "R05_PRIOR_SENSITIVITY_BOUNDED" in payload["contracts"]
     assert "R05_FAILURE_MODE_CAP" in payload["contracts"]
+    assert "synthetic_events_list" in payload["inputs"]
 
     for path in [prior_sweep, per_case, contract]:
         assert run_dir in path.resolve().parents

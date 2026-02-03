@@ -65,6 +65,41 @@ def percentile(xs: List[float], q: float) -> float:
     return xs2[lo] * (1 - a) + xs2[hi] * a
 
 
+def _snr_key(x: float) -> str:
+    return f"{float(x):.3f}"
+
+
+def load_seed_snr_to_strain(run_dir: Path) -> Tuple[Dict[Tuple[int, str], str], Path]:
+    idx = run_dir / "ringdown_synth" / "outputs" / "synthetic_events_list.json"
+    if not idx.exists():
+        raise SystemExit(f"ERROR: missing {idx}")
+
+    with open(idx, "r", encoding="utf-8") as f:
+        items = json.load(f)
+    if not isinstance(items, list) or not items:
+        raise SystemExit("ERROR: synthetic_events_list.json invalid/empty")
+
+    out: Dict[Tuple[int, str], str] = {}
+    collisions: List[Dict[str, object]] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        seed = it.get("seed")
+        snr = it.get("snr_target", it.get("snr"))
+        rel = it.get("strain_npz")
+        if seed is None or snr is None or not isinstance(rel, str) or not rel:
+            continue
+        k = (int(seed), _snr_key(float(snr)))
+        if k in out and out[k] != rel:
+            collisions.append({"key": {"seed": int(seed), "snr": _snr_key(float(snr))}, "a": out[k], "b": rel})
+        out[k] = rel
+
+    if collisions:
+        raise SystemExit(f"ERROR: synthetic_events_list has collisions for (seed,snr): {collisions[:3]}")
+
+    return out, idx
+
+
 def _read_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
     with open(path, "r", encoding="utf-8") as f:
         for idx, line in enumerate(f, start=1):
@@ -241,6 +276,8 @@ def main() -> int:
     except Exception as exc:
         abort_contract(str(exc))
 
+    seed_snr2strain, synth_idx_path = load_seed_snr_to_strain(run_dir)
+
     recovery_cases_path = (
         run_dir
         / "experiment"
@@ -252,21 +289,33 @@ def main() -> int:
         abort_contract(f"missing recovery_cases.jsonl at {recovery_cases_path}")
 
     cases: List[Dict[str, Any]] = []
+    n_mapped = 0
+    n_unmapped = 0
     for idx, row in enumerate(_read_jsonl(recovery_cases_path)):
         case_id = str(row.get("case_id") or row.get("id") or f"case_{idx:04d}")
         truth = row.get("truth") or {}
         f0 = truth.get("f_220")
         tau0 = truth.get("tau_220")
-        strain_rel = row.get("strain_npz") or row.get("strain_path")
-        if not strain_rel:
-            paths = row.get("paths") or {}
-            if isinstance(paths, dict):
-                strain_rel = paths.get("strain_npz")
-        if f0 is None or tau0 is None or not strain_rel:
+        seed = row.get("seed")
+        snr = row.get("snr_target", row.get("snr"))
+        if f0 is None or tau0 is None or seed is None or snr is None:
             continue
-        strain_path = _resolve_strain_path(run_dir, str(strain_rel))
-        if not strain_path:
+        k = (int(seed), _snr_key(float(snr)))
+        rel_strain = seed_snr2strain.get(k)
+        if not rel_strain:
+            n_unmapped += 1
             continue
+        strain_path = (run_dir / "ringdown_synth" / "outputs" / rel_strain).resolve()
+        expected_prefix = (run_dir / "ringdown_synth" / "outputs").resolve()
+        try:
+            strain_path.relative_to(expected_prefix)
+        except ValueError:
+            n_unmapped += 1
+            continue
+        if not strain_path.exists():
+            n_unmapped += 1
+            continue
+        n_mapped += 1
         cases.append(
             {
                 "case_id": case_id,
@@ -476,6 +525,10 @@ def main() -> int:
                 "path": str(run_valid_path),
                 "sha256": sha256_file(run_valid_path),
             },
+            "synthetic_events_list": {
+                "path": str(synth_idx_path),
+                "sha256": sha256_file(synth_idx_path),
+            },
             "recovery_cases": {
                 "path": str(recovery_cases_path),
                 "sha256": sha256_file(recovery_cases_path),
@@ -496,6 +549,8 @@ def main() -> int:
             "overall_verdict": overall_verdict,
             "n_cases": len(cases),
             "baseline_effective": baseline["n_effective"],
+            "n_mapped": n_mapped,
+            "n_unmapped": n_unmapped,
         },
         "artifacts": {
             "prior_sweep": str(sweep_path.relative_to(stage_dir)),
