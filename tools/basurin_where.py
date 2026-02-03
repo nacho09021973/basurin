@@ -77,6 +77,7 @@ def main() -> int:
     ap.add_argument("--ringdown-min", action="store_true", help="report minimal Ringdown chain (RUN_VALID + ringdown_synth)")
     ap.add_argument("--ringdown-exp03", action="store_true", help="report Ringdown EXP03 chain (EXP01 + OBSERVABLES_V1 + EXP03)")
     ap.add_argument("--ringdown-exp04", action="store_true", help="report Ringdown EXP04 chain (RUN_VALID + ringdown_synth + EXP04)")
+    ap.add_argument("--ringdown-exp05", action="store_true", help="report Ringdown EXP05 chain (RUN_VALID + ringdown_synth + EXP01 + EXP05)")
     args = ap.parse_args()
 
     rr = _repo_root()
@@ -92,6 +93,8 @@ def main() -> int:
         return 2
 
     if args.ringdown_exp04:
+        specs = RINGDOWN_MIN_SPECS
+    elif args.ringdown_exp05:
         specs = RINGDOWN_MIN_SPECS
     elif args.ringdown_exp03:
         specs = RINGDOWN_MIN_SPECS
@@ -149,6 +152,37 @@ def main() -> int:
             for m in missing:
                 print(f"  missing: {m}")
         print("  hint: requiere RUN_VALID PASS + ringdown_synth outputs.")
+
+    if args.ringdown_exp05:
+        exp01_cases = (
+            "experiment/ringdown_01_injection_recovery/outputs/recovery_cases.jsonl"
+        )
+        exp05_entry = "experiment/ringdown/exp_ringdown_05_prior_hyperparam_sweep.py"
+        exp05_outputs = (
+            "experiment/ringdown/EXP_RINGDOWN_05__prior_hyperparam_sweep/outputs/prior_sweep.json",
+            "experiment/ringdown/EXP_RINGDOWN_05__prior_hyperparam_sweep/outputs/per_case.jsonl",
+            "experiment/ringdown/EXP_RINGDOWN_05__prior_hyperparam_sweep/outputs/contract_verdict.json",
+        )
+
+        ok, missing = _exists_all(run_dir, (exp01_cases,))
+        tag = "OK" if ok else "MISSING"
+        print(f"- EXP_RINGDOWN_01_injection_recovery: {tag}")
+        print("  entrypoint: experiment/ringdown/exp_ringdown_01_injection_recovery.py")
+        if missing:
+            overall_ok = False
+            for m in missing:
+                print(f"  missing: {m}")
+        print("  hint: EXP05 requiere recovery_cases.jsonl de EXP01.")
+
+        ok, missing = _exists_all(run_dir, exp05_outputs)
+        tag = "OK" if ok else "MISSING"
+        print(f"- EXP_RINGDOWN_05__prior_hyperparam_sweep: {tag}")
+        print(f"  entrypoint: {exp05_entry}")
+        if missing:
+            overall_ok = False
+            for m in missing:
+                print(f"  missing: {m}")
+        print("  hint: requiere RUN_VALID PASS + EXP01 outputs.")
 
     if args.ringdown_exp03:
         exp01_pref = (
