@@ -87,3 +87,38 @@ def test_basurin_where_exp06_entrypoints(tmp_path: Path) -> None:
     assert res.returncode == 2
     assert "EXP_RINGDOWN_06__psd_robustness" in res.stdout
     assert "PYTHONPATH=. python experiment/ringdown/exp_ringdown_06_psd_robustness.py --run \"$RUN\"" in res.stdout
+
+
+def test_basurin_where_exp07_entrypoints(tmp_path: Path) -> None:
+    run_id = "2038-02-01__unit_test__where_exp07"
+    run_dir = tmp_path / "runs" / run_id
+
+    _write_json(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    _write_json(run_dir / "RUN_VALID" / "stage_summary.json", {"results": {"overall_verdict": "PASS"}})
+    (run_dir / "RUN_VALID" / "manifest.json").write_text("{}", encoding="utf-8")
+
+    _write_json(run_dir / "ringdown_synth" / "outputs" / "synthetic_event.json", {"truth": {"f_220": 250.0, "tau_220": 0.02}})
+    _write_json(
+        run_dir / "ringdown_synth" / "outputs" / "synthetic_events.json",
+        {"schema_version": "ringdown_synth_events_index_v1", "n_events": 1, "events": [{"path": "synthetic_event.json"}]},
+    )
+    _write_json(
+        run_dir / "ringdown_synth" / "outputs" / "synthetic_events_list.json",
+        [{"path": "synthetic_event.json"}],
+    )
+    _write_json(run_dir / "ringdown_synth" / "stage_summary.json", {"stage": "ringdown_synth"})
+    (run_dir / "ringdown_synth" / "manifest.json").write_text("{}", encoding="utf-8")
+
+    recovery_cases = run_dir / "experiment" / "ringdown_01_injection_recovery" / "outputs" / "recovery_cases.jsonl"
+    recovery_cases.parent.mkdir(parents=True, exist_ok=True)
+    recovery_cases.write_text("{\"case_id\": \"case_000\"}\n", encoding="utf-8")
+
+    res = subprocess.run(
+        ["python", "tools/basurin_where.py", "--run", run_id, "--out-root", str(tmp_path / "runs"), "--ringdown-exp07"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 2
+    assert "EXP_RINGDOWN_07__nonstationary_stress" in res.stdout
+    assert "PYTHONPATH=. python experiment/ringdown/exp_ringdown_07_nonstationary_stress.py --run \"$RUN\"" in res.stdout
