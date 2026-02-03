@@ -207,6 +207,11 @@ def main() -> None:
         with open(out_json, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
 
+        # Generate strain.npz for EXP01 consumption
+        out_strain = outputs_dir / "strain.npz"
+        _write_strain_npz(out_strain, int(args.seed), float(args.snr), f_220, tau_220)
+        artifacts["strain"] = out_strain
+
         summary = {
             "stage": "ringdown_synth",
             "params": {
@@ -220,6 +225,7 @@ def main() -> None:
             "outputs": {
                 "synthetic_event": "outputs/synthetic_event.json",
                 "synthetic_events": "outputs/synthetic_events.json",
+                "strain": "outputs/strain.npz",
             },
         }
         write_stage_summary(stage_dir, summary)
@@ -230,6 +236,7 @@ def main() -> None:
             "events": [
                 {
                     "path": "synthetic_event.json",
+                    "strain_npz": "strain.npz",
                     "truth": base_event["truth"],
                     "snr_target": float(args.snr),
                 }
@@ -251,6 +258,7 @@ def main() -> None:
         _ = sha256_file(out_json)
         _ = sha256_file(out_events_index)
         _ = sha256_file(out_events_list)
+        _ = sha256_file(out_strain)
 
 
 if __name__ == "__main__":
