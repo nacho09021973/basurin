@@ -36,12 +36,12 @@ def _variants_v1(line_f0: float) -> list[dict[str, object]]:
         {
             "id": "line_f0",
             "type": "line",
-            "params": {"f_hz": line_f0, "amplitude_scale": 0.10},
+            "params": {"f_hz": line_f0, "amplitude_scale": 0.03},
         },
         {
             "id": "line_2f0",
             "type": "line",
-            "params": {"f_hz": 2.0 * line_f0, "amplitude_scale": 0.08},
+            "params": {"f_hz": 2.0 * line_f0, "amplitude_scale": 0.02},
         },
         {
             "id": "glitch_gaussian_pulse",

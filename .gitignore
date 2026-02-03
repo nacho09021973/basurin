@@ -47,3 +47,11 @@ stages/
 
 # Windows Mark-of-the-Web
 *:Zone.Identifier
+
+# BASURIN: stages/ es canónico (no ignorar)
+!stages/
+!stages/**
+
+# BASURIN: stages/ es canónico (no ignorar)
+!stages/
+!stages/**
