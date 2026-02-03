@@ -239,7 +239,7 @@ def main() -> int:
             "experiment/ringdown_01_injection_recovery/outputs/recovery_cases.jsonl"
         )
         exp07_entry = (
-            "PYTHONPATH=. python experiment/ringdown/exp_ringdown_07_nonstationary_stress.py --run \"$RUN\""
+            "PYTHONPATH=. python experiment/ringdown/exp_ringdown_07_nonstationary_stress.py --run \"$RUN\" --p95-bias-rel-threshold 0.25 --max-bias-rel-hardcap 0.5"
         )
         exp07_inputs = (
             "RUN_VALID/verdict.json",
