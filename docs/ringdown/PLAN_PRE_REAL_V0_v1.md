@@ -209,3 +209,14 @@ R08_END2END_CANONICAL_IO: todos los artefactos esperados existen y están dentro
 R08_ABORT_ON_UPSTREAM_FAIL: si algún upstream no PASS, aborta y no produce outputs.
 
 Estado: No verificado aquí (pero es donde conviene anclar el runner secuencial tipo run_ringdown_pre_real.sh).
+---
+
+## Helper de diagnóstico de rutas (canónico)
+
+Para inspeccionar entradas/caminos canónicos y detectar qué falta en cada experimento:
+
+- tools/basurin_where.py
+
+Ejemplo:
+
+python tools/basurin_where.py --run "$RUN_ID" --ringdown-exp05
