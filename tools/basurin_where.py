@@ -70,6 +70,7 @@ def main() -> int:
     ap.add_argument("--run", required=True, help="run_id (folder name under runs/)")
     ap.add_argument("--out-root", default=None, help="runs root override (default: ./runs)")
     ap.add_argument("--ringdown-min", action="store_true", help="report minimal Ringdown chain (RUN_VALID + ringdown_synth)")
+    ap.add_argument("--ringdown-exp03", action="store_true", help="report Ringdown EXP03 chain (EXP01 + OBSERVABLES_V1 + EXP03)")
     args = ap.parse_args()
 
     rr = _repo_root()
@@ -84,7 +85,9 @@ def main() -> int:
         print(f"ENTRYPOINT: {RINGDOWN_MIN_SPECS[0].entrypoint}")
         return 2
 
-    if args.ringdown_min:
+    if args.ringdown_exp03:
+        specs = RINGDOWN_MIN_SPECS
+    elif args.ringdown_min:
         specs = RINGDOWN_MIN_SPECS
     else:
         specs = RINGDOWN_MIN_SPECS  # por ahora
@@ -112,6 +115,69 @@ def main() -> int:
                 print(f"  verdict: {verdict}")
                 if verdict != "PASS":
                     overall_ok = False
+
+    if args.ringdown_exp03:
+        exp01_pref = (
+            "experiment/ringdown/EXP_RINGDOWN_01_injection_recovery/outputs/recovery_cases.jsonl"
+        )
+        exp01_legacy = (
+            "experiment/ringdown_01_injection_recovery/outputs/recovery_cases.jsonl"
+        )
+        exp01_summary_pref = (
+            "experiment/ringdown/EXP_RINGDOWN_01_injection_recovery/outputs/recovery_summary.json"
+        )
+        exp01_summary_legacy = (
+            "experiment/ringdown_01_injection_recovery/outputs/recovery_summary.json"
+        )
+        exp01_entry = "experiment/ringdown/exp_ringdown_01_injection_recovery.py"
+
+        exp03_entry = "experiment/ringdown/exp_ringdown_03_observable_minimality.py"
+        obs_entry = "experiment/ringdown/stage_ringdown_observables_v1.py"
+
+        exp03_outputs = (
+            "experiment/ringdown/EXP_RINGDOWN_03__observable_minimality/outputs/identifiability_report.json",
+            "experiment/ringdown/EXP_RINGDOWN_03__observable_minimality/outputs/ablations.jsonl",
+            "experiment/ringdown/EXP_RINGDOWN_03__observable_minimality/outputs/contract_verdict.json",
+        )
+        obs_outputs = (
+            "experiment/ringdown/STAGE_RINGDOWN_OBSERVABLES_V1/outputs/observables.jsonl",
+            "experiment/ringdown/STAGE_RINGDOWN_OBSERVABLES_V1/outputs/contract_verdict.json",
+        )
+
+        print("- EXP_RINGDOWN_01_injection_recovery: ", end="")
+        exp01_cases_ok = (run_dir / exp01_pref).exists() or (run_dir / exp01_legacy).exists()
+        exp01_summary_ok = (run_dir / exp01_summary_pref).exists() or (run_dir / exp01_summary_legacy).exists()
+        if exp01_cases_ok and exp01_summary_ok:
+            print("OK")
+        else:
+            print("MISSING")
+            overall_ok = False
+            if not exp01_cases_ok:
+                print(f"  missing: {exp01_pref} (or legacy {exp01_legacy})")
+            if not exp01_summary_ok:
+                print(f"  missing: {exp01_summary_pref} (or legacy {exp01_summary_legacy})")
+        print(f"  entrypoint: {exp01_entry}")
+        print("  hint: EXP03 usa recovery_cases.jsonl como base.")
+
+        ok, missing = _exists_all(run_dir, obs_outputs)
+        tag = "OK" if ok else "MISSING"
+        print(f"- STAGE_RINGDOWN_OBSERVABLES_V1: {tag}")
+        print(f"  entrypoint: {obs_entry}")
+        if missing:
+            overall_ok = False
+            for m in missing:
+                print(f"  missing: {m}")
+        print("  hint: ejecuta stage_ringdown_observables_v1.py si no existe.")
+
+        ok, missing = _exists_all(run_dir, exp03_outputs)
+        tag = "OK" if ok else "MISSING"
+        print(f"- EXP_RINGDOWN_03__observable_minimality: {tag}")
+        print(f"  entrypoint: {exp03_entry}")
+        if missing:
+            overall_ok = False
+            for m in missing:
+                print(f"  missing: {m}")
+        print("  hint: requiere RUN_VALID PASS + EXP01/OBSERVABLES_V1.")
 
     print("\n[result]")
     if overall_ok:
