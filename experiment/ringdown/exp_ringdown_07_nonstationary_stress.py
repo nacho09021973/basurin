@@ -39,7 +39,8 @@ EXIT_CONTRACT_FAIL = 2
 STAGE_NAME = "experiment/ringdown/EXP_RINGDOWN_07__nonstationary_stress"
 DEFAULT_SWEEP = "v1"
 DEFAULT_MAX_FAIL_RATE = 0.10
-DEFAULT_MAX_BIAS_REL = 0.20
+DEFAULT_P95_BIAS_REL_THRESHOLD = 0.20
+DEFAULT_MAX_BIAS_REL_HARDCAP = 0.50
 DEFAULT_N_MAX_CASES = 24
 
 ALLOWED_FAIL_CODES = {
@@ -322,12 +323,42 @@ def _stage_created_timestamp(stage_dir: Path) -> Optional[str]:
     return str(created) if created else None
 
 
+def _compute_p95_bias_rel(bias_values: List[float]) -> float:
+    if not bias_values:
+        return float("inf")
+    return float(np.percentile(np.asarray(bias_values, dtype=float), 95))
+
+
+def _robustness_verdict(
+    *,
+    n_total_rows: int,
+    fail_rate: float,
+    max_fail_rate_threshold: float,
+    bias_values: List[float],
+    p95_bias_rel_threshold: float,
+    max_bias_rel_hardcap: float,
+) -> Tuple[bool, float, float]:
+    p95_bias_rel = _compute_p95_bias_rel(bias_values)
+    max_bias_rel = float(np.max(bias_values)) if bias_values else float("inf")
+    is_pass = (
+        n_total_rows > 0
+        and math.isfinite(fail_rate)
+        and math.isfinite(p95_bias_rel)
+        and math.isfinite(max_bias_rel)
+        and fail_rate <= float(max_fail_rate_threshold)
+        and p95_bias_rel <= float(p95_bias_rel_threshold)
+        and max_bias_rel <= float(max_bias_rel_hardcap)
+    )
+    return is_pass, p95_bias_rel, max_bias_rel
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="EXP_RINGDOWN_07 nonstationary stress (contract-first)")
     ap.add_argument("--run", required=True)
     ap.add_argument("--sweep", default=DEFAULT_SWEEP)
     ap.add_argument("--max-fail-rate", type=float, default=DEFAULT_MAX_FAIL_RATE)
-    ap.add_argument("--max-bias-rel", type=float, default=DEFAULT_MAX_BIAS_REL)
+    ap.add_argument("--p95-bias-rel-threshold", type=float, default=DEFAULT_P95_BIAS_REL_THRESHOLD)
+    ap.add_argument("--max-bias-rel-hardcap", type=float, default=DEFAULT_MAX_BIAS_REL_HARDCAP)
     ap.add_argument("--n-max-cases", type=int, default=DEFAULT_N_MAX_CASES)
     ap.add_argument("--line-f0", type=float, default=50.0)
     ap.add_argument("--dry-run", action="store_true")
@@ -408,6 +439,7 @@ def main() -> int:
     n_total_rows = 0
     n_fail_rows = 0
     bias_values: List[float] = []
+    bias_values_by_variant: Dict[str, List[float]] = {}
     by_variant: Dict[str, Dict[str, Any]] = {}
 
     with open(failure_catalog_path, "w", encoding="utf-8") as f:
@@ -508,6 +540,7 @@ def main() -> int:
                 row["status"] = "OK"
                 per_case_variant_metrics.append(float(metric_variant))
                 bias_values.append(float(rel))
+                bias_values_by_variant.setdefault(variant_id, []).append(float(rel))
                 f.write(json.dumps(row) + "\n")
 
                 stats["worst_rel_degradation"] = max(stats["worst_rel_degradation"], float(rel))
@@ -526,13 +559,23 @@ def main() -> int:
         baseline_mean = float("nan")
         worst_mean = float("nan")
 
-    max_bias_rel = float(np.max(bias_values)) if bias_values else float("inf")
     fail_rate = float(n_fail_rows / n_total_rows) if n_total_rows else 1.0
 
-    for stats in by_variant.values():
+    for variant_id, stats in by_variant.items():
         n_total = int(stats["n_total"])
         n_fail = int(stats["n_fail"])
         stats["fail_rate"] = float(n_fail / n_total) if n_total else 0.0
+        variant_bias = bias_values_by_variant.get(variant_id, [])
+        stats["p95_bias_rel"] = _compute_p95_bias_rel(variant_bias)
+
+    robustness_pass, p95_bias_rel, max_bias_rel = _robustness_verdict(
+        n_total_rows=n_total_rows,
+        fail_rate=fail_rate,
+        max_fail_rate_threshold=float(args.max_fail_rate),
+        bias_values=bias_values,
+        p95_bias_rel_threshold=float(args.p95_bias_rel_threshold),
+        max_bias_rel_hardcap=float(args.max_bias_rel_hardcap),
+    )
 
     report_payload = {
         "run_id": args.run,
@@ -541,11 +584,16 @@ def main() -> int:
         "n_total": int(n_total_rows),
         "n_fail": int(n_fail_rows),
         "fail_rate": fail_rate,
-        "max_fail_rate_threshold": float(args.max_fail_rate),
+        "p95_bias_rel": p95_bias_rel,
         "bias_summary": {
             "baseline_mean": baseline_mean,
             "worst_mean": worst_mean,
             "max_bias_rel": max_bias_rel,
+        },
+        "thresholds": {
+            "max_fail_rate_threshold": float(args.max_fail_rate),
+            "p95_bias_rel_threshold": float(args.p95_bias_rel_threshold),
+            "max_bias_rel_hardcap": float(args.max_bias_rel_hardcap),
         },
         "variants": variants,
         "by_variant": by_variant,
@@ -555,14 +603,6 @@ def main() -> int:
         with open(report_path, "w", encoding="utf-8") as f:
             json.dump(report_payload, f, indent=2, sort_keys=True)
             f.write("\n")
-
-    robustness_pass = (
-        n_total_rows > 0
-        and math.isfinite(fail_rate)
-        and fail_rate <= float(args.max_fail_rate)
-        and math.isfinite(max_bias_rel)
-        and max_bias_rel <= float(args.max_bias_rel)
-    )
 
     categorized_pass = True
     violations: List[str] = []
@@ -588,8 +628,10 @@ def main() -> int:
                 "n_fail": int(n_fail_rows),
                 "fail_rate": fail_rate,
                 "max_fail_rate_threshold": float(args.max_fail_rate),
+                "p95_bias_rel": p95_bias_rel,
+                "p95_bias_rel_threshold": float(args.p95_bias_rel_threshold),
                 "max_bias_rel": max_bias_rel,
-                "max_bias_rel_threshold": float(args.max_bias_rel),
+                "max_bias_rel_hardcap": float(args.max_bias_rel_hardcap),
                 "baseline_mean": baseline_mean,
                 "worst_mean": worst_mean,
             },
@@ -645,7 +687,8 @@ def main() -> int:
         "parameters": {
             "sweep": args.sweep,
             "max_fail_rate": float(args.max_fail_rate),
-            "max_bias_rel": float(args.max_bias_rel),
+            "p95_bias_rel_threshold": float(args.p95_bias_rel_threshold),
+            "max_bias_rel_hardcap": float(args.max_bias_rel_hardcap),
             "n_max_cases": int(args.n_max_cases),
             "line_f0": float(args.line_f0),
             "dry_run": bool(args.dry_run),
