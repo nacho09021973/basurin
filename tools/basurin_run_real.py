@@ -115,10 +115,18 @@ def _locate_run_valid_path(run_dir: Path) -> Path:
     return fallback
 
 
-def _run_command(command: list[str], repo_root: Path, env: dict[str, str]) -> None:
+def _run_command(
+    command: list[str],
+    repo_root: Path,
+    env: dict[str, str],
+    label: str,
+) -> None:
+    print(f"RUN_REAL: exec {label}: {' '.join(command)}")
     result = subprocess.run(command, cwd=repo_root, env=env, check=False)
     if result.returncode != 0:
+        print(f"FAILED {label} exit={result.returncode}")
         raise RuntimeError(f"falló comando: {' '.join(command)} (exit={result.returncode})")
+    print(f"completed {label} exit=0")
 
 
 def _run_command_capture(
@@ -126,7 +134,9 @@ def _run_command_capture(
     repo_root: Path,
     env: dict[str, str],
     output_path: Path,
+    label: str,
 ) -> None:
+    print(f"RUN_REAL: exec {label}: {' '.join(command)}")
     result = subprocess.run(
         command,
         cwd=repo_root,
@@ -138,7 +148,9 @@ def _run_command_capture(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(result.stdout + result.stderr, encoding="utf-8")
     if result.returncode != 0:
+        print(f"FAILED {label} exit={result.returncode}")
         raise RuntimeError(f"falló comando: {' '.join(command)} (exit={result.returncode})")
+    print(f"completed {label} exit=0")
 
 
 def _stage_names(dt_start_s: float, duration_s: float) -> dict[str, str]:
@@ -316,10 +328,25 @@ def main() -> int:
             print(f"- exp08: {' '.join(exp08_command)}")
         return 0
 
+    print(
+        "RUN_REAL: start"
+        f" run_id={args.run}"
+        f" dt-start-s={args.dt_start_s}"
+        f" duration-s={args.duration_s}"
+        f" band-hz={args.band_hz}"
+        f" do-exp08={args.do_exp08}"
+        f" dry-run={args.dry_run}"
+    )
+    print("RUN_REAL: stage_names")
+    print(f"- window: {stage_names['window']}")
+    print(f"- observables: {stage_names['observables']}")
+    print(f"- features: {stage_names['features']}")
+    print(f"- inference: {stage_names['inference']}")
+
     ringdown_real_v0_dir = run_dir / "ringdown_real_v0"
     if not real_v0_ok:
         try:
-            _run_command(commands["ringdown_real_v0"], repo_root, env)
+            _run_command(commands["ringdown_real_v0"], repo_root, env, "ringdown_real_v0")
         except Exception as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 2
@@ -329,7 +356,7 @@ def main() -> int:
         if not _should_run_stage(stage_dir, args.force):
             continue
         try:
-            _run_command(commands[key], repo_root, env)
+            _run_command(commands[key], repo_root, env, key)
         except Exception as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 2
@@ -341,7 +368,7 @@ def main() -> int:
             run_dir / "experiment" / "exp_ringdown_08_real_v0_smoke" / "output.txt"
         )
         try:
-            _run_command_capture(exp08_command, repo_root, env, exp08_output)
+            _run_command_capture(exp08_command, repo_root, env, exp08_output, "exp08")
         except Exception as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 2
