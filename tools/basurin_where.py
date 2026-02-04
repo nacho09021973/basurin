@@ -370,6 +370,13 @@ def main() -> int:
         real_v0_stage = (
             "ringdown_real_v0/outputs/real_v0_events_list.json"
         )
+        real_window_v1_outputs = (
+            "ringdown_real_ringdown_window_v1/outputs/H1_rd.npz",
+            "ringdown_real_ringdown_window_v1/outputs/L1_rd.npz",
+            "ringdown_real_ringdown_window_v1/outputs/segments_rd.json",
+            "ringdown_real_ringdown_window_v1/stage_summary.json",
+            "ringdown_real_ringdown_window_v1/manifest.json",
+        )
         real_obs_outputs = (
             "ringdown_real_observables_v0/outputs/observables.jsonl",
             "ringdown_real_observables_v0/stage_summary.json",
@@ -397,6 +404,16 @@ def main() -> int:
             for m in missing:
                 print(f"  missing: {m}")
         print("  hint: EXP08 requiere real_v0_events_list.json de ringdown_real_v0 stage.")
+
+        ok, missing = _exists_all(run_dir, real_window_v1_outputs)
+        tag = "OK" if ok else "MISSING"
+        print(f"- ringdown_real_ringdown_window_v1: {tag}")
+        print("  entrypoint: stages/ringdown_real_ringdown_window_v1_stage.py")
+        if missing:
+            overall_ok = False
+            for m in missing:
+                print(f"  missing: {m}")
+        print("  hint: EXP08 requiere ventana real v1 (H1/L1/segments).")
 
         ok, missing = _exists_all(run_dir, real_obs_outputs)
         tag = "OK" if ok else "MISSING"
