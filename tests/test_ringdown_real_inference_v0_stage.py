@@ -190,7 +190,10 @@ def test_stage_real_inference_reports_window_duration_from_npz(
     for det in ["H1", "L1"]:
         expected = report["fit"][det]["n_samples"] / report["fs_hz"]
         assert abs(report["window"]["duration_s"][det] - expected) < 1e-9
+        expected_df = report["fs_hz"] / report["fit"][det]["n_samples"]
+        assert abs(report["fit"][det]["df_hz"] - expected_df) < 1e-9
 
+    assert report["window"]["stage"] == "ringdown_real_ringdown_window"
     assert "duration_s" not in report["features"]
     assert "features_duration_s" in report["features"]
 

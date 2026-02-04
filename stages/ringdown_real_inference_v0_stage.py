@@ -38,7 +38,7 @@ EXIT_CONTRACT_FAIL = 2
 STAGE_NAME_DEFAULT = "ringdown_real_inference_v0"
 BAND_HZ = [150.0, 400.0]
 STRAIN_KEYS = ["strain", "h", "data", "x", "rd_strain"]
-FS_KEYS = ["fs_hz", "fs", "sample_rate", "sr"]
+FS_KEYS = ["sample_rate_hz", "fs_hz", "fs", "sample_rate", "sr"]
 
 
 def _abort(message: str) -> None:
@@ -72,7 +72,9 @@ def _require_positive(value: float, label: str) -> float:
     return value
 
 
-def _load_strain_and_fs(path: Path, fallback_fs: float | None) -> tuple[np.ndarray, float]:
+def _load_strain_and_fs(
+    path: Path, fallback_fs: float | None
+) -> tuple[np.ndarray, float, str]:
     try:
         data = np.load(path)
     except Exception as exc:
@@ -94,9 +96,11 @@ def _load_strain_and_fs(path: Path, fallback_fs: float | None) -> tuple[np.ndarr
         raise RuntimeError(f"strain contiene NaN/Inf en {path}")
 
     fs = None
+    fs_source = "fallback"
     for key in FS_KEYS:
         if key in data:
             fs = float(np.asarray(data[key]).reshape(-1)[0])
+            fs_source = "npz"
             break
     if fs is None:
         fs = fallback_fs
@@ -104,7 +108,7 @@ def _load_strain_and_fs(path: Path, fallback_fs: float | None) -> tuple[np.ndarr
         raise RuntimeError(f"fs_hz no encontrado en {path} ni en observables/features")
     fs = _require_positive(float(fs), f"fs_hz ({path})")
 
-    return strain, fs
+    return strain, fs, fs_source
 
 
 def _estimate_f_peak(strain: np.ndarray, fs_hz: float) -> tuple[float, float, float]:
@@ -310,15 +314,15 @@ def main() -> int:
         _write_failure(stage_dir, stage_name, args.run, params, inputs_list, reason)
         _abort(reason)
 
-    fs_hz = observables.get("fs_hz")
-    if fs_hz is None:
-        fs_hz = features.get("fs_hz") if isinstance(features, dict) else None
-    if fs_hz is None:
+    fs_hz_fallback = observables.get("fs_hz")
+    if fs_hz_fallback is None:
+        fs_hz_fallback = features.get("fs_hz") if isinstance(features, dict) else None
+    if fs_hz_fallback is None:
         reason = "fs_hz missing in observables/features"
         _write_failure(stage_dir, stage_name, args.run, params, inputs_list, reason)
         _abort(reason)
     try:
-        fs_hz = _require_positive(float(fs_hz), "fs_hz")
+        fs_hz_fallback = _require_positive(float(fs_hz_fallback), "fs_hz")
     except Exception as exc:
         reason = f"fs_hz inválido: {exc}"
         _write_failure(stage_dir, stage_name, args.run, params, inputs_list, reason)
@@ -342,16 +346,20 @@ def main() -> int:
     fit: dict[str, dict[str, Any]] = {}
     window: dict[str, Any] = {
         "stage": args.window_stage,
+        "fs_hz": None,
         "duration_s": {},
         "n_samples": {},
-        "fs_hz": {},
     }
     decision_reasons: list[str] = []
     decision_verdict = "PASS"
+    contract_verdict = "PASS"
+    contract_reasons: list[str] = []
 
     for det in ["H1", "L1"]:
         try:
-            strain, fs_det = _load_strain_and_fs(input_paths[det], fs_hz)
+            strain, fs_det, fs_source = _load_strain_and_fs(
+                input_paths[det], fs_hz_fallback
+            )
             f_peak_hz, peak_mag, df_hz = _estimate_f_peak(strain, fs_det)
         except Exception as exc:
             reason = f"no se pudo estimar f_peak para {det}: {exc}"
@@ -359,8 +367,17 @@ def main() -> int:
             _abort(reason)
 
         notes: list[str] = []
-        if fs_det != fs_hz:
-            notes.append(f"WARN: fs_hz distinto ({fs_det} vs {fs_hz})")
+        if window["fs_hz"] is None:
+            window["fs_hz"] = fs_det
+        elif abs(fs_det - float(window["fs_hz"])) > 1e-12:
+            contract_verdict = "INSPECT"
+            contract_reasons.append(
+                f"{det}: fs_hz mismatch (npz={fs_det}, window={window['fs_hz']})"
+            )
+            notes.append(f"WARN: fs_hz distinto ({fs_det} vs {window['fs_hz']})")
+        if fs_source != "npz":
+            contract_verdict = "INSPECT"
+            contract_reasons.append(f"{det}: fs_hz inferred from observables/features")
 
         tau_s, tau_notes = _estimate_tau(strain, fs_det)
         notes.extend(tau_notes)
@@ -378,8 +395,8 @@ def main() -> int:
 
         n_samples_det = int(strain.size)
         window["n_samples"][det] = n_samples_det
-        window["fs_hz"][det] = fs_det
-        window["duration_s"][det] = n_samples_det / fs_det
+        fs_ref = float(window["fs_hz"])
+        window["duration_s"][det] = n_samples_det / fs_ref
 
         fit[det] = {
             "n_samples": int(strain.size),
@@ -390,6 +407,25 @@ def main() -> int:
             "Q": q_val,
             "notes": notes,
         }
+
+        expected_df = fs_ref / n_samples_det
+        if abs(df_hz - expected_df) > 1e-12:
+            contract_verdict = "INSPECT"
+            contract_reasons.append(
+                f"{det}: df_hz inconsistente (df_hz={df_hz}, esperado={expected_df})"
+            )
+
+        expected_duration = n_samples_det / fs_ref
+        if abs(window["duration_s"][det] - expected_duration) > 1e-12:
+            contract_verdict = "INSPECT"
+            contract_reasons.append(
+                f"{det}: duration_s inconsistente (duration_s={window['duration_s'][det]}, esperado={expected_duration})"
+            )
+
+    if window["fs_hz"] is None:
+        contract_verdict = "INSPECT"
+        contract_reasons.append("fs_hz missing from window npz inputs")
+        window["fs_hz"] = float(fs_hz_fallback)
 
     features_payload = {
         key: features.get(key)
@@ -402,7 +438,7 @@ def main() -> int:
     report = {
         "run_id": args.run,
         "t0_gps": t0_gps,
-        "fs_hz": fs_hz,
+        "fs_hz": float(window["fs_hz"]),
         "band_hz": [int(BAND_HZ[0]), int(BAND_HZ[1])],
         "features": features_payload,
         "window": window,
@@ -420,7 +456,12 @@ def main() -> int:
 
     verdict_path = outputs_dir / "contract_verdict.json"
     with open(verdict_path, "w", encoding="utf-8") as f:
-        json.dump({"verdict": "PASS"}, f, indent=2, sort_keys=True)
+        json.dump(
+            {"verdict": contract_verdict, "reasons": contract_reasons},
+            f,
+            indent=2,
+            sort_keys=True,
+        )
         f.write("\n")
 
     outputs_list = [
