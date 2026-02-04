@@ -124,6 +124,77 @@ def test_stage_real_inference_recovers_f_peak_and_tau_on_synthetic_decay(
     assert 0.15 < h1_fit["tau_s"] < 0.4
 
 
+def test_stage_real_inference_reports_window_duration_from_npz(
+    tmp_path: Path,
+) -> None:
+    run_id = "2040-09-01__unit_test__real_inference_window"
+    runs_root = tmp_path / "runs"
+    run_dir = runs_root / run_id
+
+    _write_run_valid_pass(run_dir)
+
+    fs = 4096.0
+    duration_s = 0.25
+    n_samples = int(fs * duration_s)
+    t = np.arange(n_samples, dtype=float) / fs
+    strain = np.sin(2.0 * np.pi * 220.0 * t)
+
+    inputs_dir = run_dir / "ringdown_real_ringdown_window" / "outputs"
+    _write_rd_npz(inputs_dir / "H1_rd.npz", strain, fs)
+    _write_rd_npz(inputs_dir / "L1_rd.npz", strain, fs)
+    _write_json(inputs_dir / "segments_rd.json", {"t0_gps": 1126259462.4})
+
+    observables = {
+        "run_id": run_id,
+        "t0_gps": 1126259462.4,
+        "fs_hz": fs,
+        "detectors": ["H1", "L1"],
+        "n_samples": {"H1": n_samples, "L1": n_samples},
+        "rms": {"H1": 1.0, "L1": 1.0},
+        "peak_abs": {"H1": 1.0, "L1": 1.0},
+    }
+    features = {
+        "run_id": run_id,
+        "t0_gps": 1126259462.4,
+        "fs_hz": fs,
+        "n_samples": {"H1": n_samples, "L1": n_samples},
+        "duration_s": {"H1": duration_s, "L1": duration_s},
+        "snr_proxy": {"H1": 10.0, "L1": 10.0},
+    }
+
+    _write_jsonl(
+        run_dir / "ringdown_real_observables_v0" / "outputs" / "observables.jsonl",
+        observables,
+    )
+    _write_jsonl(
+        run_dir / "ringdown_real_features_v0" / "outputs" / "features.jsonl",
+        features,
+    )
+
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+    cmd = [
+        "python",
+        "stages/ringdown_real_inference_v0_stage.py",
+        "--run",
+        run_id,
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
+
+    assert res.returncode == 0, res.stderr
+
+    report_path = (
+        run_dir / "ringdown_real_inference_v0" / "outputs" / "inference_report.json"
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    for det in ["H1", "L1"]:
+        expected = report["fit"][det]["n_samples"] / report["fs_hz"]
+        assert abs(report["window"]["duration_s"][det] - expected) < 1e-9
+
+    assert "duration_s" not in report["features"]
+    assert "features_duration_s" in report["features"]
+
+
 def test_basurin_where_ringdown_exp08_reports_real_inference_missing(
     tmp_path: Path,
 ) -> None:
