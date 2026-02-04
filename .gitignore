@@ -51,7 +51,4 @@ stages/
 # BASURIN: stages/ es canónico (no ignorar)
 !stages/
 !stages/**
-
-# BASURIN: stages/ es canónico (no ignorar)
-!stages/
-!stages/**
+stages/__pycache__/
