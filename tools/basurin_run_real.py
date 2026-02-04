@@ -51,8 +51,11 @@ def _extract_verdict(payload: dict[str, Any]) -> str | None:
         if key not in payload:
             continue
         value = payload[key]
-        if isinstance(value, dict) and "verdict" in value:
-            return value["verdict"]
+        if isinstance(value, dict):
+            if isinstance(value.get("overall"), str):
+                return value["overall"]
+            if isinstance(value.get("verdict"), str):
+                return value["verdict"]
         if isinstance(value, str):
             return value
     return None
@@ -64,6 +67,30 @@ def _stage_summary_verdict(stage_dir: Path) -> str | None:
         return None
     payload = _read_json(summary_path)
     return _extract_verdict(payload)
+
+
+def _real_v0_stage_verdict(stage_dir: Path) -> str | None:
+    summary_path = stage_dir / "stage_summary.json"
+    if not summary_path.exists():
+        return None
+    payload = _read_json(summary_path)
+    verdict = payload.get("verdict")
+    if isinstance(verdict, dict):
+        overall = verdict.get("overall")
+        if isinstance(overall, str):
+            return overall
+        nested = verdict.get("verdict")
+        if isinstance(nested, str):
+            return nested
+    if isinstance(verdict, str):
+        return verdict
+    return _extract_verdict(payload)
+
+
+def _real_v0_ready(run_dir: Path) -> tuple[bool, str | None]:
+    stage_dir = run_dir / "ringdown_real_v0"
+    output_path = stage_dir / "outputs" / "real_v0_events_list.json"
+    return output_path.exists(), _real_v0_stage_verdict(stage_dir)
 
 
 def _locate_run_valid_path(run_dir: Path) -> Path:
@@ -237,6 +264,8 @@ def main() -> int:
         args.run,
     ]
 
+    real_v0_ok, real_v0_verdict = _real_v0_ready(run_dir)
+
     if args.dry_run:
         print("[DRY-RUN] Stage names:")
         print(f"- window: {stage_names['window']}")
@@ -244,15 +273,18 @@ def main() -> int:
         print(f"- features: {stage_names['features']}")
         print(f"- inference: {stage_names['inference']}")
         print("[DRY-RUN] Commands:")
-        print(f"- ringdown_real_v0: {' '.join(commands['ringdown_real_v0'])}")
+        if not real_v0_ok:
+            print(f"- ringdown_real_v0: {' '.join(commands['ringdown_real_v0'])}")
         for key in ("window", "observables", "features", "inference"):
-            print(f"- {key}: {' '.join(commands[key])}")
+            stage_dir = run_dir / stage_names[key]
+            if _should_run_stage(stage_dir, args.force):
+                print(f"- {key}: {' '.join(commands[key])}")
         if args.do_exp08:
             print(f"- exp08: {' '.join(exp08_command)}")
         return 0
 
     ringdown_real_v0_dir = run_dir / "ringdown_real_v0"
-    if _should_run_stage(ringdown_real_v0_dir, args.force):
+    if not real_v0_ok:
         try:
             _run_command(commands["ringdown_real_v0"], repo_root, env)
         except Exception as exc:
@@ -294,12 +326,12 @@ def main() -> int:
     ringdown_real_v0_summary = ringdown_real_v0_dir / "stage_summary.json"
     if ringdown_real_v0_summary.exists():
         stages["ringdown_real_v0"] = {
-            "verdict": _stage_summary_verdict(ringdown_real_v0_dir),
+            "verdict": real_v0_verdict,
             "path": str(ringdown_real_v0_summary.relative_to(run_dir)),
             "sha256": sha256_file(ringdown_real_v0_summary),
         }
     else:
-        stages["ringdown_real_v0"] = {"verdict": _stage_summary_verdict(ringdown_real_v0_dir)}
+        stages["ringdown_real_v0"] = {"verdict": real_v0_verdict}
 
     for key in ("window", "observables", "features", "inference"):
         stage_dir = run_dir / stage_names[key]
