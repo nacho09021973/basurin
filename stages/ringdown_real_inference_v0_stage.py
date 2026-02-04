@@ -3,6 +3,11 @@
 stages/ringdown_real_inference_v0_stage.py
 ---------------------------------------
 Canonical stage: minimal physical inference on real ringdown window.
+
+QNM damped sinusoid fit (v1):
+  h(t) = A * exp(-(t-t0)/tau) * cos(2*pi*f*(t-t0) + phi) + C
+  Fitted via scipy.optimize.least_squares with analytical Jacobian.
+  Produces qnm_fit block in inference_report.json and decision_qnm verdict.
 """
 from __future__ import annotations
 
@@ -240,6 +245,363 @@ def _estimate_tau(
     return float(tau_s), notes, metrics
 
 
+# ---------------------------------------------------------------------------
+# QNM damped-sinusoid fit helpers (v1)
+# ---------------------------------------------------------------------------
+_SCIPY_AVAILABLE = False
+try:
+    from scipy.optimize import least_squares as _least_squares
+    from scipy.signal import butter as _butter, sosfiltfilt as _sosfiltfilt
+    from scipy.signal.windows import tukey as _tukey
+
+    _SCIPY_AVAILABLE = True
+except ImportError:
+    pass
+
+QNM_MODEL_VERSION = "damped_sinusoid_v1"
+_QNM_MAX_NFEV = 2000
+
+
+def _bandpass_filter(
+    strain: np.ndarray, fs_hz: float, lo: float, hi: float,
+) -> np.ndarray:
+    """Bandpass filter.  Butterworth order 2 (scipy) or FFT hard filter (fallback)."""
+    if _SCIPY_AVAILABLE:
+        nyq = fs_hz / 2.0
+        lo_n = max(lo / nyq, 1e-6)
+        hi_n = min(hi / nyq, 1.0 - 1e-6)
+        if lo_n >= hi_n:
+            return strain.copy()
+        sos = _butter(2, [lo_n, hi_n], btype="band", output="sos")
+        return _sosfiltfilt(sos, strain).astype(float)
+    # Fallback: FFT hard bandpass
+    spectrum = np.fft.rfft(strain)
+    freqs = np.fft.rfftfreq(len(strain), d=1.0 / fs_hz)
+    mask = (freqs >= lo) & (freqs <= hi)
+    spectrum[~mask] = 0.0
+    return np.fft.irfft(spectrum, n=len(strain)).astype(float)
+
+
+def _tukey_taper(n: int, alpha: float = 0.1) -> np.ndarray:
+    """Tukey window.  Uses scipy if available, else manual."""
+    if _SCIPY_AVAILABLE:
+        return _tukey(n, alpha=alpha).astype(float)
+    if n <= 1:
+        return np.ones(n, dtype=float)
+    w = np.ones(n, dtype=float)
+    width = int(alpha * n / 2.0)
+    if width > 0:
+        t = np.linspace(0, np.pi, width, endpoint=False)
+        taper = 0.5 * (1.0 - np.cos(t))
+        w[:width] = taper
+        w[-width:] = taper[::-1]
+    return w
+
+
+def _damped_sinusoid(
+    t: np.ndarray, A: float, tau: float, f: float, phi: float, C: float,
+) -> np.ndarray:
+    """h(t) = A * exp(-t/tau) * cos(2*pi*f*t + phi) + C"""
+    decay = np.exp(-t / tau)
+    osc = np.cos(2.0 * np.pi * f * t + phi)
+    return A * decay * osc + C
+
+
+def _damped_sinusoid_residuals(
+    params: np.ndarray, t: np.ndarray, y: np.ndarray,
+) -> np.ndarray:
+    A, tau, f, phi, C = params
+    return y - _damped_sinusoid(t, A, tau, f, phi, C)
+
+
+def _damped_sinusoid_jac(
+    params: np.ndarray, t: np.ndarray, y: np.ndarray,
+) -> np.ndarray:
+    """Analytical Jacobian of *negative* residuals (dr/dp).
+    Since r = y - model, dr/dp = -dmodel/dp."""
+    A, tau, f, phi, C = params
+    decay = np.exp(-t / tau)
+    phase = 2.0 * np.pi * f * t + phi
+    cos_p = np.cos(phase)
+    sin_p = np.sin(phase)
+    n = t.size
+    J = np.empty((n, 5), dtype=float)
+    J[:, 0] = -(decay * cos_p)                             # dr/dA
+    J[:, 1] = -(A * (t / (tau * tau)) * decay * cos_p)     # dr/dtau
+    J[:, 2] = -(A * decay * (-2.0 * np.pi * t) * sin_p)   # dr/df
+    J[:, 3] = -(A * decay * (-sin_p))                      # dr/dphi
+    J[:, 4] = -np.ones(n, dtype=float)                     # dr/dC
+    return J
+
+
+def _estimate_initial_params(
+    strain: np.ndarray, fs_hz: float, band_hz: list[float],
+) -> tuple[float, float, float, float, float]:
+    """Estimate initial [A, tau, f, phi, C] from strain.
+
+    Key: frequency is estimated from a short window around the peak,
+    not the full strain, so the Hanning window doesn't suppress the signal
+    when it starts near t=0.
+    """
+    n = len(strain)
+    # Find peak amplitude
+    i_peak = int(np.argmax(np.abs(strain)))
+    A_init = float(np.abs(strain[i_peak]))
+    if A_init < 1e-30:
+        A_init = 1e-10
+    C_init = 0.0
+
+    # f_init: FFT peak within band on a short window around the peak.
+    # Use at least 256 samples or 10 cycles of the low band edge.
+    lo_f, hi_f = band_hz[0], band_hz[1]
+    min_win = max(256, int(10.0 / max(lo_f, 1.0) * fs_hz))
+    fft_end = min(n, i_peak + min_win)
+    fft_start = max(0, fft_end - min_win)
+    fft_seg = strain[fft_start:fft_end]
+    n_fft = len(fft_seg)
+    if n_fft < 4:
+        f_init = (lo_f + hi_f) / 2.0
+    else:
+        spectrum = np.fft.rfft(fft_seg * np.hanning(n_fft))
+        freqs = np.fft.rfftfreq(n_fft, d=1.0 / fs_hz)
+        mask = (freqs >= lo_f) & (freqs <= hi_f)
+        if not np.any(mask):
+            f_init = (lo_f + hi_f) / 2.0
+        else:
+            band_mag = np.abs(spectrum[mask])
+            f_init = float(freqs[mask][np.argmax(band_mag)])
+
+    # tau_init: estimate from RMS envelope decay per half-cycle.
+    tau_init = 0.01  # 10 ms default
+    if f_init > 0:
+        half_cycle = max(1, int(0.5 * fs_hz / f_init))
+        rms_vals: list[float] = []
+        rms_times: list[float] = []
+        pos = i_peak
+        while pos + half_cycle <= n:
+            block = strain[pos : pos + half_cycle]
+            rms = float(np.sqrt(np.mean(block ** 2)))
+            rms_vals.append(rms)
+            rms_times.append((pos - i_peak + half_cycle / 2.0) / fs_hz)
+            pos += half_cycle
+            if len(rms_vals) >= 20:
+                break
+        if len(rms_vals) >= 2 and rms_vals[0] > 0:
+            half_rms = rms_vals[0] / 2.0
+            for idx in range(1, len(rms_vals)):
+                if rms_vals[idx] < half_rms:
+                    dt = rms_times[idx]
+                    if dt > 0:
+                        tau_init = dt / math.log(2.0)
+                    break
+    tau_init = max(tau_init, 1e-5)
+    phi_init = 0.0
+    return A_init, tau_init, f_init, phi_init, C_init
+
+
+def _qnm_fit_detector(
+    strain: np.ndarray,
+    fs_hz: float,
+    band_hz: list[float],
+    whitened: bool = False,
+) -> dict[str, Any]:
+    """Run QNM damped-sinusoid fit on one detector's strain.
+
+    The fit is restricted to the signal region: from the peak amplitude to
+    a window spanning several expected decay constants, avoiding noise-dominated
+    samples that would bias the optimizer.
+
+    Returns dict with keys:
+      f_qnm_hz, tau_qnm_s, Q_qnm, sigma_f, sigma_tau,
+      rmse, chi2_red, n_samples, status, notes
+    """
+    notes: list[str] = []
+    n_total = int(strain.size)
+    result: dict[str, Any] = {
+        "f_qnm_hz": None,
+        "tau_qnm_s": None,
+        "Q_qnm": None,
+        "sigma_f": None,
+        "sigma_tau": None,
+        "rmse": None,
+        "chi2_red": None,
+        "n_samples": n_total,
+        "status": "FAIL",
+        "notes": notes,
+    }
+
+    if not _SCIPY_AVAILABLE:
+        notes.append("scipy not available; QNM fit skipped")
+        return result
+
+    if n_total < 32:
+        notes.append(f"strain too short for QNM fit (n={n_total})")
+        return result
+
+    lo, hi = float(band_hz[0]), float(band_hz[1])
+
+    # --- Initial parameter estimation on raw signal ---
+    # No taper/filter here: the ringdown window already starts at t0 and
+    # the signal peak may be at the very beginning.
+    try:
+        A0, tau0, f0, phi0, C0 = _estimate_initial_params(strain, fs_hz, [lo, hi])
+    except Exception as exc:
+        notes.append(f"initial param estimation failed: {exc}")
+        return result
+
+    # --- Truncate to signal region ---
+    # Fit from peak to ~8*tau_init to avoid fitting noise-dominated tail.
+    i_peak = int(np.argmax(np.abs(strain)))
+    fit_len = max(64, int(8.0 * tau0 * fs_hz))
+    fit_end = min(n_total, i_peak + fit_len)
+    if fit_end - i_peak < 32:
+        fit_end = min(n_total, i_peak + 32)
+
+    y_fit = strain[i_peak:fit_end].copy().astype(float)
+    n_fit = int(y_fit.size)
+    t_fit = np.arange(n_fit, dtype=float) / fs_hz
+
+    # No taper: the damped sinusoid naturally decays to zero,
+    # so no windowing is needed and tapering would distort the envelope.
+
+    # Re-estimate A from the fit window
+    A0 = float(np.max(np.abs(y_fit - np.mean(y_fit))))
+    if A0 < 1e-30:
+        A0 = 1e-10
+    C0 = float(np.mean(y_fit))
+    p0 = np.array([A0, tau0, f0, phi0, C0])
+
+    # Bounds: A free, tau>0, f in band, phi in [-2pi, 2pi], C free
+    lower = [-np.inf, 1e-7, lo, -2.0 * np.pi, -np.inf]
+    upper = [np.inf, 10.0, hi, 2.0 * np.pi, np.inf]
+
+    # Clamp initial guess inside bounds
+    for i in range(len(p0)):
+        p0[i] = max(lower[i], min(upper[i], p0[i]))
+
+    # --- Fit ---
+    try:
+        res = _least_squares(
+            _damped_sinusoid_residuals,
+            p0,
+            jac=_damped_sinusoid_jac,
+            args=(t_fit, y_fit),
+            bounds=(lower, upper),
+            method="trf",
+            max_nfev=_QNM_MAX_NFEV,
+            ftol=1e-12,
+            xtol=1e-12,
+            gtol=1e-12,
+        )
+    except Exception as exc:
+        notes.append(f"least_squares failed: {exc}")
+        return result
+
+    if not res.success and res.status not in (1, 2, 3, 4):
+        notes.append(f"least_squares did not converge: {res.message}")
+        return result
+
+    A_fit, tau_fit, f_fit, phi_fit, C_fit = res.x
+
+    if not math.isfinite(tau_fit) or tau_fit <= 0:
+        notes.append(f"fitted tau non-positive or non-finite: {tau_fit}")
+        return result
+    if not math.isfinite(f_fit):
+        notes.append(f"fitted f non-finite: {f_fit}")
+        return result
+
+    # --- Goodness of fit ---
+    residuals = res.fun
+    ss_res = float(np.sum(residuals ** 2))
+    n_params = 5
+    dof = max(n_fit - n_params, 1)
+    rmse = float(np.sqrt(ss_res / n_fit))
+    chi2_red = float(ss_res / dof)
+    Q_qnm = float(math.pi * f_fit * tau_fit)
+
+    result["f_qnm_hz"] = float(f_fit)
+    result["tau_qnm_s"] = float(tau_fit)
+    result["Q_qnm"] = float(Q_qnm)
+    result["rmse"] = rmse
+    result["chi2_red"] = chi2_red
+    result["n_samples"] = n_fit
+
+    # --- Uncertainty estimation: C ≈ sigma^2 * (J^T J)^-1 ---
+    sigma_f: float | None = None
+    sigma_tau: float | None = None
+    try:
+        J = res.jac
+        JtJ = J.T @ J
+        cov = np.linalg.inv(JtJ) * (ss_res / dof)
+        variances = np.diag(cov)
+        if variances[1] >= 0:
+            sigma_tau = float(np.sqrt(variances[1]))
+        if variances[2] >= 0:
+            sigma_f = float(np.sqrt(variances[2]))
+        if sigma_tau is not None and not math.isfinite(sigma_tau):
+            sigma_tau = None
+            notes.append("sigma_tau non-finite, set to null")
+        if sigma_f is not None and not math.isfinite(sigma_f):
+            sigma_f = None
+            notes.append("sigma_f non-finite, set to null")
+    except Exception as exc:
+        notes.append(f"covariance estimation failed: {exc}")
+
+    result["sigma_f"] = sigma_f
+    result["sigma_tau"] = sigma_tau
+    result["status"] = "OK"
+
+    return result
+
+
+def _build_decision_qnm(
+    qnm_fit: dict[str, Any], band_hz: list[float],
+) -> dict[str, Any]:
+    """Build decision_qnm verdict from per-detector QNM fit results."""
+    reasons: list[str] = []
+    verdict = "PASS"
+
+    for det in ["H1", "L1"]:
+        det_fit = qnm_fit.get(det)
+        if det_fit is None:
+            verdict = "FAIL"
+            reasons.append(f"{det}: qnm_fit missing")
+            continue
+        if det_fit.get("status") != "OK":
+            if verdict == "PASS":
+                verdict = "INSPECT"
+            reasons.append(f"{det}: qnm_fit status={det_fit.get('status')}")
+            continue
+        f = det_fit.get("f_qnm_hz")
+        tau = det_fit.get("tau_qnm_s")
+        if f is None or tau is None:
+            if verdict == "PASS":
+                verdict = "INSPECT"
+            reasons.append(f"{det}: f_qnm_hz or tau_qnm_s is null despite status OK")
+            continue
+        if tau <= 0:
+            if verdict == "PASS":
+                verdict = "INSPECT"
+            reasons.append(f"{det}: tau_qnm_s <= 0 ({tau})")
+        if f < band_hz[0] or f > band_hz[1]:
+            if verdict == "PASS":
+                verdict = "INSPECT"
+            reasons.append(f"{det}: f_qnm_hz={f} outside band {band_hz}")
+        # Check for huge uncertainties
+        sigma_f = det_fit.get("sigma_f")
+        sigma_tau = det_fit.get("sigma_tau")
+        if sigma_f is not None and f > 0 and sigma_f / f > 0.5:
+            if verdict == "PASS":
+                verdict = "INSPECT"
+            reasons.append(f"{det}: sigma_f/f > 50% ({sigma_f/f:.2f})")
+        if sigma_tau is not None and tau > 0 and sigma_tau / tau > 0.5:
+            if verdict == "PASS":
+                verdict = "INSPECT"
+            reasons.append(f"{det}: sigma_tau/tau > 50% ({sigma_tau/tau:.2f})")
+
+    return {"verdict": verdict, "reasons": reasons}
+
+
 def _write_failure(
     stage_dir: Path,
     stage_name: str,
@@ -390,6 +752,7 @@ def main() -> int:
     contract_verdict = "PASS"
     contract_reasons: list[str] = []
     tau_estimator_det: dict[str, dict[str, Any]] = {}
+    strains: dict[str, tuple[np.ndarray, float]] = {}
 
     for det in ["H1", "L1"]:
         try:
@@ -401,6 +764,8 @@ def main() -> int:
             reason = f"no se pudo estimar f_peak para {det}: {exc}"
             _write_failure(stage_dir, stage_name, args.run, params, inputs_list, reason)
             _abort(reason)
+
+        strains[det] = (strain, fs_det)
 
         notes: list[str] = []
         if window["fs_hz"] is None:
@@ -505,19 +870,63 @@ def main() -> int:
                     f"{det}: tau_estimator metrics missing for null tau_s"
                 )
 
+    # --- QNM damped-sinusoid fit ---
+    band_hz_list = [float(args.band_hz[0]), float(args.band_hz[1])]
+    qnm_fit: dict[str, Any] = {
+        "model": QNM_MODEL_VERSION,
+        "band_hz": band_hz_list,
+    }
+    for det in ["H1", "L1"]:
+        det_strain, det_fs = strains[det]
+        qnm_result = _qnm_fit_detector(det_strain, det_fs, band_hz_list)
+        qnm_fit[det] = qnm_result
+        # Add to decision.reasons if qnm_fit fails but the rest passes
+        if qnm_result["status"] != "OK":
+            qnm_notes = "; ".join(qnm_result["notes"]) if qnm_result["notes"] else "unknown"
+            decision_reasons.append(
+                f"{det}: qnm_fit FAIL ({qnm_notes})"
+            )
+
+    # --- QNM contract checks ---
+    for det in ["H1", "L1"]:
+        det_qnm = qnm_fit[det]
+        if det_qnm["status"] == "OK":
+            # Contract: if status OK => f_qnm_hz and tau_qnm_s not null and tau>0
+            if det_qnm["f_qnm_hz"] is None or det_qnm["tau_qnm_s"] is None:
+                contract_verdict = "INSPECT"
+                contract_reasons.append(
+                    f"{det}: qnm_fit status OK but f_qnm_hz or tau_qnm_s is null"
+                )
+            elif det_qnm["tau_qnm_s"] <= 0:
+                contract_verdict = "INSPECT"
+                contract_reasons.append(
+                    f"{det}: qnm_fit status OK but tau_qnm_s <= 0"
+                )
+        elif det_qnm["status"] == "FAIL":
+            # Contract: if status FAIL => notes not empty
+            if not det_qnm["notes"]:
+                contract_verdict = "INSPECT"
+                contract_reasons.append(
+                    f"{det}: qnm_fit status FAIL but notes empty"
+                )
+
+    decision_qnm = _build_decision_qnm(qnm_fit, band_hz_list)
+
     report = {
         "run_id": args.run,
         "t0_gps": t0_gps,
         "fs_hz": fs_report,
-        "band_hz": [float(args.band_hz[0]), float(args.band_hz[1])],
+        "band_hz": band_hz_list,
         "features": features_payload,
         "window": window,
         "fit": fit,
         "tau_estimator": tau_estimator,
+        "qnm_fit": qnm_fit,
         "decision": {
             "verdict": decision_verdict,
             "reasons": decision_reasons,
         },
+        "decision_qnm": decision_qnm,
     }
 
     report_path = outputs_dir / "inference_report.json"
