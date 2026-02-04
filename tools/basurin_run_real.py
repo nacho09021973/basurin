@@ -90,7 +90,21 @@ def _real_v0_stage_verdict(stage_dir: Path) -> str | None:
 def _real_v0_ready(run_dir: Path) -> tuple[bool, str | None]:
     stage_dir = run_dir / "ringdown_real_v0"
     output_path = stage_dir / "outputs" / "real_v0_events_list.json"
-    return output_path.exists(), _real_v0_stage_verdict(stage_dir)
+    if output_path.exists():
+        return True, None
+    return False, _real_v0_stage_verdict(stage_dir)
+
+
+def _real_v0_ready_by_artifact(run: str) -> bool:
+    runs_root = get_runs_root()
+    sentinel = (
+        runs_root
+        / run
+        / "ringdown_real_v0"
+        / "outputs"
+        / "real_v0_events_list.json"
+    )
+    return sentinel.exists()
 
 
 def _locate_run_valid_path(run_dir: Path) -> Path:
@@ -264,7 +278,10 @@ def main() -> int:
         args.run,
     ]
 
-    real_v0_ok, real_v0_verdict = _real_v0_ready(run_dir)
+    real_v0_ok = _real_v0_ready_by_artifact(args.run)
+    real_v0_verdict = "PASS" if real_v0_ok else None
+    if not real_v0_ok:
+        real_v0_ok, real_v0_verdict = _real_v0_ready(run_dir)
 
     if args.dry_run:
         print("[DRY-RUN] Stage names:")

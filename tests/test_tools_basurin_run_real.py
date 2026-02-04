@@ -86,7 +86,7 @@ def test_runner_dry_run_skips_real_v0_when_output_exists(tmp_path: Path) -> None
     result = _run_cli(["--run", run_id, "--dry-run"], env)
 
     assert result.returncode == 0
-    assert "stages/ringdown_real_v0_stage.py" not in result.stdout
+    assert "ringdown_real_v0_stage.py" not in result.stdout
 
 
 def test_runner_writes_summary_when_stages_exist(tmp_path: Path) -> None:
