@@ -240,6 +240,11 @@ def main() -> int:
         default=STAGE_NAME_DEFAULT,
         help=f"stage name (default: {STAGE_NAME_DEFAULT})",
     )
+    ap.add_argument(
+        "--window-stage",
+        default="ringdown_real_ringdown_window",
+        help="stage name for ringdown window inputs",
+    )
     args = ap.parse_args()
 
     out_root = resolve_out_root("runs")
@@ -254,7 +259,7 @@ def main() -> int:
     stage_name = args.stage_name
     stage_dir, outputs_dir = ensure_stage_dirs(args.run, stage_name, base_dir=out_root)
 
-    inputs_dir = run_dir / "ringdown_real_ringdown_window" / "outputs"
+    inputs_dir = run_dir / args.window_stage / "outputs"
     input_paths = {
         "features": run_dir / "ringdown_real_features_v0" / "outputs" / "features.jsonl",
         "observables": run_dir
@@ -266,7 +271,11 @@ def main() -> int:
         "segments": inputs_dir / "segments_rd.json",
     }
 
-    params = {"run": args.run, "stage_name": stage_name}
+    params = {
+        "run": args.run,
+        "stage_name": stage_name,
+        "window_stage": args.window_stage,
+    }
     inputs_list: list[dict[str, str]] = []
     missing = []
     for path in input_paths.values():
