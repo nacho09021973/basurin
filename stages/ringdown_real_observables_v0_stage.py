@@ -35,7 +35,16 @@ from basurin_io import (
 
 EXIT_CONTRACT_FAIL = 2
 STAGE_NAME_DEFAULT = "ringdown_real_observables_v0"
-BAND_SANITY_HZ = [150, 400]
+
+
+def _parse_band_hz(value: str) -> list[float]:
+    parts = [part.strip() for part in value.split(",") if part.strip()]
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError("band-hz debe tener formato 'low,high'")
+    try:
+        return [float(parts[0]), float(parts[1])]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("band-hz debe ser numérico") from exc
 
 
 def _abort(message: str) -> None:
@@ -175,6 +184,7 @@ def main() -> int:
         default="ringdown_real_ringdown_window",
         help="stage name for ringdown window inputs",
     )
+    ap.add_argument("--band-hz", default="150,400", type=_parse_band_hz)
     args = ap.parse_args()
 
     out_root = resolve_out_root("runs")
@@ -201,6 +211,7 @@ def main() -> int:
         "run": args.run,
         "stage_name": stage_name,
         "window_stage": args.window_stage,
+        "band_hz": args.band_hz,
     }
     inputs_list: list[dict[str, str]] = []
     for label, path in input_paths.items():
@@ -244,7 +255,7 @@ def main() -> int:
         "fs_hz": fs_hz,
         "n_samples": {det: metrics[det]["n_samples"] for det in detectors},
         "t0_gps": t0_gps,
-        "band_sanity_hz": BAND_SANITY_HZ,
+        "band_sanity_hz": args.band_hz,
         "rms": {det: metrics[det]["rms"] for det in detectors},
         "peak_abs": {det: metrics[det]["peak_abs"] for det in detectors},
     }

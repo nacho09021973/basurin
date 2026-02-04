@@ -48,6 +48,8 @@ def test_stage_real_inference_aborts_without_run_valid(tmp_path: Path) -> None:
         "stages/ringdown_real_inference_v0_stage.py",
         "--run",
         run_id,
+        "--band-hz",
+        "200,500",
     ]
     res = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
 
@@ -108,6 +110,8 @@ def test_stage_real_inference_recovers_f_peak_and_tau_on_synthetic_decay(
         "stages/ringdown_real_inference_v0_stage.py",
         "--run",
         run_id,
+        "--band-hz",
+        "200,500",
     ]
     res = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
 
@@ -122,6 +126,7 @@ def test_stage_real_inference_recovers_f_peak_and_tau_on_synthetic_decay(
     assert abs(h1_fit["f_peak_hz"] - f_hz) < 5.0
     assert h1_fit["tau_s"] is not None
     assert 0.15 < h1_fit["tau_s"] < 0.4
+    assert report["band_hz"] == [200.0, 500.0]
 
 
 def test_stage_real_inference_reports_window_duration_from_npz(

@@ -62,10 +62,10 @@ def test_runner_dry_run_prints_stage_names(tmp_path: Path) -> None:
     result = _run_cli(["--run", run_id, "--dry-run"], env)
 
     assert result.returncode == 0
-    assert "ringdown_real_ringdown_window_v1__dt0000ms__dur0250ms" in result.stdout
-    assert "ringdown_real_observables_v0__dt0000ms__dur0250ms" in result.stdout
-    assert "ringdown_real_features_v0__dt0000ms__dur0250ms" in result.stdout
-    assert "ringdown_real_inference_v0__dt0000ms__dur0250ms" in result.stdout
+    assert "ringdown_real_ringdown_window_v1__dt0000ms__dur0250ms__b0150_0400" in result.stdout
+    assert "ringdown_real_observables_v0__dt0000ms__dur0250ms__b0150_0400" in result.stdout
+    assert "ringdown_real_features_v0__dt0000ms__dur0250ms__b0150_0400" in result.stdout
+    assert "ringdown_real_inference_v0__dt0000ms__dur0250ms__b0150_0400" in result.stdout
     assert not (run_dir / "REAL_PIPELINE_SUMMARY.json").exists()
 
 
@@ -142,7 +142,7 @@ def test_runner_writes_summary_when_stages_exist(tmp_path: Path) -> None:
     real_v0_output.parent.mkdir(parents=True, exist_ok=True)
     real_v0_output.write_text("[]", encoding="utf-8")
 
-    suffix = "dt0000ms__dur0250ms"
+    suffix = "dt0000ms__dur0250ms__b0150_0400"
     window_stage = f"ringdown_real_ringdown_window_v1__{suffix}"
     observables_stage = f"ringdown_real_observables_v0__{suffix}"
     features_stage = f"ringdown_real_features_v0__{suffix}"
@@ -184,6 +184,23 @@ def test_runner_writes_summary_when_stages_exist(tmp_path: Path) -> None:
     assert inference_artifacts[0]["sha256"] == sha256_file(inference_summary)
 
     assert summary["final_verdict"] == "PASS"
+
+
+def test_runner_dry_run_includes_band_hz_in_commands(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "run_band"
+    run_dir = runs_root / run_id
+    _make_run_valid(run_dir)
+
+    env = os.environ.copy()
+    env["BASURIN_RUNS_ROOT"] = str(runs_root)
+
+    result = _run_cli(["--run", run_id, "--dry-run", "--band-hz", "200,500"], env)
+
+    assert result.returncode == 0
+    assert "ringdown_real_observables_v0__dt0000ms__dur0250ms__b0200_0500" in result.stdout
+    assert "ringdown_real_inference_v0__dt0000ms__dur0250ms__b0200_0500" in result.stdout
+    assert "--band-hz 200.0,500.0" in result.stdout
 
 
 def test_runner_real_mode_prints_exec_lines(tmp_path: Path, monkeypatch, capsys) -> None:
