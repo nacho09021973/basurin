@@ -93,7 +93,15 @@ def main() -> int:
     ap.add_argument("--ringdown-exp05", action="store_true", help="report Ringdown EXP05 chain (RUN_VALID + ringdown_synth + EXP01 + EXP05)")
     ap.add_argument("--ringdown-exp06", action="store_true", help="report Ringdown EXP06 chain (RUN_VALID + ringdown_synth + EXP01 + EXP06)")
     ap.add_argument("--ringdown-exp07", action="store_true", help="report Ringdown EXP07 chain (RUN_VALID + ringdown_synth + EXP01 + EXP07)")
-    ap.add_argument("--ringdown-exp08", action="store_true", help="report Ringdown EXP08 chain (RUN_VALID + ringdown_real_v0 + EXP08)")
+    ap.add_argument(
+        "--ringdown-exp08",
+        action="store_true",
+        help=(
+            "report Ringdown EXP08 chain (RUN_VALID + ringdown_real_v0 + "
+            "ringdown_real_observables_v0 + ringdown_real_features_v0 + "
+            "ringdown_real_inference_v0 + EXP08)"
+        ),
+    )
     args = ap.parse_args()
 
     rr = _repo_root()
@@ -414,6 +422,22 @@ def main() -> int:
             for m in missing:
                 print(f"  missing: {m}")
         print("  hint: EXP08 requiere features.jsonl de ringdown_real_features_v0 stage.")
+
+        real_inference_outputs = (
+            "ringdown_real_inference_v0/outputs/inference_report.json",
+            "ringdown_real_inference_v0/outputs/contract_verdict.json",
+            "ringdown_real_inference_v0/stage_summary.json",
+            "ringdown_real_inference_v0/manifest.json",
+        )
+        ok, missing = _exists_all(run_dir, real_inference_outputs)
+        tag = "OK" if ok else "MISSING"
+        print(f"- ringdown_real_inference_v0: {tag}")
+        print("  entrypoint: stages/ringdown_real_inference_v0_stage.py")
+        if missing:
+            overall_ok = False
+            for m in missing:
+                print(f"  missing: {m}")
+        print("  hint: EXP08 requiere inference_report.json de ringdown_real_inference_v0 stage.")
 
         ok, missing = _exists_all(run_dir, exp08_outputs)
         tag = "OK" if ok else "MISSING"
