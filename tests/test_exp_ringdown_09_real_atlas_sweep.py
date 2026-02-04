@@ -50,7 +50,8 @@ def test_exp_ringdown_09_sweep_outputs(tmp_path: Path, monkeypatch) -> None:
         {"overall_verdict": "PASS", "smoke_inference": {"n_smoke_ok": 2}},
     )
 
-    suffix = exp09._compute_suffix(0.0, 0.25)
+    band_hz = (150.0, 400.0)
+    suffix = exp09._compute_suffix(0.0, 0.25, band_hz)
     inference_report = (
         run_dir
         / f"ringdown_real_inference_v0__{suffix}"

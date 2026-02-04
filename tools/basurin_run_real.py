@@ -39,6 +39,12 @@ def _compute_suffix(dt_start_s: float, duration_s: float) -> str:
     return f"dt{dt_ms:04d}ms__dur{dur_ms:04d}ms"
 
 
+def _format_band_suffix(band_hz: list[float]) -> str:
+    low = int(round(band_hz[0]))
+    high = int(round(band_hz[1]))
+    return f"b{low:04d}_{high:04d}"
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -153,14 +159,16 @@ def _run_command_capture(
     print(f"completed {label} exit=0")
 
 
-def _stage_names(dt_start_s: float, duration_s: float) -> dict[str, str]:
+def _stage_names(dt_start_s: float, duration_s: float, band_hz: list[float]) -> dict[str, str]:
     suffix = _compute_suffix(dt_start_s, duration_s)
+    band_suffix = _format_band_suffix(band_hz)
+    full_suffix = f"{suffix}__{band_suffix}"
     return {
-        "suffix": suffix,
-        "window": f"ringdown_real_ringdown_window_v1__{suffix}",
-        "observables": f"ringdown_real_observables_v0__{suffix}",
-        "features": f"ringdown_real_features_v0__{suffix}",
-        "inference": f"ringdown_real_inference_v0__{suffix}",
+        "suffix": full_suffix,
+        "window": f"ringdown_real_ringdown_window_v1__{full_suffix}",
+        "observables": f"ringdown_real_observables_v0__{full_suffix}",
+        "features": f"ringdown_real_features_v0__{full_suffix}",
+        "inference": f"ringdown_real_inference_v0__{full_suffix}",
     }
 
 
@@ -226,7 +234,7 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
-    stage_names = _stage_names(args.dt_start_s, args.duration_s)
+    stage_names = _stage_names(args.dt_start_s, args.duration_s, args.band_hz)
 
     repo_root = Path(__file__).resolve().parents[1]
     env = os.environ.copy()
@@ -260,6 +268,8 @@ def main() -> int:
             stage_names["window"],
             "--stage-name",
             stage_names["observables"],
+            "--band-hz",
+            f"{args.band_hz[0]},{args.band_hz[1]}",
         ],
         "features": [
             "python",
@@ -280,6 +290,8 @@ def main() -> int:
             stage_names["window"],
             "--stage-name",
             stage_names["inference"],
+            "--band-hz",
+            f"{args.band_hz[0]},{args.band_hz[1]}",
         ],
     }
 

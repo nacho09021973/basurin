@@ -86,10 +86,16 @@ def _maybe_git_sha() -> Optional[str]:
     return value or None
 
 
-def _compute_suffix(dt_start_s: float, duration_s: float) -> str:
+def _format_band_suffix(band_hz: Tuple[float, float]) -> str:
+    low = int(round(band_hz[0]))
+    high = int(round(band_hz[1]))
+    return f"b{low:04d}_{high:04d}"
+
+
+def _compute_suffix(dt_start_s: float, duration_s: float, band_hz: Tuple[float, float]) -> str:
     dt_ms = int(round(dt_start_s * 1000))
     dur_ms = int(round(duration_s * 1000))
-    return f"dt{dt_ms:04d}ms__dur{dur_ms:04d}ms"
+    return f"dt{dt_ms:04d}ms__dur{dur_ms:04d}ms__{_format_band_suffix(band_hz)}"
 
 
 def _normalize_band(band_hz: Any) -> Tuple[float, float]:
@@ -272,7 +278,7 @@ def main() -> int:
         if exp08_verdict is None:
             failures.append({"case_id": case_id, "reason": "missing_exp08_report"})
 
-        suffix = _compute_suffix(dt_start_s, duration_s)
+        suffix = _compute_suffix(dt_start_s, duration_s, band_hz)
         inference_stage = f"ringdown_real_inference_v0__{suffix}"
         inference_report_path = (
             run_dir / inference_stage / "outputs" / "inference_report.json"

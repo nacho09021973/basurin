@@ -36,9 +36,18 @@ from basurin_io import (
 
 EXIT_CONTRACT_FAIL = 2
 STAGE_NAME_DEFAULT = "ringdown_real_inference_v0"
-BAND_HZ = [150.0, 400.0]
 STRAIN_KEYS = ["strain", "h", "data", "x", "rd_strain"]
 FS_KEYS = ["sample_rate_hz", "fs_hz", "fs", "sample_rate", "sr"]
+
+
+def _parse_band_hz(value: str) -> list[float]:
+    parts = [part.strip() for part in value.split(",") if part.strip()]
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError("band-hz debe tener formato 'low,high'")
+    try:
+        return [float(parts[0]), float(parts[1])]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("band-hz debe ser numérico") from exc
 
 
 def _abort(message: str) -> None:
@@ -111,7 +120,9 @@ def _load_strain_and_fs(
     return strain, fs, fs_source
 
 
-def _estimate_f_peak(strain: np.ndarray, fs_hz: float) -> tuple[float, float, float]:
+def _estimate_f_peak(
+    strain: np.ndarray, fs_hz: float, band_hz: list[float]
+) -> tuple[float, float, float]:
     n = int(strain.size)
     if n <= 0:
         raise RuntimeError("strain vacío")
@@ -122,9 +133,11 @@ def _estimate_f_peak(strain: np.ndarray, fs_hz: float) -> tuple[float, float, fl
     mag = np.abs(spectrum)
     freqs = np.fft.rfftfreq(n, d=1.0 / fs_hz)
 
-    mask = (freqs >= BAND_HZ[0]) & (freqs <= BAND_HZ[1])
+    mask = (freqs >= band_hz[0]) & (freqs <= band_hz[1])
     if not np.any(mask):
-        raise RuntimeError("no hay bins en la banda 150-400 Hz")
+        raise RuntimeError(
+            f"no hay bins en la banda {band_hz[0]}-{band_hz[1]} Hz"
+        )
 
     band_freqs = freqs[mask]
     band_mag = mag[mask]
@@ -249,6 +262,7 @@ def main() -> int:
         default="ringdown_real_ringdown_window",
         help="stage name for ringdown window inputs",
     )
+    ap.add_argument("--band-hz", default="150,400", type=_parse_band_hz)
     args = ap.parse_args()
 
     out_root = resolve_out_root("runs")
@@ -279,6 +293,7 @@ def main() -> int:
         "run": args.run,
         "stage_name": stage_name,
         "window_stage": args.window_stage,
+        "band_hz": args.band_hz,
     }
     inputs_list: list[dict[str, str]] = []
     missing = []
@@ -360,7 +375,7 @@ def main() -> int:
             strain, fs_det, fs_source = _load_strain_and_fs(
                 input_paths[det], fs_hz_fallback
             )
-            f_peak_hz, peak_mag, df_hz = _estimate_f_peak(strain, fs_det)
+            f_peak_hz, peak_mag, df_hz = _estimate_f_peak(strain, fs_det, args.band_hz)
         except Exception as exc:
             reason = f"no se pudo estimar f_peak para {det}: {exc}"
             _write_failure(stage_dir, stage_name, args.run, params, inputs_list, reason)
@@ -439,7 +454,7 @@ def main() -> int:
         "run_id": args.run,
         "t0_gps": t0_gps,
         "fs_hz": float(window["fs_hz"]),
-        "band_hz": [int(BAND_HZ[0]), int(BAND_HZ[1])],
+        "band_hz": [float(args.band_hz[0]), float(args.band_hz[1])],
         "features": features_payload,
         "window": window,
         "fit": fit,
