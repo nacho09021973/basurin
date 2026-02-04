@@ -340,6 +340,12 @@ def main() -> int:
             _abort(reason)
 
     fit: dict[str, dict[str, Any]] = {}
+    window: dict[str, Any] = {
+        "stage": args.window_stage,
+        "duration_s": {},
+        "n_samples": {},
+        "fs_hz": {},
+    }
     decision_reasons: list[str] = []
     decision_verdict = "PASS"
 
@@ -370,6 +376,11 @@ def main() -> int:
             decision_verdict = "INSPECT"
             decision_reasons.append(f"{det}: tau_s no estimado")
 
+        n_samples_det = int(strain.size)
+        window["n_samples"][det] = n_samples_det
+        window["fs_hz"][det] = fs_det
+        window["duration_s"][det] = n_samples_det / fs_det
+
         fit[det] = {
             "n_samples": int(strain.size),
             "df_hz": df_hz,
@@ -380,16 +391,21 @@ def main() -> int:
             "notes": notes,
         }
 
+    features_payload = {
+        key: features.get(key)
+        for key in ["snr_proxy", "rms", "peak_abs"]
+        if isinstance(features, dict) and key in features
+    }
+    if isinstance(features, dict) and "duration_s" in features:
+        features_payload["features_duration_s"] = features.get("duration_s")
+
     report = {
         "run_id": args.run,
         "t0_gps": t0_gps,
         "fs_hz": fs_hz,
         "band_hz": [int(BAND_HZ[0]), int(BAND_HZ[1])],
-        "features": {
-            key: features.get(key)
-            for key in ["snr_proxy", "duration_s", "rms", "peak_abs"]
-            if isinstance(features, dict) and key in features
-        },
+        "features": features_payload,
+        "window": window,
         "fit": fit,
         "decision": {
             "verdict": decision_verdict,
