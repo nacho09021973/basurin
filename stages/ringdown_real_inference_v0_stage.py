@@ -38,6 +38,7 @@ EXIT_CONTRACT_FAIL = 2
 STAGE_NAME_DEFAULT = "ringdown_real_inference_v0"
 STRAIN_KEYS = ["strain", "h", "data", "x", "rd_strain"]
 FS_KEYS = ["sample_rate_hz", "fs_hz", "fs", "sample_rate", "sr"]
+MIN_BLOCKS_TAU = 5
 
 
 def _parse_band_hz(value: str) -> list[float]:
@@ -153,15 +154,25 @@ def _estimate_f_peak(
     return f_peak, peak_mag, df_hz
 
 
-def _estimate_tau(strain: np.ndarray, fs_hz: float) -> tuple[float | None, list[str]]:
+def _estimate_tau(
+    strain: np.ndarray, fs_hz: float,
+) -> tuple[float | None, list[str], dict[str, Any]]:
+    """Estimate exponential decay time.  Returns (tau_s, notes, metrics)."""
     notes: list[str] = []
+    metrics: dict[str, Any] = {
+        "block_len_s": None,
+        "n_blocks_total": 0,
+        "n_blocks_valid": 0,
+        "reject_reasons": {},
+    }
     n = int(strain.size)
     if n <= 0:
         notes.append("WARN: strain vacío para tau")
-        return None, notes
+        return None, notes, metrics
 
     i0 = int(np.argmax(np.abs(strain)))
     block = max(16, int(0.01 * fs_hz))
+    metrics["block_len_s"] = block / fs_hz
 
     amplitudes: list[float] = []
     times: list[float] = []
@@ -178,25 +189,34 @@ def _estimate_tau(strain: np.ndarray, fs_hz: float) -> tuple[float | None, list[
         times.append(float(t))
         start = end
 
+    metrics["n_blocks_total"] = len(amplitudes)
+
     if not amplitudes:
         notes.append("WARN: no se pudo construir envolvente para tau")
-        return None, notes
+        return None, notes, metrics
 
     amp0 = amplitudes[0]
     if amp0 <= 0:
         notes.append("WARN: amplitude_0 no positiva para tau")
-        return None, notes
+        return None, notes, metrics
 
     frac = 0.05
-    valid: list[tuple[float, float]] = [
-        (t, a)
-        for t, a in zip(times, amplitudes)
-        if a > 0 and a >= frac * amp0
-    ]
+    reject_reasons: dict[str, int] = {}
+    valid: list[tuple[float, float]] = []
+    for t, a in zip(times, amplitudes):
+        if a <= 0:
+            reject_reasons["zero_amplitude"] = reject_reasons.get("zero_amplitude", 0) + 1
+        elif a < frac * amp0:
+            reject_reasons["low_power"] = reject_reasons.get("low_power", 0) + 1
+        else:
+            valid.append((t, a))
 
-    if len(valid) < 5:
+    metrics["n_blocks_valid"] = len(valid)
+    metrics["reject_reasons"] = reject_reasons
+
+    if len(valid) < MIN_BLOCKS_TAU:
         notes.append("WARN: menos de 5 bloques válidos para tau")
-        return None, notes
+        return None, notes, metrics
 
     t_vals = np.array([item[0] for item in valid], dtype=float)
     a_vals = np.array([item[1] for item in valid], dtype=float)
@@ -207,17 +227,17 @@ def _estimate_tau(strain: np.ndarray, fs_hz: float) -> tuple[float | None, list[
 
     if not math.isfinite(b):
         notes.append("WARN: ajuste lineal inválido para tau")
-        return None, notes
+        return None, notes, metrics
     if b >= 0:
         notes.append("WARN: pendiente no negativa en ajuste de tau")
-        return None, notes
+        return None, notes, metrics
 
     tau_s = -1.0 / b
     if not math.isfinite(tau_s) or tau_s <= 0:
         notes.append("WARN: tau no finito o no positivo")
-        return None, notes
+        return None, notes, metrics
 
-    return float(tau_s), notes
+    return float(tau_s), notes, metrics
 
 
 def _write_failure(
@@ -369,6 +389,7 @@ def main() -> int:
     decision_verdict = "PASS"
     contract_verdict = "PASS"
     contract_reasons: list[str] = []
+    tau_estimator_det: dict[str, dict[str, Any]] = {}
 
     for det in ["H1", "L1"]:
         try:
@@ -394,8 +415,9 @@ def main() -> int:
             contract_verdict = "INSPECT"
             contract_reasons.append(f"{det}: fs_hz inferred from observables/features")
 
-        tau_s, tau_notes = _estimate_tau(strain, fs_det)
+        tau_s, tau_notes, tau_metrics = _estimate_tau(strain, fs_det)
         notes.extend(tau_notes)
+        tau_estimator_det[det] = tau_metrics
 
         q_val = None
         if tau_s is not None:
@@ -406,7 +428,13 @@ def main() -> int:
 
         if tau_s is None:
             decision_verdict = "INSPECT"
-            decision_reasons.append(f"{det}: tau_s no estimado")
+            nv = tau_metrics["n_blocks_valid"]
+            if nv < MIN_BLOCKS_TAU:
+                decision_reasons.append(
+                    f"{det}: tau_s no estimado (n_blocks_valid={nv} < {MIN_BLOCKS_TAU})"
+                )
+            else:
+                decision_reasons.append(f"{det}: tau_s no estimado")
 
         n_samples_det = int(strain.size)
         window["n_samples"][det] = n_samples_det
@@ -450,14 +478,42 @@ def main() -> int:
     if isinstance(features, dict) and "duration_s" in features:
         features_payload["features_duration_s"] = features.get("duration_s")
 
+    # --- tau_estimator audit block ---
+    fs_report = float(window["fs_hz"])
+    block_samples = max(16, int(0.01 * fs_report))
+    tau_estimator: dict[str, Any] = {
+        "block_len_s": block_samples / fs_report,
+        "min_blocks_required": MIN_BLOCKS_TAU,
+    }
+    for det_key, det_metrics in tau_estimator_det.items():
+        tau_estimator[det_key] = {
+            "n_blocks_total": det_metrics["n_blocks_total"],
+            "n_blocks_valid": det_metrics["n_blocks_valid"],
+            "reject_reasons": det_metrics["reject_reasons"],
+        }
+
+    # Contract: if fit.<IFO>.tau_s is null, tau_estimator.<IFO> must exist
+    for det in ["H1", "L1"]:
+        if fit[det]["tau_s"] is None:
+            te_det = tau_estimator.get(det)
+            if (
+                te_det is None
+                or "n_blocks_valid" not in te_det
+            ):
+                contract_verdict = "INSPECT"
+                contract_reasons.append(
+                    f"{det}: tau_estimator metrics missing for null tau_s"
+                )
+
     report = {
         "run_id": args.run,
         "t0_gps": t0_gps,
-        "fs_hz": float(window["fs_hz"]),
+        "fs_hz": fs_report,
         "band_hz": [float(args.band_hz[0]), float(args.band_hz[1])],
         "features": features_payload,
         "window": window,
         "fit": fit,
+        "tau_estimator": tau_estimator,
         "decision": {
             "verdict": decision_verdict,
             "reasons": decision_reasons,
