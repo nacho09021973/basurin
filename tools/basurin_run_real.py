@@ -271,17 +271,33 @@ def main() -> int:
         ],
     }
 
+    exp08_events_array = (
+        runs_root
+        / args.run
+        / "ringdown_real_v0"
+        / "outputs"
+        / "real_v0_events_array.json"
+    )
     exp08_command = [
         "python",
         "experiment/ringdown/exp_ringdown_08_real_v0_smoke.py",
         "--run",
         args.run,
+        "--real-v0-events-json",
+        str(exp08_events_array),
     ]
 
     real_v0_ok = _real_v0_ready_by_artifact(args.run)
     real_v0_verdict = "PASS" if real_v0_ok else None
     if not real_v0_ok:
         real_v0_ok, real_v0_verdict = _real_v0_ready(run_dir)
+
+    if args.do_exp08 and not exp08_events_array.exists():
+        print(
+            f"MISSING_REAL_V0_EVENTS_ARRAY_FOR_EXP08: {exp08_events_array}",
+            file=sys.stderr,
+        )
+        return 2
 
     if args.dry_run:
         print("[DRY-RUN] Stage names:")
