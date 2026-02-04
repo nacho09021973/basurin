@@ -203,6 +203,102 @@ def test_stage_real_inference_reports_window_duration_from_npz(
     assert "features_duration_s" in report["features"]
 
 
+def test_stage_real_inference_tau_null_reports_tau_estimator_metrics(
+    tmp_path: Path,
+) -> None:
+    """When strain is too short for 5 valid blocks, tau_s must be null and
+    inference_report must contain tau_estimator with per-detector accounting."""
+    run_id = "2040-09-01__unit_test__real_inference_tau_null"
+    runs_root = tmp_path / "runs"
+    run_dir = runs_root / run_id
+
+    _write_run_valid_pass(run_dir)
+
+    fs = 4096.0
+    # 100 samples → with block=max(16,int(0.01*4096))=40, only ~2-3 blocks
+    n_samples = 100
+    t = np.arange(n_samples, dtype=float) / fs
+    strain = np.sin(2.0 * np.pi * 250.0 * t)
+
+    inputs_dir = run_dir / "ringdown_real_ringdown_window" / "outputs"
+    _write_rd_npz(inputs_dir / "H1_rd.npz", strain, fs)
+    _write_rd_npz(inputs_dir / "L1_rd.npz", strain, fs)
+    _write_json(inputs_dir / "segments_rd.json", {"t0_gps": 1126259462.4})
+
+    observables = {
+        "run_id": run_id,
+        "t0_gps": 1126259462.4,
+        "fs_hz": fs,
+        "detectors": ["H1", "L1"],
+        "n_samples": {"H1": n_samples, "L1": n_samples},
+        "rms": {"H1": 1.0, "L1": 1.0},
+        "peak_abs": {"H1": 1.0, "L1": 1.0},
+    }
+    features = {
+        "run_id": run_id,
+        "t0_gps": 1126259462.4,
+        "fs_hz": fs,
+        "n_samples": {"H1": n_samples, "L1": n_samples},
+        "duration_s": {"H1": n_samples / fs, "L1": n_samples / fs},
+        "snr_proxy": {"H1": 10.0, "L1": 10.0},
+    }
+
+    _write_jsonl(
+        run_dir / "ringdown_real_observables_v0" / "outputs" / "observables.jsonl",
+        observables,
+    )
+    _write_jsonl(
+        run_dir / "ringdown_real_features_v0" / "outputs" / "features.jsonl",
+        features,
+    )
+
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+    cmd = [
+        "python",
+        "stages/ringdown_real_inference_v0_stage.py",
+        "--run",
+        run_id,
+        "--band-hz",
+        "200,500",
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
+
+    assert res.returncode == 0, res.stderr
+
+    report_path = (
+        run_dir / "ringdown_real_inference_v0" / "outputs" / "inference_report.json"
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    # tau_estimator must exist with expected top-level keys
+    assert "tau_estimator" in report
+    te = report["tau_estimator"]
+    assert "block_len_s" in te
+    assert isinstance(te["block_len_s"], float)
+    assert te["min_blocks_required"] == 5
+
+    # Both detectors must have per-detector accounting
+    for det in ["H1", "L1"]:
+        assert det in te, f"tau_estimator missing {det}"
+        det_te = te[det]
+        assert "n_blocks_total" in det_te
+        assert "n_blocks_valid" in det_te
+        assert "reject_reasons" in det_te
+        assert isinstance(det_te["n_blocks_total"], int)
+        assert isinstance(det_te["n_blocks_valid"], int)
+        assert det_te["n_blocks_valid"] < 5
+
+    # tau_s must be null for both detectors
+    for det in ["H1", "L1"]:
+        assert report["fit"][det]["tau_s"] is None
+
+    # decision must be INSPECT with informative reasons
+    assert report["decision"]["verdict"] == "INSPECT"
+    reasons_text = " ".join(report["decision"]["reasons"])
+    assert "(n_blocks_valid=" in reasons_text
+    assert "< 5)" in reasons_text
+
+
 def test_basurin_where_ringdown_exp08_reports_real_inference_missing(
     tmp_path: Path,
 ) -> None:
