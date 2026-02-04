@@ -144,6 +144,23 @@ def _extract_f_peak(report_path: Path) -> Optional[float]:
     return float(sum(values) / len(values))
 
 
+def _extract_inference_decision(report_path: Path) -> Tuple[Optional[str], List[str]]:
+    if not report_path.exists():
+        return None, []
+    payload = _read_json(report_path)
+    decision = payload.get("decision")
+    if not isinstance(decision, dict):
+        return None, []
+    verdict = decision.get("verdict")
+    if not isinstance(verdict, str):
+        return None, []
+    reasons_raw = decision.get("reasons", [])
+    if not isinstance(reasons_raw, list):
+        reasons_raw = []
+    reasons = [str(item) for item in reasons_raw if isinstance(item, (str, int, float))]
+    return verdict, reasons
+
+
 def _band_ratio(band_hz: Tuple[float, float], f_peak_hz: Optional[float]) -> Optional[float]:
     if f_peak_hz is None:
         return None
@@ -222,6 +239,7 @@ def main() -> int:
 
     cases: List[Dict[str, Any]] = []
     failures: List[Dict[str, Any]] = []
+    inspect_reasons_count: Dict[str, int] = {}
 
     for idx, raw_cfg in enumerate(grid, start=1):
         case_id = f"case_{idx:03d}"
@@ -285,10 +303,24 @@ def main() -> int:
         )
         f_peak_hz = _extract_f_peak(inference_report_path)
         band_ratio = _band_ratio(band_hz, f_peak_hz)
+        inference_verdict, inference_reasons = _extract_inference_decision(
+            inference_report_path
+        )
 
         case_verdict = "FAIL"
-        if exp08_verdict == "PASS" and runner_status in {"OK", "SKIP"}:
-            case_verdict = "PASS"
+        if runner_returncode is not None and runner_returncode != 0:
+            case_verdict = "FAIL"
+        elif exp08_verdict != "PASS":
+            case_verdict = "FAIL"
+        else:
+            if inference_verdict in {"PASS", "INSPECT"}:
+                case_verdict = inference_verdict
+            else:
+                case_verdict = "PASS"
+
+        if case_verdict == "INSPECT":
+            for reason in inference_reasons:
+                inspect_reasons_count[reason] = inspect_reasons_count.get(reason, 0) + 1
 
         cases.append(
             {
@@ -301,6 +333,8 @@ def main() -> int:
                 "elapsed_s": float(elapsed_s),
                 "runner_status": runner_status,
                 "runner_returncode": runner_returncode,
+                "inference_verdict": inference_verdict,
+                "inference_reasons": inference_reasons,
                 "case_verdict": case_verdict,
                 "paths": {
                     "exp08_report": _relpath(run_dir, exp08_report_path),
@@ -318,15 +352,18 @@ def main() -> int:
             f.write(json.dumps(row, sort_keys=True) + "\n")
 
     n_pass = sum(1 for case in cases if case.get("case_verdict") == "PASS")
-    n_fail = sum(1 for case in cases if case.get("case_verdict") != "PASS")
+    n_inspect = sum(1 for case in cases if case.get("case_verdict") == "INSPECT")
+    n_fail = sum(1 for case in cases if case.get("case_verdict") == "FAIL")
 
     summary = {
         "run_id": args.run,
         "n_cases": len(cases),
         "n_pass": n_pass,
+        "n_inspect": n_inspect,
         "n_fail": n_fail,
         "top_by_n_smoke_ok": _summarize_top(cases, "n_smoke_ok"),
         "top_by_band_ratio": _summarize_top(cases, "band_ratio"),
+        "inspect_reasons_count": inspect_reasons_count,
         "dry_run": bool(args.dry_run),
         "timestamp": utc_now_iso(),
     }
@@ -369,6 +406,7 @@ def main() -> int:
         "results": {
             "n_cases": len(cases),
             "n_pass": n_pass,
+            "n_inspect": n_inspect,
             "n_fail": n_fail,
         },
         "version": {"git_sha": _maybe_git_sha()},

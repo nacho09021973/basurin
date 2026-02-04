@@ -60,7 +60,10 @@ def test_exp_ringdown_09_sweep_outputs(tmp_path: Path, monkeypatch) -> None:
     )
     _write_json(
         inference_report,
-        {"fit": {"H1": {"f_peak_hz": 200.0}, "L1": {"f_peak_hz": 220.0}}},
+        {
+            "fit": {"H1": {"f_peak_hz": 200.0}, "L1": {"f_peak_hz": 220.0}},
+            "decision": {"verdict": "INSPECT", "reasons": ["L1: tau_s no estimado"]},
+        },
     )
 
     grid = [
@@ -114,4 +117,9 @@ def test_exp_ringdown_09_sweep_outputs(tmp_path: Path, monkeypatch) -> None:
 
     assert len(cases) == 2
     assert summary["n_cases"] == 2
-    assert summary["n_pass"] == 2
+    assert summary["n_pass"] == 1
+    assert summary["n_inspect"] == 1
+
+    case_by_id = {case["case_id"]: case for case in cases}
+    assert case_by_id["case_001"]["case_verdict"] == "INSPECT"
+    assert case_by_id["case_001"]["inference_reasons"] == ["L1: tau_s no estimado"]
