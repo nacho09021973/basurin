@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from basurin_io import sha256_file
+from tools import basurin_run_real
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -183,3 +184,28 @@ def test_runner_writes_summary_when_stages_exist(tmp_path: Path) -> None:
     assert inference_artifacts[0]["sha256"] == sha256_file(inference_summary)
 
     assert summary["final_verdict"] == "PASS"
+
+
+def test_runner_real_mode_prints_exec_lines(tmp_path: Path, monkeypatch, capsys) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "run_real_mode"
+    run_dir = runs_root / run_id
+    _make_run_valid(run_dir)
+
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    calls = []
+
+    def fake_run(command, cwd, env, check=False, capture_output=False, text=False):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(basurin_run_real.subprocess, "run", fake_run)
+    monkeypatch.setattr(sys, "argv", ["basurin_run_real.py", "--run", run_id])
+
+    result = basurin_run_real.main()
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "RUN_REAL: exec" in captured.out
+    assert any("ringdown_real_v0_stage.py" in " ".join(cmd) for cmd in calls)
