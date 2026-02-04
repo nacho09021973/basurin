@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run the canonical real-data ringdown pipeline with governance.
+Runner canónico real de ringdown (1 comando por evento).
 """
 from __future__ import annotations
 
@@ -9,61 +9,34 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 # --- BASURIN import bootstrap (no depende de PYTHONPATH) ---
 _here = Path(__file__).resolve()
-for _cand in [_here.parents[0], _here.parents[1], _here.parents[2]]:
+for _cand in (_here.parents[0], _here.parents[1], _here.parents[2]):
     if (_cand / "basurin_io.py").exists():
         sys.path.insert(0, str(_cand))
         break
 # -----------------------------------------------------------
 
-from basurin_io import (
-    get_run_dir,
-    get_runs_root,
-    require_run_valid,
-    sha256_file,
-    validate_run_id,
-)
-
-
-@dataclass(frozen=True)
-class StagePlan:
-    stage_name: str
-    command: list[str]
+from basurin_io import get_run_dir, get_runs_root, require_run_valid, sha256_file, validate_run_id
 
 
 def _parse_band_hz(value: str) -> list[float]:
-    parts = [p.strip() for p in value.split(",") if p.strip()]
+    parts = [part.strip() for part in value.split(",") if part.strip()]
     if len(parts) != 2:
         raise argparse.ArgumentTypeError("band-hz debe tener formato 'low,high'")
     try:
-        low = float(parts[0])
-        high = float(parts[1])
+        return [float(parts[0]), float(parts[1])]
     except ValueError as exc:
         raise argparse.ArgumentTypeError("band-hz debe ser numérico") from exc
-    return [low, high]
 
 
-def _compute_suffix(dt_start_s: float, duration_s: float) -> tuple[str, int, int]:
+def _compute_suffix(dt_start_s: float, duration_s: float) -> str:
     dt_ms = int(round(dt_start_s * 1000))
     dur_ms = int(round(duration_s * 1000))
-    suffix = f"dt{dt_ms:04d}ms__dur{dur_ms:04d}ms"
-    return suffix, dt_ms, dur_ms
-
-
-def _extract_verdict(payload: dict[str, Any]) -> str | None:
-    for key in ("verdict", "overall_verdict", "status", "decision", "result"):
-        if key in payload:
-            value = payload[key]
-            if isinstance(value, dict) and "verdict" in value:
-                return value["verdict"]
-            if isinstance(value, str):
-                return value
-    return None
+    return f"dt{dt_ms:04d}ms__dur{dur_ms:04d}ms"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -71,6 +44,18 @@ def _read_json(path: Path) -> dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"JSON inválido en {path}: {exc}") from exc
+
+
+def _extract_verdict(payload: dict[str, Any]) -> str | None:
+    for key in ("verdict", "overall_verdict", "status", "decision", "result"):
+        if key not in payload:
+            continue
+        value = payload[key]
+        if isinstance(value, dict) and "verdict" in value:
+            return value["verdict"]
+        if isinstance(value, str):
+            return value
+    return None
 
 
 def _stage_summary_verdict(stage_dir: Path) -> str | None:
@@ -81,162 +66,98 @@ def _stage_summary_verdict(stage_dir: Path) -> str | None:
     return _extract_verdict(payload)
 
 
-def _run_command(
-    command: list[str],
-    repo_root: Path,
-    env: dict[str, str],
-) -> None:
+def _locate_run_valid_path(run_dir: Path) -> Path:
+    preferred = run_dir / "RUN_VALID" / "outputs" / "run_valid.json"
+    if preferred.exists():
+        return preferred
+    fallback = run_dir / "RUN_VALID" / "verdict.json"
+    return fallback
+
+
+def _run_command(command: list[str], repo_root: Path, env: dict[str, str]) -> None:
     result = subprocess.run(command, cwd=repo_root, env=env, check=False)
     if result.returncode != 0:
         raise RuntimeError(f"falló comando: {' '.join(command)} (exit={result.returncode})")
 
 
-def _build_stage_plans(
-    run_id: str,
-    dt_start_s: float,
-    duration_s: float,
-    window_stage_base: str,
-) -> dict[str, StagePlan]:
-    suffix, _, _ = _compute_suffix(dt_start_s, duration_s)
-    window_stage_name = f"{window_stage_base}__{suffix}"
-    observables_stage_name = f"ringdown_real_observables_v0__{suffix}"
-    features_stage_name = f"ringdown_real_features_v0__{suffix}"
-    inference_stage_name = f"ringdown_real_inference_v0__{suffix}"
-
-    plans = {
-        "window": StagePlan(
-            stage_name=window_stage_name,
-            command=[
-                sys.executable,
-                "stages/ringdown_real_ringdown_window_v1_stage.py",
-                "--run",
-                run_id,
-                "--dt-start-s",
-                str(dt_start_s),
-                "--duration-s",
-                str(duration_s),
-                "--stage-name",
-                window_stage_name,
-            ],
-        ),
-        "observables": StagePlan(
-            stage_name=observables_stage_name,
-            command=[
-                sys.executable,
-                "stages/ringdown_real_observables_v0_stage.py",
-                "--run",
-                run_id,
-                "--window-stage",
-                window_stage_name,
-                "--stage-name",
-                observables_stage_name,
-            ],
-        ),
-        "features": StagePlan(
-            stage_name=features_stage_name,
-            command=[
-                sys.executable,
-                "stages/ringdown_real_features_v0_stage.py",
-                "--run",
-                run_id,
-                "--window-stage",
-                window_stage_name,
-                "--stage-name",
-                features_stage_name,
-            ],
-        ),
-        "inference": StagePlan(
-            stage_name=inference_stage_name,
-            command=[
-                sys.executable,
-                "stages/ringdown_real_inference_v0_stage.py",
-                "--run",
-                run_id,
-                "--window-stage",
-                window_stage_name,
-                "--stage-name",
-                inference_stage_name,
-            ],
-        ),
-    }
-    return plans
-
-
-def _maybe_run_ringdown_real_v0(
-    run_id: str,
-    run_dir: Path,
+def _run_command_capture(
+    command: list[str],
     repo_root: Path,
     env: dict[str, str],
+    output_path: Path,
 ) -> None:
-    stage_dir = run_dir / "ringdown_real_v0"
-    outputs_dir = stage_dir / "outputs"
-    summary_path = stage_dir / "stage_summary.json"
-    outputs_present = outputs_dir.exists() and any(outputs_dir.iterdir())
-    if summary_path.exists() and outputs_present:
-        return
-    command = [sys.executable, "stages/ringdown_real_v0_stage.py", "--run", run_id]
-    _run_command(command, repo_root, env)
+    result = subprocess.run(
+        command,
+        cwd=repo_root,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(result.stdout + result.stderr, encoding="utf-8")
+    if result.returncode != 0:
+        raise RuntimeError(f"falló comando: {' '.join(command)} (exit={result.returncode})")
 
 
-def _ensure_stage_reexecution_allowed(run_dir: Path, stage_name: str, force: bool) -> None:
-    stage_dir = run_dir / stage_name
-    if stage_dir.exists() and not force:
-        raise RuntimeError(
-            f"stage dir {stage_dir} ya existe; usa --force para re-ejecutar"
-        )
+def _stage_names(dt_start_s: float, duration_s: float) -> dict[str, str]:
+    suffix = _compute_suffix(dt_start_s, duration_s)
+    return {
+        "suffix": suffix,
+        "window": f"ringdown_real_ringdown_window_v1__{suffix}",
+        "observables": f"ringdown_real_observables_v0__{suffix}",
+        "features": f"ringdown_real_features_v0__{suffix}",
+        "inference": f"ringdown_real_inference_v0__{suffix}",
+    }
+
+
+def _should_run_stage(stage_dir: Path, force: bool) -> bool:
+    verdict = _stage_summary_verdict(stage_dir)
+    if verdict == "PASS" and not force:
+        return False
+    return True
 
 
 def _collect_artifact(path: Path, run_dir: Path) -> dict[str, str]:
-    if not path.exists():
-        raise RuntimeError(f"artifact faltante: {path}")
     rel = path.relative_to(run_dir)
     return {"path": str(rel), "sha256": sha256_file(path)}
 
 
-def _write_summary(
-    run_dir: Path,
-    run_id: str,
-    event_id: str | None,
-    t0_gps: float | None,
-    params: dict[str, Any],
-    stage_names: dict[str, str],
-    verdicts: dict[str, Any],
-    artifacts: dict[str, dict[str, dict[str, str]]],
-) -> Path:
-    payload: dict[str, Any] = {
-        "run_id": run_id,
-        "params": params,
-        "stage_names": stage_names,
-        "artifacts": artifacts,
-        "verdicts": verdicts,
-    }
-    if event_id is not None:
-        payload["event_id"] = event_id
-    if t0_gps is not None:
-        payload["t0_gps"] = t0_gps
-
-    summary_path = run_dir / "REAL_PIPELINE_SUMMARY.json"
-    with open(summary_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, sort_keys=True)
-        f.write("\n")
-    return summary_path
+def _final_verdict(
+    verdicts: dict[str, str | None],
+    inference_report: Path,
+) -> str:
+    required = (
+        "RUN_VALID",
+        "ringdown_real_v0",
+        "window",
+        "observables",
+        "features",
+        "inference",
+    )
+    for key in required:
+        if verdicts.get(key) != "PASS":
+            return "FAIL"
+    decision_verdict = None
+    if inference_report.exists():
+        payload = _read_json(inference_report)
+        decision = payload.get("decision")
+        if isinstance(decision, dict):
+            decision_verdict = decision.get("verdict")
+        elif isinstance(payload.get("verdict"), str):
+            decision_verdict = payload.get("verdict")
+    if decision_verdict == "INSPECT":
+        return "INSPECT"
+    return "PASS"
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Run canonical real ringdown pipeline")
     ap.add_argument("--run", required=True, help="run_id")
-    ap.add_argument("--event-id", help="event id (summary metadata only)")
-    ap.add_argument("--t0-gps", type=float, help="t0_gps (summary metadata only)")
-    ap.add_argument("--fs-hz", type=int, default=4096, help="sampling rate metadata")
     ap.add_argument("--dt-start-s", type=float, default=0.0)
     ap.add_argument("--duration-s", type=float, default=0.25)
     ap.add_argument("--band-hz", default="150,400", type=_parse_band_hz)
-    ap.add_argument("--nproc", type=int, default=4, help="metadata only")
-    ap.add_argument(
-        "--window-stage-base",
-        default="ringdown_real_ringdown_window_v1",
-        help="base stage name for ringdown window",
-    )
+    ap.add_argument("--do-exp08", action="store_true", help="run exp_ringdown_08_real_v0_smoke")
     ap.add_argument("--dry-run", action="store_true", help="print plan only")
     ap.add_argument("--force", action="store_true", help="re-run stages if dir exists")
 
@@ -252,150 +173,179 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
+    stage_names = _stage_names(args.dt_start_s, args.duration_s)
+
     repo_root = Path(__file__).resolve().parents[1]
     env = os.environ.copy()
     env["PYTHONPATH"] = "."
 
-    plans = _build_stage_plans(
+    commands = {
+        "ringdown_real_v0": [
+            "python",
+            "stages/ringdown_real_v0_stage.py",
+            "--run",
+            args.run,
+        ],
+        "window": [
+            "python",
+            "stages/ringdown_real_ringdown_window_v1_stage.py",
+            "--run",
+            args.run,
+            "--dt-start-s",
+            str(args.dt_start_s),
+            "--duration-s",
+            str(args.duration_s),
+            "--stage-name",
+            stage_names["window"],
+        ],
+        "observables": [
+            "python",
+            "stages/ringdown_real_observables_v0_stage.py",
+            "--run",
+            args.run,
+            "--window-stage",
+            stage_names["window"],
+            "--stage-name",
+            stage_names["observables"],
+        ],
+        "features": [
+            "python",
+            "stages/ringdown_real_features_v0_stage.py",
+            "--run",
+            args.run,
+            "--window-stage",
+            stage_names["window"],
+            "--stage-name",
+            stage_names["features"],
+        ],
+        "inference": [
+            "python",
+            "stages/ringdown_real_inference_v0_stage.py",
+            "--run",
+            args.run,
+            "--window-stage",
+            stage_names["window"],
+            "--stage-name",
+            stage_names["inference"],
+        ],
+    }
+
+    exp08_command = [
+        "python",
+        "experiment/ringdown/exp_ringdown_08_real_v0_smoke.py",
+        "--run",
         args.run,
-        args.dt_start_s,
-        args.duration_s,
-        args.window_stage_base,
-    )
+    ]
 
     if args.dry_run:
         print("[DRY-RUN] Stage names:")
-        for key in ("window", "observables", "features", "inference"):
-            print(f"- {key}: {plans[key].stage_name}")
+        print(f"- window: {stage_names['window']}")
+        print(f"- observables: {stage_names['observables']}")
+        print(f"- features: {stage_names['features']}")
+        print(f"- inference: {stage_names['inference']}")
         print("[DRY-RUN] Commands:")
+        print(f"- ringdown_real_v0: {' '.join(commands['ringdown_real_v0'])}")
         for key in ("window", "observables", "features", "inference"):
-            print(f"- {key}: {' '.join(plans[key].command)}")
+            print(f"- {key}: {' '.join(commands[key])}")
+        if args.do_exp08:
+            print(f"- exp08: {' '.join(exp08_command)}")
         return 0
 
-    try:
-        _maybe_run_ringdown_real_v0(args.run, run_dir, repo_root, env)
-    except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 2
-
-    for key in ("window", "observables", "features", "inference"):
-        plan = plans[key]
+    ringdown_real_v0_dir = run_dir / "ringdown_real_v0"
+    if _should_run_stage(ringdown_real_v0_dir, args.force):
         try:
-            _ensure_stage_reexecution_allowed(run_dir, plan.stage_name, args.force)
-            _run_command(plan.command, repo_root, env)
+            _run_command(commands["ringdown_real_v0"], repo_root, env)
         except Exception as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 2
 
-    suffix, dt_ms, dur_ms = _compute_suffix(args.dt_start_s, args.duration_s)
-    stage_names = {
-        "window": plans["window"].stage_name,
-        "observables": plans["observables"].stage_name,
-        "features": plans["features"].stage_name,
-        "inference": plans["inference"].stage_name,
-        "suffix": suffix,
-        "dt_ms": dt_ms,
-        "duration_ms": dur_ms,
+    for key in ("window", "observables", "features", "inference"):
+        stage_dir = run_dir / stage_names[key]
+        if not _should_run_stage(stage_dir, args.force):
+            continue
+        try:
+            _run_command(commands[key], repo_root, env)
+        except Exception as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
+
+    exp08_output = None
+    exp08_verdict = None
+    if args.do_exp08:
+        exp08_output = (
+            run_dir / "experiment" / "exp_ringdown_08_real_v0_smoke" / "output.txt"
+        )
+        try:
+            _run_command_capture(exp08_command, repo_root, env, exp08_output)
+        except Exception as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
+        exp08_verdict = "PASS"
+
+    run_valid_path = _locate_run_valid_path(run_dir)
+    stages: dict[str, Any] = {
+        "RUN_VALID": {
+            "verdict": _extract_verdict(run_valid_payload),
+            "path": str(run_valid_path.relative_to(run_dir)),
+            "sha256": sha256_file(run_valid_path),
+        }
     }
 
-    params = {
-        "fs_hz": args.fs_hz,
-        "band_hz": args.band_hz,
-        "dt_start_s": float(args.dt_start_s),
-        "duration_s": float(args.duration_s),
-        "nproc": args.nproc,
-    }
+    ringdown_real_v0_summary = ringdown_real_v0_dir / "stage_summary.json"
+    if ringdown_real_v0_summary.exists():
+        stages["ringdown_real_v0"] = {
+            "verdict": _stage_summary_verdict(ringdown_real_v0_dir),
+            "path": str(ringdown_real_v0_summary.relative_to(run_dir)),
+            "sha256": sha256_file(ringdown_real_v0_summary),
+        }
+    else:
+        stages["ringdown_real_v0"] = {"verdict": _stage_summary_verdict(ringdown_real_v0_dir)}
 
-    verdicts: dict[str, Any] = {
-        "RUN_VALID": _extract_verdict(run_valid_payload),
-        "window": _stage_summary_verdict(run_dir / plans["window"].stage_name),
-        "observables": _stage_summary_verdict(run_dir / plans["observables"].stage_name),
-        "features": _stage_summary_verdict(run_dir / plans["features"].stage_name),
-        "inference": _stage_summary_verdict(run_dir / plans["inference"].stage_name),
-    }
+    for key in ("window", "observables", "features", "inference"):
+        stage_dir = run_dir / stage_names[key]
+        summary_path = stage_dir / "stage_summary.json"
+        entry: dict[str, Any] = {
+            "name": stage_names[key],
+            "verdict": _stage_summary_verdict(stage_dir),
+            "artifacts": [],
+        }
+        if summary_path.exists():
+            entry["artifacts"].append(_collect_artifact(summary_path, run_dir))
+        stages[key] = entry
+
+    if args.do_exp08:
+        exp08_entry: dict[str, Any] = {"verdict": exp08_verdict, "artifacts": []}
+        if exp08_output is not None:
+            exp08_entry["artifacts"].append(_collect_artifact(exp08_output, run_dir))
+        stages["exp08"] = exp08_entry
 
     inference_report = (
-        run_dir
-        / plans["inference"].stage_name
-        / "outputs"
-        / "inference_report.json"
+        run_dir / stage_names["inference"] / "outputs" / "inference_report.json"
     )
-    if inference_report.exists():
-        payload = _read_json(inference_report)
-        decision = payload.get("decision")
-        if isinstance(decision, dict):
-            verdicts["decision.verdict"] = decision.get("verdict")
-        else:
-            verdicts["decision.verdict"] = payload.get("verdict")
 
-    artifacts = {
-        "window": {
-            "H1_rd.npz": _collect_artifact(
-                run_dir / plans["window"].stage_name / "outputs" / "H1_rd.npz",
-                run_dir,
-            ),
-            "L1_rd.npz": _collect_artifact(
-                run_dir / plans["window"].stage_name / "outputs" / "L1_rd.npz",
-                run_dir,
-            ),
-            "segments_rd.json": _collect_artifact(
-                run_dir
-                / plans["window"].stage_name
-                / "outputs"
-                / "segments_rd.json",
-                run_dir,
-            ),
+    summary = {
+        "run_id": args.run,
+        "params": {
+            "dt_start_s": float(args.dt_start_s),
+            "duration_s": float(args.duration_s),
+            "band_hz": args.band_hz,
         },
-        "observables": {
-            "observables.jsonl": _collect_artifact(
-                run_dir
-                / plans["observables"].stage_name
-                / "outputs"
-                / "observables.jsonl",
-                run_dir,
-            ),
-        },
-        "features": {
-            "features.jsonl": _collect_artifact(
-                run_dir
-                / plans["features"].stage_name
-                / "outputs"
-                / "features.jsonl",
-                run_dir,
-            ),
-        },
-        "inference": {
-            "inference_report.json": _collect_artifact(
-                run_dir
-                / plans["inference"].stage_name
-                / "outputs"
-                / "inference_report.json",
-                run_dir,
-            ),
-            "contract_verdict.json": _collect_artifact(
-                run_dir
-                / plans["inference"].stage_name
-                / "outputs"
-                / "contract_verdict.json",
-                run_dir,
-            ),
-        },
+        "stages": stages,
+        "final_verdict": _final_verdict(
+            {
+                "RUN_VALID": stages["RUN_VALID"].get("verdict"),
+                "ringdown_real_v0": stages["ringdown_real_v0"].get("verdict"),
+                "window": stages["window"].get("verdict"),
+                "observables": stages["observables"].get("verdict"),
+                "features": stages["features"].get("verdict"),
+                "inference": stages["inference"].get("verdict"),
+            },
+            inference_report,
+        ),
     }
 
-    try:
-        _write_summary(
-            run_dir,
-            args.run,
-            args.event_id,
-            args.t0_gps,
-            params,
-            stage_names,
-            verdicts,
-            artifacts,
-        )
-    except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 2
+    summary_path = run_dir / "REAL_PIPELINE_SUMMARY.json"
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     return 0
 

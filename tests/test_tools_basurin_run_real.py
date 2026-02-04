@@ -1,79 +1,120 @@
+from __future__ import annotations
+
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
+from basurin_io import sha256_file
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _run_cli(args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    command = [sys.executable, "tools/basurin_run_real.py", *args]
+    return subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
 
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _run_tool(repo_root: Path, env: dict[str, str], args: list[str]) -> subprocess.CompletedProcess:
-    command = [sys.executable, str(repo_root / "tools" / "basurin_run_real.py"), *args]
-    return subprocess.run(command, capture_output=True, text=True, env=env, check=False)
+def _make_run_valid(run_dir: Path) -> None:
+    _write_json(run_dir / "RUN_VALID" / "outputs" / "run_valid.json", {"verdict": "PASS"})
 
 
-def test_dry_run_stage_names(tmp_path: Path) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+def _make_stage_summary(run_dir: Path, stage_name: str) -> Path:
+    path = run_dir / stage_name / "stage_summary.json"
+    _write_json(path, {"verdict": "PASS"})
+    return path
+
+
+def test_runner_fails_without_run_valid(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
-    run_id = "dry-run-stage-names"
-    run_valid_path = runs_root / run_id / "RUN_VALID" / "outputs" / "run_valid.json"
-    _write_json(run_valid_path, {"run": run_id, "verdict": "PASS"})
+    run_id = "run_missing"
+    env = os.environ.copy()
+    env["BASURIN_RUNS_ROOT"] = str(runs_root)
+
+    result = _run_cli(["--run", run_id], env)
+
+    assert result.returncode != 0
+
+
+def test_runner_dry_run_prints_stage_names(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "run_ok"
+    run_dir = runs_root / run_id
+    _make_run_valid(run_dir)
 
     env = os.environ.copy()
     env["BASURIN_RUNS_ROOT"] = str(runs_root)
 
-    result = _run_tool(
-        repo_root,
-        env,
-        [
-            "--run",
-            run_id,
-            "--dt-start-s",
-            "0.0123",
-            "--duration-s",
-            "0.25",
-            "--dry-run",
-        ],
-    )
+    result = _run_cli(["--run", run_id, "--dry-run"], env)
 
     assert result.returncode == 0
-    assert "dt0012ms__dur0250ms" in result.stdout
-    assert "ringdown_real_ringdown_window_v1__dt0012ms__dur0250ms" in result.stdout
-    assert "ringdown_real_observables_v0__dt0012ms__dur0250ms" in result.stdout
-    assert "ringdown_real_features_v0__dt0012ms__dur0250ms" in result.stdout
-    assert "ringdown_real_inference_v0__dt0012ms__dur0250ms" in result.stdout
-
-    summary_path = runs_root / run_id / "REAL_PIPELINE_SUMMARY.json"
-    assert not summary_path.exists()
+    assert "ringdown_real_ringdown_window_v1__dt0000ms__dur0250ms" in result.stdout
+    assert "ringdown_real_observables_v0__dt0000ms__dur0250ms" in result.stdout
+    assert "ringdown_real_features_v0__dt0000ms__dur0250ms" in result.stdout
+    assert "ringdown_real_inference_v0__dt0000ms__dur0250ms" in result.stdout
+    assert not (run_dir / "REAL_PIPELINE_SUMMARY.json").exists()
 
 
-def test_abort_without_run_valid(tmp_path: Path) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+def test_runner_writes_summary_when_stages_exist(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
-    run_id = "missing-run-valid"
-    (runs_root / run_id).mkdir(parents=True)
+    run_id = "run_summary"
+    run_dir = runs_root / run_id
+    _make_run_valid(run_dir)
+
+    _make_stage_summary(run_dir, "ringdown_real_v0")
+
+    suffix = "dt0000ms__dur0250ms"
+    window_stage = f"ringdown_real_ringdown_window_v1__{suffix}"
+    observables_stage = f"ringdown_real_observables_v0__{suffix}"
+    features_stage = f"ringdown_real_features_v0__{suffix}"
+    inference_stage = f"ringdown_real_inference_v0__{suffix}"
+
+    window_summary = _make_stage_summary(run_dir, window_stage)
+    observables_summary = _make_stage_summary(run_dir, observables_stage)
+    features_summary = _make_stage_summary(run_dir, features_stage)
+    inference_summary = _make_stage_summary(run_dir, inference_stage)
 
     env = os.environ.copy()
     env["BASURIN_RUNS_ROOT"] = str(runs_root)
 
-    result = _run_tool(repo_root, env, ["--run", run_id, "--dry-run"])
+    result = _run_cli(["--run", run_id], env)
 
-    assert result.returncode != 0
+    assert result.returncode == 0
 
+    summary_path = run_dir / "REAL_PIPELINE_SUMMARY.json"
+    assert summary_path.exists()
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
 
-def test_abort_when_run_valid_not_pass(tmp_path: Path) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    runs_root = tmp_path / "runs"
-    run_id = "run-valid-fail"
-    run_valid_path = runs_root / run_id / "RUN_VALID" / "outputs" / "run_valid.json"
-    _write_json(run_valid_path, {"run": run_id, "verdict": "FAIL"})
+    assert summary["run_id"] == run_id
+    assert summary["params"]["band_hz"] == [150.0, 400.0]
 
-    env = os.environ.copy()
-    env["BASURIN_RUNS_ROOT"] = str(runs_root)
+    stages = summary["stages"]
+    assert stages["RUN_VALID"]["path"] == "RUN_VALID/outputs/run_valid.json"
 
-    result = _run_tool(repo_root, env, ["--run", run_id, "--dry-run"])
+    window_artifacts = stages["window"]["artifacts"]
+    assert window_artifacts[0]["path"] == str(window_summary.relative_to(run_dir))
+    assert window_artifacts[0]["sha256"] == sha256_file(window_summary)
 
-    assert result.returncode != 0
+    observables_artifacts = stages["observables"]["artifacts"]
+    assert observables_artifacts[0]["sha256"] == sha256_file(observables_summary)
+
+    features_artifacts = stages["features"]["artifacts"]
+    assert features_artifacts[0]["sha256"] == sha256_file(features_summary)
+
+    inference_artifacts = stages["inference"]["artifacts"]
+    assert inference_artifacts[0]["sha256"] == sha256_file(inference_summary)
+
+    assert summary["final_verdict"] == "PASS"
