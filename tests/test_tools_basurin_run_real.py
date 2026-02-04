@@ -68,6 +68,45 @@ def test_runner_dry_run_prints_stage_names(tmp_path: Path) -> None:
     assert not (run_dir / "REAL_PIPELINE_SUMMARY.json").exists()
 
 
+def test_runner_dry_run_exp08_includes_real_v0_events_array(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "run_exp08"
+    run_dir = runs_root / run_id
+    _make_run_valid(run_dir)
+
+    events_array = (
+        run_dir / "ringdown_real_v0" / "outputs" / "real_v0_events_array.json"
+    )
+    events_array.parent.mkdir(parents=True, exist_ok=True)
+    events_array.write_text('[{"event_id": "evt-1"}]', encoding="utf-8")
+
+    env = os.environ.copy()
+    env["BASURIN_RUNS_ROOT"] = str(runs_root)
+
+    result = _run_cli(["--run", run_id, "--dry-run", "--do-exp08"], env)
+
+    assert result.returncode == 0
+    assert "exp_ringdown_08_real_v0_smoke.py" in result.stdout
+    assert (
+        f"--real-v0-events-json {events_array}" in result.stdout
+    )
+
+
+def test_runner_dry_run_exp08_requires_real_v0_events_array(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "run_exp08_missing"
+    run_dir = runs_root / run_id
+    _make_run_valid(run_dir)
+
+    env = os.environ.copy()
+    env["BASURIN_RUNS_ROOT"] = str(runs_root)
+
+    result = _run_cli(["--run", run_id, "--dry-run", "--do-exp08"], env)
+
+    assert result.returncode != 0
+    assert "MISSING_REAL_V0_EVENTS_ARRAY_FOR_EXP08" in result.stderr
+
+
 def test_runner_dry_run_skips_real_v0_when_output_exists(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     run_id = "run_real_v0_ready"
