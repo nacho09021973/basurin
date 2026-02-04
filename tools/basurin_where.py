@@ -400,6 +400,21 @@ def main() -> int:
                 print(f"  missing: {m}")
         print("  hint: EXP08 requiere observables.jsonl de ringdown_real_observables_v0 stage.")
 
+        real_features_outputs = (
+            "ringdown_real_features_v0/outputs/features.jsonl",
+            "ringdown_real_features_v0/stage_summary.json",
+            "ringdown_real_features_v0/manifest.json",
+        )
+        ok, missing = _exists_all(run_dir, real_features_outputs)
+        tag = "OK" if ok else "MISSING"
+        print(f"- ringdown_real_features_v0: {tag}")
+        print("  entrypoint: stages/ringdown_real_features_v0_stage.py")
+        if missing:
+            overall_ok = False
+            for m in missing:
+                print(f"  missing: {m}")
+        print("  hint: EXP08 requiere features.jsonl de ringdown_real_features_v0 stage.")
+
         ok, missing = _exists_all(run_dir, exp08_outputs)
         tag = "OK" if ok else "MISSING"
         print(f"- EXP_RINGDOWN_08__real_v0_smoke: {tag}")
