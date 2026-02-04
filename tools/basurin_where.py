@@ -39,6 +39,19 @@ RINGDOWN_MIN_SPECS = (
     ),
 )
 
+RINGDOWN_EXP08_SPECS = (
+    StageSpec(
+        name="RUN_VALID",
+        entrypoint="experiment/run_valid/stage_run_valid.py",
+        required_files=(
+            "RUN_VALID/outputs/run_valid.json",
+            "RUN_VALID/stage_summary.json",
+            "RUN_VALID/manifest.json",
+        ),
+        hints=("Soberano: el run no existe si esto no está en PASS.",),
+    ),
+)
+
 def _repo_root() -> Path:
     # Determinista: usa CWD
     return Path.cwd().resolve()
@@ -96,7 +109,7 @@ def main() -> int:
         return 2
 
     if args.ringdown_exp08:
-        specs = RINGDOWN_MIN_SPECS
+        specs = RINGDOWN_EXP08_SPECS
     elif args.ringdown_exp04:
         specs = RINGDOWN_MIN_SPECS
     elif args.ringdown_exp06:
@@ -349,6 +362,11 @@ def main() -> int:
         real_v0_stage = (
             "ringdown_real_v0/outputs/real_v0_events_list.json"
         )
+        real_obs_outputs = (
+            "ringdown_real_observables_v0/outputs/observables.jsonl",
+            "ringdown_real_observables_v0/stage_summary.json",
+            "ringdown_real_observables_v0/manifest.json",
+        )
         exp08_entry = (
             "PYTHONPATH=. python experiment/ringdown/exp_ringdown_08_real_v0_smoke.py --run \"$RUN\""
         )
@@ -371,6 +389,16 @@ def main() -> int:
             for m in missing:
                 print(f"  missing: {m}")
         print("  hint: EXP08 requiere real_v0_events_list.json de ringdown_real_v0 stage.")
+
+        ok, missing = _exists_all(run_dir, real_obs_outputs)
+        tag = "OK" if ok else "MISSING"
+        print(f"- ringdown_real_observables_v0: {tag}")
+        print("  entrypoint: stages/ringdown_real_observables_v0_stage.py")
+        if missing:
+            overall_ok = False
+            for m in missing:
+                print(f"  missing: {m}")
+        print("  hint: EXP08 requiere observables.jsonl de ringdown_real_observables_v0 stage.")
 
         ok, missing = _exists_all(run_dir, exp08_outputs)
         tag = "OK" if ok else "MISSING"
