@@ -49,7 +49,7 @@ def main() -> int:
     ap.add_argument("--run", required=True)
     ap.add_argument("--out-root", default="runs")
     ap.add_argument("--stage-name", default="bayes_validation_v1")
-    ap.add_argument("--dictionary-stage", default="dictionary")
+    ap.add_argument("--spectrum-stage", default="spectrum")
     ap.add_argument("--k-features", type=int, default=3)
     ap.add_argument("--n-monte-carlo", type=int, default=500)
     ap.add_argument("--seed", type=int, default=42)
@@ -71,10 +71,10 @@ def main() -> int:
         return _abort_contract("scipy_missing")
 
     run_dir = out_root / args.run
-    input_rel = Path("runs") / args.run / args.dictionary_stage / "outputs" / "spectrum.h5"
-    input_path = run_dir / args.dictionary_stage / "outputs" / "spectrum.h5"
+    input_rel = Path("runs") / args.run / args.spectrum_stage / "outputs" / "spectrum.h5"
+    input_path = run_dir / args.spectrum_stage / "outputs" / "spectrum.h5"
     if not input_path.exists():
-        return _abort_contract("missing_dictionary_spectrum_h5")
+        return _abort_contract("missing_spectrum_h5")
 
     stage_dir, outputs_dir = ensure_stage_dirs(args.run, args.stage_name, base_dir=out_root)
 
