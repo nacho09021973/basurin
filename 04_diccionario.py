@@ -1705,6 +1705,26 @@ def write_outputs(stage_dir: Path, outputs_dir: Path, cfg: Config, spectrum: dic
         "hashes": {},
     }
 
+    validation_summary = summary["validation_summary"]
+    reasons: list[str] = []
+    all_hard_contracts_pass = validation_summary.get("all_hard_contracts_pass")
+    if all_hard_contracts_pass is True:
+        summary["verdict"] = "PASS"
+    elif all_hard_contracts_pass is False:
+        summary["verdict"] = "FAIL"
+    else:
+        summary["verdict"] = "INSPECT"
+        reasons.append("validation_summary missing all_hard_contracts_pass")
+
+    if (
+        validation_summary.get("C1_sigma_status") == "OUT_OF_DOMAIN"
+        or validation_summary.get("C1_epsilon_status") == "OUT_OF_DOMAIN"
+    ):
+        reasons.append("C1: OUT_OF_DOMAIN (informative)")
+    if validation_summary.get("C3_status") == "SKIP":
+        reasons.append("C3: SKIP (informative)")
+    summary["reasons"] = reasons
+
     summary["atlas_points_status"] = atlas_points_status
     summary["atlas_points_reason"] = atlas_points_reason
     summary["atlas_points_generated"] = atlas_points_generated
