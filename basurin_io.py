@@ -149,7 +149,9 @@ def resolve_spectrum_path(run_dir: Path | str) -> Path:
     )
 
 
-def assert_within_runs(run_dir: Path, path: Path) -> None:
+def assert_within_runs(run_dir: Path, path: Path | str) -> None:
+    if isinstance(path, str):
+        path = Path(path)
     run_dir_resolved = run_dir.resolve()
     path_resolved = path.resolve()
     try:
