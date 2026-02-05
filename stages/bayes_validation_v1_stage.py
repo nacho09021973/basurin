@@ -89,6 +89,23 @@ def main() -> int:
         k_features=args.k_features,
         prior_precision=args.prior_precision,
     )
+
+    # --- Derive verdict from C4 results ---
+    verdict = "PASS"
+    verdict_reasons: list[str] = []
+
+    if c4.get("log_bayes_factor_proxy") is None:
+        verdict = "INSPECT"
+        verdict_reasons.append(
+            "C4: log_bayes_factor_proxy not computed; model selection based on surrogate score only"
+        )
+
+    if not c4.get("selection_consistent", True):
+        verdict = "INSPECT"
+        verdict_reasons.append(
+            "C4: neg_mse and BIC select different best models; review recommended"
+        )
+
     uncertainty = {
         "mc_mean": float(sum(values) / len(values)),
         "mc_std": float((sum((v - (sum(values) / len(values))) ** 2 for v in values) / len(values)) ** 0.5),
@@ -117,8 +134,8 @@ def main() -> int:
             "uncertainty_propagation": uncertainty,
             "sensitivity_analysis": sensitivity,
         },
-        "verdict": "PASS",
-        "reasons": [],
+        "verdict": verdict,
+        "reasons": verdict_reasons,
     }
 
     ok, reasons = validate_bayes_output(payload)
@@ -131,7 +148,8 @@ def main() -> int:
     summary = {
         "stage": args.stage_name,
         "run": args.run,
-        "verdict": "PASS",
+        "verdict": verdict,
+        "reasons": verdict_reasons,
         "parameters": payload["parameters"],
         "inputs": payload["inputs"],
         "outputs": {"bayes_validation": "outputs/bayes_validation.json"},
