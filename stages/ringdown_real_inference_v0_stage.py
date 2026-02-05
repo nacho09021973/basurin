@@ -626,6 +626,11 @@ def _build_decision_qnm(
                 verdict = "INSPECT"
             reasons.append(f"{det}: sigma_tau/tau > 50% ({sigma_tau/tau:.2f})")
 
+        if det_fit.get("clipped_tau") is True:
+            reasons.append(
+                f"{det}: tau_qnm_s clipped to bounds {det_fit.get('tau_bounds_s')}"
+            )
+
     tau_mean: float | None = None
     tau_frac_diff: float | None = None
     if (

@@ -691,3 +691,34 @@ def test_qnm_fit_tau_inconsistency_forces_inspect(tmp_path: Path) -> None:
     assert qnm_consistency["tau_mean_s"] is not None
     assert qnm_consistency["tau_frac_diff"] is not None
     assert qnm_consistency["tau_frac_diff"] > 0.2
+
+
+def test_decision_qnm_reasons_include_clipped_tau_note() -> None:
+    """Regression: clipped tau should be reported in decision_qnm.reasons."""
+    from stages.ringdown_real_inference_v0_stage import _build_decision_qnm
+
+    qnm_fit = {
+        "H1": {
+            "status": "OK",
+            "f_qnm_hz": 250.0,
+            "tau_qnm_s": 0.2,
+            "sigma_f": None,
+            "sigma_tau": None,
+            "tau_bounds_s": [0.01, 0.5],
+            "clipped_tau": False,
+        },
+        "L1": {
+            "status": "OK",
+            "f_qnm_hz": 250.0,
+            "tau_qnm_s": 0.01,
+            "sigma_f": None,
+            "sigma_tau": None,
+            "tau_bounds_s": [0.01, 0.5],
+            "clipped_tau": True,
+        },
+    }
+
+    decision_qnm, _ = _build_decision_qnm(qnm_fit, [150.0, 400.0])
+    reasons_text = " ".join(decision_qnm["reasons"])
+    assert "L1" in reasons_text
+    assert "clipped" in reasons_text
