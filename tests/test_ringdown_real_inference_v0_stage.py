@@ -622,6 +622,39 @@ def test_qnm_fit_contract_fail_implies_non_empty_notes(tmp_path: Path) -> None:
             # (not strictly required to be null, but this is the expected case)
 
 
+
+
+def test_qnm_fit_reports_tau_bounds_and_clipping_contract(tmp_path: Path) -> None:
+    """Contract: status OK must report tau bounds and non-null clipping diagnostics."""
+    run_id = "2040-09-01__unit_test__qnm_tau_clipping_contract"
+    fs = 4096.0
+    n_samples = 8192
+    f_true = 250.0
+    tau_true = 0.01
+
+    t = np.arange(n_samples, dtype=float) / fs
+    strain = np.exp(-t / tau_true) * np.cos(2.0 * np.pi * f_true * t)
+
+    run_dir, res = _make_run_with_synthetic_signal(
+        tmp_path, run_id, strain, strain, fs, band_hz="150,400",
+    )
+    assert res.returncode == 0, res.stderr
+
+    report_path = (
+        run_dir / "ringdown_real_inference_v0" / "outputs" / "inference_report.json"
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    for det in ["H1", "L1"]:
+        det_qnm = report["qnm_fit"][det]
+        assert det_qnm["tau_bounds_s"] == [0.01, 0.5]
+        assert det_qnm["clipped_tau"] in [True, False]
+        if det_qnm["status"] == "OK":
+            assert det_qnm["tau_bounds_s"] is not None
+            assert det_qnm["clipped_tau"] is not None
+            if det_qnm["tau_qnm_s"] == 0.01:
+                assert det_qnm["clipped_tau"] is True
+
 def test_qnm_fit_tau_inconsistency_forces_inspect(tmp_path: Path) -> None:
     """Regression: large H1/L1 tau mismatch must force decision_qnm=INSPECT."""
     run_id = "2040-09-01__unit_test__qnm_tau_inconsistency"

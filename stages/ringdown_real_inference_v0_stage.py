@@ -261,6 +261,16 @@ except ImportError:
 
 QNM_MODEL_VERSION = "damped_sinusoid_v1"
 _QNM_MAX_NFEV = 2000
+TAU_MIN_S = 0.01
+TAU_MAX_S = 0.5
+CLIP_EPS_FRAC = 0.01
+
+
+def _is_clipped(x: float | None, lo: float, hi: float, eps_frac: float) -> bool | None:
+    if x is None:
+        return None
+    eps = eps_frac * (hi - lo)
+    return (x <= lo + eps) or (x >= hi - eps)
 
 
 def _bandpass_filter(
@@ -420,7 +430,11 @@ def _qnm_fit_detector(
     n_total = int(strain.size)
     result: dict[str, Any] = {
         "f_qnm_hz": None,
+        "f_bounds_hz": [float(band_hz[0]), float(band_hz[1])],
+        "clipped_f": False,
         "tau_qnm_s": None,
+        "tau_bounds_s": [TAU_MIN_S, TAU_MAX_S],
+        "clipped_tau": False,
         "Q_qnm": None,
         "sigma_f": None,
         "sigma_tau": None,
@@ -472,9 +486,9 @@ def _qnm_fit_detector(
     C0 = float(np.mean(y_fit))
     p0 = np.array([A0, tau0, f0, phi0, C0])
 
-    # Bounds: A free, tau>0, f in band, phi in [-2pi, 2pi], C free
-    lower = [-np.inf, 1e-7, lo, -2.0 * np.pi, -np.inf]
-    upper = [np.inf, 10.0, hi, 2.0 * np.pi, np.inf]
+    # Bounds: A free, tau in contract range, f in analysis band, phi in [-2pi, 2pi], C free
+    lower = [-np.inf, TAU_MIN_S, lo, -2.0 * np.pi, -np.inf]
+    upper = [np.inf, TAU_MAX_S, hi, 2.0 * np.pi, np.inf]
 
     # Clamp initial guess inside bounds
     for i in range(len(p0)):
@@ -522,6 +536,8 @@ def _qnm_fit_detector(
 
     result["f_qnm_hz"] = float(f_fit)
     result["tau_qnm_s"] = float(tau_fit)
+    result["clipped_f"] = _is_clipped(float(f_fit), lo, hi, CLIP_EPS_FRAC)
+    result["clipped_tau"] = _is_clipped(float(tau_fit), TAU_MIN_S, TAU_MAX_S, CLIP_EPS_FRAC)
     result["Q_qnm"] = float(Q_qnm)
     result["rmse"] = rmse
     result["chi2_red"] = chi2_red
@@ -930,6 +946,11 @@ def main() -> int:
                 contract_verdict = "INSPECT"
                 contract_reasons.append(
                     f"{det}: qnm_fit status OK but f_qnm_hz or tau_qnm_s is null"
+                )
+            if det_qnm["tau_bounds_s"] is None or det_qnm["clipped_tau"] is None:
+                contract_verdict = "INSPECT"
+                contract_reasons.append(
+                    f"{det}: qnm_fit status OK but tau_bounds_s or clipped_tau is null"
                 )
             elif det_qnm["tau_qnm_s"] <= 0:
                 contract_verdict = "INSPECT"
