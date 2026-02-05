@@ -64,6 +64,25 @@ def test_output_contract_files_exist(tmp_path: Path) -> None:
     assert (stage_dir / "outputs" / "bayes_validation.json").exists()
 
 
+def test_payload_hashes_traceability(tmp_path: Path) -> None:
+    run_id = "2040-01-01__unit__bayes_hashes"
+    runs_root = tmp_path / "runs"
+    run_dir = runs_root / run_id
+    _setup_run_valid(run_dir)
+    _setup_spectrum_input(run_dir, content=b"hash-traceability-spectrum")
+
+    res = _run_stage(runs_root, run_id)
+    assert res.returncode == 0, res.stderr
+
+    payload = json.loads(
+        (run_dir / "bayes_validation_v1" / "outputs" / "bayes_validation.json").read_text()
+    )
+    assert "hashes" in payload
+    assert payload["hashes"]["spectrum_h5"] == payload["inputs"][0]["sha256"]
+    assert isinstance(payload["hashes"]["spectrum_h5"], str)
+    assert len(payload["hashes"]["spectrum_h5"]) == 64
+
+
 def test_determinism_same_seed_same_output(tmp_path: Path) -> None:
     run_id = "2040-01-01__unit__bayes_determinism"
     runs_root = tmp_path / "runs"

@@ -118,6 +118,7 @@ def main() -> int:
         "prior_precision": float(args.prior_precision),
     }
 
+    spectrum_sha256 = sha256_file(input_path)
     payload = {
         "schema_version": "bayes_validation_v1",
         "timestamp_utc": "1970-01-01T00:00:00+00:00",
@@ -128,7 +129,8 @@ def main() -> int:
             "models": models,
             "prior_precision": float(args.prior_precision),
         },
-        "inputs": [{"path": str(input_rel), "sha256": sha256_file(input_path)}],
+        "inputs": [{"path": str(input_rel), "sha256": spectrum_sha256}],
+        "hashes": {"spectrum_h5": spectrum_sha256},
         "results": {
             "C4_model_selection": c4,
             "uncertainty_propagation": uncertainty,
