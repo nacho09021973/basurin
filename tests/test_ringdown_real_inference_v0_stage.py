@@ -620,3 +620,41 @@ def test_qnm_fit_contract_fail_implies_non_empty_notes(tmp_path: Path) -> None:
             )
             # f_qnm_hz and tau_qnm_s can be null
             # (not strictly required to be null, but this is the expected case)
+
+
+def test_qnm_fit_tau_inconsistency_forces_inspect(tmp_path: Path) -> None:
+    """Regression: large H1/L1 tau mismatch must force decision_qnm=INSPECT."""
+    run_id = "2040-09-01__unit_test__qnm_tau_inconsistency"
+    fs = 4096.0
+    n_samples = 8192
+    f_true = 250.0
+
+    t = np.arange(n_samples, dtype=float) / fs
+    strain_h1 = np.exp(-t / 0.04) * np.cos(2.0 * np.pi * f_true * t)
+    strain_l1 = np.exp(-t / 0.01) * np.cos(2.0 * np.pi * f_true * t)
+
+    run_dir, res = _make_run_with_synthetic_signal(
+        tmp_path, run_id, strain_h1, strain_l1, fs, band_hz="150,400",
+    )
+    assert res.returncode == 0, res.stderr
+
+    report_path = (
+        run_dir / "ringdown_real_inference_v0" / "outputs" / "inference_report.json"
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    # Ensure we are testing the intended condition: both fits should be valid.
+    assert report["qnm_fit"]["H1"]["status"] == "OK"
+    assert report["qnm_fit"]["L1"]["status"] == "OK"
+
+    decision_qnm = report["decision_qnm"]
+    assert decision_qnm["verdict"] == "INSPECT"
+    reasons_text = " ".join(decision_qnm["reasons"])
+    assert "tau inconsistente" in reasons_text
+    assert "(>0.2)" in reasons_text
+
+    qnm_consistency = report["qnm_consistency"]
+    assert qnm_consistency["tau_frac_diff_max"] == 0.2
+    assert qnm_consistency["tau_mean_s"] is not None
+    assert qnm_consistency["tau_frac_diff"] is not None
+    assert qnm_consistency["tau_frac_diff"] > 0.2
