@@ -609,8 +609,8 @@ def main() -> int:
             "order": grid_order,
         },
     }
-    status = summary.get("status")
-    summary["verdict"] = "PASS" if status == "OK" else "FAIL"
+    status = str(summary.get("status", "")).strip().upper()
+    summary["verdict"] = "PASS" if status in ("OK", "PASS") else "FAIL"
     summary.setdefault("reasons", [])
     summary_path = stage_dir / "stage_summary.json"
     with open(summary_path, "w", encoding="utf-8") as f:
