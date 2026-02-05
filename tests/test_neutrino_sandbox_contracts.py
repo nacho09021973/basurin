@@ -306,3 +306,39 @@ def test_dictionary_proxy_hard_contracts(tmp_path: Path) -> None:
     assert (outputs_dir / "dictionary.h5").exists()
     assert (outputs_dir / "atlas.json").exists()
     assert (stage_dir / "manifest.json").exists()
+
+
+def test_spectrum_stage_summary_has_contract_fields(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script = repo_root / "01_genera_neutrino_sandbox.py"
+    runs_root = tmp_path / "runs"
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--run",
+            "contract_fields_case",
+            "--n-delta",
+            "2",
+            "--n-modes",
+            "2",
+            "--n-grid",
+            "32",
+            "--profiles",
+            "core,crust",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+    summary_path = runs_root / "contract_fields_case" / "spectrum" / "stage_summary.json"
+    data = json.loads(summary_path.read_text(encoding="utf-8"))
+
+    assert "verdict" in data and data["verdict"] in {"PASS", "FAIL", "INSPECT"}
+    assert "reasons" in data and isinstance(data["reasons"], list)
