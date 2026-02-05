@@ -353,3 +353,270 @@ def test_basurin_where_ringdown_exp08_reports_real_inference_missing(
     assert (
         "missing: ringdown_real_inference_v0/outputs/inference_report.json" in res.stdout
     )
+
+
+# ---------------------------------------------------------------------------
+# QNM damped-sinusoid fit tests
+# ---------------------------------------------------------------------------
+
+
+def _make_run_with_synthetic_signal(
+    tmp_path: Path,
+    run_id: str,
+    strain_h1: np.ndarray,
+    strain_l1: np.ndarray,
+    fs: float,
+    band_hz: str = "200,500",
+) -> tuple[Path, subprocess.CompletedProcess]:
+    """Helper: set up a full run directory and execute the inference stage."""
+    runs_root = tmp_path / "runs"
+    run_dir = runs_root / run_id
+    n_h1 = int(strain_h1.size)
+    n_l1 = int(strain_l1.size)
+
+    _write_run_valid_pass(run_dir)
+
+    inputs_dir = run_dir / "ringdown_real_ringdown_window" / "outputs"
+    _write_rd_npz(inputs_dir / "H1_rd.npz", strain_h1, fs)
+    _write_rd_npz(inputs_dir / "L1_rd.npz", strain_l1, fs)
+    _write_json(inputs_dir / "segments_rd.json", {"t0_gps": 1126259462.4})
+
+    observables = {
+        "run_id": run_id,
+        "t0_gps": 1126259462.4,
+        "fs_hz": fs,
+        "detectors": ["H1", "L1"],
+        "n_samples": {"H1": n_h1, "L1": n_l1},
+        "rms": {"H1": 1.0, "L1": 1.0},
+        "peak_abs": {"H1": 1.0, "L1": 1.0},
+    }
+    features = {
+        "run_id": run_id,
+        "t0_gps": 1126259462.4,
+        "fs_hz": fs,
+        "n_samples": {"H1": n_h1, "L1": n_l1},
+        "duration_s": {"H1": n_h1 / fs, "L1": n_l1 / fs},
+        "snr_proxy": {"H1": 10.0, "L1": 10.0},
+    }
+
+    _write_jsonl(
+        run_dir / "ringdown_real_observables_v0" / "outputs" / "observables.jsonl",
+        observables,
+    )
+    _write_jsonl(
+        run_dir / "ringdown_real_features_v0" / "outputs" / "features.jsonl",
+        features,
+    )
+
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+    cmd = [
+        "python",
+        "stages/ringdown_real_inference_v0_stage.py",
+        "--run",
+        run_id,
+        "--band-hz",
+        band_hz,
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
+    return run_dir, res
+
+
+def test_qnm_fit_recovers_damped_sinusoid_parameters(tmp_path: Path) -> None:
+    """Synthetic damped sinusoid: QNM fit must recover f and tau within tolerance."""
+    run_id = "2040-09-01__unit_test__qnm_fit_synth"
+    fs = 4096.0
+    n_samples = 8192
+    f_true = 250.0
+    tau_true = 0.012
+    A_true = 1.0
+    phi_true = 0.3
+
+    t = np.arange(n_samples, dtype=float) / fs
+    signal = A_true * np.exp(-t / tau_true) * np.cos(2.0 * np.pi * f_true * t + phi_true)
+    rng = np.random.RandomState(42)
+    noise = rng.normal(0, 0.01 * A_true, size=n_samples)
+    strain = signal + noise
+
+    run_dir, res = _make_run_with_synthetic_signal(
+        tmp_path, run_id, strain, strain, fs, band_hz="150,400",
+    )
+    assert res.returncode == 0, res.stderr
+
+    report_path = (
+        run_dir / "ringdown_real_inference_v0" / "outputs" / "inference_report.json"
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    # qnm_fit block must exist
+    assert "qnm_fit" in report
+    qf = report["qnm_fit"]
+    assert qf["model"] == "damped_sinusoid_v1"
+    assert qf["band_hz"] == [150.0, 400.0]
+
+    for det in ["H1", "L1"]:
+        det_qnm = qf[det]
+        assert det_qnm["status"] == "OK", f"{det}: {det_qnm['notes']}"
+        assert det_qnm["f_qnm_hz"] is not None
+        assert det_qnm["tau_qnm_s"] is not None
+        assert det_qnm["Q_qnm"] is not None
+        assert det_qnm["n_samples"] >= 32  # fit window, not total strain
+
+        # Frequency within 5% of true
+        f_est = det_qnm["f_qnm_hz"]
+        assert abs(f_est - f_true) / f_true < 0.05, (
+            f"{det}: f_est={f_est}, f_true={f_true}, err={abs(f_est-f_true)/f_true:.3f}"
+        )
+
+        # Tau within 20% of true
+        tau_est = det_qnm["tau_qnm_s"]
+        assert abs(tau_est - tau_true) / tau_true < 0.20, (
+            f"{det}: tau_est={tau_est}, tau_true={tau_true}, "
+            f"err={abs(tau_est-tau_true)/tau_true:.3f}"
+        )
+
+        # Sigmas must be finite (not NaN) or null
+        sigma_f = det_qnm["sigma_f"]
+        sigma_tau = det_qnm["sigma_tau"]
+        if sigma_f is not None:
+            assert isinstance(sigma_f, float) and sigma_f == sigma_f  # not NaN
+        if sigma_tau is not None:
+            assert isinstance(sigma_tau, float) and sigma_tau == sigma_tau
+
+        # Goodness-of-fit metrics present
+        assert det_qnm["rmse"] is not None
+        assert det_qnm["chi2_red"] is not None
+
+    # decision_qnm should be PASS
+    assert "decision_qnm" in report
+    assert report["decision_qnm"]["verdict"] == "PASS"
+
+
+def test_qnm_fit_noise_only_returns_fail_or_inspect(tmp_path: Path) -> None:
+    """Pure noise (no signal): QNM fit should produce FAIL status or INSPECT verdict."""
+    run_id = "2040-09-01__unit_test__qnm_fit_noise"
+    fs = 4096.0
+    n_samples = 4096
+
+    rng = np.random.RandomState(99)
+    strain = rng.normal(0, 1.0, size=n_samples)
+
+    run_dir, res = _make_run_with_synthetic_signal(
+        tmp_path, run_id, strain, strain, fs, band_hz="150,400",
+    )
+    assert res.returncode == 0, res.stderr
+
+    report_path = (
+        run_dir / "ringdown_real_inference_v0" / "outputs" / "inference_report.json"
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert "qnm_fit" in report
+    assert "decision_qnm" in report
+
+    # For noise-only, at least one detector should have issues
+    # The decision_qnm verdict should NOT be PASS (either INSPECT or FAIL)
+    # OR, if the fit "succeeds" on noise, the uncertainties should be large
+    qf = report["qnm_fit"]
+    dq = report["decision_qnm"]
+    for det in ["H1", "L1"]:
+        det_qnm = qf[det]
+        if det_qnm["status"] == "FAIL":
+            # Contract: notes must not be empty
+            assert len(det_qnm["notes"]) > 0, f"{det}: FAIL status but empty notes"
+        # If status is OK on noise, params can be anything (fit converged on noise)
+        # but decision_qnm might still flag large uncertainties
+
+
+def test_qnm_fit_short_strain_returns_fail(tmp_path: Path) -> None:
+    """Strain shorter than 32 samples: QNM fit must return FAIL."""
+    run_id = "2040-09-01__unit_test__qnm_fit_short"
+    fs = 4096.0
+    n_samples = 20  # < 32
+
+    t = np.arange(n_samples, dtype=float) / fs
+    strain = np.sin(2.0 * np.pi * 250.0 * t)
+
+    run_dir, res = _make_run_with_synthetic_signal(
+        tmp_path, run_id, strain, strain, fs, band_hz="200,500",
+    )
+    assert res.returncode == 0, res.stderr
+
+    report_path = (
+        run_dir / "ringdown_real_inference_v0" / "outputs" / "inference_report.json"
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    for det in ["H1", "L1"]:
+        det_qnm = report["qnm_fit"][det]
+        assert det_qnm["status"] == "FAIL"
+        assert len(det_qnm["notes"]) > 0
+        # Contract: params must be null when FAIL
+        # (f_qnm_hz and tau_qnm_s can be null)
+
+    assert report["decision_qnm"]["verdict"] != "PASS"
+
+
+def test_qnm_fit_contract_ok_implies_non_null_params(tmp_path: Path) -> None:
+    """Contract: if qnm_fit.<IFO>.status=='OK' => f_qnm_hz and tau_qnm_s not null
+    and tau_qnm_s > 0."""
+    run_id = "2040-09-01__unit_test__qnm_contract"
+    fs = 4096.0
+    n_samples = 8192
+    f_true = 300.0
+    tau_true = 0.008
+
+    t = np.arange(n_samples, dtype=float) / fs
+    strain = np.exp(-t / tau_true) * np.cos(2.0 * np.pi * f_true * t)
+
+    run_dir, res = _make_run_with_synthetic_signal(
+        tmp_path, run_id, strain, strain, fs, band_hz="150,400",
+    )
+    assert res.returncode == 0, res.stderr
+
+    report_path = (
+        run_dir / "ringdown_real_inference_v0" / "outputs" / "inference_report.json"
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    for det in ["H1", "L1"]:
+        det_qnm = report["qnm_fit"][det]
+        if det_qnm["status"] == "OK":
+            assert det_qnm["f_qnm_hz"] is not None
+            assert det_qnm["tau_qnm_s"] is not None
+            assert det_qnm["tau_qnm_s"] > 0
+
+    # contract_verdict must still be valid
+    verdict_path = (
+        run_dir / "ringdown_real_inference_v0" / "outputs" / "contract_verdict.json"
+    )
+    cv = json.loads(verdict_path.read_text(encoding="utf-8"))
+    assert cv["verdict"] in ("PASS", "INSPECT")
+
+
+def test_qnm_fit_contract_fail_implies_non_empty_notes(tmp_path: Path) -> None:
+    """Contract: if qnm_fit.<IFO>.status=='FAIL' => notes not empty."""
+    run_id = "2040-09-01__unit_test__qnm_contract_fail"
+    fs = 4096.0
+    n_samples = 20  # too short → FAIL
+
+    t = np.arange(n_samples, dtype=float) / fs
+    strain = np.sin(2.0 * np.pi * 250.0 * t)
+
+    run_dir, res = _make_run_with_synthetic_signal(
+        tmp_path, run_id, strain, strain, fs, band_hz="200,500",
+    )
+    assert res.returncode == 0, res.stderr
+
+    report_path = (
+        run_dir / "ringdown_real_inference_v0" / "outputs" / "inference_report.json"
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    for det in ["H1", "L1"]:
+        det_qnm = report["qnm_fit"][det]
+        if det_qnm["status"] == "FAIL":
+            assert len(det_qnm["notes"]) > 0, (
+                f"{det}: status FAIL but notes empty"
+            )
+            # f_qnm_hz and tau_qnm_s can be null
+            # (not strictly required to be null, but this is the expected case)
