@@ -19,8 +19,8 @@ def _setup_run_valid(run_dir: Path, verdict: str = "PASS") -> None:
     _write_json(run_dir / "RUN_VALID" / "outputs" / "run_valid.json", {"overall_verdict": verdict})
 
 
-def _setup_dictionary_input(run_dir: Path, content: bytes = b"dummy-spectrum") -> Path:
-    path = run_dir / "dictionary" / "outputs" / "spectrum.h5"
+def _setup_spectrum_input(run_dir: Path, content: bytes = b"dummy-spectrum") -> Path:
+    path = run_dir / "spectrum" / "outputs" / "spectrum.h5"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
     return path
@@ -53,7 +53,7 @@ def test_output_contract_files_exist(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     run_dir = runs_root / run_id
     _setup_run_valid(run_dir)
-    _setup_dictionary_input(run_dir)
+    _setup_spectrum_input(run_dir)
 
     res = _run_stage(runs_root, run_id)
 
@@ -69,7 +69,7 @@ def test_determinism_same_seed_same_output(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     run_dir = runs_root / run_id
     _setup_run_valid(run_dir)
-    _setup_dictionary_input(run_dir, content=b"deterministic-spectrum")
+    _setup_spectrum_input(run_dir, content=b"deterministic-spectrum")
 
     res_a = _run_stage(runs_root, run_id, ["--stage-name", "bayes_validation_a", "--seed", "123"])
     res_b = _run_stage(runs_root, run_id, ["--stage-name", "bayes_validation_b", "--seed", "123"])
@@ -89,7 +89,7 @@ def test_scipy_missing_killswitch(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     run_dir = runs_root / run_id
     _setup_run_valid(run_dir)
-    _setup_dictionary_input(run_dir)
+    _setup_spectrum_input(run_dir)
 
     fake_pkg = tmp_path / "fakepkg"
     fake_pkg.mkdir(parents=True, exist_ok=True)
