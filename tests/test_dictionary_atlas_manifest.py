@@ -63,6 +63,10 @@ def test_dictionary_atlas_manifest_and_summary(tmp_path: Path) -> None:
     assert summary["hashes"]["outputs/atlas.json"] == atlas_hash
     assert summary["outputs"]["atlas"] == "outputs/atlas.json"
     assert summary["outputs"]["dictionary"] == "outputs/dictionary.h5"
+    assert "verdict" in summary
+    assert summary["verdict"] in {"PASS", "FAIL", "INSPECT"}
+    assert "reasons" in summary
+    assert isinstance(summary["reasons"], list)
 
     inputs = summary.get("inputs", {})
     assert inputs.get("spectrum_path")
