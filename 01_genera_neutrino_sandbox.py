@@ -326,6 +326,9 @@ def write_abort_summary(
     }
     if detail:
         payload["detail"] = detail
+    status = payload.get("status")
+    payload["verdict"] = "PASS" if status == "OK" else "FAIL"
+    payload.setdefault("reasons", [])
     summary_path = stage_dir / "stage_summary.json"
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
@@ -606,6 +609,9 @@ def main() -> int:
             "order": grid_order,
         },
     }
+    status = summary.get("status")
+    summary["verdict"] = "PASS" if status == "OK" else "FAIL"
+    summary.setdefault("reasons", [])
     summary_path = stage_dir / "stage_summary.json"
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
