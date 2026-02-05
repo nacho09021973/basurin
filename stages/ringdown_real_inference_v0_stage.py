@@ -45,6 +45,9 @@ STRAIN_KEYS = ["strain", "h", "data", "x", "rd_strain"]
 FS_KEYS = ["sample_rate_hz", "fs_hz", "fs", "sample_rate", "sr"]
 MIN_BLOCKS_TAU = 5
 TAU_FRAC_DIFF_MAX = 0.2
+DEFAULT_STABILITY_K = 3.0
+DEFAULT_LOO_Z_THRESHOLD = 3.0
+DEFAULT_CLIPPING_FRACTION_MAX = 0.05
 
 
 def _parse_band_hz(value: str) -> list[float]:
@@ -575,6 +578,171 @@ def _build_decision_qnm(
     qnm_fit: dict[str, Any], band_hz: list[float],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build decision_qnm verdict from per-detector QNM fit results."""
+
+    def _set_inspect() -> None:
+        nonlocal verdict
+        if verdict == "PASS":
+            verdict = "INSPECT"
+
+    detector_ids = sorted(
+        det for det, det_fit in qnm_fit.items() if isinstance(det_fit, dict)
+    )
+
+    def _valid_tau_sigma_entries(
+        entries: dict[str, Any],
+    ) -> list[tuple[str, float, float]]:
+        """Return finite (detector, tau, sigma_tau) tuples from qnm_fit map."""
+        valid: list[tuple[str, float, float]] = []
+        for det, det_fit in entries.items():
+            if not isinstance(det_fit, dict):
+                continue
+            if det_fit.get("status") != "OK":
+                continue
+            tau_raw = det_fit.get("tau_qnm_s")
+            sigma_raw = det_fit.get("sigma_tau")
+            if tau_raw is None or sigma_raw is None:
+                continue
+            try:
+                tau_val = float(tau_raw)
+                sigma_val = float(sigma_raw)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(tau_val) and math.isfinite(sigma_val) and sigma_val > 0:
+                valid.append((det, tau_val, sigma_val))
+        return valid
+
+    def _compute_pairwise_tau_zscores(
+        entries: dict[str, Any],
+    ) -> list[dict[str, float | str]]:
+        """Compute pairwise detector tau consistency z-scores using combined sigma."""
+        valid = _valid_tau_sigma_entries(entries)
+        rows: list[dict[str, float | str]] = []
+        for idx_a in range(len(valid)):
+            det_a, tau_a, sigma_a = valid[idx_a]
+            for idx_b in range(idx_a + 1, len(valid)):
+                det_b, tau_b, sigma_b = valid[idx_b]
+                sigma_comb = math.sqrt(sigma_a * sigma_a + sigma_b * sigma_b)
+                if not math.isfinite(sigma_comb) or sigma_comb <= 0:
+                    continue
+                z = abs(tau_a - tau_b) / sigma_comb
+                rows.append(
+                    {
+                        "detector_a": det_a,
+                        "detector_b": det_b,
+                        "z_tau": float(z),
+                        "sigma_comb": float(sigma_comb),
+                    }
+                )
+        return rows
+
+    def _compute_consensus_leave_one_out(
+        entries: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Compute weighted consensus tau and leave-one-out influence diagnostics."""
+        valid = _valid_tau_sigma_entries(entries)
+        if len(valid) < 2:
+            return {
+                "consensus_tau_s": None,
+                "consensus_sigma_s": None,
+                "leave_one_out": [],
+                "max_influence_z": None,
+            }
+
+        weights = [1.0 / (sigma * sigma) for _, _, sigma in valid]
+        wsum = float(sum(weights))
+        if wsum <= 0 or not math.isfinite(wsum):
+            return {
+                "consensus_tau_s": None,
+                "consensus_sigma_s": None,
+                "leave_one_out": [],
+                "max_influence_z": None,
+            }
+
+        consensus_tau = float(
+            sum(w * tau for w, (_, tau, _) in zip(weights, valid)) / wsum
+        )
+        consensus_sigma = float(math.sqrt(1.0 / wsum))
+
+        leave_one_out: list[dict[str, float | str]] = []
+        max_influence_z: float | None = None
+        for det_excluded, _, _ in valid:
+            loo_valid = [row for row in valid if row[0] != det_excluded]
+            if len(loo_valid) < 1:
+                continue
+            loo_weights = [1.0 / (sigma * sigma) for _, _, sigma in loo_valid]
+            loo_wsum = float(sum(loo_weights))
+            if loo_wsum <= 0 or not math.isfinite(loo_wsum):
+                continue
+            loo_tau = float(
+                sum(w * tau for w, (_, tau, _) in zip(loo_weights, loo_valid)) / loo_wsum
+            )
+            loo_sigma = float(math.sqrt(1.0 / loo_wsum))
+            denom = math.sqrt(consensus_sigma * consensus_sigma + loo_sigma * loo_sigma)
+            influence_z = None
+            if denom > 0 and math.isfinite(denom):
+                influence_z = float(abs(loo_tau - consensus_tau) / denom)
+                if max_influence_z is None or influence_z > max_influence_z:
+                    max_influence_z = influence_z
+            leave_one_out.append(
+                {
+                    "excluded_detector": det_excluded,
+                    "tau_loo_s": loo_tau,
+                    "sigma_loo_s": loo_sigma,
+                    "influence_z": influence_z,
+                }
+            )
+
+        return {
+            "consensus_tau_s": consensus_tau,
+            "consensus_sigma_s": consensus_sigma,
+            "leave_one_out": leave_one_out,
+            "max_influence_z": max_influence_z,
+        }
+
+    def _compute_window_stability(entries: dict[str, Any]) -> list[dict[str, Any]]:
+        """Evaluate per-detector stability from tau/sigma window replicas if present."""
+        out: list[dict[str, Any]] = []
+        for det, det_fit in entries.items():
+            if not isinstance(det_fit, dict):
+                continue
+            replicas_raw = det_fit.get("window_replicas")
+            if not isinstance(replicas_raw, list) or len(replicas_raw) < 2:
+                continue
+            tau_vals: list[float] = []
+            sigma_vals: list[float] = []
+            for replica in replicas_raw:
+                if not isinstance(replica, dict):
+                    continue
+                tau_raw = replica.get("tau_qnm_s")
+                sigma_raw = replica.get("sigma_tau")
+                if tau_raw is None or sigma_raw is None:
+                    continue
+                try:
+                    tau_val = float(tau_raw)
+                    sigma_val = float(sigma_raw)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(tau_val):
+                    tau_vals.append(tau_val)
+                if math.isfinite(sigma_val) and sigma_val > 0:
+                    sigma_vals.append(sigma_val)
+            if len(tau_vals) < 2 or not sigma_vals:
+                continue
+            std_tau = float(np.std(np.asarray(tau_vals, dtype=float), ddof=0))
+            med_sigma = float(np.median(np.asarray(sigma_vals, dtype=float)))
+            ratio = float(std_tau / med_sigma) if med_sigma > 0 else None
+            out.append(
+                {
+                    "detector": det,
+                    "std_tau_replicas_s": std_tau,
+                    "median_sigma_tau_replicas_s": med_sigma,
+                    "stability_ratio": ratio,
+                    "stable": (ratio is not None and ratio <= DEFAULT_STABILITY_K),
+                    "stability_k": DEFAULT_STABILITY_K,
+                }
+            )
+        return out
+
     reasons: list[str] = []
     verdict = "PASS"
     tau_h1: float | None = None
@@ -582,7 +750,7 @@ def _build_decision_qnm(
     status_h1 = None
     status_l1 = None
 
-    for det in ["H1", "L1"]:
+    for det in detector_ids:
         det_fit = qnm_fit.get(det)
         if det_fit is None:
             verdict = "FAIL"
@@ -602,29 +770,49 @@ def _build_decision_qnm(
             status_l1 = det_fit.get("status")
             tau_l1 = tau
         if f is None or tau is None:
-            if verdict == "PASS":
-                verdict = "INSPECT"
+            _set_inspect()
             reasons.append(f"{det}: f_qnm_hz or tau_qnm_s is null despite status OK")
             continue
+        if not math.isfinite(float(f)) or not math.isfinite(float(tau)):
+            _set_inspect()
+            reasons.append(f"{det}: nan/non-finite qnm fit value")
+            continue
         if tau <= 0:
-            if verdict == "PASS":
-                verdict = "INSPECT"
+            _set_inspect()
             reasons.append(f"{det}: tau_qnm_s <= 0 ({tau})")
         if f < band_hz[0] or f > band_hz[1]:
-            if verdict == "PASS":
-                verdict = "INSPECT"
+            _set_inspect()
             reasons.append(f"{det}: f_qnm_hz={f} outside band {band_hz}")
         # Check for huge uncertainties
         sigma_f = det_fit.get("sigma_f")
         sigma_tau = det_fit.get("sigma_tau")
+        if sigma_f is not None and not math.isfinite(float(sigma_f)):
+            _set_inspect()
+            reasons.append(f"{det}: sigma_f is nan/non-finite")
+        if sigma_tau is not None and not math.isfinite(float(sigma_tau)):
+            _set_inspect()
+            reasons.append(f"{det}: sigma_tau is nan/non-finite")
         if sigma_f is not None and f > 0 and sigma_f / f > 0.5:
-            if verdict == "PASS":
-                verdict = "INSPECT"
+            _set_inspect()
             reasons.append(f"{det}: sigma_f/f > 50% ({sigma_f/f:.2f})")
         if sigma_tau is not None and tau > 0 and sigma_tau / tau > 0.5:
-            if verdict == "PASS":
-                verdict = "INSPECT"
+            _set_inspect()
             reasons.append(f"{det}: sigma_tau/tau > 50% ({sigma_tau/tau:.2f})")
+
+        clipping_fraction = det_fit.get("clipping_fraction")
+        if clipping_fraction is not None:
+            try:
+                cf = float(clipping_fraction)
+            except (TypeError, ValueError):
+                cf = float("nan")
+            if not math.isfinite(cf):
+                _set_inspect()
+                reasons.append(f"{det}: clipping_fraction is nan/non-finite")
+            elif cf > DEFAULT_CLIPPING_FRACTION_MAX:
+                _set_inspect()
+                reasons.append(
+                    f"{det}: clipping_fraction={cf:.3f} exceeds {DEFAULT_CLIPPING_FRACTION_MAX:.3f}"
+                )
 
         if det_fit.get("clipped_tau") is True:
             reasons.append(
@@ -643,16 +831,39 @@ def _build_decision_qnm(
         if tau_mean > 0:
             tau_frac_diff = abs(float(tau_h1) - float(tau_l1)) / tau_mean
             if tau_frac_diff > TAU_FRAC_DIFF_MAX:
-                if verdict == "PASS":
-                    verdict = "INSPECT"
+                _set_inspect()
                 reasons.append(
                     f"tau inconsistente H1/L1: frac_diff={tau_frac_diff:.3f} (>0.2)"
                 )
+
+    pairwise_tau_zscores = _compute_pairwise_tau_zscores(qnm_fit)
+    if any(float(row["z_tau"]) > DEFAULT_LOO_Z_THRESHOLD for row in pairwise_tau_zscores):
+        _set_inspect()
+        reasons.append(
+            f"pairwise tau consistency z-score exceeds {DEFAULT_LOO_Z_THRESHOLD:.1f}"
+        )
+
+    leave_one_out = _compute_consensus_leave_one_out(qnm_fit)
+    max_influence_z = leave_one_out.get("max_influence_z")
+    if isinstance(max_influence_z, float) and max_influence_z > DEFAULT_LOO_Z_THRESHOLD:
+        _set_inspect()
+        reasons.append(
+            f"leave-one-out detector influence exceeds {DEFAULT_LOO_Z_THRESHOLD:.1f}"
+        )
+
+    stability = _compute_window_stability(qnm_fit)
+    if any(row.get("stable") is False for row in stability):
+        _set_inspect()
+        reasons.append("window-replica stability check failed")
 
     qnm_consistency = {
         "tau_mean_s": tau_mean,
         "tau_frac_diff": tau_frac_diff,
         "tau_frac_diff_max": TAU_FRAC_DIFF_MAX,
+        "pairwise_tau_zscores": pairwise_tau_zscores,
+        "pairwise_z_threshold": DEFAULT_LOO_Z_THRESHOLD,
+        "leave_one_out": leave_one_out,
+        "window_stability": stability,
     }
     return {"verdict": verdict, "reasons": reasons}, qnm_consistency
 
