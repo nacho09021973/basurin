@@ -44,6 +44,7 @@ STAGE_NAME_DEFAULT = "ringdown_real_inference_v0"
 STRAIN_KEYS = ["strain", "h", "data", "x", "rd_strain"]
 FS_KEYS = ["sample_rate_hz", "fs_hz", "fs", "sample_rate", "sr"]
 MIN_BLOCKS_TAU = 5
+TAU_FRAC_DIFF_MAX = 0.2
 
 
 def _parse_band_hz(value: str) -> list[float]:
@@ -556,10 +557,14 @@ def _qnm_fit_detector(
 
 def _build_decision_qnm(
     qnm_fit: dict[str, Any], band_hz: list[float],
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build decision_qnm verdict from per-detector QNM fit results."""
     reasons: list[str] = []
     verdict = "PASS"
+    tau_h1: float | None = None
+    tau_l1: float | None = None
+    status_h1 = None
+    status_l1 = None
 
     for det in ["H1", "L1"]:
         det_fit = qnm_fit.get(det)
@@ -574,6 +579,12 @@ def _build_decision_qnm(
             continue
         f = det_fit.get("f_qnm_hz")
         tau = det_fit.get("tau_qnm_s")
+        if det == "H1":
+            status_h1 = det_fit.get("status")
+            tau_h1 = tau
+        elif det == "L1":
+            status_l1 = det_fit.get("status")
+            tau_l1 = tau
         if f is None or tau is None:
             if verdict == "PASS":
                 verdict = "INSPECT"
@@ -599,7 +610,30 @@ def _build_decision_qnm(
                 verdict = "INSPECT"
             reasons.append(f"{det}: sigma_tau/tau > 50% ({sigma_tau/tau:.2f})")
 
-    return {"verdict": verdict, "reasons": reasons}
+    tau_mean: float | None = None
+    tau_frac_diff: float | None = None
+    if (
+        status_h1 == "OK"
+        and status_l1 == "OK"
+        and tau_h1 is not None
+        and tau_l1 is not None
+    ):
+        tau_mean = 0.5 * (float(tau_h1) + float(tau_l1))
+        if tau_mean > 0:
+            tau_frac_diff = abs(float(tau_h1) - float(tau_l1)) / tau_mean
+            if tau_frac_diff > TAU_FRAC_DIFF_MAX:
+                if verdict == "PASS":
+                    verdict = "INSPECT"
+                reasons.append(
+                    f"tau inconsistente H1/L1: frac_diff={tau_frac_diff:.3f} (>0.2)"
+                )
+
+    qnm_consistency = {
+        "tau_mean_s": tau_mean,
+        "tau_frac_diff": tau_frac_diff,
+        "tau_frac_diff_max": TAU_FRAC_DIFF_MAX,
+    }
+    return {"verdict": verdict, "reasons": reasons}, qnm_consistency
 
 
 def _write_failure(
@@ -910,7 +944,7 @@ def main() -> int:
                     f"{det}: qnm_fit status FAIL but notes empty"
                 )
 
-    decision_qnm = _build_decision_qnm(qnm_fit, band_hz_list)
+    decision_qnm, qnm_consistency = _build_decision_qnm(qnm_fit, band_hz_list)
 
     report = {
         "run_id": args.run,
@@ -922,6 +956,7 @@ def main() -> int:
         "fit": fit,
         "tau_estimator": tau_estimator,
         "qnm_fit": qnm_fit,
+        "qnm_consistency": qnm_consistency,
         "decision": {
             "verdict": decision_verdict,
             "reasons": decision_reasons,
