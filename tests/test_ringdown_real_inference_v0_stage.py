@@ -892,3 +892,55 @@ def test_decision_qnm_nan_values_force_inspect_with_nan_reason() -> None:
     assert decision_qnm["verdict"] == "INSPECT"
     reasons_text = " ".join(decision_qnm["reasons"]).lower()
     assert "nan" in reasons_text
+
+
+def test_decision_qnm_ignores_extra_dict_keys_in_qnm_fit() -> None:
+    """Regression: non-detector dict keys must not affect decision_qnm or diagnostics."""
+    from stages.ringdown_real_inference_v0_stage import _build_decision_qnm
+
+    base_qnm_fit = {
+        "H1": {
+            "status": "OK",
+            "f_qnm_hz": 250.0,
+            "tau_qnm_s": 0.1,
+            "sigma_f": 0.5,
+            "sigma_tau": 0.01,
+            "tau_bounds_s": [0.01, 0.5],
+            "clipped_tau": False,
+        },
+        "L1": {
+            "status": "OK",
+            "f_qnm_hz": 250.0,
+            "tau_qnm_s": 0.1,
+            "sigma_f": 0.5,
+            "sigma_tau": 0.01,
+            "tau_bounds_s": [0.01, 0.5],
+            "clipped_tau": False,
+        },
+    }
+
+    baseline_decision, baseline_consistency = _build_decision_qnm(
+        dict(base_qnm_fit), [150.0, 400.0]
+    )
+
+    with_meta = dict(base_qnm_fit)
+    with_meta["meta"] = {
+        "status": "OK",
+        "tau_qnm_s": 999.0,
+        "sigma_tau": 1e-9,
+        "window_replicas": [
+            {"tau_qnm_s": 1.0, "sigma_tau": 0.01},
+            {"tau_qnm_s": 100.0, "sigma_tau": 0.01},
+        ],
+    }
+
+    decision_meta, consistency_meta = _build_decision_qnm(with_meta, [150.0, 400.0])
+
+    with_foo = dict(base_qnm_fit)
+    with_foo["meta"] = {"foo": "bar"}
+    decision_foo, consistency_foo = _build_decision_qnm(with_foo, [150.0, 400.0])
+
+    assert decision_meta == baseline_decision
+    assert decision_foo == baseline_decision
+    assert consistency_meta == baseline_consistency
+    assert consistency_foo == baseline_consistency
