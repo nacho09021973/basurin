@@ -46,6 +46,7 @@ FS_KEYS = ["sample_rate_hz", "fs_hz", "fs", "sample_rate", "sr"]
 MIN_BLOCKS_TAU = 5
 TAU_FRAC_DIFF_MAX = 0.2
 DEFAULT_STABILITY_K = 3.0
+DEFAULT_PAIRWISE_Z_THRESHOLD = 3.0
 DEFAULT_LOO_Z_THRESHOLD = 3.0
 DEFAULT_CLIPPING_FRACTION_MAX = 0.05
 
@@ -584,16 +585,16 @@ def _build_decision_qnm(
         if verdict == "PASS":
             verdict = "INSPECT"
 
-    detector_ids = sorted(
-        det for det, det_fit in qnm_fit.items() if isinstance(det_fit, dict)
-    )
+    allowed = ["H1", "L1", "V1", "K1"]
+    detector_ids = [det for det in allowed if isinstance(qnm_fit.get(det), dict)]
 
     def _valid_tau_sigma_entries(
         entries: dict[str, Any],
     ) -> list[tuple[str, float, float]]:
         """Return finite (detector, tau, sigma_tau) tuples from qnm_fit map."""
         valid: list[tuple[str, float, float]] = []
-        for det, det_fit in entries.items():
+        for det in detector_ids:
+            det_fit = entries.get(det)
             if not isinstance(det_fit, dict):
                 continue
             if det_fit.get("status") != "OK":
@@ -702,7 +703,8 @@ def _build_decision_qnm(
     def _compute_window_stability(entries: dict[str, Any]) -> list[dict[str, Any]]:
         """Evaluate per-detector stability from tau/sigma window replicas if present."""
         out: list[dict[str, Any]] = []
-        for det, det_fit in entries.items():
+        for det in detector_ids:
+            det_fit = entries.get(det)
             if not isinstance(det_fit, dict):
                 continue
             replicas_raw = det_fit.get("window_replicas")
@@ -837,10 +839,10 @@ def _build_decision_qnm(
                 )
 
     pairwise_tau_zscores = _compute_pairwise_tau_zscores(qnm_fit)
-    if any(float(row["z_tau"]) > DEFAULT_LOO_Z_THRESHOLD for row in pairwise_tau_zscores):
+    if any(float(row["z_tau"]) > DEFAULT_PAIRWISE_Z_THRESHOLD for row in pairwise_tau_zscores):
         _set_inspect()
         reasons.append(
-            f"pairwise tau consistency z-score exceeds {DEFAULT_LOO_Z_THRESHOLD:.1f}"
+            f"pairwise tau consistency z-score exceeds {DEFAULT_PAIRWISE_Z_THRESHOLD:.1f}"
         )
 
     leave_one_out = _compute_consensus_leave_one_out(qnm_fit)
@@ -861,7 +863,7 @@ def _build_decision_qnm(
         "tau_frac_diff": tau_frac_diff,
         "tau_frac_diff_max": TAU_FRAC_DIFF_MAX,
         "pairwise_tau_zscores": pairwise_tau_zscores,
-        "pairwise_z_threshold": DEFAULT_LOO_Z_THRESHOLD,
+        "pairwise_z_threshold": DEFAULT_PAIRWISE_Z_THRESHOLD,
         "leave_one_out": leave_one_out,
         "window_stability": stability,
     }
