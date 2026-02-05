@@ -722,3 +722,173 @@ def test_decision_qnm_reasons_include_clipped_tau_note() -> None:
     reasons_text = " ".join(decision_qnm["reasons"])
     assert "L1" in reasons_text
     assert "clipped" in reasons_text
+
+
+def test_decision_qnm_pairwise_sigma_scaling_zero_z_passes() -> None:
+    """G5: identical tau with different sigma_tau must give pairwise z=0 and PASS."""
+    from stages.ringdown_real_inference_v0_stage import _build_decision_qnm
+
+    qnm_fit = {
+        "H1": {
+            "status": "OK",
+            "f_qnm_hz": 250.0,
+            "tau_qnm_s": 0.1,
+            "sigma_f": 0.5,
+            "sigma_tau": 0.01,
+            "tau_bounds_s": [0.01, 0.5],
+            "clipped_tau": False,
+        },
+        "L1": {
+            "status": "OK",
+            "f_qnm_hz": 250.0,
+            "tau_qnm_s": 0.1,
+            "sigma_f": 0.5,
+            "sigma_tau": 0.04,
+            "tau_bounds_s": [0.01, 0.5],
+            "clipped_tau": False,
+        },
+    }
+
+    decision_qnm, qnm_consistency = _build_decision_qnm(qnm_fit, [150.0, 400.0])
+    assert decision_qnm["verdict"] == "PASS"
+    pairwise = qnm_consistency["pairwise_tau_zscores"]
+    assert len(pairwise) == 1
+    assert pairwise[0]["z_tau"] == 0.0
+
+
+def test_decision_qnm_window_instability_forces_inspect() -> None:
+    """G4: unstable tau across window replicas must force INSPECT with stability reason."""
+    from stages.ringdown_real_inference_v0_stage import _build_decision_qnm
+
+    qnm_fit = {
+        "H1": {
+            "status": "OK",
+            "f_qnm_hz": 250.0,
+            "tau_qnm_s": 0.1,
+            "sigma_f": 0.5,
+            "sigma_tau": 0.01,
+            "tau_bounds_s": [0.01, 0.5],
+            "clipped_tau": False,
+            "window_replicas": [
+                {"tau_qnm_s": 0.05, "sigma_tau": 0.01},
+                {"tau_qnm_s": 0.15, "sigma_tau": 0.01},
+                {"tau_qnm_s": 0.1, "sigma_tau": 0.01},
+                {"tau_qnm_s": 0.2, "sigma_tau": 0.01},
+            ],
+        },
+        "L1": {
+            "status": "OK",
+            "f_qnm_hz": 250.0,
+            "tau_qnm_s": 0.1,
+            "sigma_f": 0.5,
+            "sigma_tau": 0.01,
+            "tau_bounds_s": [0.01, 0.5],
+            "clipped_tau": False,
+        },
+    }
+
+    decision_qnm, qnm_consistency = _build_decision_qnm(qnm_fit, [150.0, 400.0])
+    assert decision_qnm["verdict"] == "INSPECT"
+    reasons_text = " ".join(decision_qnm["reasons"]).lower()
+    assert "stability" in reasons_text
+    assert qnm_consistency["window_stability"]
+    assert qnm_consistency["window_stability"][0]["stable"] is False
+
+
+def test_decision_qnm_single_detector_outlier_detected_by_leave_one_out() -> None:
+    """G6: single-detector tau outlier should trigger INSPECT and high leave-one-out influence."""
+    from stages.ringdown_real_inference_v0_stage import _build_decision_qnm
+
+    sigma = 0.01
+    sigma_comb = (sigma**2 + sigma**2) ** 0.5
+    qnm_fit = {
+        "H1": {
+            "status": "OK",
+            "f_qnm_hz": 250.0,
+            "tau_qnm_s": 0.1,
+            "sigma_f": 0.5,
+            "sigma_tau": sigma,
+            "tau_bounds_s": [0.01, 0.5],
+            "clipped_tau": False,
+        },
+        "L1": {
+            "status": "OK",
+            "f_qnm_hz": 250.0,
+            "tau_qnm_s": 0.1 + 10.0 * sigma_comb,
+            "sigma_f": 0.5,
+            "sigma_tau": sigma,
+            "tau_bounds_s": [0.01, 0.5],
+            "clipped_tau": False,
+        },
+    }
+
+    decision_qnm, qnm_consistency = _build_decision_qnm(qnm_fit, [150.0, 400.0])
+    assert decision_qnm["verdict"] == "INSPECT"
+
+    loo = qnm_consistency["leave_one_out"]
+    assert loo["max_influence_z"] is not None
+    assert loo["max_influence_z"] > qnm_consistency["pairwise_z_threshold"]
+
+
+def test_decision_qnm_clipping_fraction_forces_inspect_with_reason() -> None:
+    """G1: high clipping_fraction or clipped_tau must not pass silently."""
+    from stages.ringdown_real_inference_v0_stage import _build_decision_qnm
+
+    qnm_fit = {
+        "H1": {
+            "status": "OK",
+            "f_qnm_hz": 250.0,
+            "tau_qnm_s": 0.1,
+            "sigma_f": 0.5,
+            "sigma_tau": 0.01,
+            "tau_bounds_s": [0.01, 0.5],
+            "clipped_tau": False,
+            "clipping_fraction": 0.2,
+        },
+        "L1": {
+            "status": "OK",
+            "f_qnm_hz": 250.0,
+            "tau_qnm_s": 0.1,
+            "sigma_f": 0.5,
+            "sigma_tau": 0.01,
+            "tau_bounds_s": [0.01, 0.5],
+            "clipped_tau": True,
+            "clipping_fraction": 0.0,
+        },
+    }
+
+    decision_qnm, _ = _build_decision_qnm(qnm_fit, [150.0, 400.0])
+    assert decision_qnm["verdict"] == "INSPECT"
+    reasons_text = " ".join(decision_qnm["reasons"]).lower()
+    assert "clipping_fraction" in reasons_text or "clipped" in reasons_text
+
+
+def test_decision_qnm_nan_values_force_inspect_with_nan_reason() -> None:
+    """G1: NaN in tau/sigma should force non-PASS with explicit nan reason."""
+    from stages.ringdown_real_inference_v0_stage import _build_decision_qnm
+
+    qnm_fit = {
+        "H1": {
+            "status": "OK",
+            "f_qnm_hz": 250.0,
+            "tau_qnm_s": float("nan"),
+            "sigma_f": 0.5,
+            "sigma_tau": 0.01,
+            "tau_bounds_s": [0.01, 0.5],
+            "clipped_tau": False,
+        },
+        "L1": {
+            "status": "OK",
+            "f_qnm_hz": 250.0,
+            "tau_qnm_s": 0.1,
+            "sigma_f": 0.5,
+            "sigma_tau": float("nan"),
+            "tau_bounds_s": [0.01, 0.5],
+            "clipped_tau": False,
+        },
+    }
+
+    decision_qnm, _ = _build_decision_qnm(qnm_fit, [150.0, 400.0])
+    assert decision_qnm["verdict"] == "INSPECT"
+    reasons_text = " ".join(decision_qnm["reasons"]).lower()
+    assert "nan" in reasons_text
