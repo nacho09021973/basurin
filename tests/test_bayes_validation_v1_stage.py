@@ -84,6 +84,140 @@ def test_determinism_same_seed_same_output(tmp_path: Path) -> None:
     assert hash_a == hash_b
 
 
+def test_c4_score_semantics_and_bf_proxy(tmp_path: Path) -> None:
+    """C4 output must contain score semantics, BIC, and a BF proxy."""
+    run_id = "2040-01-01__unit__bayes_semantics"
+    runs_root = tmp_path / "runs"
+    run_dir = runs_root / run_id
+    _setup_run_valid(run_dir)
+    _setup_spectrum_input(run_dir, content=b"semantics-spectrum-data-payload")
+
+    res = _run_stage(runs_root, run_id)
+    assert res.returncode == 0, res.stderr
+
+    payload = json.loads(
+        (run_dir / "bayes_validation_v1" / "outputs" / "bayes_validation.json").read_text()
+    )
+    c4 = payload["results"]["C4_model_selection"]
+
+    # Score semantics present
+    assert c4["score_name"] == "neg_mse"
+    assert c4["score_higher_is_better"] is True
+    assert isinstance(c4["delta_score"], float)
+    assert c4["delta_score"] >= 0.0
+
+    # BIC values present for each model
+    assert "bic" in c4
+    assert set(c4["bic"].keys()) == set(c4["model_scores"].keys())
+
+    # BF proxy computed (2 models → must be non-null)
+    assert c4["log_bayes_factor_proxy"] is not None
+    assert isinstance(c4["log_bayes_factor_proxy"], float)
+    assert c4["bf_proxy_method"] == "bic_schwarz"
+
+    # selection_consistent flag present
+    assert isinstance(c4["selection_consistent"], bool)
+
+
+def test_verdict_pass_requires_bf_proxy(tmp_path: Path) -> None:
+    """Verdict must not be PASS when log_bayes_factor_proxy is null."""
+    from bayes_contracts import validate_bayes_output
+
+    payload = {
+        "schema_version": "bayes_validation_v1",
+        "timestamp_utc": "1970-01-01T00:00:00+00:00",
+        "parameters": {
+            "seed": 42,
+            "n_monte_carlo": 500,
+            "k_features": 3,
+            "models": ["linear", "poly2"],
+            "prior_precision": 1e-6,
+        },
+        "inputs": [{"path": "test.h5", "sha256": "abc123"}],
+        "results": {
+            "C4_model_selection": {
+                "best_model": "linear",
+                "model_scores": {"linear": -0.01, "poly2": -0.02},
+                "score_name": "neg_mse",
+                "score_higher_is_better": True,
+                "delta_score": 0.01,
+                "log_bayes_factor_proxy": None,
+                "bf_proxy_method": None,
+                "selection_consistent": True,
+                "posterior_means": {"linear": [1.0], "poly2": [1.0, 0.1]},
+                "seed": 42,
+                "n_monte_carlo": 500,
+            }
+        },
+        "verdict": "PASS",
+        "reasons": [],
+    }
+    ok, reasons = validate_bayes_output(payload)
+    assert not ok
+    assert any("C4_pass_without_bayes_factor" in r for r in reasons)
+
+
+def test_contract_detects_best_model_inconsistency(tmp_path: Path) -> None:
+    """Contract must flag when best_model does not match score semantics."""
+    from bayes_contracts import validate_bayes_output
+
+    payload = {
+        "schema_version": "bayes_validation_v1",
+        "timestamp_utc": "1970-01-01T00:00:00+00:00",
+        "parameters": {
+            "seed": 42,
+            "n_monte_carlo": 500,
+            "k_features": 3,
+            "models": ["linear", "poly2"],
+            "prior_precision": 1e-6,
+        },
+        "inputs": [{"path": "test.h5", "sha256": "abc123"}],
+        "results": {
+            "C4_model_selection": {
+                "best_model": "poly2",
+                "model_scores": {"linear": -0.01, "poly2": -0.02},
+                "score_name": "neg_mse",
+                "score_higher_is_better": True,
+                "delta_score": 0.01,
+                "log_bayes_factor_proxy": 5.0,
+                "bf_proxy_method": "bic_schwarz",
+                "selection_consistent": False,
+                "posterior_means": {"linear": [1.0], "poly2": [1.0, 0.1]},
+                "seed": 42,
+                "n_monte_carlo": 500,
+            }
+        },
+        "verdict": "INSPECT",
+        "reasons": ["inconsistency"],
+    }
+    ok, reasons = validate_bayes_output(payload)
+    assert not ok
+    assert any("C4_best_model_inconsistent" in r for r in reasons)
+
+
+def test_verdict_inspect_when_selection_inconsistent(tmp_path: Path) -> None:
+    """Stage output must contain selection_consistent flag as a bool."""
+    run_id = "2040-01-01__unit__bayes_consistency"
+    runs_root = tmp_path / "runs"
+    run_dir = runs_root / run_id
+    _setup_run_valid(run_dir)
+    _setup_spectrum_input(run_dir, content=b"consistency-check-data")
+
+    res = _run_stage(runs_root, run_id)
+    assert res.returncode == 0, res.stderr
+
+    payload = json.loads(
+        (run_dir / "bayes_validation_v1" / "outputs" / "bayes_validation.json").read_text()
+    )
+    c4 = payload["results"]["C4_model_selection"]
+    assert isinstance(c4["selection_consistent"], bool)
+
+    # Verdict must reflect consistency: PASS only when consistent and BF available
+    if not c4["selection_consistent"]:
+        assert payload["verdict"] == "INSPECT"
+        assert any("BIC" in r for r in payload["reasons"])
+
+
 def test_scipy_missing_killswitch(tmp_path: Path) -> None:
     run_id = "2040-01-01__unit__bayes_no_scipy"
     runs_root = tmp_path / "runs"
