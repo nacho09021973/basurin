@@ -431,7 +431,23 @@ def _qnm_fit_detector(
       rmse, chi2_red, n_samples, status, notes
     """
     notes: list[str] = []
+    evidence_notes: list[str] = []
     n_total = int(strain.size)
+    evidence_laplace: dict[str, Any] = {
+        "method": "laplace_gn_theta",
+        "logZ": None,
+        "logL_hat": None,
+        "logp_hat": None,
+        "sigma2_hat": None,
+        "n": 0,
+        "dof": 0,
+        "d": 5,
+        "pd_ok": False,
+        "logdet_H": None,
+        "prior_type": "gaussian_diag",
+        "prior_scales": None,
+        "notes": evidence_notes,
+    }
     result: dict[str, Any] = {
         "f_qnm_hz": None,
         "f_bounds_hz": [float(band_hz[0]), float(band_hz[1])],
@@ -447,6 +463,7 @@ def _qnm_fit_detector(
         "n_samples": n_total,
         "status": "FAIL",
         "notes": notes,
+        "evidence_laplace": evidence_laplace,
     }
 
     if not _SCIPY_AVAILABLE:
@@ -533,7 +550,8 @@ def _qnm_fit_detector(
     residuals = res.fun
     ss_res = float(np.sum(residuals ** 2))
     n_params = 5
-    dof = max(n_fit - n_params, 1)
+    dof_raw = n_fit - n_params
+    dof = max(dof_raw, 1)
     rmse = float(np.sqrt(ss_res / n_fit))
     chi2_red = float(ss_res / dof)
     Q_qnm = float(math.pi * f_fit * tau_fit)
@@ -546,6 +564,55 @@ def _qnm_fit_detector(
     result["rmse"] = rmse
     result["chi2_red"] = chi2_red
     result["n_samples"] = n_fit
+
+    # --- Laplace evidence (Gauss-Newton, theta-space, deterministic) ---
+    evidence_laplace["n"] = n_fit
+    evidence_laplace["dof"] = dof_raw
+    if dof_raw <= 0:
+        evidence_notes.append("dof <= 0; sigma2_hat undefined for Laplace evidence")
+    else:
+        sigma2_hat = float(ss_res / dof_raw)
+        evidence_laplace["sigma2_hat"] = sigma2_hat
+
+        scales = {
+            "A": float(max(abs(A_fit), 1.0) * 10.0),
+            "tau": float(max(tau_fit, 0.01) * 10.0),
+            "f": float(max(f_fit, 1.0) * 10.0),
+            "phi": float(np.pi * 10.0),
+            "C": float(max(abs(C_fit), 1.0) * 10.0),
+        }
+        evidence_laplace["prior_scales"] = scales
+
+        values = [sigma2_hat, ss_res, A_fit, tau_fit, f_fit, phi_fit, C_fit]
+        if not all(math.isfinite(float(v)) for v in values):
+            evidence_notes.append("non-finite value in fit outputs; Laplace evidence disabled")
+        elif sigma2_hat <= 0.0:
+            evidence_notes.append("sigma2_hat <= 0; Laplace evidence disabled")
+        else:
+            log2pi = float(np.log(2.0 * np.pi))
+            logL_hat = float(-0.5 * n_fit * np.log(2.0 * np.pi * sigma2_hat) - 0.5 * ss_res / sigma2_hat)
+            theta = np.array([A_fit, tau_fit, f_fit, phi_fit, C_fit], dtype=float)
+            s_vec = np.array([scales["A"], scales["tau"], scales["f"], scales["phi"], scales["C"]], dtype=float)
+            quad = float(np.sum((theta / s_vec) ** 2))
+            log_norm = float(np.sum(np.log(s_vec * np.sqrt(2.0 * np.pi))))
+            logp_hat = float(-0.5 * quad - log_norm)
+            evidence_laplace["logL_hat"] = logL_hat
+            evidence_laplace["logp_hat"] = logp_hat
+
+            try:
+                J = np.asarray(res.jac, dtype=float)
+                H = (J.T @ J) / sigma2_hat + np.diag(1.0 / (s_vec ** 2))
+                L = np.linalg.cholesky(H)
+                logdet_h = float(2.0 * np.sum(np.log(np.diag(L))))
+                logZ = float(logL_hat + logp_hat + 0.5 * n_params * log2pi - 0.5 * logdet_h)
+                if not (math.isfinite(logdet_h) and math.isfinite(logZ)):
+                    evidence_notes.append("non-finite logdet_H or logZ from Cholesky")
+                else:
+                    evidence_laplace["pd_ok"] = True
+                    evidence_laplace["logdet_H"] = logdet_h
+                    evidence_laplace["logZ"] = logZ
+            except Exception as exc:
+                evidence_notes.append(f"H not PD or Cholesky failed: {exc}")
 
     # --- Uncertainty estimation: C ≈ sigma^2 * (J^T J)^-1 ---
     sigma_f: float | None = None
