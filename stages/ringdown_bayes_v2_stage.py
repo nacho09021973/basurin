@@ -205,6 +205,31 @@ def _get_created_utc(run_valid: dict[str, Any], report: dict[str, Any]) -> str:
     return "1970-01-01T00:00:00+00:00"
 
 
+def _get_per_detector_map(inf: dict[str, Any]) -> dict[str, Any]:
+    """
+    Devuelve mapping por detector desde inference_report soportando varios layouts.
+    Retorna dict {det: payload} o {}.
+    """
+    for k in ("per_detector", "by_detector", "detectors"):
+        v = inf.get(k)
+        if isinstance(v, dict) and v:
+            return v
+
+    res = inf.get("results")
+    if isinstance(res, dict):
+        for k in ("per_detector", "by_detector", "detectors"):
+            v = res.get(k)
+            if isinstance(v, dict) and v:
+                return v
+
+    out: dict[str, Any] = {}
+    for det in ("H1", "L1", "V1", "K1", "I1"):
+        v = inf.get(det)
+        if isinstance(v, dict):
+            out[det] = v
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="BASURIN ringdown Bayes v2 (Laplace)")
     parser.add_argument("--run", required=True)
@@ -245,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
 
     run_valid: dict[str, Any] = {}
     report: dict[str, Any] = {}
+    per_det: dict[str, Any] = {}
     if not reasons:
         run_valid = json.loads(run_valid_path.read_text(encoding="utf-8"))
         rv = run_valid.get("overall_verdict") or run_valid.get("verdict") or run_valid.get("status")
@@ -253,9 +279,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if not reasons:
         report = json.loads(inf_path.read_text(encoding="utf-8"))
-        per_detector = report.get("per_detector")
-        if not isinstance(per_detector, dict) or not per_detector:
-            reasons.append("inference_report missing per_detector map")
+        per_det = _get_per_detector_map(report)
+        if not per_det:
+            reasons.append(
+                "inference_report missing per-detector map "
+                "(expected per_detector/by_detector/detectors or results.* or top-level H1/L1/...)"
+            )
+            verdict = "FAIL"
 
     priors = {
         "A": [0.0, 1.0],
@@ -272,9 +302,8 @@ def main(argv: list[str] | None = None) -> int:
         ok_detectors: list[str] = []
         detector_bfs: list[float] = []
 
-        assert isinstance(report["per_detector"], dict)
-        for det in sorted(report["per_detector"].keys()):
-            det_payload = report["per_detector"][det]
+        for det in sorted(per_det.keys()):
+            det_payload = per_det[det]
             if not isinstance(det_payload, dict):
                 reasons.append(f"invalid detector payload: {det}")
                 continue
