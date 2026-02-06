@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import sys
+from pathlib import Path as _Path
+
+_WORK_ROOT = _Path(__file__).resolve().parents[2]  # work root
+if str(_WORK_ROOT) not in sys.path:
+    sys.path.insert(0, str(_WORK_ROOT))
+
 import argparse
 import json
 from pathlib import Path
