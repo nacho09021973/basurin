@@ -9,7 +9,9 @@ if str(_WORK_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORK_ROOT))
 
 import argparse
+import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -27,10 +29,36 @@ from basurin_io import (
 
 
 STAGE_NAME = "experiment/uldm_laser_00"
+TAG_RE = re.compile(r"^[A-Za-z0-9._=-]{1,80}$")
 
 
 def abort(msg: str) -> None:
     raise SystemExit(2, f"[BASURIN ABORT] {msg}")
+
+
+def _auto_tag(args: argparse.Namespace) -> str:
+    params = {
+        "seed": args.seed,
+        "a_inj": args.a_inj,
+        "a_null": args.a_null,
+        "duration_s": args.duration_s,
+        "fs": args.fs,
+        "nfft": args.nfft,
+        "n_trials": args.n_trials,
+        "n_freqs": args.n_freqs,
+        "g_strength": args.g_strength,
+        "phase_shift": args.phase_shift,
+        "noise_sigma": args.noise_sigma,
+    }
+    digest = hashlib.sha256(json.dumps(params, sort_keys=True).encode("utf-8")).hexdigest()
+    return f"auto_{digest[:10]}"
+
+
+def _resolve_tag(args: argparse.Namespace) -> str:
+    tag = args.tag if args.tag is not None else _auto_tag(args)
+    if not TAG_RE.fullmatch(tag) or ".." in tag:
+        abort("invalid --tag; allowed [A-Za-z0-9._=-], length<=80, and must not contain '..'")
+    return tag
 
 
 def _read_spectrum_frequencies(path: Path, n_freqs: int, fs: float) -> np.ndarray:
@@ -122,6 +150,7 @@ def _simulate_stat(
 def run_experiment(args: argparse.Namespace) -> int:
     out_root = resolve_out_root(args.out_root)
     run_dir = out_root / args.run
+    tag = _resolve_tag(args)
 
     try:
         _ = require_run_valid(out_root, args.run)
@@ -132,7 +161,7 @@ def run_experiment(args: argparse.Namespace) -> int:
     if not spectrum_path.exists():
         raise SystemExit(2)
 
-    stage_dir = run_dir / STAGE_NAME
+    stage_dir = run_dir / STAGE_NAME / tag
     outputs_dir = stage_dir / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -207,6 +236,7 @@ def run_experiment(args: argparse.Namespace) -> int:
         "nfft": args.nfft,
         "n_trials": args.n_trials,
         "frequencies_hz": [float(x) for x in freqs.tolist()],
+        "tag": tag,
     }
 
     verdict = "PASS"
@@ -233,7 +263,9 @@ def run_experiment(args: argparse.Namespace) -> int:
 
     summary = {
         "stage": STAGE_NAME,
+        "tag": tag,
         "run": args.run,
+        "outputs_dir": str(outputs_dir),
         "inputs": {
             "spectrum_path": str(spectrum_path),
             "spectrum_sha256": sha256_file(spectrum_path),
@@ -273,6 +305,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--phase-shift", type=float, default=0.03)
     p.add_argument("--threshold-null-max", type=float, default=0.35)
     p.add_argument("--threshold-tpr-min", type=float, default=0.9)
+    p.add_argument("--tag", default=None)
     return p
 
 
