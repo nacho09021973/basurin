@@ -59,17 +59,26 @@ STAGE_NAME = "ringdown_featuremap_v0"
 EXIT_CONTRACT_FAIL = 2
 
 
-def inverse_phi(f_hz: float, tau_s: float, alpha: float, k_ratios: int) -> dict:
+def inverse_phi(
+    f_hz: float,
+    tau_s: float,
+    alpha: float,
+    k_ratios: int,
+    f_221_hz: float | None = None,
+    tau_221_s: float | None = None,
+) -> dict:
     """Map observed ringdown (f, tau) -> predicted holographic ratios.
 
     Core formula:
       Q = pi * f * tau
       r_1 = 1 + 1 / (2 * alpha * Q)
 
-    For higher ratios (k > 1), we use the ansatz:
-      r_n = 1 + n^2 / (2 * alpha * Q)
-    which reduces to the AdS puro limit r_n = ((n+Delta)/Delta)^2
-    when alpha and Q are consistent with that geometry.
+    V1-A overtone:
+      r_1 = 1 + 1 / (2 * alpha * Q_220)
+      r_2 = 1 + 3 / (2 * alpha * Q_221)  (if overtone is available)
+
+    Legacy fallback (for backward compatibility):
+      r_n = 1 + n^2 / (2 * alpha * Q_220)
     """
     if f_hz <= 0 or tau_s <= 0:
         return {"error": "f_hz and tau_s must be positive", "ratios": None}
@@ -80,8 +89,21 @@ def inverse_phi(f_hz: float, tau_s: float, alpha: float, k_ratios: int) -> dict:
         return {"error": f"invalid Q={Q} or alpha={alpha}", "ratios": None}
 
     ratios = []
+    overtone_used = False
+    Q_221 = None
+
+    if f_221_hz is not None and tau_221_s is not None and f_221_hz > 0 and tau_221_s > 0:
+        Q_221 = math.pi * f_221_hz * tau_221_s
+        if Q_221 > 0:
+            overtone_used = True
+
     for n in range(1, k_ratios + 1):
-        r_n = 1.0 + (n ** 2) / (2.0 * alpha * Q)
+        if n == 1:
+            r_n = 1.0 + 1.0 / (2.0 * alpha * Q)
+        elif n == 2 and overtone_used:
+            r_n = 1.0 + 3.0 / (2.0 * alpha * Q_221)  # V1-A overtone
+        else:
+            r_n = 1.0 + (n ** 2) / (2.0 * alpha * Q)
         ratios.append(r_n)
 
     # Also predict M2_0 from f (the scale observable).
@@ -95,14 +117,16 @@ def inverse_phi(f_hz: float, tau_s: float, alpha: float, k_ratios: int) -> dict:
         "f_hz": f_hz,
         "tau_s": tau_s,
         "Q": Q,
+        "Q_221": Q_221,
         "alpha": alpha,
         "ratios": ratios,
         "log_ratios": [math.log(r) for r in ratios],
         "M2_0_proxy": M2_0_proxy,
+        "overtone_used": overtone_used,
     }
 
 
-def forward_phi(M2_0: float, r_1: float, L: float, alpha: float) -> dict:
+def forward_phi(M2_0: float, r_1: float, L: float, alpha: float, r_2: float | None = None) -> dict:
     """Map holographic theory (M2_0, r_1, L) -> predicted ringdown params.
 
     Core formulas:
@@ -125,13 +149,22 @@ def forward_phi(M2_0: float, r_1: float, L: float, alpha: float) -> dict:
     tau_pred = 1.0 / gamma
     Q_pred = math.pi * f_pred * tau_pred
 
-    return {
+    out = {
         "f_hz": f_pred,
         "tau_s": tau_pred,
         "Q": Q_pred,
         "omega_0": omega_0,
         "gamma": gamma,
     }
+    if r_2 is not None:
+        if r_2 <= 1.0:
+            return {"error": "invalid r_2 <= 1", "f_hz": f_pred, "tau_s": tau_pred}
+        # V1-A overtone: explicit r2 from overtone quality factor
+        f_221 = f_pred * math.sqrt(r_1)
+        Q_221 = 3.0 / (2.0 * alpha * (r_2 - 1.0))
+        tau_221 = Q_221 / (math.pi * f_221)
+        out.update({"f_221": f_221, "tau_221": tau_221, "Q_221": Q_221})
+    return out
 
 
 def load_ringdown_params(path: Path) -> list[dict]:
@@ -180,12 +213,16 @@ def _extract_params(obj: dict) -> dict | None:
         f = est["f_220_hat"]
         tau = est["tau_220_hat"]
         Q = est.get("Q_220_hat", math.pi * f * tau)
+        f_221 = est.get("f_221_hat")
+        tau_221 = est.get("tau_221_hat")
         truth = obj.get("truth", {})
         return {
             "case_id": case_id,
             "f_220": f,
             "tau_220": tau,
             "Q_220": Q,
+            "f_221": f_221,
+            "tau_221": tau_221,
             "truth": truth if truth else None,
         }
 
@@ -195,11 +232,15 @@ def _extract_params(obj: dict) -> dict | None:
         f = truth["f_220"]
         tau = truth["tau_220"]
         Q = truth.get("Q_220", math.pi * f * tau)
+        f_221 = truth.get("f_221")
+        tau_221 = truth.get("tau_221")
         return {
             "case_id": case_id,
             "f_220": f,
             "tau_220": tau,
             "Q_220": Q,
+            "f_221": f_221,
+            "tau_221": tau_221,
             "truth": truth,
         }
 
@@ -208,11 +249,15 @@ def _extract_params(obj: dict) -> dict | None:
         f = obj["f_220"]
         tau = obj["tau_220"]
         Q = obj.get("Q_220", math.pi * f * tau)
+        f_221 = obj.get("f_221")
+        tau_221 = obj.get("tau_221")
         return {
             "case_id": case_id,
             "f_220": f,
             "tau_220": tau,
             "Q_220": Q,
+            "f_221": f_221,
+            "tau_221": tau_221,
             "truth": None,
         }
 
@@ -254,7 +299,12 @@ def main() -> int:
     mapped = []
     for case in cases:
         result = inverse_phi(
-            case["f_220"], case["tau_220"], args.alpha, args.k_ratios
+            case["f_220"],
+            case["tau_220"],
+            args.alpha,
+            args.k_ratios,
+            f_221_hz=case.get("f_221"),
+            tau_221_s=case.get("tau_221"),
         )
         mapped.append({
             "case_id": case["case_id"],
@@ -262,6 +312,8 @@ def main() -> int:
                 "f_220": case["f_220"],
                 "tau_220": case["tau_220"],
                 "Q_220": case["Q_220"],
+                "f_221": case.get("f_221"),
+                "tau_221": case.get("tau_221"),
             },
             "mapped": result,
             "truth": case.get("truth"),
