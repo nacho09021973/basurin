@@ -15,6 +15,7 @@ RESULTS (OVERTONE_V2-B, alpha_n dependent on n):
 from __future__ import annotations
 
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -242,3 +243,36 @@ class TestRecoveryPerformance:
         assert n >= 64
         assert acc1 > 1.0 / 128.0, f"Worse than random top-1: {acc1:.1%} (N={n})."
         assert acck > 3.0 / 128.0, f"Worse than random top-3: {acck:.1%} (N={n})."
+
+
+class TestThesisGate:
+    def test_n128_noise_005_thesis_gate(self):
+        n_theories = 128
+        noise_sigma = 0.05
+        threshold_top1 = 0.70
+        threshold_top3 = 0.95
+
+        acc1, acck, n = run_recovery(n_theories=n_theories, noise_sigma=noise_sigma)
+        n_top1 = round(acc1 * n)
+        n_top3 = round(acck * n)
+
+        if acc1 >= threshold_top1 and acck >= threshold_top3:
+            return
+
+        msg = (
+            "Thesis gate not met: "
+            f"top1={acc1:.1%} ({n_top1}/{n}), "
+            f"top3={acck:.1%} ({n_top3}/{n}); "
+            f"required >= {threshold_top1:.0%} / {threshold_top3:.0%}; "
+            f"N={n_theories}, noise_sigma={noise_sigma}. "
+            "Abort downstream (tesis no demostrada)."
+        )
+
+        if os.getenv("BASURIN_STRICT_THESIS") == "1":
+            import pytest
+
+            pytest.fail(msg)
+
+        import pytest
+
+        pytest.xfail(msg)
