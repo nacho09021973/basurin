@@ -18,8 +18,7 @@ from basurin_io import sha256_file
 
 
 def _read_json(path: Path) -> dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -35,6 +34,27 @@ def _extract_verdict(summary_path: Path) -> str | None:
     if isinstance(results, dict) and isinstance(results.get("verdict"), str):
         return results["verdict"]
     return None
+
+
+def _read_run_valid_verdict(run_dir: Path) -> tuple[str, Path | None]:
+    verdict_path = run_dir / "RUN_VALID" / "verdict.json"
+    output_path = run_dir / "RUN_VALID" / "outputs" / "run_valid.json"
+
+    if verdict_path.exists():
+        verdict_payload = _read_json(verdict_path)
+        verdict = verdict_payload.get("verdict")
+        if isinstance(verdict, str) and verdict:
+            return verdict, verdict_path
+
+    if output_path.exists():
+        output_payload = _read_json(output_path)
+        verdict = output_payload.get("overall_verdict")
+        if not (isinstance(verdict, str) and verdict):
+            verdict = output_payload.get("verdict")
+        if isinstance(verdict, str) and verdict:
+            return verdict, output_path
+
+    return "MISSING", None
 
 
 def _collect_entries(run_dir: Path) -> list[dict[str, Any]]:
@@ -88,13 +108,7 @@ def main() -> int:
     runs_root = Path(args.runs_root)
     run_dir = runs_root / args.run
 
-    run_valid_path = run_dir / "RUN_VALID" / "outputs" / "run_valid.json"
-    if not run_valid_path.exists():
-        print(f"ERROR: RUN_VALID missing at {run_valid_path}", file=sys.stderr)
-        return 2
-
-    run_valid_payload = _read_json(run_valid_path)
-    verdict = run_valid_payload.get("verdict")
+    verdict, run_valid_path = _read_run_valid_verdict(run_dir)
     if verdict != "PASS":
         print(f"ERROR: RUN_VALID verdict {verdict}", file=sys.stderr)
         return 2
@@ -103,6 +117,7 @@ def main() -> int:
     outputs_dir = stage_dir / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
 
+    assert run_valid_path is not None
     run_valid_rel = str(run_valid_path.relative_to(run_dir))
     run_valid_sha = sha256_file(run_valid_path)
 
@@ -168,3 +183,9 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+# Manual test:
+# RUN="2026-02-06__REPO_INDEX_V0"
+# python experiment/run_valid/stage_run_valid.py --run "$RUN"
+# python stages/stage_run_index.py --run "$RUN"
+# ls runs/$RUN/RUN_INDEX/outputs
