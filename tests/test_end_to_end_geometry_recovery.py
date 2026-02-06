@@ -15,7 +15,6 @@ RESULTS (OVERTONE_V2-B, alpha_n dependent on n):
 from __future__ import annotations
 
 import math
-import os
 import sys
 from pathlib import Path
 
@@ -243,36 +242,44 @@ class TestRecoveryPerformance:
         assert n >= 64
         assert acc1 > 1.0 / 128.0, f"Worse than random top-1: {acc1:.1%} (N={n})."
         assert acck > 3.0 / 128.0, f"Worse than random top-3: {acck:.1%} (N={n})."
+        assert acc1 > 1.0 / 128, f"Worse than random: {acc1:.1%}"
+        assert acck > 3.0 / 128, f"Worse than random: {acck:.1%}"
 
+    def test_accuracy_improves_with_less_noise(self):
+        """With 1% noise, N=128 performance should be much better.
+
+        This confirms the limit is noise, not the map itself.
+        """
+        acc1, acck, n = run_recovery(n_theories=128, noise_sigma=0.01)
+        assert n >= 64
+        # With 1% noise, should be significantly better than 5%
+        assert acc1 >= 0.50, f"Even 1% noise too poor: top-1 = {acc1:.1%}"
+
+    def test_accuracy_scales_with_atlas_size(self):
+        """Accuracy decreases monotonically with atlas size (harder problem)."""
+        prev_acc = 1.0
+        for N in [8, 16, 32, 64]:
+            acc1, _, n = run_recovery(n_theories=N, noise_sigma=0.05)
+            if n > 0:
+                assert acc1 <= prev_acc + 0.05, (
+                    f"Accuracy should decrease: N={N} gave {acc1:.1%} > prev {prev_acc:.1%}"
+                )
+                prev_acc = acc1
+
+
+# ---------------------------------------------------------------------------
+# The sovereign thesis gate (N=128)
+# ---------------------------------------------------------------------------
 
 class TestThesisGate:
-    def test_n128_noise_005_thesis_gate(self):
-        n_theories = 128
-        noise_sigma = 0.05
-        threshold_top1 = 0.70
-        threshold_top3 = 0.95
-
-        acc1, acck, n = run_recovery(n_theories=n_theories, noise_sigma=noise_sigma)
-        n_top1 = round(acc1 * n)
-        n_top3 = round(acck * n)
-
-        if acc1 >= threshold_top1 and acck >= threshold_top3:
-            return
-
-        msg = (
-            "Thesis gate not met: "
-            f"top1={acc1:.1%} ({n_top1}/{n}), "
-            f"top3={acck:.1%} ({n_top3}/{n}); "
-            f"required >= {threshold_top1:.0%} / {threshold_top3:.0%}; "
-            f"N={n_theories}, noise_sigma={noise_sigma}. "
-            "Abort downstream (tesis no demostrada)."
-        )
-
-        if os.getenv("BASURIN_STRICT_THESIS") == "1":
-            import pytest
-
-            pytest.fail(msg)
-
-        import pytest
-
-        pytest.xfail(msg)
+    """THE gate. Keep as xfail until overtone selector weighting is calibrated."""
+    def test_thesis_top1_N128(self):
+        """THESIS: accuracy_top1 >= 70% for N=128 at 5% noise."""
+        acc1, _, n = run_recovery(n_theories=128, noise_sigma=0.05)
+        assert n >= 64
+        assert acc1 >= 0.70, f"accuracy_top1 = {acc1:.1%} < 70% (N={n})."
+    def test_thesis_topk_N128(self):
+        """THESIS: accuracy_top3 >= 95% for N=128 at 5% noise."""
+        _, acck, n = run_recovery(n_theories=128, noise_sigma=0.05)
+        assert n >= 64
+        assert acck >= 0.95, f"accuracy_top3 = {acck:.1%} < 95% (N={n})."
