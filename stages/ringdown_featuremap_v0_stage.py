@@ -64,6 +64,7 @@ def inverse_phi(
     tau_s: float,
     alpha: float,
     k_ratios: int,
+    beta: float = 0.0,
     f_221_hz: float | None = None,
     tau_221_s: float | None = None,
 ) -> dict:
@@ -73,9 +74,9 @@ def inverse_phi(
       Q = pi * f * tau
       r_1 = 1 + 1 / (2 * alpha * Q)
 
-    V1-A overtone:
+    V2-B overtone:
       r_1 = 1 + 1 / (2 * alpha * Q_220)
-      r_2 = 1 + 3 / (2 * alpha * Q_221)  (if overtone is available)
+      r_2 = 1 + 3 / (2 * alpha_1 * Q_221), alpha_1 = alpha * (1 + beta)
 
     Legacy fallback (for backward compatibility):
       r_n = 1 + n^2 / (2 * alpha * Q_220)
@@ -91,6 +92,7 @@ def inverse_phi(
     ratios = []
     overtone_used = False
     Q_221 = None
+    alpha_1 = alpha * (1.0 + beta)
 
     if f_221_hz is not None and tau_221_s is not None and f_221_hz > 0 and tau_221_s > 0:
         Q_221 = math.pi * f_221_hz * tau_221_s
@@ -101,7 +103,9 @@ def inverse_phi(
         if n == 1:
             r_n = 1.0 + 1.0 / (2.0 * alpha * Q)
         elif n == 2 and overtone_used:
-            r_n = 1.0 + 3.0 / (2.0 * alpha * Q_221)  # V1-A overtone
+            if alpha_1 <= 0:
+                return {"error": f"invalid alpha_1={alpha_1}", "ratios": None}
+            r_n = 1.0 + 3.0 / (2.0 * alpha_1 * Q_221)  # V2-B overtone
         else:
             r_n = 1.0 + (n ** 2) / (2.0 * alpha * Q)
         ratios.append(r_n)
@@ -119,7 +123,10 @@ def inverse_phi(
         "Q": Q,
         "Q_221": Q_221,
         "alpha": alpha,
+        "alpha_1": alpha_1,
+        "beta": beta,
         "ratios": ratios,
+        "obs": [math.log(Q), math.log(Q_221), math.log(f_221_hz / f_hz)] if overtone_used else [math.log(Q)],
         "log_ratios": [math.log(r) for r in ratios],
         "M2_0_proxy": M2_0_proxy,
         "overtone_used": overtone_used,
