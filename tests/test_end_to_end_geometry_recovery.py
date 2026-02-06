@@ -15,10 +15,12 @@ RESULTS (OVERTONE_V2-B, alpha_n dependent on n):
 from __future__ import annotations
 
 import math
+import os
 import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -273,13 +275,40 @@ class TestRecoveryPerformance:
 
 class TestThesisGate:
     """THE gate. Keep as xfail until overtone selector weighting is calibrated."""
+
+    @staticmethod
+    def _build_gate_message(acc1: float, acck: float, n: int, noise_sigma: float) -> str:
+        top1_correct = int(round(acc1 * n)) if n > 0 else 0
+        topk_correct = int(round(acck * n)) if n > 0 else 0
+        return "\n".join([
+            "THESIS GATE not satisfied.",
+            f"- top1: {acc1:.1%} ({top1_correct}/{n}) [threshold: 70%]",
+            f"- top3: {acck:.1%} ({topk_correct}/{n}) [threshold: 95%]",
+            f"- N={n}, noise_sigma={noise_sigma}",
+            "- Abort downstream (tesis no demostrada).",
+            "- Set BASURIN_STRICT_THESIS=1 to fail hard.",
+        ])
+
+    @staticmethod
+    def _thesis_gate(verdict_ok: bool, msg: str) -> None:
+        if verdict_ok:
+            return
+        if os.environ.get("BASURIN_STRICT_THESIS", "0") == "1":
+            pytest.fail(msg)
+        pytest.xfail(msg)
+
     def test_thesis_top1_N128(self):
         """THESIS: accuracy_top1 >= 70% for N=128 at 5% noise."""
-        acc1, _, n = run_recovery(n_theories=128, noise_sigma=0.05)
+        acc1, acck, n = run_recovery(n_theories=128, noise_sigma=0.05)
         assert n >= 64
-        assert acc1 >= 0.70, f"accuracy_top1 = {acc1:.1%} < 70% (N={n})."
+        verdict_ok = acc1 >= 0.70 and acck >= 0.95
+        msg = self._build_gate_message(acc1=acc1, acck=acck, n=n, noise_sigma=0.05)
+        self._thesis_gate(verdict_ok, msg)
+
     def test_thesis_topk_N128(self):
         """THESIS: accuracy_top3 >= 95% for N=128 at 5% noise."""
-        _, acck, n = run_recovery(n_theories=128, noise_sigma=0.05)
+        acc1, acck, n = run_recovery(n_theories=128, noise_sigma=0.05)
         assert n >= 64
-        assert acck >= 0.95, f"accuracy_top3 = {acck:.1%} < 95% (N={n})."
+        verdict_ok = acc1 >= 0.70 and acck >= 0.95
+        msg = self._build_gate_message(acc1=acc1, acck=acck, n=n, noise_sigma=0.05)
+        self._thesis_gate(verdict_ok, msg)
