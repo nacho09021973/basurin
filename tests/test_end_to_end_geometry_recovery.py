@@ -273,42 +273,37 @@ class TestRecoveryPerformance:
 # The sovereign thesis gate (N=128)
 # ---------------------------------------------------------------------------
 
+
+def _thesis_gate(verdict_ok: bool, msg: str) -> None:
+    """Soft-fail gate: XFAIL by default, FAIL when BASURIN_STRICT_THESIS=1."""
+    if verdict_ok:
+        return
+    strict = os.environ.get("BASURIN_STRICT_THESIS", "0") == "1"
+    if strict:
+        pytest.fail(msg)
+    pytest.xfail(msg)
+
+
 class TestThesisGate:
-    """THE gate. Keep as xfail until overtone selector weighting is calibrated."""
+    """THE gate. Soft-fail (XFAIL) by default; set BASURIN_STRICT_THESIS=1 to fail hard."""
 
     @staticmethod
-    def _build_gate_message(acc1: float, acck: float, n: int, noise_sigma: float) -> str:
-        top1_correct = int(round(acc1 * n)) if n > 0 else 0
-        topk_correct = int(round(acck * n)) if n > 0 else 0
-        return "\n".join([
-            "THESIS GATE not satisfied.",
-            f"- top1: {acc1:.1%} ({top1_correct}/{n}) [threshold: 70%]",
-            f"- top3: {acck:.1%} ({topk_correct}/{n}) [threshold: 95%]",
-            f"- N={n}, noise_sigma={noise_sigma}",
-            "- Abort downstream (tesis no demostrada).",
-            "- Set BASURIN_STRICT_THESIS=1 to fail hard.",
-        ])
-
-    @staticmethod
-    def _thesis_gate(verdict_ok: bool, msg: str) -> None:
-        if verdict_ok:
-            return
-        if os.environ.get("BASURIN_STRICT_THESIS", "0") == "1":
-            pytest.fail(msg)
-        pytest.xfail(msg)
+    def _run_gate():
+        acc1, acck, n = run_recovery(n_theories=128, noise_sigma=0.05)
+        assert n >= 64
+        msg = (
+            f"THESIS_GATE FAIL (N={n}, noise_sigma=0.05)\n"
+            f" top1={acc1:.1%} (req>=70%)\n"
+            f" top3={acck:.1%} (req>=95%)\n"
+            f" Abort downstream (tesis no demostrada).\n"
+            f" Set BASURIN_STRICT_THESIS=1 to fail hard."
+        )
+        _thesis_gate(acc1 >= 0.70 and acck >= 0.95, msg)
 
     def test_thesis_top1_N128(self):
         """THESIS: accuracy_top1 >= 70% for N=128 at 5% noise."""
-        acc1, acck, n = run_recovery(n_theories=128, noise_sigma=0.05)
-        assert n >= 64
-        verdict_ok = acc1 >= 0.70 and acck >= 0.95
-        msg = self._build_gate_message(acc1=acc1, acck=acck, n=n, noise_sigma=0.05)
-        self._thesis_gate(verdict_ok, msg)
+        self._run_gate()
 
     def test_thesis_topk_N128(self):
         """THESIS: accuracy_top3 >= 95% for N=128 at 5% noise."""
-        acc1, acck, n = run_recovery(n_theories=128, noise_sigma=0.05)
-        assert n >= 64
-        verdict_ok = acc1 >= 0.70 and acck >= 0.95
-        msg = self._build_gate_message(acc1=acc1, acck=acck, n=n, noise_sigma=0.05)
-        self._thesis_gate(verdict_ok, msg)
+        self._run_gate()
