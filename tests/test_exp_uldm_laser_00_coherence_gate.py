@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import h5py
@@ -93,3 +95,11 @@ def test_detection_gap(tmp_path: Path, monkeypatch) -> None:
     assert rc1 == 0
     stats1 = json.loads(stats_path.read_text(encoding="utf-8"))
     assert stats1["inj"]["tpr_at_fpr_1pct"] > 0.9
+
+
+def test_entrypoint_help_runs() -> None:
+    root = Path(__file__).resolve().parents[1]
+    script = root / "experiment" / "uldm_laser" / "exp_uldm_laser_00_coherence_gate.py"
+    p = subprocess.run([sys.executable, str(script), "--help"], capture_output=True, text=True)
+    assert p.returncode == 0
+    assert "--run" in (p.stdout + p.stderr) or "usage" in (p.stdout + p.stderr).lower()
