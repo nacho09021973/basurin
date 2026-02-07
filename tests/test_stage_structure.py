@@ -33,8 +33,13 @@ def _assert_stage_structure(stage_dir: Path) -> tuple[Path, Path, Path]:
 def _assert_manifest_relative_to_stage_dir(stage_dir: Path, manifest_path: Path) -> None:
     m = _load_json(manifest_path)
     assert isinstance(m, dict) and m, f"manifest must be a non-empty dict: {manifest_path}"
+    # Manifest can include metadata entries that are not artifact paths.
+    META_KEYS = {"created"}
+    n_artifacts = 0
     for k, rel in m.items():
         assert isinstance(k, str) and k, f"manifest key must be a non-empty string in {manifest_path}: {k!r}"
+        if k in META_KEYS:
+            continue
         assert isinstance(rel, str) and rel, f"manifest value must be a non-empty string in {manifest_path}: {k}"
         p = Path(rel)
 
@@ -44,10 +49,12 @@ def _assert_manifest_relative_to_stage_dir(stage_dir: Path, manifest_path: Path)
         # Contract: must resolve under stage_dir (not under run root or elsewhere).
         abs_p = stage_dir / p
         assert abs_p.exists(), f"manifest points to missing file from {manifest_path}: {k} -> {abs_p}"
+        n_artifacts += 1
 
         # Stronger: should normally live under outputs/ (allow exceptions if ever needed).
         # If you want strictness, uncomment the next line.
         # assert abs_p.is_relative_to(stage_dir / "outputs"), f"{k} not under outputs/: {abs_p}"
+    assert n_artifacts >= 1, f"manifest must contain at least one artifact entry: {manifest_path}"
 
 
 def _assert_stage_summary_inputs_have_hashes(summary_path: Path) -> None:
