@@ -52,3 +52,6 @@ stages/
 !stages/
 !stages/**
 stages/__pycache__/
+
+# local outputs (must live under runs/<run_id>/)
+out_bayesiano_v*
