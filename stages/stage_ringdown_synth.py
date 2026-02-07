@@ -38,6 +38,7 @@ def main() -> int:
     ap.add_argument("--atlas-json", required=True)
     ap.add_argument("--sigma-rel", required=True, type=float)
     ap.add_argument("--seed-base", required=True, type=int)
+    ap.add_argument("--stage-subdir", default=None)
     ap.add_argument("--root", default=".")
     args = ap.parse_args()
 
@@ -53,7 +54,7 @@ def main() -> int:
     atlas = read_json(atlas_path)
     geoms = atlas.get("geometries", [])
 
-    stage_dir = run_root / STAGE
+    stage_dir = run_root / args.stage_subdir if args.stage_subdir else run_root / STAGE
     outputs_dir = stage_dir / "outputs"
     ensure_dir(outputs_dir)
 
