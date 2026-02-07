@@ -35,11 +35,16 @@ def _assert_manifest_relative_to_stage_dir(stage_dir: Path, manifest_path: Path)
     assert isinstance(m, dict) and m, f"manifest must be a non-empty dict: {manifest_path}"
     # Manifest can include metadata entries that are not artifact paths.
     META_KEYS = {"created"}
+    artifacts = m.get("files") if "files" in m else None
+    if artifacts is not None:
+        assert isinstance(artifacts, dict) and artifacts, f"manifest.files must be a non-empty dict: {manifest_path}"
+        entries = artifacts.items()
+    else:
+        entries = ((k, v) for k, v in m.items() if k not in META_KEYS)
+
     n_artifacts = 0
-    for k, rel in m.items():
+    for k, rel in entries:
         assert isinstance(k, str) and k, f"manifest key must be a non-empty string in {manifest_path}: {k!r}"
-        if k in META_KEYS:
-            continue
         assert isinstance(rel, str) and rel, f"manifest value must be a non-empty string in {manifest_path}: {k}"
         p = Path(rel)
 
