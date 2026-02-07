@@ -65,11 +65,40 @@ def _assert_manifest_relative_to_stage_dir(stage_dir: Path, manifest_path: Path)
 def _assert_stage_summary_inputs_have_hashes(summary_path: Path) -> None:
     s = _load_json(summary_path)
     assert isinstance(s, dict), f"stage_summary must be a dict: {summary_path}"
-    assert "inputs" in s and isinstance(s["inputs"], dict), f"stage_summary.inputs must be a dict: {summary_path}"
-    for name, spec in s["inputs"].items():
-        assert isinstance(spec, dict), f"inputs.{name} must be a dict in {summary_path}"
-        assert "path" in spec and isinstance(spec["path"], str) and spec["path"], f"inputs.{name}.path missing in {summary_path}"
-        assert "sha256" in spec and isinstance(spec["sha256"], str) and spec["sha256"], f"inputs.{name}.sha256 missing in {summary_path}"
+
+    # Root stages (e.g. geometry) generate data from config and have no file
+    # inputs at all — that is valid.
+    if "inputs" not in s:
+        return
+
+    inputs = s["inputs"]
+    assert isinstance(inputs, dict), f"stage_summary.inputs must be a dict: {summary_path}"
+
+    if not inputs:
+        return
+
+    # Detect format.
+    #   Pattern B (nested):  {"geo": {"path": "...", "sha256": "..."}}
+    #   Pattern A (flat):    {"geometry_path": "...", "geometry_sha256": "..."}
+    has_nested = any(isinstance(v, dict) for v in inputs.values())
+
+    if has_nested:
+        # Pattern B – every entry must carry path + sha256.
+        for name, spec in inputs.items():
+            assert isinstance(spec, dict), f"inputs.{name} must be a dict in {summary_path}"
+            assert "path" in spec and isinstance(spec["path"], str) and spec["path"], \
+                f"inputs.{name}.path missing in {summary_path}"
+            assert "sha256" in spec and isinstance(spec["sha256"], str) and spec["sha256"], \
+                f"inputs.{name}.sha256 missing in {summary_path}"
+    else:
+        # Pattern A – flat keys; every *_path key must have a matching *_sha256.
+        path_keys = sorted(k for k in inputs if k.endswith("_path"))
+        for pk in path_keys:
+            sha_key = pk.removesuffix("_path") + "_sha256"
+            assert sha_key in inputs, \
+                f"inputs has {pk!r} but no matching {sha_key!r} in {summary_path}"
+            assert isinstance(inputs[sha_key], str) and inputs[sha_key], \
+                f"inputs.{sha_key} must be a non-empty string in {summary_path}"
 
 
 # ----------------
