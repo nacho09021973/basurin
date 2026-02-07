@@ -1,3 +1,5 @@
+## Resumen ejecutivo no normativo
+
 This repository is governed by BASURIN_README_SUPER.md (single source of truth).
 If an executive contract fails, the run does not exist. No downstream.
 
@@ -20,7 +22,7 @@ If an executive contract fails, the run does not exist. No downstream.
   - abort si `RUN_VALID != PASS`
 
 Referencia normativa: lee y sigue BASURIN_README_SUPER.md; este README no sustituye contratos.
-=======
+
 **Audience:** automated agents (AI), collaborators, auditors.
 **Normative authority:** `BASURIN_README_SUPER.md` (single source of truth for contracts and IO).
 
@@ -138,4 +140,4 @@ When working on BASURIN:
 3. **A result of "this doesn't work because X" is valuable.** Don't optimize around failures; document them.
 4. **Amplitude ratios require excitation contracts.** Amplitudes depend on initial conditions (the "kick"), not just geometry. Never use them to break degeneracy without explicit separation of geometric vs. initial-state information.
 5. **No ad-hoc scripts.** Every computation must flow through a stage with manifest, summary, and hash traceability.
->>>>>>> cd9dfb0 (wip: local changes (atlas select + docs))
+
