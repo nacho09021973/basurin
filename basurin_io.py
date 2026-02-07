@@ -78,6 +78,39 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def compute_sha256(path: str | Path) -> str:
+    return sha256_file(Path(path))
+
+
+def ensure_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def read_json(path: Path) -> Any:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write_json_atomic(path: Path, obj: Any) -> None:
+    ensure_dir(path.parent)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=2, sort_keys=True)
+        f.write("\n")
+    os.replace(tmp_path, path)
+
+
+def load_run_valid_verdict(run_root: Path) -> tuple[bool, Path]:
+    preferred = run_root / "RUN_VALID" / "verdict.json"
+    legacy = run_root / "RUN_VALID" / "outputs" / "run_valid.json"
+    verdict_path = preferred if preferred.exists() else legacy
+    if not verdict_path.exists():
+        return False, verdict_path
+    payload = read_json(verdict_path)
+    verdict = payload.get("verdict", payload.get("overall_verdict", payload.get("status")))
+    return verdict == "PASS", verdict_path
+
+
 def get_run_dir(run_id: str, base_dir: Path | str | None = None) -> Path:
     if base_dir is None:
         base_dir = get_runs_root()
@@ -238,9 +271,34 @@ def _relative_to_stage(stage_dir: Path, path: Path) -> str:
 
 def write_manifest(
     stage_dir: Path,
-    artifacts: Mapping[str, Path],
+    artifacts: Mapping[str, Path] | None = None,
     extra: Mapping[str, Any] | None = None,
+    *,
+    stage: str | None = None,
+    artifact_relpaths: list[Path] | None = None,
 ) -> Path:
+    if artifact_relpaths is not None:
+        stage_name = stage or stage_dir.name
+        manifest_path = stage_dir / "manifest.json"
+        if not manifest_path.exists() and any(str(r) == "manifest.json" for r in artifact_relpaths):
+            write_json_atomic(manifest_path, {"version": "manifest.v1", "stage": stage_name, "artifacts": {}})
+
+        artifact_hashes: dict[str, dict[str, str]] = {}
+        for rel in artifact_relpaths:
+            rel_str = str(rel)
+            artifact_hashes[rel_str] = {"sha256": compute_sha256(stage_dir / rel)}
+
+        manifest = {
+            "version": "manifest.v1",
+            "stage": stage_name,
+            "artifacts": artifact_hashes,
+        }
+        write_json_atomic(manifest_path, manifest)
+        return manifest_path
+
+    if artifacts is None:
+        raise ValueError("artifacts must be provided when artifact_relpaths is not used")
+
     stage_dir_resolved = stage_dir.resolve()
     run_dir = stage_dir_resolved.parent
     env_runs_root = None
@@ -285,18 +343,51 @@ def write_manifest(
     return manifest_path
 
 
-def write_stage_summary(stage_dir: Path, summary_dict: dict[str, Any]) -> Path:
-    if "created" not in summary_dict:
-        summary_dict["created"] = utc_now_iso()
-    if "stage" not in summary_dict:
-        summary_dict["stage"] = stage_dir.name
-    if "run" not in summary_dict:
-        summary_dict["run"] = stage_dir.parent.name
+def write_stage_summary(
+    stage_dir: Path,
+    summary_dict: dict[str, Any] | None = None,
+    *,
+    stage: str | None = None,
+    impl_module: str | None = None,
+    params: dict | None = None,
+    inputs: dict | None = None,
+    outputs: dict | None = None,
+    verdict: str | None = None,
+    model_family: str | None = None,
+    epistemic_status: str | None = None,
+) -> Path:
+    if summary_dict is not None:
+        if "created" not in summary_dict:
+            summary_dict["created"] = utc_now_iso()
+        if "stage" not in summary_dict:
+            summary_dict["stage"] = stage_dir.name
+        if "run" not in summary_dict:
+            summary_dict["run"] = stage_dir.parent.name
 
+        summary_path = stage_dir / "stage_summary.json"
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(summary_dict, f, indent=2, sort_keys=True)
+            f.write("\n")
+        return summary_path
+
+    if None in (stage, impl_module, params, inputs, outputs, verdict, model_family, epistemic_status):
+        raise ValueError("Missing required keyword arguments for stage_summary.v1")
+
+    summary_v1 = {
+        "version": "stage_summary.v1",
+        "stage": stage,
+        "impl": {"module": impl_module, "version": "v0"},
+        "model": {
+            "family": model_family,
+            "epistemic_status": epistemic_status,
+        },
+        "params": params,
+        "inputs": inputs,
+        "outputs": outputs,
+        "verdict": verdict,
+    }
     summary_path = stage_dir / "stage_summary.json"
-    with open(summary_path, "w", encoding="utf-8") as f:
-        json.dump(summary_dict, f, indent=2, sort_keys=True)
-        f.write("\n")
+    write_json_atomic(summary_path, summary_v1)
     return summary_path
 
 
