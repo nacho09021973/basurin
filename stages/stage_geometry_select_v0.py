@@ -41,6 +41,7 @@ def main() -> int:
     ap.add_argument("--topk", required=True, type=int)
     ap.add_argument("--acc-top1-threshold", required=True, type=float)
     ap.add_argument("--acc-topk-threshold", required=True, type=float)
+    ap.add_argument("--stage-subdir", default=None)
     ap.add_argument("--root", default=".")
     args = ap.parse_args()
 
@@ -62,7 +63,7 @@ def main() -> int:
 
     atlas_ratios = [np.array([float(g["r1"])]) for g in atlas.get("geometries", [])]
 
-    stage_dir = run_root / "experiment" / "ringdown" / STAGE
+    stage_dir = run_root / args.stage_subdir if args.stage_subdir else run_root / "experiment" / "ringdown" / STAGE
     outputs_dir = stage_dir / "outputs"
     ensure_dir(outputs_dir)
 

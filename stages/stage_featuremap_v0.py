@@ -35,6 +35,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True)
     ap.add_argument("--synthetic-events-json", required=True)
+    ap.add_argument("--stage-subdir", default=None)
     ap.add_argument("--root", default=".")
     args = ap.parse_args()
 
@@ -50,7 +51,7 @@ def main() -> int:
     synth = read_json(synth_path)
     cases = synth.get("cases", [])
 
-    stage_dir = run_root / "experiment" / "ringdown" / "featuremap_v0"
+    stage_dir = run_root / args.stage_subdir if args.stage_subdir else run_root / "experiment" / "ringdown" / "featuremap_v0"
     outputs_dir = stage_dir / "outputs"
     ensure_dir(outputs_dir)
 
