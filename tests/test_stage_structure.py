@@ -65,11 +65,46 @@ def _assert_manifest_relative_to_stage_dir(stage_dir: Path, manifest_path: Path)
 def _assert_stage_summary_inputs_have_hashes(summary_path: Path) -> None:
     s = _load_json(summary_path)
     assert isinstance(s, dict), f"stage_summary must be a dict: {summary_path}"
-    assert "inputs" in s and isinstance(s["inputs"], dict), f"stage_summary.inputs must be a dict: {summary_path}"
-    for name, spec in s["inputs"].items():
-        assert isinstance(spec, dict), f"inputs.{name} must be a dict in {summary_path}"
-        assert "path" in spec and isinstance(spec["path"], str) and spec["path"], f"inputs.{name}.path missing in {summary_path}"
-        assert "sha256" in spec and isinstance(spec["sha256"], str) and spec["sha256"], f"inputs.{name}.sha256 missing in {summary_path}"
+
+    # Accept legacy and modern formats:
+    # - Legacy root stages: no inputs, but top-level hashes present
+    # - Legacy flat inputs: keys like geometry_path + geometry_sha256
+    # - Modern nested inputs: inputs.<name> = {"path": ..., "sha256": ...}
+
+    hashes = s.get("hashes")
+    if hashes is not None:
+        assert isinstance(hashes, dict) and hashes, f"stage_summary.hashes must be a non-empty dict: {summary_path}"
+        for k, v in hashes.items():
+            assert isinstance(k, str) and k, f"hashes key must be non-empty in {summary_path}"
+            assert isinstance(v, str) and v, f"hashes.{k} must be non-empty string in {summary_path}"
+
+    if "inputs" not in s:
+        assert hashes is not None, f"stage_summary must contain inputs or hashes: {summary_path}"
+        return
+
+    inputs = s["inputs"]
+    assert isinstance(inputs, dict), f"stage_summary.inputs must be a dict: {summary_path}"
+    if not inputs:
+        return
+
+    has_nested = any(isinstance(v, dict) for v in inputs.values())
+    if has_nested:
+        for name, spec in inputs.items():
+            assert isinstance(spec, dict), f"inputs.{name} must be a dict in {summary_path}"
+            assert isinstance(spec.get("path"), str) and spec["path"], f"inputs.{name}.path missing in {summary_path}"
+            assert isinstance(spec.get("sha256"), str) and spec["sha256"], f"inputs.{name}.sha256 missing in {summary_path}"
+    else:
+        # Flat pattern: require *_path has matching *_sha256
+        path_keys = sorted(k for k in inputs if isinstance(k, str) and k.endswith("_path"))
+        if path_keys:
+            for pk in path_keys:
+                base = pk[:-5]
+                sha_key = base + "_sha256"
+                assert sha_key in inputs, f"inputs has {pk!r} but no matching {sha_key!r} in {summary_path}"
+                assert isinstance(inputs[sha_key], str) and inputs[sha_key], f"inputs.{sha_key} must be non-empty string in {summary_path}"
+        else:
+            # If not nested and no *_path keys, require hashes as fallback.
+            assert hashes is not None, f"flat inputs without *_path requires stage_summary.hashes: {summary_path}"
 
 
 # ----------------
