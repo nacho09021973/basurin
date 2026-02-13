@@ -157,6 +157,7 @@ def run_single_event(
     band_high: float = 400.0,
     epsilon: float = 0.3,
     stage_timeout_s: float | None = None,
+    reuse_strain: bool = False,
 ) -> tuple[int, str]:
     """Run full pipeline for a single event. Returns (exit_code, run_id)."""
     out_root = resolve_out_root("runs")
@@ -187,6 +188,8 @@ def run_single_event(
     s1_args = ["--run", run_id, "--event-id", event_id, "--duration-s", str(duration_s)]
     if synthetic:
         s1_args.append("--synthetic")
+    if reuse_strain:
+        s1_args.append("--reuse-if-present")
     rc = _run_stage("s1_fetch_strain.py", s1_args, "s1_fetch_strain", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
@@ -313,6 +316,10 @@ def main() -> int:
         "--stage-timeout-s", type=float, default=None,
         help="Kill a stage if it exceeds this many seconds (default: no limit)",
     )
+    sp_single.add_argument(
+        "--reuse-strain", action="store_true", default=False,
+        help="Skip s1 download if outputs already exist and params match",
+    )
 
     # Multi event
     sp_multi = sub.add_parser("multi", help="Run pipeline for multiple events + aggregate")
@@ -331,6 +338,10 @@ def main() -> int:
         "--stage-timeout-s", type=float, default=None,
         help="Kill a stage if it exceeds this many seconds (default: no limit)",
     )
+    sp_multi.add_argument(
+        "--reuse-strain", action="store_true", default=False,
+        help="Skip s1 download if outputs already exist and params match",
+    )
 
     args = parser.parse_args()
 
@@ -347,6 +358,7 @@ def main() -> int:
             band_high=args.band_high,
             epsilon=args.epsilon,
             stage_timeout_s=args.stage_timeout_s,
+            reuse_strain=args.reuse_strain,
         )
         return rc
 
@@ -365,6 +377,7 @@ def main() -> int:
             band_high=args.band_high,
             epsilon=args.epsilon,
             stage_timeout_s=args.stage_timeout_s,
+            reuse_strain=args.reuse_strain,
         )
         return rc
 

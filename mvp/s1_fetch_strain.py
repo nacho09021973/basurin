@@ -30,7 +30,7 @@ for _cand in [_here.parents[0], _here.parents[1]]:
         break
 
 from mvp.contracts import init_stage, finalize, abort
-from basurin_io import write_json_atomic, utc_now_iso
+from basurin_io import write_json_atomic, sha256_file, utc_now_iso
 
 STAGE = "s1_fetch_strain"
 
@@ -145,6 +145,78 @@ def _fetch_gps_center(event_id: str) -> float:
     )
 
 
+def _try_reuse(ctx, event_id: str, detectors: list[str], duration_s: float) -> bool:
+    """Return True if existing outputs match params and pass hash validation.
+
+    Checks:
+      1. strain.npz and provenance.json exist in ctx.outputs_dir
+      2. provenance.json event_id, duration_s, detectors match current params
+      3. strain.npz contains all requested detector keys
+      4. Per-detector SHA256 in provenance matches re-computed hashes from npz
+
+    On success, calls finalize() and returns True.
+    On any mismatch or missing file, prints reason and returns False.
+    """
+    npz_path = ctx.outputs_dir / "strain.npz"
+    prov_path = ctx.outputs_dir / "provenance.json"
+
+    if not npz_path.exists() or not prov_path.exists():
+        print("[s1_fetch_strain] reuse: outputs not found, will fetch", flush=True)
+        return False
+
+    try:
+        with open(prov_path, "r", encoding="utf-8") as f:
+            prov = json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"[s1_fetch_strain] reuse: cannot read provenance ({exc}), will fetch", flush=True)
+        return False
+
+    # Validate params match
+    if prov.get("event_id") != event_id:
+        print(f"[s1_fetch_strain] reuse: event_id mismatch ({prov.get('event_id')} != {event_id})", flush=True)
+        return False
+    if abs(prov.get("duration_s", -1) - duration_s) > 1e-9:
+        print(f"[s1_fetch_strain] reuse: duration_s mismatch ({prov.get('duration_s')} != {duration_s})", flush=True)
+        return False
+    prov_dets = sorted(prov.get("detectors", []))
+    if prov_dets != sorted(detectors):
+        print(f"[s1_fetch_strain] reuse: detectors mismatch ({prov_dets} != {sorted(detectors)})", flush=True)
+        return False
+
+    # Validate npz contents and hashes
+    try:
+        npz = np.load(npz_path)
+    except Exception as exc:
+        print(f"[s1_fetch_strain] reuse: cannot load strain.npz ({exc}), will fetch", flush=True)
+        return False
+
+    sha_recorded = prov.get("sha256_per_detector", {})
+    for det in detectors:
+        if det not in npz.files:
+            print(f"[s1_fetch_strain] reuse: detector {det} missing in strain.npz, will fetch", flush=True)
+            return False
+        if det in sha_recorded:
+            actual_sha = _sha256_array(npz[det])
+            if actual_sha != sha_recorded[det]:
+                print(f"[s1_fetch_strain] reuse: SHA256 mismatch for {det}, will fetch", flush=True)
+                return False
+
+    sample_rate_hz = float(npz["sample_rate_hz"]) if "sample_rate_hz" in npz.files else None
+    if sample_rate_hz is None:
+        print("[s1_fetch_strain] reuse: sample_rate_hz missing in strain.npz, will fetch", flush=True)
+        return False
+
+    # All checks passed — finalize with existing artifacts
+    print("[s1_fetch_strain] reuse: outputs valid, skipping fetch", flush=True)
+    finalize(
+        ctx,
+        artifacts={"strain_npz": npz_path, "provenance": prov_path},
+        results={"detectors": detectors, "sample_rate_hz": sample_rate_hz},
+        extra_summary={"reused": True},
+    )
+    return True
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=f"MVP {STAGE}: fetch GWOSC strain")
     ap.add_argument("--run", required=True)
@@ -158,6 +230,13 @@ def main() -> int:
         help="Hard timeout for GWOSC strain fetch via gwpy (seconds)",
     )
     ap.add_argument("--synthetic", action="store_true")
+    ap.add_argument(
+        "--reuse-if-present",
+        action="store_true",
+        default=False,
+        help="Skip fetch if outputs/strain.npz + provenance.json already exist "
+             "and event_id/duration_s/detectors match. Validates array hashes.",
+    )
     args = ap.parse_args()
 
     detectors = [d.strip().upper() for d in args.detectors.split(",") if d.strip()]
@@ -169,6 +248,16 @@ def main() -> int:
         "event_id": args.event_id, "detectors": detectors,
         "duration_s": args.duration_s, "synthetic": args.synthetic,
     })
+
+    # --- Reuse check (before any network / generation) ---
+    if args.reuse_if_present:
+        try:
+            if _try_reuse(ctx, args.event_id, detectors, args.duration_s):
+                return 0
+        except SystemExit:
+            raise
+        except Exception as exc:
+            print(f"[s1_fetch_strain] reuse check failed ({exc}), proceeding with fetch", flush=True)
 
     try:
         if args.synthetic:
