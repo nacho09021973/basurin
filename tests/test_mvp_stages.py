@@ -372,3 +372,87 @@ class TestIntegration:
         cs = json.loads(cs_path.read_text(encoding="utf-8"))
         assert cs["n_atlas"] > 0
         assert isinstance(cs["compatible_geometries"], list)
+
+
+# ── Test --reuse-if-present ──────────────────────────────────────────────
+
+class TestS1ReuseIfPresent:
+    def test_reuse_skips_fetch_when_outputs_match(self, tmp_path):
+        """--reuse-if-present skips fetch when existing outputs match params."""
+        runs_root = tmp_path / "runs"
+        run_id = "test_reuse"
+        _create_run_valid(runs_root, run_id)
+        env = {"BASURIN_RUNS_ROOT": str(runs_root)}
+
+        # First run: generate outputs normally
+        r1 = _run_stage(
+            "s1_fetch_strain.py",
+            ["--run", run_id, "--event-id", "GW150914", "--synthetic", "--duration-s", "4"],
+            env=env,
+        )
+        assert r1.returncode == 0, f"first run failed: {r1.stderr}"
+
+        # Record file mod-time of strain.npz
+        npz_path = runs_root / run_id / "s1_fetch_strain" / "outputs" / "strain.npz"
+        mtime_before = npz_path.stat().st_mtime
+
+        # Second run with --reuse-if-present (same run_id, outputs already there)
+        r2 = _run_stage(
+            "s1_fetch_strain.py",
+            ["--run", run_id, "--event-id", "GW150914", "--synthetic",
+             "--duration-s", "4", "--reuse-if-present"],
+            env=env,
+        )
+        assert r2.returncode == 0, f"reuse run failed: {r2.stderr}"
+        assert "reuse: outputs valid, skipping fetch" in r2.stdout
+
+        # strain.npz should NOT have been rewritten
+        mtime_after = npz_path.stat().st_mtime
+        assert mtime_before == mtime_after, "strain.npz was rewritten despite reuse"
+
+        # stage_summary should record reused=True
+        summary = json.loads(
+            (runs_root / run_id / "s1_fetch_strain" / "stage_summary.json").read_text()
+        )
+        assert summary.get("reused") is True
+
+    def test_reuse_falls_back_on_param_mismatch(self, tmp_path):
+        """--reuse-if-present re-fetches when duration_s differs."""
+        runs_root = tmp_path / "runs"
+        run_id = "test_reuse_mismatch"
+        _create_run_valid(runs_root, run_id)
+        env = {"BASURIN_RUNS_ROOT": str(runs_root)}
+
+        # First run with duration=4
+        r1 = _run_stage(
+            "s1_fetch_strain.py",
+            ["--run", run_id, "--event-id", "GW150914", "--synthetic", "--duration-s", "4"],
+            env=env,
+        )
+        assert r1.returncode == 0
+
+        # Second run with duration=8 + reuse flag — should NOT reuse
+        r2 = _run_stage(
+            "s1_fetch_strain.py",
+            ["--run", run_id, "--event-id", "GW150914", "--synthetic",
+             "--duration-s", "8", "--reuse-if-present"],
+            env=env,
+        )
+        assert r2.returncode == 0
+        assert "duration_s mismatch" in r2.stdout
+
+    def test_reuse_falls_back_on_missing_outputs(self, tmp_path):
+        """--reuse-if-present fetches normally when no prior outputs exist."""
+        runs_root = tmp_path / "runs"
+        run_id = "test_reuse_empty"
+        _create_run_valid(runs_root, run_id)
+        env = {"BASURIN_RUNS_ROOT": str(runs_root)}
+
+        r = _run_stage(
+            "s1_fetch_strain.py",
+            ["--run", run_id, "--event-id", "GW150914", "--synthetic",
+             "--duration-s", "4", "--reuse-if-present"],
+            env=env,
+        )
+        assert r.returncode == 0
+        assert "outputs not found, will fetch" in r.stdout
