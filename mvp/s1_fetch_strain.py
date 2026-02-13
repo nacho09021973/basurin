@@ -17,6 +17,7 @@ import json
 import signal
 import shutil
 import sys
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -31,9 +32,35 @@ for _cand in [_here.parents[0], _here.parents[1]]:
         break
 
 from mvp.contracts import init_stage, finalize, abort
-from basurin_io import write_json_atomic, sha256_file, utc_now_iso
+from basurin_io import resolve_out_root, write_json_atomic, sha256_file, utc_now_iso
 
 STAGE = "s1_fetch_strain"
+
+
+def _run_valid_verdict_path(run_id: str) -> Path:
+    return resolve_out_root("runs") / run_id / "RUN_VALID" / "verdict.json"
+
+
+def _write_run_valid_verdict(
+    run_id: str,
+    verdict: str,
+    reason: str,
+    *,
+    traceback_short: str | None = None,
+    only_if_missing: bool = False,
+) -> None:
+    path = _run_valid_verdict_path(run_id)
+    if only_if_missing and path.exists():
+        return
+    payload: dict[str, Any] = {
+        "verdict": verdict,
+        "created": utc_now_iso(),
+        "reason": reason,
+        "stage": STAGE,
+    }
+    if traceback_short:
+        payload["traceback_short"] = traceback_short
+    write_json_atomic(path, payload)
 
 
 def _sha256_array(arr: np.ndarray) -> str:
@@ -439,11 +466,28 @@ def main() -> int:
 
         finalize(ctx, artifacts={"strain_npz": npz_path, "provenance": prov_path},
                  results={"detectors": detectors, "sample_rate_hz": sample_rate_hz})
+        _write_run_valid_verdict(args.run, "PASS", "s1_fetch_strain completed successfully")
         return 0
 
-    except SystemExit:
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+        if code != 0:
+            _write_run_valid_verdict(
+                args.run,
+                "FAIL",
+                f"s1_fetch_strain exited with code {code}",
+                only_if_missing=True,
+            )
         raise
     except Exception as exc:
+        tb_short = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+        _write_run_valid_verdict(
+            args.run,
+            "FAIL",
+            str(exc),
+            traceback_short=tb_short,
+            only_if_missing=True,
+        )
         abort(ctx, str(exc))
         return 2  # unreachable
 

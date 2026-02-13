@@ -101,6 +101,31 @@ def _assert_stage_contract(runs_root: Path, run_id: str, stage_name: str) -> dic
 # ── Test Stage 1: Fetch Strain ────────────────────────────────────────────
 
 class TestS1FetchStrain:
+    def test_creates_run_valid_gate_for_standalone_run(self, tmp_path):
+        """s1 creates RUN_VALID PASS gate so downstream standalone stages can run."""
+        runs_root = tmp_path / "runs"
+        run_id = "test_s1_creates_gate"
+        env = {"BASURIN_RUNS_ROOT": str(runs_root)}
+
+        result = _run_stage(
+            "s1_fetch_strain.py",
+            ["--run", run_id, "--event-id", "GW150914", "--synthetic", "--duration-s", "4"],
+            env=env,
+        )
+        assert result.returncode == 0, f"s1 failed: {result.stderr}"
+
+        verdict_path = runs_root / run_id / "RUN_VALID" / "verdict.json"
+        assert verdict_path.exists(), "RUN_VALID gate was not created by s1"
+        verdict = json.loads(verdict_path.read_text(encoding="utf-8"))
+        assert verdict["verdict"] == "PASS"
+
+        s2 = _run_stage(
+            "s2_ringdown_window.py",
+            ["--run", run_id, "--event-id", "GW150914", "--dt-start-s", "0.0", "--duration-s", "0.1"],
+            env=env,
+        )
+        assert s2.returncode == 0, f"s2 failed after s1 gate creation: {s2.stderr}"
+
     def test_synthetic_mode_produces_contract(self, tmp_path):
         """s1 --synthetic produces strain.npz + provenance.json + contract files."""
         runs_root = tmp_path / "runs"
