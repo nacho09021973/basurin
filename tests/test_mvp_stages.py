@@ -125,6 +125,55 @@ class TestS1FetchStrain:
         assert npz["H1"].ndim == 1
         assert npz["H1"].size > 0
 
+    def test_local_hdf5_mode_produces_contract(self, tmp_path):
+        """s1 --local-hdf5 writes inputs copy + strain/provenance with local source."""
+        h5py = pytest.importorskip("h5py")
+
+        runs_root = tmp_path / "runs"
+        run_id = "test_s1_local"
+        _create_run_valid(runs_root, run_id)
+
+        fs = 256.0
+        duration = 4.0
+        n = int(fs * duration)
+        gps_start = 1126259446.0
+
+        local_h1 = tmp_path / "H-H1_local.hdf5"
+        local_l1 = tmp_path / "L-L1_local.hdf5"
+        for p, seed in [(local_h1, 1), (local_l1, 2)]:
+            with h5py.File(p, "w") as h5:
+                grp = h5.create_group("strain")
+                data = np.random.default_rng(seed).normal(0.0, 1e-21, n).astype(np.float64)
+                ds = grp.create_dataset("Strain", data=data)
+                ds.attrs["Xspacing"] = 1.0 / fs
+                ds.attrs["Xstart"] = gps_start
+
+        result = _run_stage(
+            "s1_fetch_strain.py",
+            [
+                "--run", run_id,
+                "--event-id", "GW150914",
+                "--duration-s", str(duration),
+                "--detectors", "H1,L1",
+                "--local-hdf5", f"H1={local_h1}",
+                "--local-hdf5", f"L1={local_l1}",
+            ],
+            env={"BASURIN_RUNS_ROOT": str(runs_root)},
+        )
+        assert result.returncode == 0, f"s1 local failed: {result.stderr}"
+
+        summary = _assert_stage_contract(runs_root, run_id, "s1_fetch_strain")
+        assert summary["verdict"] == "PASS"
+
+        stage_dir = runs_root / run_id / "s1_fetch_strain"
+        assert (stage_dir / "outputs" / "strain.npz").exists()
+        prov_path = stage_dir / "outputs" / "provenance.json"
+        assert prov_path.exists()
+        prov = json.loads(prov_path.read_text(encoding="utf-8"))
+        assert prov["source"] == "local"
+        assert (stage_dir / "inputs" / local_h1.name).exists()
+        assert (stage_dir / "inputs" / local_l1.name).exists()
+
 
 # ── Test Stage 2: Ringdown Window ─────────────────────────────────────────
 
