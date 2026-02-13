@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import signal
 import sys
 from pathlib import Path
 from typing import Any
@@ -38,7 +39,12 @@ def _sha256_array(arr: np.ndarray) -> str:
     return hashlib.sha256(np.ascontiguousarray(arr, dtype=np.float64).tobytes()).hexdigest()
 
 
-def _fetch_via_gwpy(detector: str, gps_start: float, duration_s: float) -> tuple[np.ndarray, float, str]:
+def _fetch_via_gwpy(
+    detector: str,
+    gps_start: float,
+    duration_s: float,
+    timeout_s: int = 60,
+) -> tuple[np.ndarray, float, str]:
     try:
         from gwpy.timeseries import TimeSeries
         from gwpy import __version__ as gwpy_ver
@@ -47,10 +53,32 @@ def _fetch_via_gwpy(detector: str, gps_start: float, duration_s: float) -> tuple
             "gwpy not installed. Install with: pip install gwpy. "
             "Or use --synthetic for offline testing."
         ) from exc
-    ts = TimeSeries.fetch_open_data(detector, gps_start, gps_start + duration_s, verbose=False)
+    def _handle_timeout(signum: int, frame: Any) -> None:
+        raise TimeoutError(
+            f"GWOSC fetch timeout for detector {detector} after {timeout_s}s"
+        )
+
+    old_handler = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, _handle_timeout)
+    signal.alarm(int(timeout_s))
+    try:
+        print(
+            f"[s1_fetch_strain] GWOSC fetch begin: det={detector}, "
+            f"gps=[{gps_start}, {gps_start + duration_s}]",
+            flush=True,
+        )
+        ts = TimeSeries.fetch_open_data(detector, gps_start, gps_start + duration_s, verbose=False)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
+
     values = np.asarray(ts.value, dtype=np.float64)
     if values.ndim != 1 or values.size == 0:
         raise ValueError(f"Invalid strain shape for {detector}: {values.shape}")
+    print(
+        f"[s1_fetch_strain] GWOSC fetch OK: det={detector}, n={values.size}, fs={float(ts.sample_rate.value)}",
+        flush=True,
+    )
     return values, float(ts.sample_rate.value), gwpy_ver
 
 
@@ -115,6 +143,12 @@ def main() -> int:
     ap.add_argument("--event-id", default="GW150914")
     ap.add_argument("--detectors", default="H1,L1")
     ap.add_argument("--duration-s", type=float, default=32.0)
+    ap.add_argument(
+        "--fetch-timeout-s",
+        type=int,
+        default=60,
+        help="Hard timeout for GWOSC strain fetch via gwpy (seconds)",
+    )
     ap.add_argument("--synthetic", action="store_true")
     args = ap.parse_args()
 
@@ -144,7 +178,12 @@ def main() -> int:
             if args.synthetic:
                 strain, sr, library_version = _generate_synthetic_strain(det, gps_start, args.duration_s)
             else:
-                strain, sr, library_version = _fetch_via_gwpy(det, gps_start, args.duration_s)
+                strain, sr, library_version = _fetch_via_gwpy(
+                    det,
+                    gps_start,
+                    args.duration_s,
+                    timeout_s=args.fetch_timeout_s,
+                )
             strains[det] = strain
             sha_by_det[det] = _sha256_array(strain)
             if sample_rate_hz is None:
