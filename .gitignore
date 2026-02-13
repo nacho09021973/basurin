@@ -6,3 +6,6 @@ __pycache__/
 .venv/
 runs/
 runs_tmp/
+
+# Local external data (H5, downloads)
+external/

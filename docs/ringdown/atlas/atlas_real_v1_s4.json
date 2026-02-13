@@ -1,0 +1,4714 @@
+{
+  "entries": [
+    {
+      "geometry_id": "Kerr_a0.0000_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 194.69630169772014,
+      "tau_s": 0.003433575016141348,
+      "Q": 2.100168377611806,
+      "phi_atlas": [
+        5.271440917322146,
+        0.7420175213302934
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.37367168441804177,
+        "omega_dimless_imag": -0.08896231568893546,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.0500_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 198.06942994956214,
+      "tau_s": 0.00343795790331582,
+      "Q": 2.1392812214044032,
+      "phi_atlas": [
+        5.288617625539899,
+        0.7604698947657521
+      ],
+      "metadata": {
+        "spin": 0.05,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.3801455748033908,
+        "omega_dimless_imag": -0.08884890191151013,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.1000_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 201.6499685531573,
+      "tau_s": 0.0034435080031603085,
+      "Q": 2.1814694129509,
+      "phi_atlas": [
+        5.3065333653717195,
+        0.7799986923743147
+      ],
+      "metadata": {
+        "spin": 0.1,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.38701753836645053,
+        "omega_dimless_imag": -0.0887056990276401,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.1500_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 205.4615790725868,
+      "tau_s": 0.003450409579217906,
+      "Q": 2.2271586003582677,
+      "phi_atlas": [
+        5.3252590533060715,
+        0.8007266027839919
+      ],
+      "metadata": {
+        "spin": 0.15000000000000002,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.39433298766220587,
+        "omega_dimless_imag": -0.0885282681706575,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.2000_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 209.5320856274886,
+      "tau_s": 0.003458891979860575,
+      "Q": 2.2768656644296397,
+      "phi_atlas": [
+        5.344876880988583,
+        0.8227997886041338
+      ],
+      "metadata": {
+        "spin": 0.2,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.40214532424765553,
+        "omega_dimless_imag": -0.08831116620760185,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.2500_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 213.89450193831922,
+      "tau_s": 0.003469244024573052,
+      "Q": 2.3312258115353837,
+      "phi_atlas": [
+        5.365482911869834,
+        0.8463942286072631
+      ],
+      "metadata": {
+        "spin": 0.25,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.41051790984269,
+        "omega_dimless_imag": -0.08804765025579313,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.3000_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 218.5883940608119,
+      "tau_s": 0.0034818342604689386,
+      "Q": 2.3910302268851646,
+      "phi_atlas": [
+        5.387190482204968,
+        0.8717243303390496
+      ],
+      "metadata": {
+        "spin": 0.30000000000000004,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.4195266817638515,
+        "omega_dimless_imag": -0.08772927189431143,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.3500_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 223.66171977394572,
+      "tau_s": 0.0034971400824806397,
+      "Q": 2.4572795225291655,
+      "phi_atlas": [
+        5.410134730803896,
+        0.8990548528513422
+      ],
+      "metadata": {
+        "spin": 0.35000000000000003,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.42926368317732144,
+        "omega_dimless_imag": -0.08734530997423931,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.4000_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 229.17336010318056,
+      "tau_s": 0.0035157905898148293,
+      "Q": 2.5312614463434704,
+      "phi_atlas": [
+        5.434478748169049,
+        0.9287177738747232
+      ],
+      "metadata": {
+        "spin": 0.4,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.43984192173538705,
+        "omega_dimless_imag": -0.08688196202939842,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.4500_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 235.19668196314504,
+      "tau_s": 0.0035386313735707247,
+      "Q": 2.614667008092766,
+      "phi_atlas": [
+        5.460422108625409,
+        0.9611367502471007
+      ],
+      "metadata": {
+        "spin": 0.45,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.45140220719319396,
+        "omega_dimless_imag": -0.08632116552433637,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.4750_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 238.42833203765105,
+      "tau_s": 0.003551970318737426,
+      "Q": 2.660584528797254,
+      "phi_atlas": [
+        5.474068770569803,
+        0.978545846320766
+      ],
+      "metadata": {
+        "spin": 0.47500000000000003,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.457604564999996,
+        "omega_dimless_imag": -0.08599699803690529,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.5000_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 241.8246831600365,
+      "tau_s": 0.0035668255478974883,
+      "Q": 2.7097696158560507,
+      "phi_atlas": [
+        5.488213013864244,
+        0.9968636186785904
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.46412302597593835,
+        "omega_dimless_imag": -0.08563883498806521,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.5250_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 245.40167826980104,
+      "tau_s": 0.003583418694821723,
+      "Q": 2.7626442024640183,
+      "phi_atlas": [
+        5.502896371168671,
+        1.0161882654684742
+      ],
+      "metadata": {
+        "spin": 0.525,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.47098818867376924,
+        "omega_dimless_imag": -0.08524228133570226,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.5500_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 249.17765154072146,
+      "tau_s": 0.0036020171483925373,
+      "Q": 2.819711899641163,
+      "phi_atlas": [
+        5.518166102076009,
+        1.0366347164831877
+      ],
+      "metadata": {
+        "spin": 0.55,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.4782352410325396,
+        "omega_dimless_imag": -0.08480214611524672,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.5750_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 253.1738318653475,
+      "tau_s": 0.003622946476122592,
+      "Q": 2.8815794978903257,
+      "phi_atlas": [
+        5.534076335266152,
+        1.058338580578849
+      ],
+      "metadata": {
+        "spin": 0.575,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.48590492669230956,
+        "omega_dimless_imag": -0.0843122542772206,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.6000_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 257.4149872653516,
+      "tau_s": 0.0036466071429081845,
+      "Q": 2.948985790254263,
+      "phi_atlas": [
+        5.550689519051099,
+        1.0814613113251799
+      ],
+      "metadata": {
+        "spin": 0.6,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.4940447817813843,
+        "omega_dimless_imag": -0.08376520216104322,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.6250_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 261.930260903493,
+      "tau_s": 0.0036734973759859615,
+      "Q": 3.0228408475027058,
+      "phi_atlas": [
+        5.568078288571317,
+        1.1061970672075399
+      ],
+      "metadata": {
+        "spin": 0.625,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.5027107394357428,
+        "omega_dimless_imag": -0.08315203558451531,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.6500_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 266.7542722439929,
+      "tau_s": 0.0037042450070998057,
+      "Q": 3.1042805265300966,
+      "phi_atlas": [
+        5.586327905963611,
+        1.1327819740524327
+      ],
+      "metadata": {
+        "spin": 0.65,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.5119692432056552,
+        "omega_dimless_imag": -0.08246181986940535,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.6750_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 271.92859252363843,
+      "tau_s": 0.0037396527341470964,
+      "Q": 3.194743703111477,
+      "phi_atlas": [
+        5.6055395043430005,
+        1.1615068664933792
+      ],
+      "metadata": {
+        "spin": 0.675,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.5219000788597165,
+        "omega_dimless_imag": -0.08168105603454497,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.7000_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 277.5037607256322,
+      "tau_s": 0.0037807639782974052,
+      "Q": 3.2960843125926127,
+      "phi_atlas": [
+        5.6258344852591,
+        1.1927351919969404
+      ],
+      "metadata": {
+        "spin": 0.7,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.532600243551018,
+        "omega_dimless_imag": -0.08079287315500869,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.7250_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 283.5421005107569,
+      "tau_s": 0.003828961320349659,
+      "Q": 3.410738348602599,
+      "phi_atlas": [
+        5.64736061482582,
+        1.2269287923742667
+      ],
+      "metadata": {
+        "spin": 0.725,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.5441893522239662,
+        "omega_dimless_imag": -0.07977588671481119,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.7500_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 290.12176014500267,
+      "tau_s": 0.0038861183124838535,
+      "Q": 3.5419807360257733,
+      "phi_atlas": [
+        5.67030069743187,
+        1.2646861006179504
+      ],
+      "metadata": {
+        "spin": 0.75,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.5568173912621357,
+        "omega_dimless_imag": -0.07860254371215247,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.7750_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 297.3426864246407,
+      "tau_s": 0.003954842411944478,
+      "Q": 3.6943353574469007,
+      "phi_atlas": [
+        5.694885300002266,
+        1.3068006620220984
+      ],
+      "metadata": {
+        "spin": 0.7749999999999999,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.5706761839687382,
+        "omega_dimless_imag": -0.07723665135304932,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.8000_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 305.33578674695497,
+      "tau_s": 0.004038881297214626,
+      "Q": 3.874259179466821,
+      "phi_atlas": [
+        5.7214121111711895,
+        1.3543544650357484
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.5860169749088701,
+        "omega_dimless_imag": -0.07562955235606078,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.8250_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 314.2776171212646,
+      "tau_s": 0.004143840080763303,
+      "Q": 4.091346963574761,
+      "phi_atlas": [
+        5.750276726254137,
+        1.4088742467845516
+      ],
+      "metadata": {
+        "spin": 0.825,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.6031786199355759,
+        "omega_dimless_imag": -0.07371394131390857,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.8500_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 324.415259256296,
+      "tau_s": 0.004278535387030751,
+      "Q": 4.360600242304068,
+      "phi_atlas": [
+        5.78202435953294,
+        1.47260971813849
+      ],
+      "metadata": {
+        "spin": 0.85,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.62263533164295,
+        "omega_dimless_imag": -0.0713933056282591,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.8600_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 328.880903911451,
+      "tau_s": 0.004343748046520889,
+      "Q": 4.488003187807168,
+      "phi_atlas": [
+        5.7956956910395405,
+        1.5014078785158578
+      ],
+      "metadata": {
+        "spin": 0.86,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.631206038665906,
+        "omega_dimless_imag": -0.07032147842282531,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.8700_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 333.62436257419665,
+      "tau_s": 0.004417326351345677,
+      "Q": 4.629852078797764,
+      "phi_atlas": [
+        5.810015697117233,
+        1.532524919163972
+      ],
+      "metadata": {
+        "spin": 0.87,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.6403099413749952,
+        "omega_dimless_imag": -0.06915015107148571,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.8800_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 338.6825642365832,
+      "tau_s": 0.004501028265995495,
+      "Q": 4.789106028420691,
+      "phi_atlas": [
+        5.825063280012047,
+        1.5663437611071782
+      ],
+      "metadata": {
+        "spin": 0.88,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.6500179158913506,
+        "omega_dimless_imag": -0.06786422267891486,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.8900_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 344.1007074820399,
+      "tau_s": 0.004597163850958535,
+      "Q": 4.969645625811057,
+      "phi_atlas": [
+        5.840934368837473,
+        1.6033485349126715
+      ],
+      "metadata": {
+        "spin": 0.89,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.6604167097836526,
+        "omega_dimless_imag": -0.06644505056392941,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.9000_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 349.9350376392204,
+      "tau_s": 0.004708838949675053,
+      "Q": 5.17667784323903,
+      "phi_atlas": [
+        5.857747530511311,
+        1.6441635075189442
+      ],
+      "metadata": {
+        "spin": 0.9,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.6716142721321631,
+        "omega_dimless_imag": -0.06486923587579638,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.9100_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 356.2569355813647,
+      "tau_s": 0.004840344516021448,
+      "Q": 5.417382177819637,
+      "phi_atlas": [
+        5.875652199691923,
+        1.6896127057506465
+      ],
+      "metadata": {
+        "spin": 0.91,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.6837476009738566,
+        "omega_dimless_imag": -0.06310682711045579,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.9200_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 363.1591590836406,
+      "tau_s": 0.0049978069950230965,
+      "Q": 5.701988735992171,
+      "phi_atlas": [
+        5.894841192947513,
+        1.7408150150399446
+      ],
+      "metadata": {
+        "spin": 0.9199999999999999,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.6969947220533805,
+        "omega_dimless_imag": -0.061118563568338974,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.9300_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 370.7657967519349,
+      "tau_s": 0.005190335383420925,
+      "Q": 6.045677238980506,
+      "phi_atlas": [
+        5.915570587667843,
+        1.799343510708081
+      ],
+      "metadata": {
+        "spin": 0.9299999999999999,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.7115937929421654,
+        "omega_dimless_imag": -0.05885145408971277,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.9400_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 379.2490300971091,
+      "tau_s": 0.005432185691908685,
+      "Q": 6.472155733718682,
+      "phi_atlas": [
+        5.9381930608017965,
+        1.8675092421549895
+      ],
+      "metadata": {
+        "spin": 0.94,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.7278752737189502,
+        "omega_dimless_imag": -0.05623128549942491,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.9500_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 388.85939099060596,
+      "tau_s": 0.005747215155235696,
+      "Q": 7.021015312941102,
+      "phi_atlas": [
+        5.963217815525955,
+        1.948907839052688
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.7463199987169306,
+        "omega_dimless_imag": -0.05314900804598141,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.9600_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 399.98565963534963,
+      "tau_s": 0.0061791749324496,
+      "Q": 7.764701847591974,
+      "phi_atlas": [
+        5.991428695553696,
+        2.0495880589017133
+      ],
+      "metadata": {
+        "spin": 0.96,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.7676741359527982,
+        "omega_dimless_imag": -0.04943358747193062,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.9700_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 413.28984503205317,
+      "tau_s": 0.006819744629585038,
+      "Q": 8.85467691535025,
+      "phi_atlas": [
+        6.024149150763501,
+        2.180945784442708
+      ],
+      "metadata": {
+        "spin": 0.97,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.7932082489464521,
+        "omega_dimless_imag": -0.04479035522862307,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.9800_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 430.07825660716054,
+      "tau_s": 0.007907254091699695,
+      "Q": 10.68373368819739,
+      "phi_atlas": [
+        6.063967184238729,
+        2.368722368710674
+      ],
+      "metadata": {
+        "spin": 0.98,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.8254294774817201,
+        "omega_dimless_imag": -0.038630197156336574,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.9900_l2m2n0",
+      "theory": "GR_Kerr",
+      "f_hz": 453.7661987838993,
+      "tau_s": 0.010393139692340009,
+      "Q": 14.815925286405218,
+      "phi_atlas": [
+        6.117582084741065,
+        2.695702635126882
+      ],
+      "metadata": {
+        "spin": 0.99,
+        "mode": "(2,2,0)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.8708926587357829,
+        "omega_dimless_imag": -0.029390424219231718,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.0000_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 180.6488199806546,
+      "tau_s": 0.0011151595334237864,
+      "Q": 0.6328809205971904,
+      "phi_atlas": [
+        5.196554925497334,
+        -0.45747299365434435
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.34671099687916285,
+        "omega_dimless_imag": -0.27391487529123504,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.0521_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 184.66595771871184,
+      "tau_s": 0.001118073035020896,
+      "Q": 0.6486447225594046,
+      "phi_atlas": [
+        5.218548559003457,
+        -0.43287013503551447
+      ],
+      "metadata": {
+        "spin": 0.05210526315789474,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.3544209051415688,
+        "omega_dimless_imag": -0.2732011013233134,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.1042_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 188.92119749006747,
+      "tau_s": 0.0011214368685624034,
+      "Q": 0.6655878604913696,
+      "phi_atlas": [
+        5.24132998361712,
+        -0.40708462808591733
+      ],
+      "metadata": {
+        "spin": 0.10421052631578948,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.3625877917187663,
+        "omega_dimless_imag": -0.2723816142402944,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.1563_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 193.44194719020055,
+      "tau_s": 0.0011253227260842004,
+      "Q": 0.6838764009529452,
+      "phi_atlas": [
+        5.2649774529355495,
+        -0.3799780780490551
+      ],
+      "metadata": {
+        "spin": 0.1563157894736842,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.3712642593278111,
+        "omega_dimless_imag": -0.2714410519287361,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.2084_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 198.26074447183527,
+      "tau_s": 0.0011298198696369087,
+      "Q": 0.7037133881036589,
+      "phi_atlas": [
+        5.289583055625621,
+        -0.35138412489054305
+      ],
+      "metadata": {
+        "spin": 0.20842105263157895,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.3805127559936243,
+        "omega_dimless_imag": -0.27036060591302385,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.2605_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 203.41661799746518,
+      "tau_s": 0.0011350409291996013,
+      "Q": 0.7253503492290861,
+      "phi_atlas": [
+        5.3152561813462595,
+        -0.3211005005344809
+      ],
+      "metadata": {
+        "spin": 0.2605263157894737,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.39040818763854435,
+        "omega_dimless_imag": -0.26911697778423654,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.3126_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 208.9569260646203,
+      "tau_s": 0.0011411302321671089,
+      "Q": 0.7491035494114917,
+      "phi_atlas": [
+        5.342128135339647,
+        -0.2888780548049882
+      ],
+      "metadata": {
+        "spin": 0.3126315789473684,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.40104144687149546,
+        "omega_dimless_imag": -0.26768091486588225,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.3647_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 214.9398866094992,
+      "tau_s": 0.001148276067149681,
+      "Q": 0.7753775122367609,
+      "phi_atlas": [
+        5.370358391867968,
+        -0.25440525566603933
+      ],
+      "metadata": {
+        "spin": 0.36473684210526314,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.41252426870795034,
+        "omega_dimless_imag": -0.2660151101867308,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.4168_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 221.43813219481115,
+      "tau_s": 0.0011567292494242287,
+      "Q": 0.8046999969699674,
+      "phi_atlas": [
+        5.400143237579837,
+        -0.21728574559546882
+      ],
+      "metadata": {
+        "spin": 0.4168421052631579,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.4249960534950881,
+        "omega_dimless_imag": -0.2640711166244416,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.4689_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 228.54382570416752,
+      "tau_s": 0.001166832133217042,
+      "Q": 0.8377756747586603,
+      "phi_atlas": [
+        5.431727989335909,
+        -0.17700490555452617
+      ],
+      "metadata": {
+        "spin": 0.46894736842105267,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.4386336852294696,
+        "omega_dimless_imag": -0.26178468678732386,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.5211_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 236.37622731048845,
+      "tau_s": 0.0011790656430504848,
+      "Q": 0.8755715752251777,
+      "phi_atlas": [
+        5.465424719182967,
+        -0.13287837705683234
+      ],
+      "metadata": {
+        "spin": 0.5210526315789474,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.4536660544925309,
+        "omega_dimless_imag": -0.2590685144020682,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.5732_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 245.0932553301871,
+      "tau_s": 0.001194128858472259,
+      "Q": 0.9194591243003312,
+      "phi_atlas": [
+        5.501638772122747,
+        -0.08396969019414563
+      ],
+      "metadata": {
+        "spin": 0.5731578947368421,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.4703962466679183,
+        "omega_dimless_imag": -0.2558005213259859,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.6253_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 254.90985055192377,
+      "tau_s": 0.0012130807443331978,
+      "Q": 0.9714628563777817,
+      "phi_atlas": [
+        5.540909955405579,
+        -0.028952244165977775
+      ],
+      "metadata": {
+        "spin": 0.6252631578947369,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.4892367877556045,
+        "omega_dimless_imag": -0.2518041655137407,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.6774_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 266.12859468343123,
+      "tau_s": 0.0012376087839660694,
+      "Q": 1.034724652738519,
+      "phi_atlas": [
+        5.5839796306223946,
+        0.034135355322046944
+      ],
+      "metadata": {
+        "spin": 0.6773684210526316,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.5107684089529295,
+        "omega_dimless_imag": -0.2468136849746073,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.7295_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 279.19406224430156,
+      "tau_s": 0.0012705797738183926,
+      "Q": 1.1144433266297566,
+      "phi_atlas": [
+        5.631907103628767,
+        0.10835502161297518
+      ],
+      "metadata": {
+        "spin": 0.7294736842105263,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.5358443617502233,
+        "omega_dimless_imag": -0.24040897771387656,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.7816_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 294.7979052261712,
+      "tau_s": 0.0013172928022344532,
+      "Q": 1.2199908816027376,
+      "phi_atlas": [
+        5.686290054544248,
+        0.19884338462111728
+      ],
+      "metadata": {
+        "spin": 0.781578947368421,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.5657921021006408,
+        "omega_dimless_imag": -0.23188374217901664,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.8337_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 314.10871603839905,
+      "tau_s": 0.0013887801646212388,
+      "Q": 1.3704505367354434,
+      "phi_atlas": [
+        5.749739155406331,
+        0.3151395447087681
+      ],
+      "metadata": {
+        "spin": 0.8336842105263158,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.6028544558318715,
+        "omega_dimless_imag": -0.21994754267743727,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.8858_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 339.380754163924,
+      "tau_s": 0.0015127323159302391,
+      "Q": 1.6128692714624437,
+      "phi_atlas": [
+        5.8271226457236125,
+        0.4780147490281249
+      ],
+      "metadata": {
+        "spin": 0.8857894736842106,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.6513579198047182,
+        "omega_dimless_imag": -0.20192520600696598,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.9379_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 376.20205155772857,
+      "tau_s": 0.0017884648501111922,
+      "Q": 2.1137393934482778,
+      "phi_atlas": [
+        5.9301263702218865,
+        0.7484586033343391
+      ],
+      "metadata": {
+        "spin": 0.9378947368421053,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.7220273475217508,
+        "omega_dimless_imag": -0.17079384283600393,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "Kerr_a0.9900_l2m2n1",
+      "theory": "GR_Kerr",
+      "f_hz": 453.6372452592048,
+      "tau_s": 0.0034642183922726573,
+      "Q": 4.937008106432056,
+      "phi_atlas": [
+        6.11729785940247,
+        1.5967595012506777
+      ],
+      "metadata": {
+        "spin": 0.99,
+        "mode": "(2,2,1)",
+        "M_remnant_Msun": 62.0,
+        "omega_dimless_real": 0.8706451641487566,
+        "omega_dimless_imag": -0.08817538328673784,
+        "source": "qnm_package_v0.4.4_Leaver"
+      }
+    },
+    {
+      "geometry_id": "bK_001_a0.00_df-0.20_dQ-0.20",
+      "theory": "beyond_Kerr_df-0.20_dQ-0.20",
+      "f_hz": 155.75704135817614,
+      "tau_s": 0.003433575016141348,
+      "Q": 1.6801347020894448,
+      "phi_atlas": [
+        5.048297366007937,
+        0.5188739700160837
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_002_a0.00_df-0.20_dQ-0.10",
+      "theory": "beyond_Kerr_df-0.20_dQ-0.10",
+      "f_hz": 155.75704135817614,
+      "tau_s": 0.003862771893159016,
+      "Q": 1.8901515398506252,
+      "phi_atlas": [
+        5.048297366007937,
+        0.6366570056724671
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_003_a0.00_df-0.20_dQ+0.00",
+      "theory": "beyond_Kerr_df-0.20_dQ+0.00",
+      "f_hz": 155.75704135817614,
+      "tau_s": 0.004291968770176685,
+      "Q": 2.100168377611806,
+      "phi_atlas": [
+        5.048297366007937,
+        0.7420175213302934
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_004_a0.00_df-0.20_dQ+0.10",
+      "theory": "beyond_Kerr_df-0.20_dQ+0.10",
+      "f_hz": 155.75704135817614,
+      "tau_s": 0.004721165647194354,
+      "Q": 2.3101852153729867,
+      "phi_atlas": [
+        5.048297366007937,
+        0.8373277011346184
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_005_a0.00_df-0.20_dQ+0.20",
+      "theory": "beyond_Kerr_df-0.20_dQ+0.20",
+      "f_hz": 155.75704135817614,
+      "tau_s": 0.005150362524212022,
+      "Q": 2.520202053134167,
+      "phi_atlas": [
+        5.048297366007937,
+        0.9243390781242481
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_006_a0.00_df-0.10_dQ-0.20",
+      "theory": "beyond_Kerr_df-0.10_dQ-0.20",
+      "f_hz": 175.22667152794813,
+      "tau_s": 0.003052066681014532,
+      "Q": 1.6801347020894448,
+      "phi_atlas": [
+        5.16608040166432,
+        0.5188739700160837
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_007_a0.00_df-0.10_dQ-0.10",
+      "theory": "beyond_Kerr_df-0.10_dQ-0.10",
+      "f_hz": 175.22667152794813,
+      "tau_s": 0.003433575016141348,
+      "Q": 1.8901515398506252,
+      "phi_atlas": [
+        5.16608040166432,
+        0.6366570056724671
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_008_a0.00_df-0.10_dQ+0.00",
+      "theory": "beyond_Kerr_df-0.10_dQ+0.00",
+      "f_hz": 175.22667152794813,
+      "tau_s": 0.0038150833512681647,
+      "Q": 2.100168377611806,
+      "phi_atlas": [
+        5.16608040166432,
+        0.7420175213302934
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_009_a0.00_df-0.10_dQ+0.10",
+      "theory": "beyond_Kerr_df-0.10_dQ+0.10",
+      "f_hz": 175.22667152794813,
+      "tau_s": 0.004196591686394981,
+      "Q": 2.3101852153729867,
+      "phi_atlas": [
+        5.16608040166432,
+        0.8373277011346184
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_010_a0.00_df-0.10_dQ+0.20",
+      "theory": "beyond_Kerr_df-0.10_dQ+0.20",
+      "f_hz": 175.22667152794813,
+      "tau_s": 0.004578100021521798,
+      "Q": 2.520202053134167,
+      "phi_atlas": [
+        5.16608040166432,
+        0.9243390781242481
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_011_a0.00_df-0.05_dQ-0.20",
+      "theory": "beyond_Kerr_df-0.05_dQ-0.20",
+      "f_hz": 184.96148661283414,
+      "tau_s": 0.002891431592540083,
+      "Q": 1.6801347020894448,
+      "phi_atlas": [
+        5.220147622934596,
+        0.5188739700160837
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_012_a0.00_df-0.05_dQ-0.10",
+      "theory": "beyond_Kerr_df-0.05_dQ-0.10",
+      "f_hz": 184.96148661283414,
+      "tau_s": 0.003252860541607593,
+      "Q": 1.8901515398506252,
+      "phi_atlas": [
+        5.220147622934596,
+        0.6366570056724671
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_013_a0.00_df-0.05_dQ+0.00",
+      "theory": "beyond_Kerr_df-0.05_dQ+0.00",
+      "f_hz": 184.96148661283414,
+      "tau_s": 0.0036142894906751035,
+      "Q": 2.100168377611806,
+      "phi_atlas": [
+        5.220147622934596,
+        0.7420175213302934
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_014_a0.00_df-0.05_dQ+0.10",
+      "theory": "beyond_Kerr_df-0.05_dQ+0.10",
+      "f_hz": 184.96148661283414,
+      "tau_s": 0.003975718439742614,
+      "Q": 2.3101852153729867,
+      "phi_atlas": [
+        5.220147622934596,
+        0.8373277011346184
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_015_a0.00_df-0.05_dQ+0.20",
+      "theory": "beyond_Kerr_df-0.05_dQ+0.20",
+      "f_hz": 184.96148661283414,
+      "tau_s": 0.004337147388810124,
+      "Q": 2.520202053134167,
+      "phi_atlas": [
+        5.220147622934596,
+        0.9243390781242481
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_016_a0.00_df+0.00_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.00_dQ-0.20",
+      "f_hz": 194.69630169772014,
+      "tau_s": 0.002746860012913079,
+      "Q": 1.6801347020894448,
+      "phi_atlas": [
+        5.271440917322146,
+        0.5188739700160837
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_017_a0.00_df+0.00_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.00_dQ-0.10",
+      "f_hz": 194.69630169772014,
+      "tau_s": 0.0030902175145272135,
+      "Q": 1.8901515398506252,
+      "phi_atlas": [
+        5.271440917322146,
+        0.6366570056724671
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_018_a0.00_df+0.00_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.00_dQ+0.10",
+      "f_hz": 194.69630169772014,
+      "tau_s": 0.0037769325177554837,
+      "Q": 2.3101852153729867,
+      "phi_atlas": [
+        5.271440917322146,
+        0.8373277011346184
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_019_a0.00_df+0.00_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.00_dQ+0.20",
+      "f_hz": 194.69630169772014,
+      "tau_s": 0.004120290019369618,
+      "Q": 2.520202053134167,
+      "phi_atlas": [
+        5.271440917322146,
+        0.9243390781242481
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_020_a0.00_df+0.05_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.05_dQ-0.20",
+      "f_hz": 204.43111678260615,
+      "tau_s": 0.002616057155155313,
+      "Q": 1.6801347020894448,
+      "phi_atlas": [
+        5.3202310814915785,
+        0.5188739700160837
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_021_a0.00_df+0.05_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.05_dQ-0.10",
+      "f_hz": 204.43111678260615,
+      "tau_s": 0.0029430642995497266,
+      "Q": 1.8901515398506252,
+      "phi_atlas": [
+        5.3202310814915785,
+        0.6366570056724671
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_022_a0.00_df+0.05_dQ+0.00",
+      "theory": "beyond_Kerr_df+0.05_dQ+0.00",
+      "f_hz": 204.43111678260615,
+      "tau_s": 0.003270071443944141,
+      "Q": 2.100168377611806,
+      "phi_atlas": [
+        5.3202310814915785,
+        0.7420175213302934
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_023_a0.00_df+0.05_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.05_dQ+0.10",
+      "f_hz": 204.43111678260615,
+      "tau_s": 0.0035970785883385555,
+      "Q": 2.3101852153729867,
+      "phi_atlas": [
+        5.3202310814915785,
+        0.8373277011346184
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_024_a0.00_df+0.05_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.05_dQ+0.20",
+      "f_hz": 204.43111678260615,
+      "tau_s": 0.00392408573273297,
+      "Q": 2.520202053134167,
+      "phi_atlas": [
+        5.3202310814915785,
+        0.9243390781242481
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_025_a0.00_df+0.10_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.10_dQ-0.20",
+      "f_hz": 214.1659318674922,
+      "tau_s": 0.0024971454662846165,
+      "Q": 1.6801347020894448,
+      "phi_atlas": [
+        5.366751097126471,
+        0.5188739700160837
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_026_a0.00_df+0.10_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.10_dQ-0.10",
+      "f_hz": 214.1659318674922,
+      "tau_s": 0.0028092886495701933,
+      "Q": 1.8901515398506252,
+      "phi_atlas": [
+        5.366751097126471,
+        0.6366570056724671
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_027_a0.00_df+0.10_dQ+0.00",
+      "theory": "beyond_Kerr_df+0.10_dQ+0.00",
+      "f_hz": 214.1659318674922,
+      "tau_s": 0.0031214318328557705,
+      "Q": 2.100168377611806,
+      "phi_atlas": [
+        5.366751097126471,
+        0.7420175213302934
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_028_a0.00_df+0.10_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.10_dQ+0.10",
+      "f_hz": 214.1659318674922,
+      "tau_s": 0.0034335750161413477,
+      "Q": 2.3101852153729867,
+      "phi_atlas": [
+        5.366751097126471,
+        0.8373277011346184
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_029_a0.00_df+0.10_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.10_dQ+0.20",
+      "f_hz": 214.1659318674922,
+      "tau_s": 0.0037457181994269245,
+      "Q": 2.520202053134167,
+      "phi_atlas": [
+        5.366751097126471,
+        0.9243390781242481
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_030_a0.00_df+0.20_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.20_dQ-0.20",
+      "f_hz": 233.63556203726415,
+      "tau_s": 0.002289050010760899,
+      "Q": 1.6801347020894448,
+      "phi_atlas": [
+        5.453762474116101,
+        0.5188739700160837
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_031_a0.00_df+0.20_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.20_dQ-0.10",
+      "f_hz": 233.63556203726415,
+      "tau_s": 0.002575181262106011,
+      "Q": 1.8901515398506252,
+      "phi_atlas": [
+        5.453762474116101,
+        0.6366570056724671
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_032_a0.00_df+0.20_dQ+0.00",
+      "theory": "beyond_Kerr_df+0.20_dQ+0.00",
+      "f_hz": 233.63556203726415,
+      "tau_s": 0.0028613125134511236,
+      "Q": 2.100168377611806,
+      "phi_atlas": [
+        5.453762474116101,
+        0.7420175213302934
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_033_a0.00_df+0.20_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.20_dQ+0.10",
+      "f_hz": 233.63556203726415,
+      "tau_s": 0.0031474437647962365,
+      "Q": 2.3101852153729867,
+      "phi_atlas": [
+        5.453762474116101,
+        0.8373277011346184
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_034_a0.00_df+0.20_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.20_dQ+0.20",
+      "f_hz": 233.63556203726415,
+      "tau_s": 0.0034335750161413486,
+      "Q": 2.520202053134167,
+      "phi_atlas": [
+        5.453762474116101,
+        0.9243390781242481
+      ],
+      "metadata": {
+        "spin": 0.0,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.0000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_035_a0.30_df-0.20_dQ-0.20",
+      "theory": "beyond_Kerr_df-0.20_dQ-0.20",
+      "f_hz": 174.87071524864953,
+      "tau_s": 0.0034818342604689386,
+      "Q": 1.9128241815081317,
+      "phi_atlas": [
+        5.164046930890758,
+        0.6485807790248399
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_036_a0.30_df-0.20_dQ-0.10",
+      "theory": "beyond_Kerr_df-0.20_dQ-0.10",
+      "f_hz": 174.87071524864953,
+      "tau_s": 0.003917063543027555,
+      "Q": 2.151927204196648,
+      "phi_atlas": [
+        5.164046930890758,
+        0.7663638146812234
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_037_a0.30_df-0.20_dQ+0.00",
+      "theory": "beyond_Kerr_df-0.20_dQ+0.00",
+      "f_hz": 174.87071524864953,
+      "tau_s": 0.004352292825586173,
+      "Q": 2.3910302268851646,
+      "phi_atlas": [
+        5.164046930890758,
+        0.8717243303390496
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_038_a0.30_df-0.20_dQ+0.10",
+      "theory": "beyond_Kerr_df-0.20_dQ+0.10",
+      "f_hz": 174.87071524864953,
+      "tau_s": 0.004787522108144791,
+      "Q": 2.630133249573681,
+      "phi_atlas": [
+        5.164046930890758,
+        0.9670345101433745
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_039_a0.30_df-0.20_dQ+0.20",
+      "theory": "beyond_Kerr_df-0.20_dQ+0.20",
+      "f_hz": 174.87071524864953,
+      "tau_s": 0.005222751390703407,
+      "Q": 2.8692362722621976,
+      "phi_atlas": [
+        5.164046930890758,
+        1.0540458871330043
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_040_a0.30_df-0.10_dQ-0.20",
+      "theory": "beyond_Kerr_df-0.10_dQ-0.20",
+      "f_hz": 196.72955465473072,
+      "tau_s": 0.003094963787083501,
+      "Q": 1.9128241815081317,
+      "phi_atlas": [
+        5.281829966547142,
+        0.6485807790248399
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_041_a0.30_df-0.10_dQ-0.10",
+      "theory": "beyond_Kerr_df-0.10_dQ-0.10",
+      "f_hz": 196.72955465473072,
+      "tau_s": 0.0034818342604689386,
+      "Q": 2.151927204196648,
+      "phi_atlas": [
+        5.281829966547142,
+        0.7663638146812234
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_042_a0.30_df-0.10_dQ+0.00",
+      "theory": "beyond_Kerr_df-0.10_dQ+0.00",
+      "f_hz": 196.72955465473072,
+      "tau_s": 0.003868704733854376,
+      "Q": 2.3910302268851646,
+      "phi_atlas": [
+        5.281829966547142,
+        0.8717243303390496
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_043_a0.30_df-0.10_dQ+0.10",
+      "theory": "beyond_Kerr_df-0.10_dQ+0.10",
+      "f_hz": 196.72955465473072,
+      "tau_s": 0.004255575207239814,
+      "Q": 2.630133249573681,
+      "phi_atlas": [
+        5.281829966547142,
+        0.9670345101433745
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_044_a0.30_df-0.10_dQ+0.20",
+      "theory": "beyond_Kerr_df-0.10_dQ+0.20",
+      "f_hz": 196.72955465473072,
+      "tau_s": 0.004642445680625251,
+      "Q": 2.8692362722621976,
+      "phi_atlas": [
+        5.281829966547142,
+        1.0540458871330043
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_045_a0.30_df-0.05_dQ-0.20",
+      "theory": "beyond_Kerr_df-0.05_dQ-0.20",
+      "f_hz": 207.6589743577713,
+      "tau_s": 0.0029320709561843693,
+      "Q": 1.9128241815081317,
+      "phi_atlas": [
+        5.335897187817418,
+        0.6485807790248399
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_046_a0.30_df-0.05_dQ-0.10",
+      "theory": "beyond_Kerr_df-0.05_dQ-0.10",
+      "f_hz": 207.6589743577713,
+      "tau_s": 0.0032985798257074155,
+      "Q": 2.151927204196648,
+      "phi_atlas": [
+        5.335897187817418,
+        0.7663638146812234
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_047_a0.30_df-0.05_dQ+0.00",
+      "theory": "beyond_Kerr_df-0.05_dQ+0.00",
+      "f_hz": 207.6589743577713,
+      "tau_s": 0.0036650886952304617,
+      "Q": 2.3910302268851646,
+      "phi_atlas": [
+        5.335897187817418,
+        0.8717243303390496
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_048_a0.30_df-0.05_dQ+0.10",
+      "theory": "beyond_Kerr_df-0.05_dQ+0.10",
+      "f_hz": 207.6589743577713,
+      "tau_s": 0.004031597564753508,
+      "Q": 2.630133249573681,
+      "phi_atlas": [
+        5.335897187817418,
+        0.9670345101433745
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_049_a0.30_df-0.05_dQ+0.20",
+      "theory": "beyond_Kerr_df-0.05_dQ+0.20",
+      "f_hz": 207.6589743577713,
+      "tau_s": 0.0043981064342765545,
+      "Q": 2.8692362722621976,
+      "phi_atlas": [
+        5.335897187817418,
+        1.0540458871330043
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_050_a0.30_df+0.00_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.00_dQ-0.20",
+      "f_hz": 218.5883940608119,
+      "tau_s": 0.0027854674083751508,
+      "Q": 1.9128241815081317,
+      "phi_atlas": [
+        5.387190482204968,
+        0.6485807790248399
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_051_a0.30_df+0.00_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.00_dQ-0.10",
+      "f_hz": 218.5883940608119,
+      "tau_s": 0.0031336508344220445,
+      "Q": 2.151927204196648,
+      "phi_atlas": [
+        5.387190482204968,
+        0.7663638146812234
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_052_a0.30_df+0.00_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.00_dQ+0.10",
+      "f_hz": 218.5883940608119,
+      "tau_s": 0.0038300176865158323,
+      "Q": 2.630133249573681,
+      "phi_atlas": [
+        5.387190482204968,
+        0.9670345101433745
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_053_a0.30_df+0.00_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.00_dQ+0.20",
+      "f_hz": 218.5883940608119,
+      "tau_s": 0.004178201112562726,
+      "Q": 2.8692362722621976,
+      "phi_atlas": [
+        5.387190482204968,
+        1.0540458871330043
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_054_a0.30_df+0.05_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.05_dQ-0.20",
+      "f_hz": 229.5178137638525,
+      "tau_s": 0.0026528261032144292,
+      "Q": 1.9128241815081317,
+      "phi_atlas": [
+        5.4359806463744,
+        0.6485807790248399
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_055_a0.30_df+0.05_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.05_dQ-0.10",
+      "f_hz": 229.5178137638525,
+      "tau_s": 0.002984429366116233,
+      "Q": 2.151927204196648,
+      "phi_atlas": [
+        5.4359806463744,
+        0.7663638146812234
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_056_a0.30_df+0.05_dQ+0.00",
+      "theory": "beyond_Kerr_df+0.05_dQ+0.00",
+      "f_hz": 229.5178137638525,
+      "tau_s": 0.003316032629018037,
+      "Q": 2.3910302268851646,
+      "phi_atlas": [
+        5.4359806463744,
+        0.8717243303390496
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_057_a0.30_df+0.05_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.05_dQ+0.10",
+      "f_hz": 229.5178137638525,
+      "tau_s": 0.0036476358919198407,
+      "Q": 2.630133249573681,
+      "phi_atlas": [
+        5.4359806463744,
+        0.9670345101433745
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_058_a0.30_df+0.05_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.05_dQ+0.20",
+      "f_hz": 229.5178137638525,
+      "tau_s": 0.003979239154821644,
+      "Q": 2.8692362722621976,
+      "phi_atlas": [
+        5.4359806463744,
+        1.0540458871330043
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_059_a0.30_df+0.10_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.10_dQ-0.20",
+      "f_hz": 240.44723346689312,
+      "tau_s": 0.0025322430985228643,
+      "Q": 1.9128241815081317,
+      "phi_atlas": [
+        5.482500662009293,
+        0.6485807790248399
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_060_a0.30_df+0.10_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.10_dQ-0.10",
+      "f_hz": 240.44723346689312,
+      "tau_s": 0.0028487734858382223,
+      "Q": 2.151927204196648,
+      "phi_atlas": [
+        5.482500662009293,
+        0.7663638146812234
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_061_a0.30_df+0.10_dQ+0.00",
+      "theory": "beyond_Kerr_df+0.10_dQ+0.00",
+      "f_hz": 240.44723346689312,
+      "tau_s": 0.00316530387315358,
+      "Q": 2.3910302268851646,
+      "phi_atlas": [
+        5.482500662009293,
+        0.8717243303390496
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_062_a0.30_df+0.10_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.10_dQ+0.10",
+      "f_hz": 240.44723346689312,
+      "tau_s": 0.0034818342604689386,
+      "Q": 2.630133249573681,
+      "phi_atlas": [
+        5.482500662009293,
+        0.9670345101433745
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_063_a0.30_df+0.10_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.10_dQ+0.20",
+      "f_hz": 240.44723346689312,
+      "tau_s": 0.0037983646477842965,
+      "Q": 2.8692362722621976,
+      "phi_atlas": [
+        5.482500662009293,
+        1.0540458871330043
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_064_a0.30_df+0.20_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.20_dQ-0.20",
+      "f_hz": 262.30607287297426,
+      "tau_s": 0.0023212228403126263,
+      "Q": 1.9128241815081317,
+      "phi_atlas": [
+        5.569512038998923,
+        0.6485807790248399
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_065_a0.30_df+0.20_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.20_dQ-0.10",
+      "f_hz": 262.30607287297426,
+      "tau_s": 0.0026113756953517046,
+      "Q": 2.151927204196648,
+      "phi_atlas": [
+        5.569512038998923,
+        0.7663638146812234
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_066_a0.30_df+0.20_dQ+0.00",
+      "theory": "beyond_Kerr_df+0.20_dQ+0.00",
+      "f_hz": 262.30607287297426,
+      "tau_s": 0.002901528550390783,
+      "Q": 2.3910302268851646,
+      "phi_atlas": [
+        5.569512038998923,
+        0.8717243303390496
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_067_a0.30_df+0.20_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.20_dQ+0.10",
+      "f_hz": 262.30607287297426,
+      "tau_s": 0.003191681405429861,
+      "Q": 2.630133249573681,
+      "phi_atlas": [
+        5.569512038998923,
+        0.9670345101433745
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_068_a0.30_df+0.20_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.20_dQ+0.20",
+      "f_hz": 262.30607287297426,
+      "tau_s": 0.0034818342604689394,
+      "Q": 2.8692362722621976,
+      "phi_atlas": [
+        5.569512038998923,
+        1.0540458871330043
+      ],
+      "metadata": {
+        "spin": 0.3,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.3000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_069_a0.50_df-0.20_dQ-0.20",
+      "theory": "beyond_Kerr_df-0.20_dQ-0.20",
+      "f_hz": 193.4597465280292,
+      "tau_s": 0.0035668255478974883,
+      "Q": 2.1678156926848406,
+      "phi_atlas": [
+        5.265069462550034,
+        0.7737200673643807
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_070_a0.50_df-0.20_dQ-0.10",
+      "theory": "beyond_Kerr_df-0.20_dQ-0.10",
+      "f_hz": 193.4597465280292,
+      "tau_s": 0.0040126787413846746,
+      "Q": 2.4387926542704457,
+      "phi_atlas": [
+        5.265069462550034,
+        0.8915031030207642
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_071_a0.50_df-0.20_dQ+0.00",
+      "theory": "beyond_Kerr_df-0.20_dQ+0.00",
+      "f_hz": 193.4597465280292,
+      "tau_s": 0.00445853193487186,
+      "Q": 2.7097696158560507,
+      "phi_atlas": [
+        5.265069462550034,
+        0.9968636186785904
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_072_a0.50_df-0.20_dQ+0.10",
+      "theory": "beyond_Kerr_df-0.20_dQ+0.10",
+      "f_hz": 193.4597465280292,
+      "tau_s": 0.004904385128359047,
+      "Q": 2.980746577441656,
+      "phi_atlas": [
+        5.265069462550034,
+        1.0921737984829154
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_073_a0.50_df-0.20_dQ+0.20",
+      "theory": "beyond_Kerr_df-0.20_dQ+0.20",
+      "f_hz": 193.4597465280292,
+      "tau_s": 0.005350238321846232,
+      "Q": 3.2517235390272607,
+      "phi_atlas": [
+        5.265069462550034,
+        1.179185175472545
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_074_a0.50_df-0.10_dQ-0.20",
+      "theory": "beyond_Kerr_df-0.10_dQ-0.20",
+      "f_hz": 217.64221484403285,
+      "tau_s": 0.003170511598131101,
+      "Q": 2.1678156926848406,
+      "phi_atlas": [
+        5.382852498206417,
+        0.7737200673643807
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_075_a0.50_df-0.10_dQ-0.10",
+      "theory": "beyond_Kerr_df-0.10_dQ-0.10",
+      "f_hz": 217.64221484403285,
+      "tau_s": 0.0035668255478974887,
+      "Q": 2.4387926542704457,
+      "phi_atlas": [
+        5.382852498206417,
+        0.8915031030207642
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_076_a0.50_df-0.10_dQ+0.00",
+      "theory": "beyond_Kerr_df-0.10_dQ+0.00",
+      "f_hz": 217.64221484403285,
+      "tau_s": 0.003963139497663876,
+      "Q": 2.7097696158560507,
+      "phi_atlas": [
+        5.382852498206417,
+        0.9968636186785904
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_077_a0.50_df-0.10_dQ+0.10",
+      "theory": "beyond_Kerr_df-0.10_dQ+0.10",
+      "f_hz": 217.64221484403285,
+      "tau_s": 0.004359453447430264,
+      "Q": 2.980746577441656,
+      "phi_atlas": [
+        5.382852498206417,
+        1.0921737984829154
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_078_a0.50_df-0.10_dQ+0.20",
+      "theory": "beyond_Kerr_df-0.10_dQ+0.20",
+      "f_hz": 217.64221484403285,
+      "tau_s": 0.004755767397196652,
+      "Q": 3.2517235390272607,
+      "phi_atlas": [
+        5.382852498206417,
+        1.179185175472545
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_079_a0.50_df-0.05_dQ-0.20",
+      "theory": "beyond_Kerr_df-0.05_dQ-0.20",
+      "f_hz": 229.73344900203466,
+      "tau_s": 0.003003642566650517,
+      "Q": 2.1678156926848406,
+      "phi_atlas": [
+        5.436919719476693,
+        0.7737200673643807
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_080_a0.50_df-0.05_dQ-0.10",
+      "theory": "beyond_Kerr_df-0.05_dQ-0.10",
+      "f_hz": 229.73344900203466,
+      "tau_s": 0.0033790978874818313,
+      "Q": 2.4387926542704457,
+      "phi_atlas": [
+        5.436919719476693,
+        0.8915031030207642
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_081_a0.50_df-0.05_dQ+0.00",
+      "theory": "beyond_Kerr_df-0.05_dQ+0.00",
+      "f_hz": 229.73344900203466,
+      "tau_s": 0.003754553208313146,
+      "Q": 2.7097696158560507,
+      "phi_atlas": [
+        5.436919719476693,
+        0.9968636186785904
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_082_a0.50_df-0.05_dQ+0.10",
+      "theory": "beyond_Kerr_df-0.05_dQ+0.10",
+      "f_hz": 229.73344900203466,
+      "tau_s": 0.004130008529144461,
+      "Q": 2.980746577441656,
+      "phi_atlas": [
+        5.436919719476693,
+        1.0921737984829154
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_083_a0.50_df-0.05_dQ+0.20",
+      "theory": "beyond_Kerr_df-0.05_dQ+0.20",
+      "f_hz": 229.73344900203466,
+      "tau_s": 0.004505463849975775,
+      "Q": 3.2517235390272607,
+      "phi_atlas": [
+        5.436919719476693,
+        1.179185175472545
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_084_a0.50_df+0.00_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.00_dQ-0.20",
+      "f_hz": 241.8246831600365,
+      "tau_s": 0.0028534604383179908,
+      "Q": 2.1678156926848406,
+      "phi_atlas": [
+        5.488213013864244,
+        0.7737200673643807
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_085_a0.50_df+0.00_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.00_dQ-0.10",
+      "f_hz": 241.8246831600365,
+      "tau_s": 0.0032101429931077393,
+      "Q": 2.4387926542704457,
+      "phi_atlas": [
+        5.488213013864244,
+        0.8915031030207642
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_086_a0.50_df+0.00_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.00_dQ+0.10",
+      "f_hz": 241.8246831600365,
+      "tau_s": 0.003923508102687237,
+      "Q": 2.980746577441656,
+      "phi_atlas": [
+        5.488213013864244,
+        1.0921737984829154
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_087_a0.50_df+0.00_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.00_dQ+0.20",
+      "f_hz": 241.8246831600365,
+      "tau_s": 0.004280190657476986,
+      "Q": 3.2517235390272607,
+      "phi_atlas": [
+        5.488213013864244,
+        1.179185175472545
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_088_a0.50_df+0.05_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.05_dQ-0.20",
+      "f_hz": 253.91591731803834,
+      "tau_s": 0.0027175813698266577,
+      "Q": 2.1678156926848406,
+      "phi_atlas": [
+        5.537003178033676,
+        0.7737200673643807
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_089_a0.50_df+0.05_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.05_dQ-0.10",
+      "f_hz": 253.91591731803834,
+      "tau_s": 0.00305727904105499,
+      "Q": 2.4387926542704457,
+      "phi_atlas": [
+        5.537003178033676,
+        0.8915031030207642
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_090_a0.50_df+0.05_dQ+0.00",
+      "theory": "beyond_Kerr_df+0.05_dQ+0.00",
+      "f_hz": 253.91591731803834,
+      "tau_s": 0.003396976712283322,
+      "Q": 2.7097696158560507,
+      "phi_atlas": [
+        5.537003178033676,
+        0.9968636186785904
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_091_a0.50_df+0.05_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.05_dQ+0.10",
+      "f_hz": 253.91591731803834,
+      "tau_s": 0.003736674383511655,
+      "Q": 2.980746577441656,
+      "phi_atlas": [
+        5.537003178033676,
+        1.0921737984829154
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_092_a0.50_df+0.05_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.05_dQ+0.20",
+      "f_hz": 253.91591731803834,
+      "tau_s": 0.004076372054739987,
+      "Q": 3.2517235390272607,
+      "phi_atlas": [
+        5.537003178033676,
+        1.179185175472545
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_093_a0.50_df+0.10_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.10_dQ-0.20",
+      "f_hz": 266.0071514760402,
+      "tau_s": 0.0025940549439254458,
+      "Q": 2.1678156926848406,
+      "phi_atlas": [
+        5.583523193668569,
+        0.7737200673643807
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_094_a0.50_df+0.10_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.10_dQ-0.10",
+      "f_hz": 266.0071514760402,
+      "tau_s": 0.0029183118119161266,
+      "Q": 2.4387926542704457,
+      "phi_atlas": [
+        5.583523193668569,
+        0.8915031030207642
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_095_a0.50_df+0.10_dQ+0.00",
+      "theory": "beyond_Kerr_df+0.10_dQ+0.00",
+      "f_hz": 266.0071514760402,
+      "tau_s": 0.0032425686799068074,
+      "Q": 2.7097696158560507,
+      "phi_atlas": [
+        5.583523193668569,
+        0.9968636186785904
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_096_a0.50_df+0.10_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.10_dQ+0.10",
+      "f_hz": 266.0071514760402,
+      "tau_s": 0.0035668255478974883,
+      "Q": 2.980746577441656,
+      "phi_atlas": [
+        5.583523193668569,
+        1.0921737984829154
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_097_a0.50_df+0.10_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.10_dQ+0.20",
+      "f_hz": 266.0071514760402,
+      "tau_s": 0.0038910824158881687,
+      "Q": 3.2517235390272607,
+      "phi_atlas": [
+        5.583523193668569,
+        1.179185175472545
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_098_a0.50_df+0.20_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.20_dQ-0.20",
+      "f_hz": 290.1896197920438,
+      "tau_s": 0.0023778836985983254,
+      "Q": 2.1678156926848406,
+      "phi_atlas": [
+        5.670534570658198,
+        0.7737200673643807
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_099_a0.50_df+0.20_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.20_dQ-0.10",
+      "f_hz": 290.1896197920438,
+      "tau_s": 0.002675119160923116,
+      "Q": 2.4387926542704457,
+      "phi_atlas": [
+        5.670534570658198,
+        0.8915031030207642
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_100_a0.50_df+0.20_dQ+0.00",
+      "theory": "beyond_Kerr_df+0.20_dQ+0.00",
+      "f_hz": 290.1896197920438,
+      "tau_s": 0.002972354623247907,
+      "Q": 2.7097696158560507,
+      "phi_atlas": [
+        5.670534570658198,
+        0.9968636186785904
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_101_a0.50_df+0.20_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.20_dQ+0.10",
+      "f_hz": 290.1896197920438,
+      "tau_s": 0.003269590085572698,
+      "Q": 2.980746577441656,
+      "phi_atlas": [
+        5.670534570658198,
+        1.0921737984829154
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_102_a0.50_df+0.20_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.20_dQ+0.20",
+      "f_hz": 290.1896197920438,
+      "tau_s": 0.0035668255478974883,
+      "Q": 3.2517235390272607,
+      "phi_atlas": [
+        5.670534570658198,
+        1.179185175472545
+      ],
+      "metadata": {
+        "spin": 0.5,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.5000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_103_a0.80_df-0.20_dQ-0.20",
+      "theory": "beyond_Kerr_df-0.20_dQ-0.20",
+      "f_hz": 244.26862939756398,
+      "tau_s": 0.004038881297214626,
+      "Q": 3.099407343573457,
+      "phi_atlas": [
+        5.49826855985698,
+        1.1312109137215387
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_104_a0.80_df-0.20_dQ-0.10",
+      "theory": "beyond_Kerr_df-0.20_dQ-0.10",
+      "f_hz": 244.26862939756398,
+      "tau_s": 0.004543741459366454,
+      "Q": 3.4868332615201387,
+      "phi_atlas": [
+        5.49826855985698,
+        1.248993949377922
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_105_a0.80_df-0.20_dQ+0.00",
+      "theory": "beyond_Kerr_df-0.20_dQ+0.00",
+      "f_hz": 244.26862939756398,
+      "tau_s": 0.005048601621518283,
+      "Q": 3.874259179466821,
+      "phi_atlas": [
+        5.49826855985698,
+        1.3543544650357484
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_106_a0.80_df-0.20_dQ+0.10",
+      "theory": "beyond_Kerr_df-0.20_dQ+0.10",
+      "f_hz": 244.26862939756398,
+      "tau_s": 0.0055534617836701106,
+      "Q": 4.261685097413503,
+      "phi_atlas": [
+        5.49826855985698,
+        1.4496646448400732
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_107_a0.80_df-0.20_dQ+0.20",
+      "theory": "beyond_Kerr_df-0.20_dQ+0.20",
+      "f_hz": 244.26862939756398,
+      "tau_s": 0.006058321945821938,
+      "Q": 4.649111015360185,
+      "phi_atlas": [
+        5.49826855985698,
+        1.5366760218297029
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_108_a0.80_df-0.10_dQ-0.20",
+      "theory": "beyond_Kerr_df-0.10_dQ-0.20",
+      "f_hz": 274.8022080722595,
+      "tau_s": 0.0035901167086352243,
+      "Q": 3.099407343573457,
+      "phi_atlas": [
+        5.616051595513363,
+        1.1312109137215387
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_109_a0.80_df-0.10_dQ-0.10",
+      "theory": "beyond_Kerr_df-0.10_dQ-0.10",
+      "f_hz": 274.8022080722595,
+      "tau_s": 0.004038881297214626,
+      "Q": 3.4868332615201387,
+      "phi_atlas": [
+        5.616051595513363,
+        1.248993949377922
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_110_a0.80_df-0.10_dQ+0.00",
+      "theory": "beyond_Kerr_df-0.10_dQ+0.00",
+      "f_hz": 274.8022080722595,
+      "tau_s": 0.0044876458857940294,
+      "Q": 3.874259179466821,
+      "phi_atlas": [
+        5.616051595513363,
+        1.3543544650357484
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_111_a0.80_df-0.10_dQ+0.10",
+      "theory": "beyond_Kerr_df-0.10_dQ+0.10",
+      "f_hz": 274.8022080722595,
+      "tau_s": 0.0049364104743734325,
+      "Q": 4.261685097413503,
+      "phi_atlas": [
+        5.616051595513363,
+        1.4496646448400732
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_112_a0.80_df-0.10_dQ+0.20",
+      "theory": "beyond_Kerr_df-0.10_dQ+0.20",
+      "f_hz": 274.8022080722595,
+      "tau_s": 0.0053851750629528355,
+      "Q": 4.649111015360185,
+      "phi_atlas": [
+        5.616051595513363,
+        1.5366760218297029
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_113_a0.80_df-0.05_dQ-0.20",
+      "theory": "beyond_Kerr_df-0.05_dQ-0.20",
+      "f_hz": 290.0689974096072,
+      "tau_s": 0.003401163197654423,
+      "Q": 3.099407343573457,
+      "phi_atlas": [
+        5.6701188167836385,
+        1.1312109137215387
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_114_a0.80_df-0.05_dQ-0.10",
+      "theory": "beyond_Kerr_df-0.05_dQ-0.10",
+      "f_hz": 290.0689974096072,
+      "tau_s": 0.0038263085973612248,
+      "Q": 3.4868332615201387,
+      "phi_atlas": [
+        5.6701188167836385,
+        1.248993949377922
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_115_a0.80_df-0.05_dQ+0.00",
+      "theory": "beyond_Kerr_df-0.05_dQ+0.00",
+      "f_hz": 290.0689974096072,
+      "tau_s": 0.004251453997068028,
+      "Q": 3.874259179466821,
+      "phi_atlas": [
+        5.6701188167836385,
+        1.3543544650357484
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_116_a0.80_df-0.05_dQ+0.10",
+      "theory": "beyond_Kerr_df-0.05_dQ+0.10",
+      "f_hz": 290.0689974096072,
+      "tau_s": 0.004676599396774831,
+      "Q": 4.261685097413503,
+      "phi_atlas": [
+        5.6701188167836385,
+        1.4496646448400732
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_117_a0.80_df-0.05_dQ+0.20",
+      "theory": "beyond_Kerr_df-0.05_dQ+0.20",
+      "f_hz": 290.0689974096072,
+      "tau_s": 0.005101744796481633,
+      "Q": 4.649111015360185,
+      "phi_atlas": [
+        5.6701188167836385,
+        1.5366760218297029
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_118_a0.80_df+0.00_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.00_dQ-0.20",
+      "f_hz": 305.33578674695497,
+      "tau_s": 0.0032311050377717017,
+      "Q": 3.099407343573457,
+      "phi_atlas": [
+        5.7214121111711895,
+        1.1312109137215387
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_119_a0.80_df+0.00_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.00_dQ-0.10",
+      "f_hz": 305.33578674695497,
+      "tau_s": 0.003634993167493164,
+      "Q": 3.4868332615201387,
+      "phi_atlas": [
+        5.7214121111711895,
+        1.248993949377922
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_120_a0.80_df+0.00_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.00_dQ+0.10",
+      "f_hz": 305.33578674695497,
+      "tau_s": 0.004442769426936089,
+      "Q": 4.261685097413503,
+      "phi_atlas": [
+        5.7214121111711895,
+        1.4496646448400732
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_121_a0.80_df+0.00_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.00_dQ+0.20",
+      "f_hz": 305.33578674695497,
+      "tau_s": 0.0048466575566575515,
+      "Q": 4.649111015360185,
+      "phi_atlas": [
+        5.7214121111711895,
+        1.5366760218297029
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_122_a0.80_df+0.05_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.05_dQ-0.20",
+      "f_hz": 320.6025760843027,
+      "tau_s": 0.0030772428931159063,
+      "Q": 3.099407343573457,
+      "phi_atlas": [
+        5.770202275340622,
+        1.1312109137215387
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_123_a0.80_df+0.05_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.05_dQ-0.10",
+      "f_hz": 320.6025760843027,
+      "tau_s": 0.003461898254755394,
+      "Q": 3.4868332615201387,
+      "phi_atlas": [
+        5.770202275340622,
+        1.248993949377922
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_124_a0.80_df+0.05_dQ+0.00",
+      "theory": "beyond_Kerr_df+0.05_dQ+0.00",
+      "f_hz": 320.6025760843027,
+      "tau_s": 0.003846553616394882,
+      "Q": 3.874259179466821,
+      "phi_atlas": [
+        5.770202275340622,
+        1.3543544650357484
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_125_a0.80_df+0.05_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.05_dQ+0.10",
+      "f_hz": 320.6025760843027,
+      "tau_s": 0.004231208978034371,
+      "Q": 4.261685097413503,
+      "phi_atlas": [
+        5.770202275340622,
+        1.4496646448400732
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_126_a0.80_df+0.05_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.05_dQ+0.20",
+      "f_hz": 320.6025760843027,
+      "tau_s": 0.004615864339673858,
+      "Q": 4.649111015360185,
+      "phi_atlas": [
+        5.770202275340622,
+        1.5366760218297029
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_127_a0.80_df+0.10_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.10_dQ-0.20",
+      "f_hz": 335.8693654216505,
+      "tau_s": 0.0029373682161560923,
+      "Q": 3.099407343573457,
+      "phi_atlas": [
+        5.816722290975514,
+        1.1312109137215387
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_128_a0.80_df+0.10_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.10_dQ-0.10",
+      "f_hz": 335.8693654216505,
+      "tau_s": 0.0033045392431756034,
+      "Q": 3.4868332615201387,
+      "phi_atlas": [
+        5.816722290975514,
+        1.248993949377922
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_129_a0.80_df+0.10_dQ+0.00",
+      "theory": "beyond_Kerr_df+0.10_dQ+0.00",
+      "f_hz": 335.8693654216505,
+      "tau_s": 0.003671710270195115,
+      "Q": 3.874259179466821,
+      "phi_atlas": [
+        5.816722290975514,
+        1.3543544650357484
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_130_a0.80_df+0.10_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.10_dQ+0.10",
+      "f_hz": 335.8693654216505,
+      "tau_s": 0.004038881297214626,
+      "Q": 4.261685097413503,
+      "phi_atlas": [
+        5.816722290975514,
+        1.4496646448400732
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_131_a0.80_df+0.10_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.10_dQ+0.20",
+      "f_hz": 335.8693654216505,
+      "tau_s": 0.0044060523242341375,
+      "Q": 4.649111015360185,
+      "phi_atlas": [
+        5.816722290975514,
+        1.5366760218297029
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_132_a0.80_df+0.20_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.20_dQ-0.20",
+      "f_hz": 366.40294409634595,
+      "tau_s": 0.002692587531476418,
+      "Q": 3.099407343573457,
+      "phi_atlas": [
+        5.9037336679651435,
+        1.1312109137215387
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_133_a0.80_df+0.20_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.20_dQ-0.10",
+      "f_hz": 366.40294409634595,
+      "tau_s": 0.00302916097291097,
+      "Q": 3.4868332615201387,
+      "phi_atlas": [
+        5.9037336679651435,
+        1.248993949377922
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_134_a0.80_df+0.20_dQ+0.00",
+      "theory": "beyond_Kerr_df+0.20_dQ+0.00",
+      "f_hz": 366.40294409634595,
+      "tau_s": 0.0033657344143455223,
+      "Q": 3.874259179466821,
+      "phi_atlas": [
+        5.9037336679651435,
+        1.3543544650357484
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_135_a0.80_df+0.20_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.20_dQ+0.10",
+      "f_hz": 366.40294409634595,
+      "tau_s": 0.0037023078557800746,
+      "Q": 4.261685097413503,
+      "phi_atlas": [
+        5.9037336679651435,
+        1.4496646448400732
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_136_a0.80_df+0.20_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.20_dQ+0.20",
+      "f_hz": 366.40294409634595,
+      "tau_s": 0.004038881297214626,
+      "Q": 4.649111015360185,
+      "phi_atlas": [
+        5.9037336679651435,
+        1.5366760218297029
+      ],
+      "metadata": {
+        "spin": 0.8,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.8000_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_137_a0.95_df-0.20_dQ-0.20",
+      "theory": "beyond_Kerr_df-0.20_dQ-0.20",
+      "f_hz": 311.0875127924848,
+      "tau_s": 0.005747215155235696,
+      "Q": 5.616812250352882,
+      "phi_atlas": [
+        5.740074264211746,
+        1.7257642877384785
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_138_a0.95_df-0.20_dQ-0.10",
+      "theory": "beyond_Kerr_df-0.20_dQ-0.10",
+      "f_hz": 311.0875127924848,
+      "tau_s": 0.006465617049640157,
+      "Q": 6.318913781646992,
+      "phi_atlas": [
+        5.740074264211746,
+        1.8435473233948618
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_139_a0.95_df-0.20_dQ+0.00",
+      "theory": "beyond_Kerr_df-0.20_dQ+0.00",
+      "f_hz": 311.0875127924848,
+      "tau_s": 0.007184018944044619,
+      "Q": 7.021015312941102,
+      "phi_atlas": [
+        5.740074264211746,
+        1.948907839052688
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_140_a0.95_df-0.20_dQ+0.10",
+      "theory": "beyond_Kerr_df-0.20_dQ+0.10",
+      "f_hz": 311.0875127924848,
+      "tau_s": 0.007902420838449081,
+      "Q": 7.7231168442352125,
+      "phi_atlas": [
+        5.740074264211746,
+        2.044218018857013
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_141_a0.95_df-0.20_dQ+0.20",
+      "theory": "beyond_Kerr_df-0.20_dQ+0.20",
+      "f_hz": 311.0875127924848,
+      "tau_s": 0.008620822732853544,
+      "Q": 8.425218375529322,
+      "phi_atlas": [
+        5.740074264211746,
+        2.131229395846643
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": -0.2,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_142_a0.95_df-0.10_dQ-0.20",
+      "theory": "beyond_Kerr_df-0.10_dQ-0.20",
+      "f_hz": 349.9734518915454,
+      "tau_s": 0.005108635693542841,
+      "Q": 5.616812250352882,
+      "phi_atlas": [
+        5.857857299868129,
+        1.7257642877384785
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_143_a0.95_df-0.10_dQ-0.10",
+      "theory": "beyond_Kerr_df-0.10_dQ-0.10",
+      "f_hz": 349.9734518915454,
+      "tau_s": 0.005747215155235696,
+      "Q": 6.318913781646992,
+      "phi_atlas": [
+        5.857857299868129,
+        1.8435473233948618
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_144_a0.95_df-0.10_dQ+0.00",
+      "theory": "beyond_Kerr_df-0.10_dQ+0.00",
+      "f_hz": 349.9734518915454,
+      "tau_s": 0.00638579461692855,
+      "Q": 7.021015312941102,
+      "phi_atlas": [
+        5.857857299868129,
+        1.948907839052688
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_145_a0.95_df-0.10_dQ+0.10",
+      "theory": "beyond_Kerr_df-0.10_dQ+0.10",
+      "f_hz": 349.9734518915454,
+      "tau_s": 0.007024374078621406,
+      "Q": 7.7231168442352125,
+      "phi_atlas": [
+        5.857857299868129,
+        2.044218018857013
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_146_a0.95_df-0.10_dQ+0.20",
+      "theory": "beyond_Kerr_df-0.10_dQ+0.20",
+      "f_hz": 349.9734518915454,
+      "tau_s": 0.0076629535403142605,
+      "Q": 8.425218375529322,
+      "phi_atlas": [
+        5.857857299868129,
+        2.131229395846643
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": -0.1,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_147_a0.95_df-0.05_dQ-0.20",
+      "theory": "beyond_Kerr_df-0.05_dQ-0.20",
+      "f_hz": 369.41642144107567,
+      "tau_s": 0.004839760130724797,
+      "Q": 5.616812250352882,
+      "phi_atlas": [
+        5.911924521138404,
+        1.7257642877384785
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_148_a0.95_df-0.05_dQ-0.10",
+      "theory": "beyond_Kerr_df-0.05_dQ-0.10",
+      "f_hz": 369.41642144107567,
+      "tau_s": 0.005444730147065396,
+      "Q": 6.318913781646992,
+      "phi_atlas": [
+        5.911924521138404,
+        1.8435473233948618
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_149_a0.95_df-0.05_dQ+0.00",
+      "theory": "beyond_Kerr_df-0.05_dQ+0.00",
+      "f_hz": 369.41642144107567,
+      "tau_s": 0.006049700163405995,
+      "Q": 7.021015312941102,
+      "phi_atlas": [
+        5.911924521138404,
+        1.948907839052688
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_150_a0.95_df-0.05_dQ+0.10",
+      "theory": "beyond_Kerr_df-0.05_dQ+0.10",
+      "f_hz": 369.41642144107567,
+      "tau_s": 0.006654670179746596,
+      "Q": 7.7231168442352125,
+      "phi_atlas": [
+        5.911924521138404,
+        2.044218018857013
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_151_a0.95_df-0.05_dQ+0.20",
+      "theory": "beyond_Kerr_df-0.05_dQ+0.20",
+      "f_hz": 369.41642144107567,
+      "tau_s": 0.007259640196087195,
+      "Q": 8.425218375529322,
+      "phi_atlas": [
+        5.911924521138404,
+        2.131229395846643
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": -0.05,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_152_a0.95_df+0.00_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.00_dQ-0.20",
+      "f_hz": 388.85939099060596,
+      "tau_s": 0.004597772124188557,
+      "Q": 5.616812250352882,
+      "phi_atlas": [
+        5.963217815525955,
+        1.7257642877384785
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_153_a0.95_df+0.00_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.00_dQ-0.10",
+      "f_hz": 388.85939099060596,
+      "tau_s": 0.005172493639712126,
+      "Q": 6.318913781646992,
+      "phi_atlas": [
+        5.963217815525955,
+        1.8435473233948618
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_154_a0.95_df+0.00_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.00_dQ+0.10",
+      "f_hz": 388.85939099060596,
+      "tau_s": 0.006321936670759266,
+      "Q": 7.7231168442352125,
+      "phi_atlas": [
+        5.963217815525955,
+        2.044218018857013
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_155_a0.95_df+0.00_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.00_dQ+0.20",
+      "f_hz": 388.85939099060596,
+      "tau_s": 0.0068966581862828355,
+      "Q": 8.425218375529322,
+      "phi_atlas": [
+        5.963217815525955,
+        2.131229395846643
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.0,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_156_a0.95_df+0.05_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.05_dQ-0.20",
+      "f_hz": 408.30236054013625,
+      "tau_s": 0.004378830594465293,
+      "Q": 5.616812250352882,
+      "phi_atlas": [
+        6.012007979695388,
+        1.7257642877384785
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_157_a0.95_df+0.05_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.05_dQ-0.10",
+      "f_hz": 408.30236054013625,
+      "tau_s": 0.004926184418773454,
+      "Q": 6.318913781646992,
+      "phi_atlas": [
+        6.012007979695388,
+        1.8435473233948618
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_158_a0.95_df+0.05_dQ+0.00",
+      "theory": "beyond_Kerr_df+0.05_dQ+0.00",
+      "f_hz": 408.30236054013625,
+      "tau_s": 0.005473538243081616,
+      "Q": 7.021015312941102,
+      "phi_atlas": [
+        6.012007979695388,
+        1.948907839052688
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_159_a0.95_df+0.05_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.05_dQ+0.10",
+      "f_hz": 408.30236054013625,
+      "tau_s": 0.006020892067389778,
+      "Q": 7.7231168442352125,
+      "phi_atlas": [
+        6.012007979695388,
+        2.044218018857013
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_160_a0.95_df+0.05_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.05_dQ+0.20",
+      "f_hz": 408.30236054013625,
+      "tau_s": 0.006568245891697939,
+      "Q": 8.425218375529322,
+      "phi_atlas": [
+        6.012007979695388,
+        2.131229395846643
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.05,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_161_a0.95_df+0.10_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.10_dQ-0.20",
+      "f_hz": 427.7453300896666,
+      "tau_s": 0.004179792840171415,
+      "Q": 5.616812250352882,
+      "phi_atlas": [
+        6.05852799533028,
+        1.7257642877384785
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_162_a0.95_df+0.10_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.10_dQ-0.10",
+      "f_hz": 427.7453300896666,
+      "tau_s": 0.004702266945192842,
+      "Q": 6.318913781646992,
+      "phi_atlas": [
+        6.05852799533028,
+        1.8435473233948618
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_163_a0.95_df+0.10_dQ+0.00",
+      "theory": "beyond_Kerr_df+0.10_dQ+0.00",
+      "f_hz": 427.7453300896666,
+      "tau_s": 0.005224741050214268,
+      "Q": 7.021015312941102,
+      "phi_atlas": [
+        6.05852799533028,
+        1.948907839052688
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_164_a0.95_df+0.10_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.10_dQ+0.10",
+      "f_hz": 427.7453300896666,
+      "tau_s": 0.005747215155235696,
+      "Q": 7.7231168442352125,
+      "phi_atlas": [
+        6.05852799533028,
+        2.044218018857013
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_165_a0.95_df+0.10_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.10_dQ+0.20",
+      "f_hz": 427.7453300896666,
+      "tau_s": 0.0062696892602571224,
+      "Q": 8.425218375529322,
+      "phi_atlas": [
+        6.05852799533028,
+        2.131229395846643
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.1,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_166_a0.95_df+0.20_dQ-0.20",
+      "theory": "beyond_Kerr_df+0.20_dQ-0.20",
+      "f_hz": 466.6312691887271,
+      "tau_s": 0.003831476770157131,
+      "Q": 5.616812250352882,
+      "phi_atlas": [
+        6.145539372319909,
+        1.7257642877384785
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": -0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_167_a0.95_df+0.20_dQ-0.10",
+      "theory": "beyond_Kerr_df+0.20_dQ-0.10",
+      "f_hz": 466.6312691887271,
+      "tau_s": 0.004310411366426772,
+      "Q": 6.318913781646992,
+      "phi_atlas": [
+        6.145539372319909,
+        1.8435473233948618
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": -0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_168_a0.95_df+0.20_dQ+0.00",
+      "theory": "beyond_Kerr_df+0.20_dQ+0.00",
+      "f_hz": 466.6312691887271,
+      "tau_s": 0.0047893459626964134,
+      "Q": 7.021015312941102,
+      "phi_atlas": [
+        6.145539372319909,
+        1.948907839052688
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": 0.0,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_169_a0.95_df+0.20_dQ+0.10",
+      "theory": "beyond_Kerr_df+0.20_dQ+0.10",
+      "f_hz": 466.6312691887271,
+      "tau_s": 0.005268280558966055,
+      "Q": 7.7231168442352125,
+      "phi_atlas": [
+        6.145539372319909,
+        2.044218018857013
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": 0.1,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    },
+    {
+      "geometry_id": "bK_170_a0.95_df+0.20_dQ+0.20",
+      "theory": "beyond_Kerr_df+0.20_dQ+0.20",
+      "f_hz": 466.6312691887271,
+      "tau_s": 0.005747215155235697,
+      "Q": 8.425218375529322,
+      "phi_atlas": [
+        6.145539372319909,
+        2.131229395846643
+      ],
+      "metadata": {
+        "spin": 0.95,
+        "mode": "(2,2,0)",
+        "base_geometry": "Kerr_a0.9500_l2m2n0",
+        "delta_f_frac": 0.2,
+        "delta_Q_frac": 0.2,
+        "M_remnant_Msun": 62.0,
+        "source": "parametrized_deviation",
+        "note": "Fractional shift from Kerr GR prediction"
+      }
+    }
+  ]
+}
