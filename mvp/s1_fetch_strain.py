@@ -102,16 +102,21 @@ def _generate_synthetic_strain(
 def _fetch_gps_center(event_id: str) -> float:
     local = Path("docs/ringdown/event_metadata") / f"{event_id}_metadata.json"
     if local.exists():
+        print(f"[s1_fetch_strain] GPS lookup: reading local metadata {local}", flush=True)
         with open(local, "r", encoding="utf-8") as f:
             meta = json.load(f)
         for key in ("t_coalescence_gps", "gps", "GPS", "gpstime"):
             if key in meta:
+                print(f"[s1_fetch_strain] GPS resolved from local file: {meta[key]}", flush=True)
                 return float(meta[key])
+    print(f"[s1_fetch_strain] GPS lookup: querying GWOSC API for {event_id} ...", flush=True)
     try:
         import requests
         url = f"https://gwosc.org/api/v2/events/{event_id}"
+        print(f"[s1_fetch_strain] GET {url} (timeout=30s)", flush=True)
         resp = requests.get(url, headers={"Accept": "application/json"}, timeout=30)
         resp.raise_for_status()
+        print(f"[s1_fetch_strain] GWOSC API responded: HTTP {resp.status_code}", flush=True)
         data = resp.json()
         versions = data.get("event_versions") or data.get("versions") or []
         if versions and isinstance(versions, list):
@@ -120,17 +125,20 @@ def _fetch_gps_center(event_id: str) -> float:
             if detail_url:
                 if detail_url.startswith("/"):
                     detail_url = f"https://gwosc.org{detail_url}"
+                print(f"[s1_fetch_strain] GET {detail_url} (timeout=30s)", flush=True)
                 vresp = requests.get(detail_url, headers={"Accept": "application/json"}, timeout=30)
                 vresp.raise_for_status()
                 vdata = vresp.json()
                 for key in ("GPS", "gps", "gpstime", "gps_time"):
                     if key in vdata:
+                        print(f"[s1_fetch_strain] GPS resolved from GWOSC: {vdata[key]}", flush=True)
                         return float(vdata[key])
         for key in ("GPS", "gps", "gpstime"):
             if key in data:
+                print(f"[s1_fetch_strain] GPS resolved from GWOSC: {data[key]}", flush=True)
                 return float(data[key])
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[s1_fetch_strain] GWOSC API error: {exc}", flush=True)
     raise RuntimeError(
         f"Cannot resolve GPS center for {event_id}. "
         f"Add metadata to docs/ringdown/event_metadata/{event_id}_metadata.json"
@@ -174,9 +182,15 @@ def main() -> int:
         sample_rate_hz: float | None = None
         library_version = "unknown"
 
-        for det in detectors:
+        for i, det in enumerate(detectors, 1):
+            print(
+                f"[s1_fetch_strain] Detector {i}/{len(detectors)}: {det}",
+                flush=True,
+            )
             if args.synthetic:
+                print(f"[s1_fetch_strain] Generating synthetic strain for {det} ...", flush=True)
                 strain, sr, library_version = _generate_synthetic_strain(det, gps_start, args.duration_s)
+                print(f"[s1_fetch_strain] Synthetic OK: {det}, n={strain.size}, fs={sr}", flush=True)
             else:
                 strain, sr, library_version = _fetch_via_gwpy(
                     det,
