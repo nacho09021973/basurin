@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -66,6 +67,14 @@ def _write_timeline(out_root: Path, run_id: str, timeline: dict[str, Any]) -> No
     write_json_atomic(out_root / run_id / "pipeline_timeline.json", timeline)
 
 
+def _heartbeat(label: str, t0: float, stop: threading.Event, interval: float = 5.0) -> None:
+    """Print elapsed time every *interval* seconds while a stage runs."""
+    while not stop.wait(interval):
+        elapsed = time.time() - t0
+        mins, secs = divmod(int(elapsed), 60)
+        print(f"[pipeline] {label} ... elapsed {mins:02d}:{secs:02d}", flush=True)
+
+
 def _run_stage(
     script: str,
     args: list[str],
@@ -73,6 +82,7 @@ def _run_stage(
     out_root: Path,
     run_id: str,
     timeline: dict[str, Any],
+    stage_timeout_s: float | None = None,
 ) -> int:
     cmd = [sys.executable, str(MVP_DIR / script)] + args
     stage_started = datetime.now(timezone.utc).isoformat()
@@ -80,8 +90,30 @@ def _run_stage(
     print(f"\n{'=' * 60}")
     print(f"[pipeline] Stage: {label}")
     print(f"[pipeline] Command: {' '.join(cmd)}")
-    print(f"{'=' * 60}")
-    result = subprocess.run(cmd)
+    if stage_timeout_s is not None:
+        print(f"[pipeline] Timeout: {stage_timeout_s:.0f}s")
+    print(f"{'=' * 60}", flush=True)
+
+    stop_evt = threading.Event()
+    hb = threading.Thread(target=_heartbeat, args=(label, stage_t0, stop_evt), daemon=True)
+    hb.start()
+
+    timed_out = False
+    try:
+        proc = subprocess.Popen(cmd)
+        try:
+            proc.wait(timeout=stage_timeout_s)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            proc.kill()
+            proc.wait()
+    finally:
+        stop_evt.set()
+        hb.join(timeout=2)
+
+    returncode = proc.returncode
+    elapsed = time.time() - stage_t0
+    mins, secs = divmod(int(elapsed), 60)
 
     stage_entry = {
         "stage": label,
@@ -89,15 +121,28 @@ def _run_stage(
         "command": cmd,
         "started_utc": stage_started,
         "ended_utc": datetime.now(timezone.utc).isoformat(),
-        "duration_s": time.time() - stage_t0,
-        "returncode": result.returncode,
+        "duration_s": elapsed,
+        "returncode": returncode,
+        "timed_out": timed_out,
     }
     timeline["stages"].append(stage_entry)
     _write_timeline(out_root, run_id, timeline)
 
-    if result.returncode != 0:
-        print(f"[pipeline] ABORT: {label} failed (exit={result.returncode})", file=sys.stderr)
-    return result.returncode
+    if timed_out:
+        print(
+            f"[pipeline] TIMEOUT: {label} killed after {mins:02d}:{secs:02d} "
+            f"(limit={stage_timeout_s:.0f}s)",
+            file=sys.stderr, flush=True,
+        )
+    elif returncode != 0:
+        print(
+            f"[pipeline] ABORT: {label} failed (exit={returncode}) after {mins:02d}:{secs:02d}",
+            file=sys.stderr, flush=True,
+        )
+    else:
+        print(f"[pipeline] OK: {label} completed in {mins:02d}:{secs:02d}", flush=True)
+
+    return returncode if not timed_out else 124  # 124 = timeout convention
 
 
 def run_single_event(
@@ -111,6 +156,7 @@ def run_single_event(
     band_low: float = 150.0,
     band_high: float = 400.0,
     epsilon: float = 0.3,
+    stage_timeout_s: float | None = None,
 ) -> tuple[int, str]:
     """Run full pipeline for a single event. Returns (exit_code, run_id)."""
     out_root = resolve_out_root("runs")
@@ -141,7 +187,7 @@ def run_single_event(
     s1_args = ["--run", run_id, "--event-id", event_id, "--duration-s", str(duration_s)]
     if synthetic:
         s1_args.append("--synthetic")
-    rc = _run_stage("s1_fetch_strain.py", s1_args, "s1_fetch_strain", out_root, run_id, timeline)
+    rc = _run_stage("s1_fetch_strain.py", s1_args, "s1_fetch_strain", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, run_id, timeline)
@@ -153,7 +199,7 @@ def run_single_event(
         "--dt-start-s", str(dt_start_s),
         "--duration-s", str(window_duration_s),
     ]
-    rc = _run_stage("s2_ringdown_window.py", s2_args, "s2_ringdown_window", out_root, run_id, timeline)
+    rc = _run_stage("s2_ringdown_window.py", s2_args, "s2_ringdown_window", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, run_id, timeline)
@@ -161,7 +207,7 @@ def run_single_event(
 
     # Stage 3: Ringdown estimates
     s3_args = ["--run", run_id, "--band-low", str(band_low), "--band-high", str(band_high)]
-    rc = _run_stage("s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates", out_root, run_id, timeline)
+    rc = _run_stage("s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, run_id, timeline)
@@ -169,7 +215,7 @@ def run_single_event(
 
     # Stage 4: Geometry filter
     s4_args = ["--run", run_id, "--atlas-path", atlas_path, "--epsilon", str(epsilon)]
-    rc = _run_stage("s4_geometry_filter.py", s4_args, "s4_geometry_filter", out_root, run_id, timeline)
+    rc = _run_stage("s4_geometry_filter.py", s4_args, "s4_geometry_filter", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, run_id, timeline)
@@ -231,7 +277,7 @@ def run_multi_event(
         "--source-runs", ",".join(per_event_runs),
         "--min-coverage", str(min_coverage),
     ]
-    rc = _run_stage("s5_aggregate.py", s5_args, "s5_aggregate", out_root, agg_run_id, timeline)
+    rc = _run_stage("s5_aggregate.py", s5_args, "s5_aggregate", out_root, agg_run_id, timeline, kwargs.get("stage_timeout_s"))
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, agg_run_id, timeline)
@@ -263,6 +309,10 @@ def main() -> int:
     sp_single.add_argument("--band-low", type=float, default=150.0)
     sp_single.add_argument("--band-high", type=float, default=400.0)
     sp_single.add_argument("--epsilon", type=float, default=0.3)
+    sp_single.add_argument(
+        "--stage-timeout-s", type=float, default=None,
+        help="Kill a stage if it exceeds this many seconds (default: no limit)",
+    )
 
     # Multi event
     sp_multi = sub.add_parser("multi", help="Run pipeline for multiple events + aggregate")
@@ -277,6 +327,10 @@ def main() -> int:
     sp_multi.add_argument("--band-low", type=float, default=150.0)
     sp_multi.add_argument("--band-high", type=float, default=400.0)
     sp_multi.add_argument("--epsilon", type=float, default=0.3)
+    sp_multi.add_argument(
+        "--stage-timeout-s", type=float, default=None,
+        help="Kill a stage if it exceeds this many seconds (default: no limit)",
+    )
 
     args = parser.parse_args()
 
@@ -292,6 +346,7 @@ def main() -> int:
             band_low=args.band_low,
             band_high=args.band_high,
             epsilon=args.epsilon,
+            stage_timeout_s=args.stage_timeout_s,
         )
         return rc
 
@@ -309,6 +364,7 @@ def main() -> int:
             band_low=args.band_low,
             band_high=args.band_high,
             epsilon=args.epsilon,
+            stage_timeout_s=args.stage_timeout_s,
         )
         return rc
 
