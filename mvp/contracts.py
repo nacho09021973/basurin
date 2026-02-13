@@ -120,6 +120,18 @@ CONTRACTS: dict[str, StageContract] = {
         upstream_stages=[],  # Checks source runs, not same-run upstream
         check_run_valid=False,  # Creates its own RUN_VALID
     ),
+    "s6_information_geometry": StageContract(
+        name="s6_information_geometry",
+        required_inputs=[
+            "s3_ringdown_estimates/outputs/estimates.json",
+            "s4_geometry_filter/outputs/compatible_set.json",
+        ],
+        produced_outputs=[
+            "outputs/curvature.json",
+            "outputs/metric_diagnostics.json",
+        ],
+        upstream_stages=["s3_ringdown_estimates", "s4_geometry_filter"],
+    ),
 }
 
 
