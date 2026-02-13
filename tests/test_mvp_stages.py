@@ -126,7 +126,7 @@ class TestS1FetchStrain:
         assert npz["H1"].size > 0
 
     def test_local_hdf5_mode_produces_contract(self, tmp_path):
-        """s1 --local-hdf5 writes inputs copy + strain/provenance with local source."""
+        """s1 --local-hdf5 writes inputs copy + strain/provenance with local_hdf5 source."""
         h5py = pytest.importorskip("h5py")
 
         runs_root = tmp_path / "runs"
@@ -170,7 +170,9 @@ class TestS1FetchStrain:
         prov_path = stage_dir / "outputs" / "provenance.json"
         assert prov_path.exists()
         prov = json.loads(prov_path.read_text(encoding="utf-8"))
-        assert prov["source"] == "local"
+        assert prov["source"] == "local_hdf5"
+        assert set(prov["local_inputs"].keys()) == {"H1", "L1"}
+        assert set(prov["local_input_sha256"].keys()) == {"H1", "L1"}
         assert (stage_dir / "inputs" / local_h1.name).exists()
         assert (stage_dir / "inputs" / local_l1.name).exists()
 
