@@ -62,13 +62,39 @@ def _create_run_valid(out_root: Path, run_id: str) -> None:
     print(f"[pipeline] RUN_VALID created for {run_id}")
 
 
-def _run_stage(script: str, args: list[str], label: str) -> int:
+def _write_timeline(out_root: Path, run_id: str, timeline: dict[str, Any]) -> None:
+    write_json_atomic(out_root / run_id / "pipeline_timeline.json", timeline)
+
+
+def _run_stage(
+    script: str,
+    args: list[str],
+    label: str,
+    out_root: Path,
+    run_id: str,
+    timeline: dict[str, Any],
+) -> int:
     cmd = [sys.executable, str(MVP_DIR / script)] + args
+    stage_started = datetime.now(timezone.utc).isoformat()
+    stage_t0 = time.time()
     print(f"\n{'=' * 60}")
     print(f"[pipeline] Stage: {label}")
     print(f"[pipeline] Command: {' '.join(cmd)}")
     print(f"{'=' * 60}")
     result = subprocess.run(cmd)
+
+    stage_entry = {
+        "stage": label,
+        "script": script,
+        "command": cmd,
+        "started_utc": stage_started,
+        "ended_utc": datetime.now(timezone.utc).isoformat(),
+        "duration_s": time.time() - stage_t0,
+        "returncode": result.returncode,
+    }
+    timeline["stages"].append(stage_entry)
+    _write_timeline(out_root, run_id, timeline)
+
     if result.returncode != 0:
         print(f"[pipeline] ABORT: {label} failed (exit={result.returncode})", file=sys.stderr)
     return result.returncode
@@ -98,12 +124,27 @@ def run_single_event(
 
     _create_run_valid(out_root, run_id)
 
+    timeline: dict[str, Any] = {
+        "schema_version": "mvp_pipeline_timeline_v1",
+        "run_id": run_id,
+        "mode": "single",
+        "started_utc": datetime.now(timezone.utc).isoformat(),
+        "ended_utc": None,
+        "event_id": event_id,
+        "atlas_path": atlas_path,
+        "synthetic": synthetic,
+        "stages": [],
+    }
+    _write_timeline(out_root, run_id, timeline)
+
     # Stage 1: Fetch strain
     s1_args = ["--run", run_id, "--event-id", event_id, "--duration-s", str(duration_s)]
     if synthetic:
         s1_args.append("--synthetic")
-    rc = _run_stage("s1_fetch_strain.py", s1_args, "s1_fetch_strain")
+    rc = _run_stage("s1_fetch_strain.py", s1_args, "s1_fetch_strain", out_root, run_id, timeline)
     if rc != 0:
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
         return rc, run_id
 
     # Stage 2: Ringdown window
@@ -112,21 +153,30 @@ def run_single_event(
         "--dt-start-s", str(dt_start_s),
         "--duration-s", str(window_duration_s),
     ]
-    rc = _run_stage("s2_ringdown_window.py", s2_args, "s2_ringdown_window")
+    rc = _run_stage("s2_ringdown_window.py", s2_args, "s2_ringdown_window", out_root, run_id, timeline)
     if rc != 0:
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
         return rc, run_id
 
     # Stage 3: Ringdown estimates
     s3_args = ["--run", run_id, "--band-low", str(band_low), "--band-high", str(band_high)]
-    rc = _run_stage("s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates")
+    rc = _run_stage("s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates", out_root, run_id, timeline)
     if rc != 0:
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
         return rc, run_id
 
     # Stage 4: Geometry filter
     s4_args = ["--run", run_id, "--atlas-path", atlas_path, "--epsilon", str(epsilon)]
-    rc = _run_stage("s4_geometry_filter.py", s4_args, "s4_geometry_filter")
+    rc = _run_stage("s4_geometry_filter.py", s4_args, "s4_geometry_filter", out_root, run_id, timeline)
     if rc != 0:
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
         return rc, run_id
+
+    timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+    _write_timeline(out_root, run_id, timeline)
 
     print(f"\n[pipeline] Single-event pipeline COMPLETE: run_id={run_id}")
     return 0, run_id
@@ -143,9 +193,26 @@ def run_multi_event(
     if agg_run_id is None:
         agg_run_id = f"mvp_aggregate_{_ts()}"
 
+    out_root = resolve_out_root("runs")
+
     print(f"\n[pipeline] Starting multi-event pipeline")
     print(f"[pipeline] events={events}")
     print(f"[pipeline] aggregate_run={agg_run_id}")
+
+    _create_run_valid(out_root, agg_run_id)
+
+    timeline: dict[str, Any] = {
+        "schema_version": "mvp_pipeline_timeline_v1",
+        "run_id": agg_run_id,
+        "mode": "multi",
+        "started_utc": datetime.now(timezone.utc).isoformat(),
+        "ended_utc": None,
+        "events": events,
+        "atlas_path": atlas_path,
+        "synthetic": bool(kwargs.get("synthetic", False)),
+        "stages": [],
+    }
+    _write_timeline(out_root, agg_run_id, timeline)
 
     per_event_runs: list[str] = []
 
@@ -153,6 +220,8 @@ def run_multi_event(
         rc, run_id = run_single_event(event_id=event_id, atlas_path=atlas_path, **kwargs)
         if rc != 0:
             print(f"[pipeline] ABORT: event {event_id} failed", file=sys.stderr)
+            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+            _write_timeline(out_root, agg_run_id, timeline)
             return rc, agg_run_id
         per_event_runs.append(run_id)
 
@@ -162,9 +231,14 @@ def run_multi_event(
         "--source-runs", ",".join(per_event_runs),
         "--min-coverage", str(min_coverage),
     ]
-    rc = _run_stage("s5_aggregate.py", s5_args, "s5_aggregate")
+    rc = _run_stage("s5_aggregate.py", s5_args, "s5_aggregate", out_root, agg_run_id, timeline)
     if rc != 0:
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, agg_run_id, timeline)
         return rc, agg_run_id
+
+    timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+    _write_timeline(out_root, agg_run_id, timeline)
 
     print(f"\n[pipeline] Multi-event pipeline COMPLETE: agg_run={agg_run_id}")
     print(f"[pipeline] Per-event runs: {per_event_runs}")
