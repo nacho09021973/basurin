@@ -164,6 +164,19 @@ def _parse_local_hdf5_args(items: list[str]) -> dict[str, Path]:
     return local_by_det
 
 
+def _find_strain_dataset(h5: Any) -> Any:
+    if "strain/Strain" in h5:
+        return h5["strain/Strain"]
+    if "strain" in h5 and hasattr(h5["strain"], "shape"):
+        return h5["strain"]
+
+    for key in h5:
+        obj = h5[key]
+        if hasattr(obj, "keys") and "strain/Strain" in obj:
+            return obj["strain/Strain"]
+    raise ValueError("missing strain dataset: expected 'strain/Strain' (possibly nested) or 'strain'")
+
+
 def _load_local_hdf5(path: Path) -> tuple[np.ndarray, float, float | None, str]:
     try:
         import h5py
@@ -171,12 +184,10 @@ def _load_local_hdf5(path: Path) -> tuple[np.ndarray, float, float | None, str]:
         raise RuntimeError("h5py not installed; required for --local-hdf5 mode") from exc
 
     with h5py.File(path, "r") as h5:
-        if "strain/Strain" in h5:
-            ds = h5["strain/Strain"]
-        elif "strain" in h5 and hasattr(h5["strain"], "shape"):
-            ds = h5["strain"]
-        else:
-            raise ValueError(f"Unsupported HDF5 structure in {path}: missing strain/Strain dataset")
+        try:
+            ds = _find_strain_dataset(h5)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported HDF5 structure in {path}: {exc}") from exc
 
         values = np.asarray(ds[...], dtype=np.float64)
         if values.ndim != 1 or values.size == 0:
@@ -234,10 +245,10 @@ def _try_reuse(
         print(f"[s1_fetch_strain] reuse: detectors mismatch ({prov_dets} != {sorted(detectors)})", flush=True)
         return False
     if local_input_sha is not None:
-        if prov.get("source") != "local":
-            print("[s1_fetch_strain] reuse: source mismatch (expected local)", flush=True)
+        if prov.get("source") != "local_hdf5":
+            print("[s1_fetch_strain] reuse: source mismatch (expected local_hdf5)", flush=True)
             return False
-        if prov.get("sha256_local_files", {}) != local_input_sha:
+        if prov.get("local_input_sha256", {}) != local_input_sha:
             print("[s1_fetch_strain] reuse: local input SHA mismatch, will fetch", flush=True)
             return False
 
@@ -279,7 +290,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=f"MVP {STAGE}: fetch GWOSC strain")
     ap.add_argument("--run", required=True)
     ap.add_argument("--event-id", default="GW150914")
-    ap.add_argument("--detectors", default="H1,L1")
+    ap.add_argument("--detectors", default=None)
     ap.add_argument("--duration-s", type=float, default=32.0)
     ap.add_argument(
         "--fetch-timeout-s",
@@ -304,12 +315,17 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    detectors = [d.strip().upper() for d in args.detectors.split(",") if d.strip()]
+    detectors = [d.strip().upper() for d in (args.detectors or "").split(",") if d.strip()]
+
+    local_by_det = _parse_local_hdf5_args(args.local_hdf5)
+    if local_by_det and not detectors:
+        detectors = sorted(local_by_det.keys())
+    if not detectors:
+        detectors = ["H1", "L1"]
     if not detectors:
         print("ERROR: --detectors is empty", file=sys.stderr)
         raise SystemExit(2)
 
-    local_by_det = _parse_local_hdf5_args(args.local_hdf5)
     if local_by_det and args.synthetic:
         print("ERROR: --local-hdf5 cannot be used with --synthetic", file=sys.stderr)
         raise SystemExit(2)
@@ -405,18 +421,18 @@ def main() -> int:
 
         provenance = {
             "event_id": args.event_id,
-            "source": "local" if local_by_det else ("synthetic" if args.synthetic else "GWOSC"),
+            "source": "local_hdf5" if local_by_det else ("synthetic" if args.synthetic else "GWOSC"),
             "detectors": detectors, "gps_center": gps_center,
             "gps_start": gps_start, "duration_s": args.duration_s,
             "sample_rate_hz": sample_rate_hz, "library_version": library_version,
             "sha256_per_detector": sha_by_det, "timestamp": utc_now_iso(),
         }
         if local_by_det:
-            provenance["local_files"] = {
+            provenance["local_inputs"] = {
                 det: f"inputs/{local_by_det[det].name}" for det in detectors
             }
-            provenance["sha256_local_files"] = {
-                det: sha256_file(ctx.stage_dir / provenance["local_files"][det]) for det in detectors
+            provenance["local_input_sha256"] = {
+                det: sha256_file(ctx.stage_dir / provenance["local_inputs"][det]) for det in detectors
             }
         prov_path = ctx.outputs_dir / "provenance.json"
         write_json_atomic(prov_path, provenance)
