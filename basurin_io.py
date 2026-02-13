@@ -168,10 +168,18 @@ def write_manifest(
     of artifact labels to their string representations (Paths → str).
     *extra* fields are merged at the top level.
     """
+    artifact_strings = {k: str(v) for k, v in artifacts.items()}
+    artifact_hashes: dict[str, str] = {}
+    for label, value in artifacts.items():
+        path = Path(value)
+        if path.is_file():
+            artifact_hashes[label] = sha256_file(path)
+
     payload: dict[str, Any] = {
         "schema_version": "mvp_manifest_v1",
         "created": utc_now_iso(),
-        "artifacts": {k: str(v) for k, v in artifacts.items()},
+        "artifacts": artifact_strings,
+        "hashes": artifact_hashes,
     }
     if extra:
         payload.update(extra)

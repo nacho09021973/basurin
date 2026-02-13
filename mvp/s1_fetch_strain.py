@@ -86,7 +86,7 @@ def _generate_synthetic_strain(
     detector: str, gps_start: float, duration_s: float,
     fs: float = 4096.0, f0: float = 251.0, tau: float = 0.004,
 ) -> tuple[np.ndarray, float, str]:
-    seed = 42 + hash(detector)
+    seed = int.from_bytes(hashlib.sha256(detector.encode("utf-8")).digest()[:8], "little")
     rng = np.random.default_rng(seed)
     n = int(fs * duration_s)
     t = np.arange(n) / fs
