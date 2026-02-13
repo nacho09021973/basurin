@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""MVP Stage 3: Estimate ringdown observables (f, tau, Q) per event.
+
+CLI:
+    python mvp/s3_ringdown_estimates.py --run <run_id> \
+        [--band-low 150] [--band-high 400]
+
+Inputs:  runs/<run>/s2_ringdown_window/outputs/{H1,L1}_rd.npz
+Outputs: runs/<run>/s3_ringdown_estimates/outputs/estimates.json
+
+Method: Hilbert-envelope analysis (bandpass → analytic signal → f from phase, τ from envelope decay).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import sys
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+_here = Path(__file__).resolve()
+for _cand in [_here.parents[0], _here.parents[1]]:
+    if (_cand / "basurin_io.py").exists():
+        if str(_cand) not in sys.path:
+            sys.path.insert(0, str(_cand))
+        break
+
+from mvp.contracts import init_stage, check_inputs, finalize, abort
+from basurin_io import write_json_atomic
+
+STAGE = "s3_ringdown_estimates"
+
+
+def estimate_ringdown_observables(
+    strain: np.ndarray, fs: float,
+    band_low: float = 150.0, band_high: float = 400.0,
+) -> dict[str, float]:
+    """Estimate f, tau, Q from a ringdown strain segment via Hilbert envelope."""
+    from scipy.signal import butter, sosfilt, hilbert
+
+    n = strain.size
+    if n < 16:
+        raise ValueError(f"Strain too short: {n} samples")
+
+    nyquist = fs / 2.0
+    if band_high >= nyquist:
+        band_high = nyquist * 0.95
+    if band_low >= band_high:
+        raise ValueError(f"Invalid band: [{band_low}, {band_high}] Hz")
+
+    sos = butter(4, [band_low, band_high], btype="band", fs=fs, output="sos")
+    filtered = sosfilt(sos, strain)
+
+    analytic = hilbert(filtered)
+    envelope = np.abs(analytic)
+    inst_phase = np.unwrap(np.angle(analytic))
+
+    inst_freq = np.diff(inst_phase) * fs / (2.0 * np.pi)
+    valid_mask = (inst_freq > band_low * 0.8) & (inst_freq < band_high * 1.2)
+    if np.sum(valid_mask) < 3:
+        raise ValueError("Insufficient valid frequency samples")
+    f_hz = float(np.median(inst_freq[valid_mask]))
+
+    peak_idx = int(np.argmax(envelope))
+    snr_peak = float(envelope[peak_idx] / (np.std(envelope[:max(1, peak_idx // 2)]) + 1e-30))
+
+    noise_floor = np.median(envelope) * 0.1 + 1e-30
+    fit_mask = (np.arange(n) >= peak_idx) & (envelope > noise_floor)
+    fit_indices = np.flatnonzero(fit_mask)
+    if fit_indices.size < 5:
+        raise ValueError(f"Insufficient samples for tau fit: {fit_indices.size}")
+
+    t_fit = fit_indices.astype(float) / fs
+    log_env = np.log(envelope[fit_indices])
+    coeffs = np.polyfit(t_fit - t_fit[0], log_env, 1)
+    gamma = -coeffs[0]
+
+    if gamma <= 0:
+        raise ValueError(f"Non-decaying signal: gamma={gamma:.4f}")
+
+    tau_s = 1.0 / gamma
+    Q = math.pi * f_hz * tau_s
+    if Q <= 0 or not math.isfinite(Q):
+        raise ValueError(f"Invalid Q={Q:.4f}")
+
+    return {"f_hz": f_hz, "tau_s": tau_s, "Q": Q, "snr_peak": snr_peak}
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=f"MVP {STAGE}: estimate f, tau, Q")
+    ap.add_argument("--run", required=True)
+    ap.add_argument("--band-low", type=float, default=150.0)
+    ap.add_argument("--band-high", type=float, default=400.0)
+    args = ap.parse_args()
+
+    ctx = init_stage(args.run, STAGE, params={
+        "band_low_hz": args.band_low, "band_high_hz": args.band_high,
+        "method": "hilbert_envelope",
+    })
+
+    # Discover detector files
+    upstream_dir = ctx.run_dir / "s2_ringdown_window" / "outputs"
+    det_files: dict[str, Path] = {}
+    for cand in ("H1_rd.npz", "L1_rd.npz", "V1_rd.npz"):
+        p = upstream_dir / cand
+        if p.exists():
+            det_files[cand.split("_")[0]] = p
+    if not det_files:
+        abort(ctx, f"No detector files in {upstream_dir}")
+
+    check_inputs(ctx, det_files)
+
+    # Load window metadata
+    wm_path = upstream_dir / "window_meta.json"
+    window_meta: dict[str, Any] = {}
+    if wm_path.exists():
+        with open(wm_path, "r", encoding="utf-8") as f:
+            window_meta = json.load(f)
+
+    try:
+        per_detector: dict[str, Any] = {}
+        valid: list[dict[str, float]] = []
+
+        for det, path in det_files.items():
+            data = np.load(path)
+            strain = np.asarray(data["strain"], dtype=np.float64)
+            fs = float(np.asarray(data["sample_rate_hz"]).flat[0])
+            if strain.ndim != 1 or not np.all(np.isfinite(strain)):
+                abort(ctx, f"{det}: invalid strain")
+            try:
+                est = estimate_ringdown_observables(strain, fs, args.band_low, args.band_high)
+                per_detector[det] = est
+                valid.append(est)
+            except ValueError as exc:
+                per_detector[det] = {"error": str(exc)}
+
+        if not valid:
+            abort(ctx, "No detector produced a valid estimate")
+
+        weights = np.array([e.get("snr_peak", 1.0) for e in valid])
+        weights = weights / weights.sum()
+        combined_f = float(sum(w * e["f_hz"] for w, e in zip(weights, valid)))
+        combined_tau = float(sum(w * e["tau_s"] for w, e in zip(weights, valid)))
+        combined_Q = math.pi * combined_f * combined_tau
+
+        estimates = {
+            "schema_version": "mvp_estimates_v1",
+            "event_id": window_meta.get("event_id", "unknown"),
+            "method": "hilbert_envelope",
+            "band_hz": [args.band_low, args.band_high],
+            "combined": {"f_hz": combined_f, "tau_s": combined_tau, "Q": combined_Q},
+            "per_detector": per_detector,
+            "n_detectors_valid": len(valid),
+        }
+        est_path = ctx.outputs_dir / "estimates.json"
+        write_json_atomic(est_path, estimates)
+
+        finalize(ctx, artifacts={"estimates": est_path},
+                 results=estimates["combined"])
+        return 0
+
+    except SystemExit:
+        raise
+    except Exception as exc:
+        abort(ctx, str(exc))
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

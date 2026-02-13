@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""MVP Stage 2: Crop ringdown window from full strain.
+
+CLI:
+    python mvp/s2_ringdown_window.py --run <run_id> --event-id GW150914 \
+        [--dt-start-s 0.003] [--duration-s 0.06]
+
+Inputs:  runs/<run>/s1_fetch_strain/outputs/strain.npz
+Outputs: runs/<run>/s2_ringdown_window/outputs/{H1,L1}_rd.npz + window_meta.json
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+_here = Path(__file__).resolve()
+for _cand in [_here.parents[0], _here.parents[1]]:
+    if (_cand / "basurin_io.py").exists():
+        if str(_cand) not in sys.path:
+            sys.path.insert(0, str(_cand))
+        break
+
+from mvp.contracts import init_stage, check_inputs, finalize, abort
+from basurin_io import write_json_atomic
+
+STAGE = "s2_ringdown_window"
+
+
+def _resolve_t0_gps(event_id: str, window_catalog_path: Path) -> tuple[float, str]:
+    if window_catalog_path.exists():
+        with open(window_catalog_path, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+        for w in catalog.get("windows", []):
+            if isinstance(w, dict) and w.get("event_id") == event_id:
+                t0_ref = w.get("t0_ref", {})
+                if "value_gps" in t0_ref:
+                    return float(t0_ref["value_gps"]), str(window_catalog_path)
+    meta_path = Path("docs/ringdown/event_metadata") / f"{event_id}_metadata.json"
+    if meta_path.exists():
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        for key in ("t_coalescence_gps", "t0_ref_gps", "GPS"):
+            if key in meta:
+                return float(meta[key]), str(meta_path)
+    raise RuntimeError(f"Cannot resolve t0_gps for {event_id}")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=f"MVP {STAGE}: crop ringdown window")
+    ap.add_argument("--run", required=True)
+    ap.add_argument("--event-id", default="GW150914")
+    ap.add_argument("--dt-start-s", type=float, default=0.003)
+    ap.add_argument("--duration-s", type=float, default=0.06)
+    ap.add_argument("--window-catalog", default="docs/ringdown/window_catalog_v1.json")
+    args = ap.parse_args()
+
+    ctx = init_stage(args.run, STAGE, params={
+        "event_id": args.event_id, "dt_start_s": args.dt_start_s,
+        "duration_s": args.duration_s, "window_catalog": args.window_catalog,
+    })
+
+    strain_path = ctx.run_dir / "s1_fetch_strain" / "outputs" / "strain.npz"
+    check_inputs(ctx, {"strain_npz": strain_path})
+
+    try:
+        t0_gps, t0_source = _resolve_t0_gps(args.event_id, Path(args.window_catalog))
+        t_start_gps = t0_gps + args.dt_start_s
+        t_end_gps = t_start_gps + args.duration_s
+
+        data = np.load(strain_path)
+        gps_start = float(np.asarray(data["gps_start"]).flat[0])
+        fs = float(np.asarray(data["sample_rate_hz"]).flat[0])
+        if fs <= 0:
+            abort(ctx, f"Invalid sample_rate_hz: {fs}")
+        if args.duration_s <= 0:
+            abort(ctx, f"Invalid duration_s: {args.duration_s}")
+
+        detectors = [k for k in data.files if k in ("H1", "L1", "V1")]
+        if not detectors:
+            abort(ctx, "No detector arrays found in strain.npz")
+
+        artifacts: dict[str, Path] = {}
+        n_out = 0
+        for det in detectors:
+            strain = np.asarray(data[det], dtype=np.float64)
+            if strain.ndim != 1:
+                abort(ctx, f"{det} strain is not 1-D: shape={strain.shape}")
+            if not np.all(np.isfinite(strain)):
+                abort(ctx, f"{det} strain contains NaN/Inf")
+
+            i_start = int(round((t_start_gps - gps_start) * fs))
+            n_out = int(round(args.duration_s * fs))
+            i_end = i_start + n_out
+            if i_start < 0 or i_end > strain.size:
+                abort(ctx, f"Window out of range for {det}: i_start={i_start}, i_end={i_end}, n={strain.size}")
+
+            out_path = ctx.outputs_dir / f"{det}_rd.npz"
+            np.savez(out_path, strain=strain[i_start:i_end].copy(),
+                     gps_start=np.float64(t_start_gps), duration_s=np.float64(args.duration_s),
+                     sample_rate_hz=np.float64(fs))
+            artifacts[f"{det}_rd"] = out_path
+
+        window_meta = {
+            "event_id": args.event_id, "t0_gps": t0_gps, "t0_source": t0_source,
+            "dt_start_s": args.dt_start_s, "duration_s": args.duration_s,
+            "t_start_gps": t_start_gps, "t_end_gps": t_end_gps,
+            "sample_rate_hz": fs, "detectors": detectors, "n_samples": n_out,
+        }
+        meta_path = ctx.outputs_dir / "window_meta.json"
+        write_json_atomic(meta_path, window_meta)
+        artifacts["window_meta"] = meta_path
+
+        finalize(ctx, artifacts, results=window_meta)
+        return 0
+
+    except SystemExit:
+        raise
+    except Exception as exc:
+        abort(ctx, str(exc))
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

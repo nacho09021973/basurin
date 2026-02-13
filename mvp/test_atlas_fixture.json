@@ -1,0 +1,26 @@
+{
+  "schema_version": "mvp_atlas_v1",
+  "description": "Test atlas with 20 synthetic geometries spanning (f, Q) space around GW150914-like values.",
+  "entries": [
+    {"geometry_id": "geo_001", "f_hz": 220.0, "Q": 2.5, "metadata": {"family": "kerr", "chi": 0.0}},
+    {"geometry_id": "geo_002", "f_hz": 230.0, "Q": 3.0, "metadata": {"family": "kerr", "chi": 0.1}},
+    {"geometry_id": "geo_003", "f_hz": 240.0, "Q": 3.5, "metadata": {"family": "kerr", "chi": 0.2}},
+    {"geometry_id": "geo_004", "f_hz": 250.0, "Q": 4.0, "metadata": {"family": "kerr", "chi": 0.3}},
+    {"geometry_id": "geo_005", "f_hz": 251.0, "Q": 4.2, "metadata": {"family": "kerr", "chi": 0.32}},
+    {"geometry_id": "geo_006", "f_hz": 255.0, "Q": 4.5, "metadata": {"family": "kerr", "chi": 0.35}},
+    {"geometry_id": "geo_007", "f_hz": 260.0, "Q": 5.0, "metadata": {"family": "kerr", "chi": 0.4}},
+    {"geometry_id": "geo_008", "f_hz": 270.0, "Q": 5.5, "metadata": {"family": "kerr", "chi": 0.5}},
+    {"geometry_id": "geo_009", "f_hz": 280.0, "Q": 6.0, "metadata": {"family": "kerr", "chi": 0.55}},
+    {"geometry_id": "geo_010", "f_hz": 300.0, "Q": 7.0, "metadata": {"family": "kerr", "chi": 0.65}},
+    {"geometry_id": "geo_011", "f_hz": 200.0, "Q": 2.0, "metadata": {"family": "ads_dw", "delta": 1.5}},
+    {"geometry_id": "geo_012", "f_hz": 235.0, "Q": 3.2, "metadata": {"family": "ads_dw", "delta": 2.0}},
+    {"geometry_id": "geo_013", "f_hz": 248.0, "Q": 3.9, "metadata": {"family": "ads_dw", "delta": 2.5}},
+    {"geometry_id": "geo_014", "f_hz": 252.0, "Q": 4.1, "metadata": {"family": "ads_dw", "delta": 2.6}},
+    {"geometry_id": "geo_015", "f_hz": 258.0, "Q": 4.6, "metadata": {"family": "ads_dw", "delta": 2.8}},
+    {"geometry_id": "geo_016", "f_hz": 275.0, "Q": 5.8, "metadata": {"family": "ads_dw", "delta": 3.0}},
+    {"geometry_id": "geo_017", "f_hz": 310.0, "Q": 8.0, "metadata": {"family": "exotic", "type": "wormhole"}},
+    {"geometry_id": "geo_018", "f_hz": 350.0, "Q": 12.0, "metadata": {"family": "exotic", "type": "gravastar"}},
+    {"geometry_id": "geo_019", "f_hz": 180.0, "Q": 1.5, "metadata": {"family": "exotic", "type": "boson_star"}},
+    {"geometry_id": "geo_020", "f_hz": 400.0, "Q": 15.0, "metadata": {"family": "exotic", "type": "firewall"}}
+  ]
+}
