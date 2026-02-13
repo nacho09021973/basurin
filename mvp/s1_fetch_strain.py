@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import json
 import signal
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -145,7 +146,57 @@ def _fetch_gps_center(event_id: str) -> float:
     )
 
 
-def _try_reuse(ctx, event_id: str, detectors: list[str], duration_s: float) -> bool:
+def _parse_local_hdf5_args(items: list[str]) -> dict[str, Path]:
+    local_by_det: dict[str, Path] = {}
+    for item in items:
+        det_raw, sep, path_raw = item.partition("=")
+        det = det_raw.strip().upper()
+        path = Path(path_raw.strip())
+        if not sep:
+            raise ValueError(f"Invalid --local-hdf5 entry '{item}'. Expected DET=PATH")
+        if det not in {"H1", "L1"}:
+            raise ValueError(f"Invalid detector in --local-hdf5: {det}. Allowed: H1,L1")
+        if det in local_by_det:
+            raise ValueError(f"Duplicate --local-hdf5 detector: {det}")
+        if not path.exists() or not path.is_file():
+            raise ValueError(f"--local-hdf5 path for {det} not found or not a file: {path}")
+        local_by_det[det] = path
+    return local_by_det
+
+
+def _load_local_hdf5(path: Path) -> tuple[np.ndarray, float, float | None, str]:
+    try:
+        import h5py
+    except ImportError as exc:
+        raise RuntimeError("h5py not installed; required for --local-hdf5 mode") from exc
+
+    with h5py.File(path, "r") as h5:
+        if "strain/Strain" in h5:
+            ds = h5["strain/Strain"]
+        elif "strain" in h5 and hasattr(h5["strain"], "shape"):
+            ds = h5["strain"]
+        else:
+            raise ValueError(f"Unsupported HDF5 structure in {path}: missing strain/Strain dataset")
+
+        values = np.asarray(ds[...], dtype=np.float64)
+        if values.ndim != 1 or values.size == 0:
+            raise ValueError(f"Invalid strain shape in {path}: {values.shape}")
+
+        xspacing = ds.attrs.get("Xspacing")
+        if xspacing is None:
+            raise ValueError(f"Missing Xspacing attr in {path} strain dataset")
+        xstart = ds.attrs.get("Xstart")
+        gps_start = float(xstart) if xstart is not None else None
+    return values, float(1.0 / float(xspacing)), gps_start, "h5py"
+
+
+def _try_reuse(
+    ctx,
+    event_id: str,
+    detectors: list[str],
+    duration_s: float,
+    local_input_sha: dict[str, str] | None = None,
+) -> bool:
     """Return True if existing outputs match params and pass hash validation.
 
     Checks:
@@ -182,6 +233,13 @@ def _try_reuse(ctx, event_id: str, detectors: list[str], duration_s: float) -> b
     if prov_dets != sorted(detectors):
         print(f"[s1_fetch_strain] reuse: detectors mismatch ({prov_dets} != {sorted(detectors)})", flush=True)
         return False
+    if local_input_sha is not None:
+        if prov.get("source") != "local":
+            print("[s1_fetch_strain] reuse: source mismatch (expected local)", flush=True)
+            return False
+        if prov.get("sha256_local_files", {}) != local_input_sha:
+            print("[s1_fetch_strain] reuse: local input SHA mismatch, will fetch", flush=True)
+            return False
 
     # Validate npz contents and hashes
     try:
@@ -231,6 +289,13 @@ def main() -> int:
     )
     ap.add_argument("--synthetic", action="store_true")
     ap.add_argument(
+        "--local-hdf5",
+        action="append",
+        default=[],
+        metavar="DET=PATH",
+        help="Use local/offline HDF5 strain per detector (repeatable, e.g. H1=/tmp/H.hdf5)",
+    )
+    ap.add_argument(
         "--reuse-if-present",
         action="store_true",
         default=False,
@@ -244,15 +309,29 @@ def main() -> int:
         print("ERROR: --detectors is empty", file=sys.stderr)
         raise SystemExit(2)
 
+    local_by_det = _parse_local_hdf5_args(args.local_hdf5)
+    if local_by_det and args.synthetic:
+        print("ERROR: --local-hdf5 cannot be used with --synthetic", file=sys.stderr)
+        raise SystemExit(2)
+    if local_by_det and sorted(local_by_det.keys()) != sorted(detectors):
+        print(
+            "ERROR: --detectors must match exactly detectors provided by --local-hdf5",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+    local_input_sha = {det: sha256_file(path) for det, path in sorted(local_by_det.items())} if local_by_det else None
+
     ctx = init_stage(args.run, STAGE, params={
         "event_id": args.event_id, "detectors": detectors,
         "duration_s": args.duration_s, "synthetic": args.synthetic,
+        "local_hdf5": {det: str(path) for det, path in sorted(local_by_det.items())},
     })
 
     # --- Reuse check (before any network / generation) ---
     if args.reuse_if_present:
         try:
-            if _try_reuse(ctx, args.event_id, detectors, args.duration_s):
+            if _try_reuse(ctx, args.event_id, detectors, args.duration_s, local_input_sha=local_input_sha):
                 return 0
         except SystemExit:
             raise
@@ -260,11 +339,15 @@ def main() -> int:
             print(f"[s1_fetch_strain] reuse check failed ({exc}), proceeding with fetch", flush=True)
 
     try:
-        if args.synthetic:
+        if local_by_det:
+            gps_center = None
+            gps_start = None
+        elif args.synthetic:
             gps_center = 1126259462.4204
         else:
             gps_center = _fetch_gps_center(args.event_id)
-        gps_start = gps_center - args.duration_s / 2.0
+        if gps_center is not None:
+            gps_start = gps_center - args.duration_s / 2.0
 
         strains: dict[str, np.ndarray] = {}
         sha_by_det: dict[str, str] = {}
@@ -280,6 +363,17 @@ def main() -> int:
                 print(f"[s1_fetch_strain] Generating synthetic strain for {det} ...", flush=True)
                 strain, sr, library_version = _generate_synthetic_strain(det, gps_start, args.duration_s)
                 print(f"[s1_fetch_strain] Synthetic OK: {det}, n={strain.size}, fs={sr}", flush=True)
+            elif local_by_det:
+                inputs_dir = ctx.stage_dir / "inputs"
+                inputs_dir.mkdir(parents=True, exist_ok=True)
+                src = local_by_det[det]
+                dst = inputs_dir / src.name
+                shutil.copy2(src, dst)
+                strain, sr, gps_start_local, library_version = _load_local_hdf5(dst)
+                if gps_start is None and gps_start_local is not None:
+                    gps_start = gps_start_local
+                    gps_center = gps_start + args.duration_s / 2.0
+                print(f"[s1_fetch_strain] Local HDF5 OK: {det}, n={strain.size}, fs={sr}", flush=True)
             else:
                 strain, sr, library_version = _fetch_via_gwpy(
                     det,
@@ -296,6 +390,8 @@ def main() -> int:
 
         if sample_rate_hz is None:
             abort(ctx, "no strain downloaded")
+        if gps_start is None:
+            gps_start = 0.0
 
         npz_payload: dict[str, Any] = {
             "sample_rate_hz": np.float64(sample_rate_hz),
@@ -309,12 +405,19 @@ def main() -> int:
 
         provenance = {
             "event_id": args.event_id,
-            "source": "synthetic" if args.synthetic else "GWOSC",
+            "source": "local" if local_by_det else ("synthetic" if args.synthetic else "GWOSC"),
             "detectors": detectors, "gps_center": gps_center,
             "gps_start": gps_start, "duration_s": args.duration_s,
             "sample_rate_hz": sample_rate_hz, "library_version": library_version,
             "sha256_per_detector": sha_by_det, "timestamp": utc_now_iso(),
         }
+        if local_by_det:
+            provenance["local_files"] = {
+                det: f"inputs/{local_by_det[det].name}" for det in detectors
+            }
+            provenance["sha256_local_files"] = {
+                det: sha256_file(ctx.stage_dir / provenance["local_files"][det]) for det in detectors
+            }
         prov_path = ctx.outputs_dir / "provenance.json"
         write_json_atomic(prov_path, provenance)
 
