@@ -37,8 +37,14 @@ STAGE = "s3_ringdown_estimates"
 def estimate_ringdown_observables(
     strain: np.ndarray, fs: float,
     band_low: float = 150.0, band_high: float = 400.0,
-) -> dict[str, float]:
-    """Estimate f, tau, Q from a ringdown strain segment via Hilbert envelope."""
+) -> dict[str, Any]:
+    """Estimate f, tau, Q from a ringdown strain segment via Hilbert envelope.
+
+    Returns point estimates and uncertainty fields:
+      f_hz, tau_s, Q, snr_peak          – point estimates (unchanged)
+      sigma_f_hz, sigma_tau_s, sigma_Q   – 1-sigma uncertainties
+      cov_logf_logQ                      – covariance in (ln f, ln Q) space
+    """
     from scipy.signal import butter, sosfilt, hilbert
 
     n = strain.size
@@ -64,6 +70,11 @@ def estimate_ringdown_observables(
         raise ValueError("Insufficient valid frequency samples")
     f_hz = float(np.median(inst_freq[valid_mask]))
 
+    # Robust frequency dispersion: MAD → sigma
+    freq_valid = inst_freq[valid_mask]
+    mad_f = float(np.median(np.abs(freq_valid - np.median(freq_valid))))
+    sigma_f_hz = mad_f * 1.4826  # MAD-to-sigma conversion factor
+
     peak_idx = int(np.argmax(envelope))
     snr_peak = float(envelope[peak_idx] / (np.std(envelope[:max(1, peak_idx // 2)]) + 1e-30))
 
@@ -75,8 +86,9 @@ def estimate_ringdown_observables(
 
     t_fit = fit_indices.astype(float) / fs
     log_env = np.log(envelope[fit_indices])
-    coeffs = np.polyfit(t_fit - t_fit[0], log_env, 1)
+    coeffs, cov = np.polyfit(t_fit - t_fit[0], log_env, 1, cov=True)
     gamma = -coeffs[0]
+    var_gamma = float(cov[0, 0])
 
     if gamma <= 0:
         raise ValueError(f"Non-decaying signal: gamma={gamma:.4f}")
@@ -86,7 +98,32 @@ def estimate_ringdown_observables(
     if Q <= 0 or not math.isfinite(Q):
         raise ValueError(f"Invalid Q={Q:.4f}")
 
-    return {"f_hz": f_hz, "tau_s": tau_s, "Q": Q, "snr_peak": snr_peak}
+    # --- Uncertainty propagation ---
+    # tau = 1/gamma  =>  sigma_tau = sigma_gamma / gamma^2
+    sigma_gamma = math.sqrt(var_gamma)
+    sigma_tau_s = sigma_gamma / (gamma * gamma)
+
+    # Q = pi * f * tau, assuming independence of f and tau:
+    #   var_Q = (pi*tau)^2 * var_f + (pi*f)^2 * var_tau
+    var_Q = (math.pi * tau_s) ** 2 * sigma_f_hz ** 2 \
+          + (math.pi * f_hz) ** 2 * sigma_tau_s ** 2
+    sigma_Q = math.sqrt(var_Q)
+
+    # Log-space covariance for (ln f, ln Q):
+    #   sigma_logf = sigma_f / f
+    #   sigma_logQ = sigma_Q / Q
+    #   cov(logf, logQ) ≈ 0  (independence assumption; valid as first gate)
+    sigma_logf = sigma_f_hz / f_hz if f_hz > 0 else 0.0
+    sigma_logQ = sigma_Q / Q if Q > 0 else 0.0
+    cov_logf_logQ = 0.0  # independence assumption
+
+    return {
+        "f_hz": f_hz, "tau_s": tau_s, "Q": Q, "snr_peak": snr_peak,
+        "sigma_f_hz": sigma_f_hz,
+        "sigma_tau_s": sigma_tau_s,
+        "sigma_Q": sigma_Q,
+        "cov_logf_logQ": cov_logf_logQ,
+    }
 
 
 def main() -> int:
@@ -146,12 +183,43 @@ def main() -> int:
         combined_tau = float(sum(w * e["tau_s"] for w, e in zip(weights, valid)))
         combined_Q = math.pi * combined_f * combined_tau
 
+        # Combined uncertainties: propagate per-detector variances through
+        # the SNR-weighted average (var_comb = sum(w_i^2 * var_i))
+        var_f_comb = float(sum(
+            w ** 2 * e.get("sigma_f_hz", 0.0) ** 2
+            for w, e in zip(weights, valid)
+        ))
+        var_tau_comb = float(sum(
+            w ** 2 * e.get("sigma_tau_s", 0.0) ** 2
+            for w, e in zip(weights, valid)
+        ))
+        sigma_f_comb = math.sqrt(var_f_comb)
+        sigma_tau_comb = math.sqrt(var_tau_comb)
+
+        # Q = pi * f * tau  =>  var_Q = (pi*tau)^2 var_f + (pi*f)^2 var_tau
+        var_Q_comb = (math.pi * combined_tau) ** 2 * var_f_comb \
+                   + (math.pi * combined_f) ** 2 * var_tau_comb
+        sigma_Q_comb = math.sqrt(var_Q_comb)
+
+        # Log-space covariance matrix for downstream (s4 Paso 2)
+        sigma_logf = sigma_f_comb / combined_f if combined_f > 0 else 0.0
+        sigma_logQ = sigma_Q_comb / combined_Q if combined_Q > 0 else 0.0
+        cov_logf_logQ = 0.0  # independence assumption
+
         estimates = {
             "schema_version": "mvp_estimates_v1",
             "event_id": window_meta.get("event_id", "unknown"),
             "method": "hilbert_envelope",
             "band_hz": [args.band_low, args.band_high],
             "combined": {"f_hz": combined_f, "tau_s": combined_tau, "Q": combined_Q},
+            "combined_uncertainty": {
+                "sigma_f_hz": sigma_f_comb,
+                "sigma_tau_s": sigma_tau_comb,
+                "sigma_Q": sigma_Q_comb,
+                "cov_logf_logQ": cov_logf_logQ,
+                "sigma_logf": sigma_logf,
+                "sigma_logQ": sigma_logQ,
+            },
             "per_detector": per_detector,
             "n_detectors_valid": len(valid),
         }
