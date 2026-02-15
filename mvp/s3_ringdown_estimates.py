@@ -126,16 +126,112 @@ def estimate_ringdown_observables(
     }
 
 
+def bootstrap_ringdown_observables(
+    strain: np.ndarray,
+    fs: float,
+    band_low: float,
+    band_high: float,
+    n_bootstrap: int = 200,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Block bootstrap resampling to estimate uncertainties of (f, tau, Q).
+
+    Method: block bootstrap with blocks of ~1 oscillation cycle.
+    Resamples blocks of the strain with replacement, re-estimates observables.
+    Reports median and std.
+
+    Returns dict with:
+        f_hz_median, f_hz_std, tau_s_median, tau_s_std, Q_median, Q_std,
+        n_successful, n_failed, block_size,
+        samples: {f_hz: [...], tau_s: [...], Q: [...]}
+    """
+    rng = np.random.default_rng(seed=seed)
+
+    # (a) Initial estimate for block size calculation
+    initial = estimate_ringdown_observables(strain, fs, band_low, band_high)
+    f_estimate = initial["f_hz"]
+
+    # (b) Block size ~ 1 oscillation cycle
+    block_size = max(16, int(fs / f_estimate))
+    n = len(strain)
+    n_blocks = n // block_size
+
+    _empty_result = {
+        "f_hz_median": float("nan"), "f_hz_std": float("nan"),
+        "tau_s_median": float("nan"), "tau_s_std": float("nan"),
+        "Q_median": float("nan"), "Q_std": float("nan"),
+        "n_successful": 0, "n_failed": 0, "block_size": block_size,
+        "samples": {"f_hz": [], "tau_s": [], "Q": []},
+    }
+    if n_blocks == 0:
+        return _empty_result
+
+    # Number of blocks to draw so concatenated length >= n
+    n_blocks_resample = -(-n // block_size)  # ceil(n / block_size)
+
+    samples_f: list[float] = []
+    samples_tau: list[float] = []
+    samples_Q: list[float] = []
+    n_failed = 0
+
+    # (c) Bootstrap iterations
+    for _ in range(n_bootstrap):
+        chosen = rng.integers(0, n_blocks, size=n_blocks_resample)
+        resampled = np.concatenate(
+            [strain[i * block_size:(i + 1) * block_size] for i in chosen]
+        )[:n]
+
+        try:
+            est = estimate_ringdown_observables(resampled, fs, band_low, band_high)
+            samples_f.append(est["f_hz"])
+            samples_tau.append(est["tau_s"])
+            samples_Q.append(est["Q"])
+        except ValueError:
+            n_failed += 1
+
+    n_successful = len(samples_f)
+
+    # (d) If too few successful, report NaN
+    if n_successful < 10:
+        _empty_result["n_successful"] = n_successful
+        _empty_result["n_failed"] = n_failed
+        return _empty_result
+
+    # (e) Median and std of bootstrap distributions
+    arr_f = np.array(samples_f)
+    arr_tau = np.array(samples_tau)
+    arr_Q = np.array(samples_Q)
+
+    return {
+        "f_hz_median": float(np.median(arr_f)),
+        "f_hz_std": float(np.std(arr_f)),
+        "tau_s_median": float(np.median(arr_tau)),
+        "tau_s_std": float(np.std(arr_tau)),
+        "Q_median": float(np.median(arr_Q)),
+        "Q_std": float(np.std(arr_Q)),
+        "n_successful": n_successful,
+        "n_failed": n_failed,
+        "block_size": block_size,
+        "samples": {
+            "f_hz": [float(x) for x in samples_f],
+            "tau_s": [float(x) for x in samples_tau],
+            "Q": [float(x) for x in samples_Q],
+        },
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=f"MVP {STAGE}: estimate f, tau, Q")
     ap.add_argument("--run", required=True)
     ap.add_argument("--band-low", type=float, default=150.0)
     ap.add_argument("--band-high", type=float, default=400.0)
+    ap.add_argument("--n-bootstrap", type=int, default=200,
+                    help="Number of bootstrap resamples for uncertainty estimation (0=skip)")
     args = ap.parse_args()
 
     ctx = init_stage(args.run, STAGE, params={
         "band_low_hz": args.band_low, "band_high_hz": args.band_high,
-        "method": "hilbert_envelope",
+        "method": "hilbert_envelope", "n_bootstrap": args.n_bootstrap,
     })
 
     # Discover detector files
@@ -170,7 +266,29 @@ def main() -> int:
             try:
                 est = estimate_ringdown_observables(strain, fs, args.band_low, args.band_high)
                 per_detector[det] = est
-                valid.append(est)
+
+                # Bootstrap uncertainty estimation
+                if args.n_bootstrap > 0:
+                    boot = bootstrap_ringdown_observables(
+                        strain, fs, args.band_low, args.band_high,
+                        n_bootstrap=args.n_bootstrap,
+                    )
+                    _bstd_f = boot["f_hz_std"]
+                    _bstd_tau = boot["tau_s_std"]
+                    _bstd_Q = boot["Q_std"]
+                    per_detector[det]["uncertainty"] = {
+                        "method": "block_bootstrap",
+                        "n_bootstrap": args.n_bootstrap,
+                        "n_successful": boot["n_successful"],
+                        "n_failed": boot["n_failed"],
+                        "block_size": boot["block_size"],
+                        "f_hz_std": _bstd_f if math.isfinite(_bstd_f) else None,
+                        "tau_s_std": _bstd_tau if math.isfinite(_bstd_tau) else None,
+                        "Q_std": _bstd_Q if math.isfinite(_bstd_Q) else None,
+                    }
+                    per_detector[det]["bootstrap_samples"] = boot["samples"]
+
+                valid.append(per_detector[det])
             except ValueError as exc:
                 per_detector[det] = {"error": str(exc)}
 
@@ -183,8 +301,8 @@ def main() -> int:
         combined_tau = float(sum(w * e["tau_s"] for w, e in zip(weights, valid)))
         combined_Q = math.pi * combined_f * combined_tau
 
-        # Combined uncertainties: propagate per-detector variances through
-        # the SNR-weighted average (var_comb = sum(w_i^2 * var_i))
+        # Combined uncertainties (analytic): propagate per-detector variances
+        # through the SNR-weighted average (var_comb = sum(w_i^2 * var_i))
         var_f_comb = float(sum(
             w ** 2 * e.get("sigma_f_hz", 0.0) ** 2
             for w, e in zip(weights, valid)
@@ -206,12 +324,51 @@ def main() -> int:
         sigma_logQ = sigma_Q_comb / combined_Q if combined_Q > 0 else 0.0
         cov_logf_logQ = 0.0  # independence assumption
 
-        estimates = {
-            "schema_version": "mvp_estimates_v1",
+        # Build combined dict with bootstrap uncertainties if available
+        combined_dict: dict[str, Any] = {
+            "f_hz": combined_f, "tau_s": combined_tau, "Q": combined_Q,
+        }
+        if args.n_bootstrap > 0:
+            # Propagate per-detector bootstrap stds via SNR weights
+            boot_var_f = 0.0
+            boot_var_tau = 0.0
+            boot_var_Q = 0.0
+            any_valid_boot = False
+            for w, e in zip(weights, valid):
+                unc = e.get("uncertainty", {})
+                std_f = unc.get("f_hz_std")
+                if std_f is not None and math.isfinite(std_f):
+                    boot_var_f += w ** 2 * std_f ** 2
+                    boot_var_tau += w ** 2 * unc["tau_s_std"] ** 2
+                    boot_var_Q += w ** 2 * unc["Q_std"] ** 2
+                    any_valid_boot = True
+
+            if any_valid_boot:
+                combined_sigma_f = math.sqrt(boot_var_f)
+                combined_sigma_tau = math.sqrt(boot_var_tau)
+                combined_sigma_Q = math.sqrt(boot_var_Q)
+                combined_dict["sigma_f_hz"] = combined_sigma_f
+                combined_dict["sigma_tau_s"] = combined_sigma_tau
+                combined_dict["sigma_Q"] = combined_sigma_Q
+                combined_dict["sigma_log_f"] = (
+                    combined_sigma_f / combined_f if combined_f > 0 else None
+                )
+                combined_dict["sigma_log_Q"] = (
+                    combined_sigma_Q / combined_Q if combined_Q > 0 else None
+                )
+            else:
+                combined_dict["sigma_f_hz"] = None
+                combined_dict["sigma_tau_s"] = None
+                combined_dict["sigma_Q"] = None
+                combined_dict["sigma_log_f"] = None
+                combined_dict["sigma_log_Q"] = None
+
+        estimates: dict[str, Any] = {
+            "schema_version": "mvp_estimates_v2",
             "event_id": window_meta.get("event_id", "unknown"),
             "method": "hilbert_envelope",
             "band_hz": [args.band_low, args.band_high],
-            "combined": {"f_hz": combined_f, "tau_s": combined_tau, "Q": combined_Q},
+            "combined": combined_dict,
             "combined_uncertainty": {
                 "sigma_f_hz": sigma_f_comb,
                 "sigma_tau_s": sigma_tau_comb,
@@ -223,6 +380,11 @@ def main() -> int:
             "per_detector": per_detector,
             "n_detectors_valid": len(valid),
         }
+        if args.n_bootstrap > 0:
+            estimates["bootstrap"] = {
+                "n_requested": args.n_bootstrap,
+                "method": "block_bootstrap",
+            }
         est_path = ctx.outputs_dir / "estimates.json"
         write_json_atomic(est_path, estimates)
 
