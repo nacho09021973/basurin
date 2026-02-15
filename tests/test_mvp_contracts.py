@@ -38,7 +38,8 @@ from mvp.contracts import (
 
 class TestContractRegistry:
     EXPECTED_STAGES = {"s1_fetch_strain", "s2_ringdown_window", "s3_ringdown_estimates",
-                       "s4_geometry_filter", "s5_aggregate", "s6_information_geometry"}
+                       "s4_geometry_filter", "s4b_spectral_curvature", "s5_aggregate",
+                       "s6_information_geometry"}
 
     def test_all_stages_registered(self):
         """Every MVP stage has a contract entry."""
