@@ -26,6 +26,8 @@ from basurin_io import write_json_atomic
 
 STAGE = "s4_geometry_filter"
 CHI2_2DOF_95 = 5.991
+CHI2_2DOF_95_AUDIT = 5.9915
+CHI2_2DOF_997_AUDIT = 11.6183
 _UNSET = object()
 
 
@@ -157,6 +159,147 @@ def _validate_mahalanobis_params(params: dict[str, Any]) -> None:
             break
 
 
+def _resolve_fixed_theta_row(
+    ranked_rows: list[dict[str, Any]],
+    fixed_theta0: str | int | dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if fixed_theta0 is None:
+        return None
+
+    if isinstance(fixed_theta0, int):
+        if 0 <= fixed_theta0 < len(ranked_rows):
+            return ranked_rows[fixed_theta0]
+        return None
+
+    if isinstance(fixed_theta0, str):
+        for row in ranked_rows:
+            if row.get("geometry_id") == fixed_theta0:
+                return row
+        return None
+
+    if isinstance(fixed_theta0, dict):
+        gid = fixed_theta0.get("geometry_id")
+        if isinstance(gid, str):
+            for row in ranked_rows:
+                if row.get("geometry_id") == gid:
+                    return row
+    return None
+
+
+def _add_mahalanobis_audit_fields(
+    out: dict[str, Any],
+    *,
+    fixed_theta0: str | int | dict[str, Any] | None = None,
+    theta0_source: str | None = None,
+) -> None:
+    ranked_rows = out.get("ranked_all")
+    if not isinstance(ranked_rows, list):
+        out["atlas_posterior"] = None
+        out["chi2_fixed_theta"] = None
+        return
+
+    prior_type = "uniform_entries"
+    n_rows = len(ranked_rows)
+    prior_weight_default = (1.0 / n_rows) if n_rows > 0 else 0.0
+
+    valid_rows: list[dict[str, Any]] = []
+    for row in ranked_rows:
+        d2_val = row.get("d2")
+        if d2_val is None:
+            dist = row.get("distance")
+            if isinstance(dist, (int, float)) and math.isfinite(dist):
+                d2_val = float(dist) * float(dist)
+
+        if isinstance(d2_val, (int, float)) and math.isfinite(d2_val) and d2_val >= 0.0:
+            d2_float = float(d2_val)
+            row["d2"] = d2_float
+            row["log_likelihood_rel"] = -0.5 * d2_float
+            row["prior_weight"] = prior_weight_default
+            valid_rows.append(row)
+        else:
+            row["d2"] = row.get("d2") if isinstance(row.get("d2"), (int, float)) else None
+            row["log_likelihood_rel"] = None
+            row["prior_weight"] = prior_weight_default
+            row["delta_lnL"] = None
+            row["posterior_weight"] = 0.0
+
+    if valid_rows:
+        d2_min = out.get("d2_min")
+        if not (isinstance(d2_min, (int, float)) and math.isfinite(d2_min) and d2_min >= 0.0):
+            d2_min = min(row["d2"] for row in valid_rows)
+            out["d2_min"] = d2_min
+
+        max_ll = max(row["log_likelihood_rel"] for row in valid_rows)
+        raw_weights: list[float] = []
+        for row in valid_rows:
+            lw = row["log_likelihood_rel"] - max_ll
+            w = math.exp(lw) * row["prior_weight"]
+            raw_weights.append(w)
+
+        norm = sum(raw_weights)
+        if norm > 0.0:
+            for row, w in zip(valid_rows, raw_weights):
+                row["posterior_weight"] = w / norm
+                row["delta_lnL"] = -0.5 * (row["d2"] - d2_min)
+        else:
+            for row in valid_rows:
+                row["posterior_weight"] = 0.0
+                row["delta_lnL"] = -0.5 * (row["d2"] - d2_min)
+
+        posterior_sum = sum(float(row.get("posterior_weight", 0.0)) for row in ranked_rows)
+        if abs(posterior_sum - 1.0) > 1e-9 and norm > 0.0:
+            for row in ranked_rows:
+                row["posterior_weight"] = float(row.get("posterior_weight", 0.0)) / posterior_sum
+
+        best_entry_id = ranked_rows[0].get("geometry_id") if ranked_rows else None
+        out["atlas_posterior"] = {
+            "prior_type": prior_type,
+            "normalization": "relative_only",
+            "best_entry_id": best_entry_id,
+            "log_likelihood_rel_best": -0.5 * float(d2_min),
+            "d2_min": d2_min,
+            "chi2_interpretation": "min_over_atlas_not_chi2",
+        }
+    else:
+        out["atlas_posterior"] = {
+            "prior_type": prior_type,
+            "normalization": "relative_only",
+            "best_entry_id": ranked_rows[0].get("geometry_id") if ranked_rows else None,
+            "log_likelihood_rel_best": None,
+            "d2_min": out.get("d2_min"),
+            "chi2_interpretation": "min_over_atlas_not_chi2",
+        }
+
+    if fixed_theta0 is None:
+        out["chi2_fixed_theta"] = None
+        return
+
+    theta_row = _resolve_fixed_theta_row(ranked_rows, fixed_theta0)
+    theta_d2 = theta_row.get("d2") if isinstance(theta_row, dict) else None
+    if not (isinstance(theta_d2, (int, float)) and math.isfinite(theta_d2) and theta_d2 >= 0.0):
+        out["chi2_fixed_theta"] = None
+        return
+
+    p_value = math.exp(-0.5 * float(theta_d2))
+    if theta_d2 <= CHI2_2DOF_95_AUDIT:
+        classification = "compatible"
+    elif theta_d2 >= CHI2_2DOF_997_AUDIT:
+        classification = "excluded"
+    else:
+        classification = "tension"
+
+    out["chi2_fixed_theta"] = {
+        "dof": 2,
+        "d2": float(theta_d2),
+        "p_value": p_value,
+        "classification": classification,
+        "compatible_95": CHI2_2DOF_95_AUDIT,
+        "excluded_strong": CHI2_2DOF_997_AUDIT,
+        "chi2_interpretation": "fixed_theta_valid",
+        "theta0_source": theta0_source or "unspecified",
+    }
+
+
 def compute_compatible_set(
     f_obs: float,
     Q_obs: float,
@@ -169,6 +312,8 @@ def compute_compatible_set(
     sigma_logf: float | object = _UNSET,
     sigma_logQ: float | object = _UNSET,
     cov_logf_logQ: float | object = _UNSET,
+    fixed_theta0: str | int | dict[str, Any] | None = None,
+    theta0_source: str | None = None,
 ) -> dict[str, Any]:
     del legacy_labels  # kept for compatibility with older callers
 
@@ -309,6 +454,7 @@ def compute_compatible_set(
         out["d2_min"] = d2_min
         out["distance"] = distance
         out["covariance_logspace"] = _coerce_covariance_for_output(params)
+        _add_mahalanobis_audit_fields(out, fixed_theta0=fixed_theta0, theta0_source=theta0_source)
 
     return out
 
