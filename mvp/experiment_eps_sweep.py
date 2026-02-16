@@ -109,6 +109,7 @@ def run_eps_sweep(
             "n_compatible": result["n_compatible"],
             "n_atlas": result["n_atlas"],
             "bits_excluded": round(result["bits_excluded"], 4),
+            "bits_kl": round(float(result.get("bits_kl", 0.0)), 4),
             "closest_geometry_id": closest["geometry_id"] if closest else None,
             "closest_distance": round(closest["distance"], 6) if closest else None,
         })
@@ -116,6 +117,8 @@ def run_eps_sweep(
 
     # ── Sweep summary ────────────────────────────────────────────────
     summary = {
+        "metric": metric,
+        "metric_params": dict(metric_params or {}),
         "schema_version": "mvp_eps_sweep_v1",
         "experiment_tag": EXPERIMENT_TAG,
         "created": utc_now_iso(),

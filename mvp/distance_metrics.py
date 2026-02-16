@@ -1,48 +1,53 @@
-<<<<<<< HEAD
-=======
-"""Distance metrics and information measures for QNM observable space.
+"""Distance metrics for QNM observable space.
 
-Metrics
--------
-1. **euclidean_log** (current default):
-   d = sqrt[(ln f_obs - ln f_th)² + (ln Q_obs - ln Q_th)²]
-   Assumes isotropic, uncorrelated errors.  Simple but naive.
+This module is intentionally small and dependency-free (stdlib only).
 
-2. **mahalanobis_log** (Fisher-informed):
-   d² = 1/(1-r²) * [(Δf/σ_f)² + (ΔQ/σ_Q)² - 2r·(Δf/σ_f)·(ΔQ/σ_Q)]
-   where Δf = ln f_obs - ln f_th,  ΔQ = ln Q_obs - ln Q_th,
-   σ_f, σ_Q are fractional uncertainties, and r is the f-Q correlation.
+Metrics operate in **log-space**: (ln f, ln Q).
 
-   The correlation r ≈ 0.9 comes from the Fisher information matrix of a
-   damped sinusoid in Gaussian noise (Berti et al. 2006).  The elliptical
-   iso-distance contours capture the physical fact that f and Q are strongly
-   correlated in ringdown parameter estimation.
+Provided metrics
+----------------
+- euclidean_log: Euclidean distance in (ln f, ln Q)
+- mahalanobis_log: Mahalanobis distance in (ln f, ln Q) with optional
+  correlation between ln f and ln Q.
 
-Information measure
--------------------
-**kl_bits(distances)** — KL divergence D_KL(posterior ‖ prior) in bits.
+Compatibility / aliasing
+------------------------
+The project historically used several parameter names.  To keep the
+public API stable, `mahalanobis_log` accepts both modern names
+(sigma_lnf, sigma_lnQ, r) and legacy aliases (sigma_logf, sigma_logQ,
+correlation/rho/corr_logf_logQ, cov_logf_logQ).
 
-The old measure log₂(N/n) assumes a uniform prior and a hard binary cut
-at epsilon.  KL divergence instead uses the *full* distance distribution:
-
-    L(gᵢ) ∝ exp(−dᵢ²/2)        (Gaussian likelihood from distance)
-    P(gᵢ|data) = L(gᵢ) / Z     (posterior)
-    P(gᵢ) = 1/N                 (uniform prior)
-    D_KL = Σᵢ P(gᵢ|data) · log₂[ P(gᵢ|data) / P(gᵢ) ]
-
-This is epsilon-independent, uses the full ranking, and naturally handles
-the Mahalanobis metric (where d is already in σ units, so exp(−d²/2) is
-the proper Gaussian likelihood).
-
-References:
-  - Berti, Cardoso & Will (2006) PRD 73, 064030 (Fisher matrix for ringdown)
-  - Gemini research compilation for BASURIN (2025)
+All validation is "fail-fast": invalid covariance inputs raise
+ValueError("Non-invertible covariance: ...").
 """
->>>>>>> 362cb04 (Add KL divergence (bits_kl) as epsilon-independent information measure)
+
 from __future__ import annotations
 
 import math
-from typing import Any, Callable
+from typing import Callable, Dict, Optional
+
+MetricFn = Callable[..., float]
+
+# ---------------------------------------------------------------------------
+# Public defaults (imported by tests / callers)
+# ---------------------------------------------------------------------------
+
+DEFAULT_SIGMA_LNF: float = 0.07
+DEFAULT_SIGMA_LNQ: float = 0.25
+DEFAULT_CORRELATION: float = 0.90
+
+
+def _as_float(x: object, *, name: str) -> float:
+    try:
+        v = float(x)  # type: ignore[arg-type]
+    except Exception as e:  # pragma: no cover
+        raise ValueError(f"Non-invertible covariance: {name} must be a float") from e
+    return v
+
+
+def _require_finite_positive(v: float, *, name: str) -> None:
+    if not math.isfinite(v) or v <= 0.0:
+        raise ValueError(f"Non-invertible covariance: {name} must be finite and > 0")
 
 
 def euclidean_log(
@@ -50,19 +55,12 @@ def euclidean_log(
     lnQ_obs: float,
     lnf_atlas: float,
     lnQ_atlas: float,
-    **_: Any,
+    **_: object,
 ) -> float:
-    """Euclidean distance in (ln f, ln Q)."""
-    dlnf = lnf_obs - lnf_atlas
-    dlnQ = lnQ_obs - lnQ_atlas
-    return math.sqrt(dlnf * dlnf + dlnQ * dlnQ)
-
-
-def _pick_first(params: dict[str, Any], *keys: str) -> Any:
-    for key in keys:
-        if key in params and params[key] is not None:
-            return params[key]
-    return None
+    """Euclidean distance in (ln f, ln Q) space."""
+    d0 = lnf_obs - lnf_atlas
+    d1 = lnQ_obs - lnQ_atlas
+    return math.hypot(d0, d1)
 
 
 def mahalanobis_log(
@@ -71,155 +69,110 @@ def mahalanobis_log(
     lnf_atlas: float,
     lnQ_atlas: float,
     *,
-    sigma_lnf: float | None = None,
-    sigma_lnQ: float | None = None,
-    r: float | None = None,
-    **kwargs: Any,
+    sigma_lnf: Optional[float] = None,
+    sigma_lnQ: Optional[float] = None,
+    r: Optional[float] = None,
+    # legacy/alternate aliases (accepted via **kwargs from callers)
+    sigma_logf: Optional[float] = None,
+    sigma_logQ: Optional[float] = None,
+    rho: Optional[float] = None,
+    correlation: Optional[float] = None,
+    corr_logf_logQ: Optional[float] = None,
+    cov_logf_logQ: Optional[float] = None,
+    **_: object,
 ) -> float:
-    """Mahalanobis distance in (ln f, ln Q), returning d (not d²).
+    """Mahalanobis distance in (ln f, ln Q). Returns d (not d²)."""
 
-    Supported aliases:
-    - sigma_lnf / sigma_logf
-    - sigma_lnQ / sigma_logQ
-    - r / rho / correlation / corr_logf_logQ
-    - cov_logf_logQ (converted to r = cov/(sigma_lnf*sigma_lnQ))
-    """
-    params = dict(kwargs)
+    # --- normalize sigmas ---------------------------------------------------
+    if sigma_lnf is None:
+        sigma_lnf = sigma_logf
+    if sigma_lnQ is None:
+        sigma_lnQ = sigma_logQ
 
-    sigma_lnf = sigma_lnf if sigma_lnf is not None else _pick_first(params, "sigma_lnf", "sigma_logf")
-    sigma_lnQ = sigma_lnQ if sigma_lnQ is not None else _pick_first(params, "sigma_lnQ", "sigma_logQ")
-    r = r if r is not None else _pick_first(params, "r", "rho", "correlation", "corr_logf_logQ")
+    if sigma_lnf is None:
+        sigma_lnf = DEFAULT_SIGMA_LNF
+    if sigma_lnQ is None:
+        sigma_lnQ = DEFAULT_SIGMA_LNQ
 
-    cov = _pick_first(params, "cov_logf_logQ")
+    sigma_lnf = _as_float(sigma_lnf, name="sigma_logf")
+    sigma_lnQ = _as_float(sigma_lnQ, name="sigma_logQ")
+    _require_finite_positive(sigma_lnf, name="sigma_logf")
+    _require_finite_positive(sigma_lnQ, name="sigma_logQ")
 
-    if sigma_lnf is None or sigma_lnQ is None:
-        raise ValueError("Non-invertible covariance: sigma_lnf and sigma_lnQ are required")
+    # --- normalize correlation / covariance --------------------------------
+    if r is None:
+        r = correlation if correlation is not None else rho
+    if r is None and corr_logf_logQ is not None:
+        r = corr_logf_logQ
 
-    sigma_lnf = float(sigma_lnf)
-    sigma_lnQ = float(sigma_lnQ)
-
-    if not math.isfinite(sigma_lnf) or sigma_lnf <= 0:
-        raise ValueError("Non-invertible covariance: sigma_lnf must be finite and > 0")
-    if not math.isfinite(sigma_lnQ) or sigma_lnQ <= 0:
-        raise ValueError("Non-invertible covariance: sigma_lnQ must be finite and > 0")
-
-    if cov is not None:
-        cov = float(cov)
+    if cov_logf_logQ is not None:
+        cov = _as_float(cov_logf_logQ, name="cov_logf_logQ")
         if not math.isfinite(cov):
             raise ValueError("Non-invertible covariance: cov_logf_logQ must be finite")
         r = cov / (sigma_lnf * sigma_lnQ)
 
     if r is None:
-        r = 0.0
-    r = float(r)
+        r = DEFAULT_CORRELATION
+    r = _as_float(r, name="correlation")
     if not math.isfinite(r) or abs(r) >= 1.0:
         raise ValueError("Non-invertible covariance: |r| must be < 1")
 
-    dlnf = lnf_obs - lnf_atlas
-    dlnQ = lnQ_obs - lnQ_atlas
+    # --- compute d^2 via closed-form inverse of 2x2 covariance --------------
+    d0 = lnf_obs - lnf_atlas
+    d1 = lnQ_obs - lnQ_atlas
 
-    denom = 1.0 - r * r
-    d2 = (
-        (dlnf * dlnf) / (sigma_lnf * sigma_lnf)
-        + (dlnQ * dlnQ) / (sigma_lnQ * sigma_lnQ)
-        - (2.0 * r * dlnf * dlnQ) / (sigma_lnf * sigma_lnQ)
-    ) / denom
-    if d2 < 0 and d2 > -1e-12:
+    s0 = sigma_lnf
+    s1 = sigma_lnQ
+    cov = r * s0 * s1
+
+    det = (s0 * s0) * (s1 * s1) - (cov * cov)
+    if det <= 0.0 or not math.isfinite(det):
+        raise ValueError("Non-invertible covariance: det(Σ) <= 0")
+
+    inv00 = (s1 * s1) / det
+    inv11 = (s0 * s0) / det
+    inv01 = -cov / det
+
+    d2 = d0 * d0 * inv00 + 2.0 * d0 * d1 * inv01 + d1 * d1 * inv11
+    if d2 < 0.0 and d2 > -1e-15:
         d2 = 0.0
     return math.sqrt(d2)
 
 
-_METRICS: dict[str, Callable[..., float]] = {
-    "euclidean_log": euclidean_log,
-    "mahalanobis_log": mahalanobis_log,
-}
+def kl_bits(distances: list[float]) -> float:
+    """Compute KL divergence (in bits) between posterior and uniform prior."""
+    N = len(distances)
+    if N <= 1:
+        return 0.0
+
+    energies = [0.5 * float(d) * float(d) for d in distances]
+    e_min = min(energies)
+    ws = [math.exp(-(e - e_min)) for e in energies]
+    Z = sum(ws)
+    if Z <= 0.0 or not math.isfinite(Z):
+        return 0.0
+
+    invZ = 1.0 / Z
+    log2N = math.log2(N)
+    kl = 0.0
+    for w in ws:
+        q = w * invZ
+        if q <= 0.0:
+            continue
+        kl += q * (math.log2(q) + log2N)
+
+    if kl < 0.0 and kl > -1e-15:
+        kl = 0.0
+    return kl
 
 
-<<<<<<< HEAD
-def get_metric(name: str) -> Callable[..., float]:
-    try:
-        return _METRICS[name]
-    except KeyError as exc:
-        raise ValueError(f"Unsupported metric: {name}") from exc
-=======
 def get_metric(name: str) -> MetricFn:
-    """Look up a metric function by name.
-
-    Raises ValueError if not found.
-    """
     if name not in METRICS:
-        raise ValueError(f"Unknown metric {name!r}. Available: {list(METRICS)}")
+        raise ValueError(f"Unknown metric {name!r}. Available: {sorted(METRICS)}")
     return METRICS[name]
 
 
-# ---------------------------------------------------------------------------
-# Information measure: KL divergence in bits
-# ---------------------------------------------------------------------------
-
-def _logsumexp(xs: list[float]) -> float:
-    """Numerically stable log-sum-exp (avoids overflow/underflow)."""
-    if not xs:
-        return float("-inf")
-    x_max = max(xs)
-    if x_max == float("-inf"):
-        return float("-inf")
-    return x_max + math.log(sum(math.exp(x - x_max) for x in xs))
-
-
-def kl_bits(distances: list[float]) -> float:
-    """KL divergence D_KL(posterior ‖ uniform prior) in bits.
-
-    Parameters
-    ----------
-    distances : list of float
-        Non-negative distances from the observation to each atlas entry.
-
-    Returns
-    -------
-    float
-        Information gained (in bits) by observing (f, Q).
-        Always >= 0.  Returns 0.0 for empty or single-entry atlas.
-
-    Notes
-    -----
-    Likelihood:  L_i = exp(-d_i² / 2)
-    Posterior:   P_i = L_i / Z,  Z = Σ L_j
-    Prior:       Q_i = 1/N  (uniform)
-    D_KL = Σ P_i · log₂(P_i / Q_i)
-         = Σ P_i · log₂(N · P_i)
-         = log₂(N) + Σ P_i · log₂(P_i)
-         = log₂(N) - H(posterior)
-
-    So D_KL = log₂(N) minus the Shannon entropy of the posterior.
-    When the posterior concentrates on one geometry, D_KL → log₂(N).
-    When the posterior is uniform (all d equal), D_KL → 0.
-    """
-    n = len(distances)
-    if n <= 1:
-        return 0.0
-
-    # log-likelihood: log L_i = -d_i² / 2
-    log_likes = [-0.5 * d * d for d in distances]
-
-    # log Z = logsumexp(log_likes)
-    log_z = _logsumexp(log_likes)
-
-    # log posterior: log P_i = log L_i - log Z
-    # D_KL = log₂(N) + Σ P_i · log₂(P_i)
-    #       = log₂(N) + (1/ln2) · Σ P_i · ln(P_i)
-    # where ln(P_i) = log_likes[i] - log_z
-    log2_n = math.log2(n)
-    neg_entropy_nats = 0.0
-    for ll in log_likes:
-        log_p = ll - log_z  # ln P_i
-        p = math.exp(log_p)  # P_i
-        if p > 0:
-            neg_entropy_nats += p * log_p  # Σ P_i · ln(P_i)
-
-    # Convert nats → bits: divide by ln(2)
-    neg_entropy_bits = neg_entropy_nats / math.log(2)
-    kl = log2_n + neg_entropy_bits  # D_KL = log₂(N) - H(posterior)
-
-    # Guard against floating-point drift below zero
-    return max(0.0, kl)
->>>>>>> 362cb04 (Add KL divergence (bits_kl) as epsilon-independent information measure)
+METRICS: Dict[str, MetricFn] = {
+    "euclidean_log": euclidean_log,
+    "mahalanobis_log": mahalanobis_log,
+}
