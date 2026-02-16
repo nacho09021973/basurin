@@ -44,6 +44,8 @@ def run_eps_sweep(
     run_id: str,
     atlas_path: Path,
     epsilons: list[float],
+    metric: str = "euclidean_log",
+    metric_params: dict[str, Any] | None = None,
     runs_root: Path | None = None,
 ) -> dict[str, Any]:
     """Execute epsilon sweep and write all artifacts.
@@ -88,12 +90,8 @@ def run_eps_sweep(
         eps_dir.mkdir(parents=True, exist_ok=True)
 
         result = compute_compatible_set(
-            f_obs,
-            Q_obs,
-            atlas,
-            eps,
-            metric="euclidean_log",
-            metric_params={},
+            f_obs, Q_obs, atlas, eps,
+            metric=metric, metric_params=metric_params,
         )
         result["event_id"] = event_id
         result["run_id"] = run_id
@@ -176,6 +174,12 @@ def main() -> int:
         default=None,
         help="Comma-separated epsilon values (default: 0.05..0.50)",
     )
+    ap.add_argument(
+        "--metric",
+        default="euclidean_log",
+        choices=["euclidean_log", "mahalanobis_log"],
+        help="Distance metric for compute_compatible_set",
+    )
     args = ap.parse_args()
 
     atlas_path = Path(args.atlas_path)
@@ -188,7 +192,7 @@ def main() -> int:
         epsilons = DEFAULT_EPSILONS
 
     try:
-        run_eps_sweep(args.run, atlas_path, epsilons)
+        run_eps_sweep(args.run, atlas_path, epsilons, metric=args.metric)
         return 0
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
