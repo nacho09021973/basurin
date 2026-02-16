@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -68,6 +69,48 @@ def test_suggest_sigma_scale_reference_value() -> None:
 
     scale = suggest_sigma_scale(215.463, 5.991)
     assert scale == pytest.approx(5.99703649, abs=1e-3)
+
+
+def test_compute_compatible_set_adds_gaussian_likelihood_fields() -> None:
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT))
+
+    from mvp.s4_geometry_filter import compute_compatible_set
+
+    atlas = [
+        {"geometry_id": "g_best", "phi_atlas": [math.log(250.0), math.log(3.0)]},
+        {"geometry_id": "g_mid", "phi_atlas": [math.log(260.0), math.log(3.2)]},
+        {"geometry_id": "g_far", "phi_atlas": [math.log(320.0), math.log(5.0)]},
+    ]
+
+    result = compute_compatible_set(
+        250.0,
+        3.0,
+        atlas,
+        epsilon=5.991,
+        metric="mahalanobis_log",
+        metric_params={"sigma_lnf": 0.2, "sigma_lnQ": 0.5, "r": 0.0},
+    )
+
+    ranked_all = result["ranked_all"]
+    assert ranked_all, "ranked_all should not be empty"
+    assert all(row["log_likelihood"] is not None for row in ranked_all)
+    assert all(row["delta_log_likelihood"] is not None for row in ranked_all)
+
+    best_row = min(ranked_all, key=lambda row: row["d2"])
+    assert best_row["delta_log_likelihood"] == pytest.approx(0.0)
+
+    stats = result["likelihood_stats"]
+    assert stats is not None
+    assert stats["metric_type"] == "gaussian_chi2"
+    assert stats["best_geometry_id"] == best_row["geometry_id"]
+    assert stats["max_log_likelihood"] == pytest.approx(best_row["log_likelihood"])
+
+    expected_2sigma = sum(math.sqrt(row["d2"]) > 2.0 for row in ranked_all)
+    expected_3sigma = sum(math.sqrt(row["d2"]) > 3.0 for row in ranked_all)
+    assert stats["n_excluded_2sigma"] == expected_2sigma
+    assert stats["n_excluded_3sigma"] == expected_3sigma
 
 class TestEpsSweep:
     """Tests for run_eps_sweep."""
