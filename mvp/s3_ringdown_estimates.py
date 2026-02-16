@@ -324,6 +324,15 @@ def main() -> int:
         sigma_logQ = sigma_Q_comb / combined_Q if combined_Q > 0 else 0.0
         cov_logf_logQ = 0.0  # independence assumption
 
+        # Canonical (modern) aliases expected by downstream contract-first audits.
+        sigma_lnf = sigma_logf
+        sigma_lnQ = sigma_logQ
+        if sigma_logf > 0 and sigma_logQ > 0:
+            r = cov_logf_logQ / (sigma_logf * sigma_logQ)
+            r = float(max(min(r, 1.0 - 1e-12), -1.0 + 1e-12))
+        else:
+            r = 0.0
+
         # Build combined dict with bootstrap uncertainties if available
         combined_dict: dict[str, Any] = {
             "f_hz": combined_f, "tau_s": combined_tau, "Q": combined_Q,
@@ -373,9 +382,16 @@ def main() -> int:
                 "sigma_f_hz": sigma_f_comb,
                 "sigma_tau_s": sigma_tau_comb,
                 "sigma_Q": sigma_Q_comb,
+
+                # Legacy keys (kept for backward compatibility)
                 "cov_logf_logQ": cov_logf_logQ,
                 "sigma_logf": sigma_logf,
                 "sigma_logQ": sigma_logQ,
+
+                # Modern canonical keys
+                "sigma_lnf": sigma_lnf,
+                "sigma_lnQ": sigma_lnQ,
+                "r": float(r),
             },
             "per_detector": per_detector,
             "n_detectors_valid": len(valid),
