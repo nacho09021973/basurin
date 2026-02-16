@@ -229,6 +229,52 @@ def compute_compatible_set(
 
     sort_key = "d2" if metric_name == "mahalanobis_log" else "distance"
     results.sort(key=lambda row: row[sort_key])
+
+    likelihood_stats: dict[str, Any] | None = None
+    valid_likelihood_rows: list[dict[str, Any]] = []
+
+    if metric_name == "mahalanobis_log":
+        for row in results:
+            d2_val = row.get("d2")
+            if d2_val is None:
+                d2_val = row.get("mahalanobis_d2")
+            if d2_val is None:
+                distance_val = row.get("distance")
+                if isinstance(distance_val, (int, float)) and math.isfinite(distance_val):
+                    d2_val = float(distance_val) * float(distance_val)
+
+            if isinstance(d2_val, (int, float)) and math.isfinite(d2_val) and d2_val >= 0:
+                d2_float = float(d2_val)
+                row["d2"] = d2_float
+                row["log_likelihood"] = -0.5 * d2_float
+                valid_likelihood_rows.append(row)
+            else:
+                row["log_likelihood"] = None
+
+        if valid_likelihood_rows:
+            max_log_likelihood = max(row["log_likelihood"] for row in valid_likelihood_rows)
+            for row in results:
+                ll = row.get("log_likelihood")
+                row["delta_log_likelihood"] = ll - max_log_likelihood if isinstance(ll, (int, float)) else None
+
+            best_row = min(valid_likelihood_rows, key=lambda row: row["d2"])
+            n_excluded_2sigma = sum(math.sqrt(row["d2"]) > 2.0 for row in valid_likelihood_rows)
+            n_excluded_3sigma = sum(math.sqrt(row["d2"]) > 3.0 for row in valid_likelihood_rows)
+            likelihood_stats = {
+                "metric_type": "gaussian_chi2",
+                "max_log_likelihood": max_log_likelihood,
+                "best_geometry_id": best_row["geometry_id"],
+                "n_excluded_2sigma": n_excluded_2sigma,
+                "n_excluded_3sigma": n_excluded_3sigma,
+            }
+        else:
+            for row in results:
+                row["delta_log_likelihood"] = None
+    else:
+        for row in results:
+            row["log_likelihood"] = None
+            row["delta_log_likelihood"] = None
+
     compatible = [row for row in results if row["compatible"]]
 
     n_atlas = len(results)
@@ -250,6 +296,7 @@ def compute_compatible_set(
         "ranked_all": results[:50],
         "bits_excluded": bits_excluded,
         "bits_kl": bits_kl,
+        "likelihood_stats": likelihood_stats,
     }
 
     if metric_name == "mahalanobis_log":
