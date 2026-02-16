@@ -110,6 +110,53 @@ def _coerce_covariance_for_output(metric_params: dict[str, Any]) -> dict[str, fl
     }
 
 
+def _validate_mahalanobis_params(params: dict[str, Any]) -> None:
+    """Validate metric_params for mahalanobis_log (contract-first).
+
+    Raises ValueError("Non-invertible covariance: ...") when sigma values
+    are missing, non-finite, or non-positive, or when |r| >= 1.
+    """
+    sigma_lnf = params.get("sigma_lnf", params.get("sigma_logf"))
+    sigma_lnQ = params.get("sigma_lnQ", params.get("sigma_logQ"))
+
+    if sigma_lnf is None or sigma_lnQ is None:
+        raise ValueError(
+            "Non-invertible covariance: sigma_lnf and sigma_lnQ are required"
+        )
+
+    try:
+        sigma_lnf = float(sigma_lnf)
+        sigma_lnQ = float(sigma_lnQ)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Non-invertible covariance: sigma_lnf and sigma_lnQ must be numeric"
+        ) from exc
+
+    if not math.isfinite(sigma_lnf) or sigma_lnf <= 0:
+        raise ValueError(
+            f"Non-invertible covariance: sigma_lnf must be finite and > 0, got {sigma_lnf}"
+        )
+    if not math.isfinite(sigma_lnQ) or sigma_lnQ <= 0:
+        raise ValueError(
+            f"Non-invertible covariance: sigma_lnQ must be finite and > 0, got {sigma_lnQ}"
+        )
+
+    for key in ("r", "rho", "correlation", "corr_logf_logQ"):
+        r = params.get(key)
+        if r is not None:
+            try:
+                r = float(r)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "Non-invertible covariance: correlation must be numeric"
+                ) from exc
+            if not math.isfinite(r) or abs(r) >= 1.0:
+                raise ValueError(
+                    f"Non-invertible covariance: |r| must be < 1, got {r}"
+                )
+            break
+
+
 def compute_compatible_set(
     f_obs: float,
     Q_obs: float,
@@ -129,6 +176,9 @@ def compute_compatible_set(
         raise ValueError("Observed f_hz and Q must be > 0")
 
     metric_name, params = _normalize_metric(metric, metric_params, sigma_logf, sigma_logQ, cov_logf_logQ)
+
+    if metric_name == "mahalanobis_log":
+        _validate_mahalanobis_params(params)
 
     metric_fn = get_metric(metric_name)
     log_f_obs = math.log(f_obs)
@@ -249,6 +299,12 @@ def main() -> int:
         has_covariance = sigma_logf_raw is not None and sigma_logQ_raw is not None
 
         metric_name = args.metric or ("mahalanobis_log" if has_covariance else "euclidean_log")
+        if metric_name == "mahalanobis_log" and not has_covariance:
+            abort(
+                ctx,
+                "mahalanobis_log requires combined_uncertainty in s3 estimates "
+                "(sigma_logf and sigma_logQ must be present)",
+            )
         if metric_name == "mahalanobis_log":
             threshold = args.epsilon if args.epsilon is not None else CHI2_2DOF_95
             params = {
