@@ -67,10 +67,35 @@ def _resolve_mahalanobis_params(estimates: dict[str, Any], args: argparse.Namesp
     if args.correlation is not None:
         params["r"] = args.correlation
 
+    # ── Require sigmas ────────────────────────────────────────────────
     if params.get("sigma_lnf") is None or params.get("sigma_lnQ") is None:
         raise ValueError(
             "mahalanobis_log requires uncertainties: provide --sigma-lnf/--sigma-lnQ or regenerate s3 estimates with combined_uncertainty"
         )
+
+    # ── Ensure correlation is always explicit (never fall through to
+    #    DEFAULT_CORRELATION in distance_metrics) ──────────────────────
+    if "r" not in params and "cov_logf_logQ" not in params:
+        params["r"] = 0.0
+
+    # ── Validate numeric constraints ─────────────────────────────────
+    s_lnf = float(params["sigma_lnf"])
+    s_lnQ = float(params["sigma_lnQ"])
+    if not math.isfinite(s_lnf) or s_lnf <= 0:
+        raise ValueError(
+            f"Non-invertible covariance: sigma_lnf must be finite and > 0, got {s_lnf}"
+        )
+    if not math.isfinite(s_lnQ) or s_lnQ <= 0:
+        raise ValueError(
+            f"Non-invertible covariance: sigma_lnQ must be finite and > 0, got {s_lnQ}"
+        )
+    r_val = params.get("r")
+    if r_val is not None:
+        r_val = float(r_val)
+        if not math.isfinite(r_val) or abs(r_val) >= 1.0:
+            raise ValueError(
+                f"Non-invertible covariance: |r| must be < 1, got {r_val}"
+            )
 
     return params
 
@@ -246,12 +271,13 @@ def main() -> int:
         run_eps_sweep(args.run, atlas_path, epsilons, metric=args.metric, metric_params=metric_params)
         return 0
     except ValueError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        if "requires uncertainties" in str(exc):
+        msg = str(exc)
+        print(f"ERROR: [experiment_eps_sweep] {msg}", file=sys.stderr)
+        if "requires uncertainties" in msg or "Non-invertible covariance" in msg:
             return 2
         return 1
     except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        print(f"ERROR: [experiment_eps_sweep] {exc}", file=sys.stderr)
         return 1
 
 

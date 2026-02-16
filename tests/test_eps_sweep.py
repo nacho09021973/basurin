@@ -219,7 +219,7 @@ class TestEpsSweep:
         _create_run_valid(tmp_path, run_id)
         _create_s3_estimates(tmp_path, run_id, include_uncertainty=False)
 
-        env = dict(**os.environ, BASURIN_RUNS_ROOT=str(tmp_path))
+        env = {**os.environ, "BASURIN_RUNS_ROOT": str(tmp_path)}
         proc = subprocess.run(
             [
                 sys.executable,
@@ -243,7 +243,7 @@ class TestEpsSweep:
         _create_run_valid(tmp_path, run_id)
         _create_s3_estimates(tmp_path, run_id, include_uncertainty=False)
 
-        env = dict(**os.environ, BASURIN_RUNS_ROOT=str(tmp_path))
+        env = {**os.environ, "BASURIN_RUNS_ROOT": str(tmp_path)}
         proc = subprocess.run(
             [
                 sys.executable,
@@ -263,3 +263,78 @@ class TestEpsSweep:
         )
 
         assert proc.returncode == 0
+
+    def test_cli_mahalanobis_invalid_sigma_exits_2(self, tmp_path: Path) -> None:
+        """Negative sigma → exit code 2 with Non-invertible covariance message."""
+        run_id = "test_cli_mah_bad_sigma"
+        _create_run_valid(tmp_path, run_id)
+        _create_s3_estimates(tmp_path, run_id, include_uncertainty=False)
+
+        env = {**os.environ, "BASURIN_RUNS_ROOT": str(tmp_path)}
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(MVP_DIR / "experiment_eps_sweep.py"),
+                "--run", run_id,
+                "--atlas-path", str(ATLAS_FIXTURE),
+                "--metric", "mahalanobis_log",
+                "--epsilons", "0.1",
+                "--sigma-lnf", "-0.1",
+                "--sigma-lnQ", "0.5",
+            ],
+            cwd=str(REPO_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+        assert proc.returncode == 2
+        assert "Non-invertible covariance" in proc.stderr
+
+    def test_cli_mahalanobis_without_correlation_defaults_r_zero(
+        self, tmp_path: Path,
+    ) -> None:
+        """When --correlation is omitted and estimates lack it, r must be 0.0
+        in the output (not the silent DEFAULT_CORRELATION from distance_metrics).
+        """
+        run_id = "test_cli_mah_r_default"
+        _create_run_valid(tmp_path, run_id)
+        _create_s3_estimates(tmp_path, run_id, include_uncertainty=False)
+
+        env = {**os.environ, "BASURIN_RUNS_ROOT": str(tmp_path)}
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(MVP_DIR / "experiment_eps_sweep.py"),
+                "--run", run_id,
+                "--atlas-path", str(ATLAS_FIXTURE),
+                "--metric", "mahalanobis_log",
+                "--epsilons", "0.1",
+                "--sigma-lnf", "0.2",
+                "--sigma-lnQ", "0.5",
+                # No --correlation flag
+            ],
+            cwd=str(REPO_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+        assert proc.returncode == 0
+
+        # Check the output JSON has r=0.0 explicitly
+        from mvp.experiment_eps_sweep import EXPERIMENT_TAG
+
+        summary_path = (
+            tmp_path / run_id / "experiment" / EXPERIMENT_TAG / "sweep_summary.json"
+        )
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        assert summary["metric_params"]["r"] == 0.0
+
+        # Also check per-epsilon compatible_set has covariance_logspace with cov=0
+        cs_path = (
+            tmp_path / run_id / "experiment" / EXPERIMENT_TAG
+            / "eps_0.100" / "compatible_set.json"
+        )
+        cs = json.loads(cs_path.read_text(encoding="utf-8"))
+        assert cs["covariance_logspace"]["cov_logf_logQ"] == 0.0

@@ -329,6 +329,39 @@ class TestS4MetricIntegration:
         with pytest.raises(ValueError, match="sigma_lnf and sigma_lnQ are required"):
             compute_compatible_set(251.0, 4.0, atlas, 3.0, metric="mahalanobis_log")
 
+    def test_mahalanobis_zero_sigma_raises(self, atlas: list[dict]) -> None:
+        """sigma_lnf=0 is non-invertible → should fail at API level."""
+        from mvp.s4_geometry_filter import compute_compatible_set
+
+        with pytest.raises(ValueError, match="Non-invertible covariance"):
+            compute_compatible_set(
+                251.0, 4.0, atlas, 3.0,
+                metric="mahalanobis_log",
+                metric_params={"sigma_lnf": 0.0, "sigma_lnQ": 0.25, "r": 0.0},
+            )
+
+    def test_mahalanobis_negative_sigma_raises(self, atlas: list[dict]) -> None:
+        """Negative sigma → Non-invertible covariance."""
+        from mvp.s4_geometry_filter import compute_compatible_set
+
+        with pytest.raises(ValueError, match="Non-invertible covariance"):
+            compute_compatible_set(
+                251.0, 4.0, atlas, 3.0,
+                metric="mahalanobis_log",
+                metric_params={"sigma_lnf": 0.07, "sigma_lnQ": -0.1, "r": 0.0},
+            )
+
+    def test_mahalanobis_r_equals_1_raises_at_api_level(self, atlas: list[dict]) -> None:
+        """Correlation |r| >= 1 in metric_params → caught by contract validation."""
+        from mvp.s4_geometry_filter import compute_compatible_set
+
+        with pytest.raises(ValueError, match="Non-invertible covariance"):
+            compute_compatible_set(
+                251.0, 4.0, atlas, 3.0,
+                metric="mahalanobis_log",
+                metric_params={"sigma_lnf": 0.07, "sigma_lnQ": 0.25, "r": 1.0},
+            )
+
     def test_backward_compat_no_metric_arg(self, atlas: list[dict]) -> None:
         """Calling without metric= should still work (euclidean default)."""
         from mvp.s4_geometry_filter import compute_compatible_set
