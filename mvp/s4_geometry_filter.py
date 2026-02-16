@@ -30,6 +30,7 @@ for _cand in [_here.parents[0], _here.parents[1]]:
         break
 
 from mvp.contracts import init_stage, check_inputs, finalize, abort
+from mvp.distance_metrics import mahalanobis_log
 from basurin_io import write_json_atomic
 
 STAGE = "s4_geometry_filter"
@@ -84,6 +85,7 @@ def compute_compatible_set(
     log_f, log_Q = math.log(f_obs), math.log(Q_obs)
 
     legacy_kwargs_used = any(v is not _UNSET for v in (sigma_logf, sigma_logQ, cov_logf_logQ))
+    metric_was_explicit = metric is not None
     use_legacy_labels = legacy_labels or (metric is None)
 
     if metric is None and legacy_kwargs_used:
@@ -105,7 +107,10 @@ def compute_compatible_set(
             metric_name = "euclidean_log"
             metric_params = {}
     else:
-        metric_name = metric or "euclidean_log"
+        if not metric_was_explicit:
+            metric_name = "euclidean_log"
+        else:
+            metric_name = str(metric)
 
     if metric_name not in {"euclidean_log", "mahalanobis_log"}:
         raise ValueError(f"Unsupported metric: {metric_name}")
@@ -116,45 +121,40 @@ def compute_compatible_set(
     sigma_f_val: float | None = None
     sigma_q_val: float | None = None
     cov_val: float | None = None
+    metric_kw: dict[str, Any] = dict(params)
     if use_mahalanobis:
-        sigma_f_val = params.get("sigma_logf")
-        sigma_q_val = params.get("sigma_logQ")
-        if "cov_logf_logQ" in params:
-            cov_val = params.get("cov_logf_logQ")
-        elif "correlation" in params:
-            cov_val = float(params["correlation"]) * float(params.get("sigma_logf", 0.0)) * float(params.get("sigma_logQ", 0.0))
-        elif "r" in params:
-            cov_val = float(params["r"]) * float(params.get("sigma_logf", 0.0)) * float(params.get("sigma_logQ", 0.0))
-        elif "rho" in params:
-            cov_val = float(params["rho"]) * float(params.get("sigma_logf", 0.0)) * float(params.get("sigma_logQ", 0.0))
-        elif "corr_logf_logQ" in params:
-            cov_val = float(params["corr_logf_logQ"]) * float(params.get("sigma_logf", 0.0)) * float(params.get("sigma_logQ", 0.0))
-        else:
-            cov_val = 0.0
+        if "sigma_lnf" not in metric_kw and "sigma_logf" in metric_kw:
+            metric_kw["sigma_lnf"] = metric_kw.pop("sigma_logf")
+        if "sigma_lnQ" not in metric_kw and "sigma_logQ" in metric_kw:
+            metric_kw["sigma_lnQ"] = metric_kw.pop("sigma_logQ")
 
+        if "r" not in metric_kw:
+            if "correlation" in metric_kw:
+                metric_kw["r"] = metric_kw.pop("correlation")
+            elif "rho" in metric_kw:
+                metric_kw["r"] = metric_kw.pop("rho")
+            elif "corr_logf_logQ" in metric_kw:
+                metric_kw["r"] = metric_kw.pop("corr_logf_logQ")
+
+        if "cov_logf_logQ" in metric_kw and "r" not in metric_kw:
+            cov = float(metric_kw["cov_logf_logQ"])
+            sf = float(metric_kw.get("sigma_lnf", 0.0))
+            sq = float(metric_kw.get("sigma_lnQ", 0.0))
+            if sf <= 0 or sq <= 0:
+                raise ValueError("Non-invertible covariance: sigma_lnf and sigma_lnQ must be > 0")
+            metric_kw["r"] = cov / (sf * sq)
+
+        sigma_f_val = metric_kw.get("sigma_lnf")
+        sigma_q_val = metric_kw.get("sigma_lnQ")
         if sigma_f_val is None or sigma_q_val is None:
-            raise ValueError("Non-invertible covariance: sigma_logf and sigma_logQ are required")
+            raise ValueError("Non-invertible covariance: sigma_lnf and sigma_lnQ are required")
         sigma_f_val = float(sigma_f_val)
         sigma_q_val = float(sigma_q_val)
-        cov_val = float(cov_val)
 
-        if not math.isfinite(sigma_f_val) or sigma_f_val <= 0:
-            raise ValueError(
-                f"Non-invertible covariance: sigma_logf={sigma_f_val} (must be finite and > 0)")
-        if not math.isfinite(sigma_q_val) or sigma_q_val <= 0:
-            raise ValueError(
-                f"Non-invertible covariance: sigma_logQ={sigma_q_val} (must be finite and > 0)")
-        if not math.isfinite(cov_val):
-            raise ValueError(
-                f"Non-invertible covariance: cov_logf_logQ={cov_val} (must be finite)")
-
-        det = (sigma_f_val * sigma_f_val) * (sigma_q_val * sigma_q_val) - (cov_val * cov_val)
-        if det <= 0.0:
-            raise ValueError("Non-invertible covariance: det(Σ) <= 0")
-
-        inv_00 = (sigma_q_val * sigma_q_val) / det
-        inv_11 = (sigma_f_val * sigma_f_val) / det
-        inv_01 = -cov_val / det
+        if "cov_logf_logQ" in metric_kw:
+            cov_val = float(metric_kw["cov_logf_logQ"])
+        else:
+            cov_val = float(metric_kw.get("r", 0.0)) * sigma_f_val * sigma_q_val
 
     results: list[dict[str, Any]] = []
 
@@ -184,10 +184,17 @@ def compute_compatible_set(
             continue
 
         if use_mahalanobis:
-            d2 = dlf * dlf * inv_00 + 2.0 * dlf * dlQ * inv_01 + dlQ * dlQ * inv_11
+            d = mahalanobis_log(
+                log_f,
+                log_Q,
+                log_f - dlf,
+                log_Q - dlQ,
+                **metric_kw,
+            )
+            d2 = d * d
             results.append({
                 "geometry_id": gid, "d2": round(d2, 10),
-                "distance": math.sqrt(max(d2, 0.0)),
+                "distance": d,
                 "compatible": d2 <= epsilon,
                 "metadata": entry.get("metadata"),
             })
@@ -218,7 +225,7 @@ def compute_compatible_set(
 
     if use_mahalanobis:
         d2_values = [r["d2"] for r in results]
-        out["metric"] = "mahalanobis" if use_legacy_labels else "mahalanobis_log"
+        out["metric"] = metric_name
         out["threshold_d2"] = epsilon
         out["d2_min"] = min(d2_values) if d2_values else None
         out["covariance_logspace"] = {
@@ -231,7 +238,7 @@ def compute_compatible_set(
         for item in out["ranked_all"]:
             item["d2"] = item.get("d2", item.get("dist2"))
     else:
-        out["metric"] = "euclidean" if use_legacy_labels else "euclidean_log"
+        out["metric"] = metric_name
 
     return out
 
