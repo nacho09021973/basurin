@@ -17,7 +17,14 @@ for _cand in [_here.parents[0], _here.parents[1]]:
         break
 
 from mvp.contracts import abort, check_inputs, finalize, init_stage
-from mvp.distance_metrics import euclidean_log, get_metric, mahalanobis_log
+from mvp.distance_metrics import (
+    DEFAULT_CORRELATION,
+    DEFAULT_SIGMA_LNF,
+    DEFAULT_SIGMA_LNQ,
+    euclidean_log,
+    get_metric,
+    mahalanobis_log,
+)
 from basurin_io import write_json_atomic
 
 STAGE = "s4_geometry_filter"
@@ -125,6 +132,12 @@ def compute_compatible_set(
         raise ValueError("Observed f_hz and Q must be > 0")
 
     metric_name, params = _normalize_metric(metric, metric_params, sigma_logf, sigma_logQ, cov_logf_logQ)
+
+    if metric_name == "mahalanobis_log":
+        params.setdefault("sigma_lnf", DEFAULT_SIGMA_LNF)
+        params.setdefault("sigma_lnQ", DEFAULT_SIGMA_LNQ)
+        params.setdefault("r", DEFAULT_CORRELATION)
+
     metric_fn = get_metric(metric_name)
     log_f_obs = math.log(f_obs)
     log_Q_obs = math.log(Q_obs)
@@ -187,6 +200,7 @@ def compute_compatible_set(
         "schema_version": "mvp_compatible_set_v1",
         "observables": {"f_hz": f_obs, "Q": Q_obs},
         "metric": metric_name,
+        "metric_params": params,
         "epsilon": epsilon,
         "n_atlas": n_atlas,
         "n_compatible": n_compatible,
