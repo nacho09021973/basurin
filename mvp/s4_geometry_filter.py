@@ -84,7 +84,7 @@ def compute_compatible_set(
     log_f, log_Q = math.log(f_obs), math.log(Q_obs)
 
     legacy_kwargs_used = any(v is not _UNSET for v in (sigma_logf, sigma_logQ, cov_logf_logQ))
-    use_legacy_labels = legacy_labels or (metric is None and legacy_kwargs_used)
+    use_legacy_labels = legacy_labels or (metric is None)
 
     if metric is None and legacy_kwargs_used:
         s_f = None if sigma_logf is _UNSET else sigma_logf
