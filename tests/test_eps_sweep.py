@@ -351,3 +351,38 @@ class TestEpsSweep:
         )
         cs = json.loads(cs_path.read_text(encoding="utf-8"))
         assert cs["covariance_logspace"]["cov_logf_logQ"] == 0.0
+
+    def test_mahalanobis_compatible_set_persists_distance_from_d2_min(
+        self, tmp_path: Path,
+    ) -> None:
+        """distance must be materialized as sqrt(d2_min), keeping d² semantics."""
+        import math
+        import sys
+
+        sys.path.insert(0, str(REPO_ROOT))
+
+        from mvp.experiment_eps_sweep import EXPERIMENT_TAG, run_eps_sweep
+
+        run_id = "test_sweep_mah_distance"
+        _create_run_valid(tmp_path, run_id)
+        _create_s3_estimates(tmp_path, run_id, include_uncertainty=True)
+
+        epsilon = 0.30
+        run_eps_sweep(
+            run_id,
+            ATLAS_FIXTURE,
+            [epsilon],
+            metric="mahalanobis_log",
+            metric_params={"sigma_lnf": 0.2, "sigma_lnQ": 0.5, "cov_logf_logQ": 0.0},
+            runs_root=tmp_path,
+        )
+
+        cs_path = (
+            tmp_path / run_id / "experiment" / EXPERIMENT_TAG / "eps_0.300" / "compatible_set.json"
+        )
+        cs = json.loads(cs_path.read_text(encoding="utf-8"))
+
+        assert cs["threshold_d2"] == cs["epsilon"] == epsilon
+        assert "distance" in cs
+        assert cs["d2_min"] is not None
+        assert abs(cs["distance"] - math.sqrt(cs["d2_min"])) < 1e-9

@@ -253,8 +253,14 @@ def compute_compatible_set(
     }
 
     if metric_name == "mahalanobis_log":
+        d2_min = min((row["d2"] for row in results), default=None)
+        distance = None
+        if isinstance(d2_min, (int, float)) and math.isfinite(d2_min) and d2_min >= 0:
+            distance = float(math.sqrt(d2_min))
+
         out["threshold_d2"] = epsilon
-        out["d2_min"] = min((row["d2"] for row in results), default=None)
+        out["d2_min"] = d2_min
+        out["distance"] = distance
         out["covariance_logspace"] = _coerce_covariance_for_output(params)
 
     return out
