@@ -82,25 +82,26 @@ def compute_compatible_set(
     """
     log_f, log_Q = math.log(f_obs), math.log(Q_obs)
 
-    explicit_legacy = any(v is not _UNSET for v in (sigma_logf, sigma_logQ, cov_logf_logQ))
-    legacy_mode = explicit_legacy
+    legacy_mode = metric is None
 
-    if explicit_legacy:
+    if legacy_mode:
         s_f = None if sigma_logf is _UNSET else sigma_logf
         s_q = None if sigma_logQ is _UNSET else sigma_logQ
-        r = 0.0 if cov_logf_logQ is _UNSET else cov_logf_logQ
-        if s_f is not None and s_q is not None:
+        cov = 0.0 if cov_logf_logQ is _UNSET else cov_logf_logQ
+        has_sigma = (s_f is not None) or (s_q is not None)
+        has_cov = cov != 0.0
+        if has_sigma or has_cov:
+            if s_f is None or s_q is None:
+                raise ValueError("Non-invertible covariance: sigma_logf and sigma_logQ must be provided together")
             metric = "mahalanobis_log"
             metric_params = {
                 "sigma_logf": float(s_f),
                 "sigma_logQ": float(s_q),
-                "cov_logf_logQ": float(r),
+                "cov_logf_logQ": float(cov),
             }
-        elif s_f is None and s_q is None:
-            metric = metric or "euclidean_log"
-            metric_params = metric_params or {}
         else:
-            raise ValueError("Non-invertible covariance: sigma_logf and sigma_logQ must be provided together")
+            metric = "euclidean_log"
+            metric_params = {}
 
     metric_name = metric or "euclidean_log"
     if metric_name not in {"euclidean_log", "mahalanobis_log"}:
@@ -111,26 +112,26 @@ def compute_compatible_set(
 
     sigma_f_val: float | None = None
     sigma_q_val: float | None = None
-    r_val: float | None = None
+    cov_val: float | None = None
     if use_mahalanobis:
         sigma_f_val = params.get("sigma_logf")
         sigma_q_val = params.get("sigma_logQ")
         if "cov_logf_logQ" in params:
-            r_val = params.get("cov_logf_logQ")
+            cov_val = params.get("cov_logf_logQ")
         elif "r" in params:
-            r_val = params.get("r")
+            cov_val = params.get("r")
         elif "rho" in params:
-            r_val = params.get("rho")
+            cov_val = params.get("rho")
         elif "corr_logf_logQ" in params:
-            r_val = params.get("corr_logf_logQ")
+            cov_val = params.get("corr_logf_logQ")
         else:
-            r_val = 0.0
+            cov_val = 0.0
 
         if sigma_f_val is None or sigma_q_val is None:
             raise ValueError("Non-invertible covariance: sigma_logf and sigma_logQ are required")
         sigma_f_val = float(sigma_f_val)
         sigma_q_val = float(sigma_q_val)
-        r_val = float(r_val)
+        cov_val = float(cov_val)
 
         if not math.isfinite(sigma_f_val) or sigma_f_val <= 0:
             raise ValueError(
@@ -138,23 +139,17 @@ def compute_compatible_set(
         if not math.isfinite(sigma_q_val) or sigma_q_val <= 0:
             raise ValueError(
                 f"Non-invertible covariance: sigma_logQ={sigma_q_val} (must be finite and > 0)")
-        if not math.isfinite(r_val):
+        if not math.isfinite(cov_val):
             raise ValueError(
-                f"Non-invertible covariance: cov_logf_logQ={r_val} (must be finite)")
-        if r_val < -1.0 or r_val > 1.0:
-            raise ValueError(
-                f"Non-invertible covariance: cov_logf_logQ={r_val} (must be in [-1, 1])")
-        if abs(r_val) == 1.0:
-            raise ValueError(
-                f"Non-invertible covariance: |cov_logf_logQ|={abs(r_val)} => singular")
+                f"Non-invertible covariance: cov_logf_logQ={cov_val} (must be finite)")
 
-        one_minus_r2 = 1.0 - r_val * r_val
-        if one_minus_r2 <= 0.0:
-            raise ValueError("Non-invertible covariance: 1-r² <= 0")
+        det = (sigma_f_val * sigma_f_val) * (sigma_q_val * sigma_q_val) - (cov_val * cov_val)
+        if det <= 0.0:
+            raise ValueError("Non-invertible covariance: det(Σ) <= 0")
 
-        inv_00 = 1.0 / (sigma_f_val * sigma_f_val * one_minus_r2)
-        inv_11 = 1.0 / (sigma_q_val * sigma_q_val * one_minus_r2)
-        inv_01 = -r_val / (sigma_f_val * sigma_q_val * one_minus_r2)
+        inv_00 = (sigma_q_val * sigma_q_val) / det
+        inv_11 = (sigma_f_val * sigma_f_val) / det
+        inv_01 = -cov_val / det
 
     results: list[dict[str, Any]] = []
 
@@ -224,7 +219,7 @@ def compute_compatible_set(
         out["covariance_logspace"] = {
             "sigma_logf": sigma_f_val,
             "sigma_logQ": sigma_q_val,
-            "cov_logf_logQ": r_val,
+            "cov_logf_logQ": cov_val,
         }
         for item in out["compatible_geometries"]:
             item["d2"] = item.get("d2", item.get("dist2"))
@@ -243,6 +238,8 @@ def main() -> int:
     ap.add_argument("--epsilon", type=float, default=None,
                     help="Threshold: d² for Mahalanobis (default χ²₂(95%%)=5.991), "
                          "or Euclidean distance if no covariance available (default 0.3)")
+    ap.add_argument("--metric", choices=["euclidean_log", "mahalanobis_log"], default=None,
+                    help="Optional modern metric label override; default keeps legacy labels")
     args = ap.parse_args()
 
     atlas_path = Path(args.atlas_path)
@@ -292,12 +289,18 @@ def main() -> int:
         if has_cov:
             result = compute_compatible_set(
                 f_obs, Q_obs, atlas, threshold,
+                metric=args.metric,
                 sigma_logf=float(sigma_logf_raw),
                 sigma_logQ=float(sigma_logQ_raw),
                 cov_logf_logQ=float(cov_raw),
             )
         else:
-            result = compute_compatible_set(f_obs, Q_obs, atlas, threshold, sigma_logf=None, sigma_logQ=None)
+            result = compute_compatible_set(
+                f_obs, Q_obs, atlas, threshold,
+                metric=args.metric,
+                sigma_logf=None,
+                sigma_logQ=None,
+            )
         result["event_id"] = estimates.get("event_id", "unknown")
         result["run_id"] = args.run
 

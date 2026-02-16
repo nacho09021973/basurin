@@ -87,7 +87,14 @@ def run_eps_sweep(
         eps_dir = sweep_dir / eps_label
         eps_dir.mkdir(parents=True, exist_ok=True)
 
-        result = compute_compatible_set(f_obs, Q_obs, atlas, eps)
+        result = compute_compatible_set(
+            f_obs,
+            Q_obs,
+            atlas,
+            eps,
+            metric="euclidean_log",
+            metric_params={},
+        )
         result["event_id"] = event_id
         result["run_id"] = run_id
 
