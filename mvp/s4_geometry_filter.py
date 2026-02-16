@@ -36,6 +36,7 @@ STAGE = "s4_geometry_filter"
 
 # χ²(2 dof, 95%) — default threshold for 2D Mahalanobis compatibility
 CHI2_2DOF_95 = 5.991
+_UNSET = object()
 
 
 def _load_atlas(atlas_path: Path) -> list[dict[str, Any]]:
@@ -61,9 +62,11 @@ def compute_compatible_set(
     f_obs: float, Q_obs: float,
     atlas: list[dict[str, Any]], epsilon: float,
     *,
-    sigma_logf: float | None = None,
-    sigma_logQ: float | None = None,
-    cov_logf_logQ: float = 0.0,
+    metric: str | None = None,
+    metric_params: dict[str, Any] | None = None,
+    sigma_logf: float | object = _UNSET,
+    sigma_logQ: float | object = _UNSET,
+    cov_logf_logQ: float | object = _UNSET,
 ) -> dict[str, Any]:
     """Filter atlas geometries by proximity in (log f, log Q) space.
 
@@ -79,36 +82,79 @@ def compute_compatible_set(
     """
     log_f, log_Q = math.log(f_obs), math.log(Q_obs)
 
-    use_mahalanobis = sigma_logf is not None and sigma_logQ is not None
+    explicit_legacy = any(v is not _UNSET for v in (sigma_logf, sigma_logQ, cov_logf_logQ))
+    legacy_mode = explicit_legacy
 
+    if explicit_legacy:
+        s_f = None if sigma_logf is _UNSET else sigma_logf
+        s_q = None if sigma_logQ is _UNSET else sigma_logQ
+        r = 0.0 if cov_logf_logQ is _UNSET else cov_logf_logQ
+        if s_f is not None and s_q is not None:
+            metric = "mahalanobis_log"
+            metric_params = {
+                "sigma_logf": float(s_f),
+                "sigma_logQ": float(s_q),
+                "cov_logf_logQ": float(r),
+            }
+        elif s_f is None and s_q is None:
+            metric = metric or "euclidean_log"
+            metric_params = metric_params or {}
+        else:
+            raise ValueError("Non-invertible covariance: sigma_logf and sigma_logQ must be provided together")
+
+    metric_name = metric or "euclidean_log"
+    if metric_name not in {"euclidean_log", "mahalanobis_log"}:
+        raise ValueError(f"Unsupported metric: {metric_name}")
+
+    params = metric_params or {}
+    use_mahalanobis = metric_name == "mahalanobis_log"
+
+    sigma_f_val: float | None = None
+    sigma_q_val: float | None = None
+    r_val: float | None = None
     if use_mahalanobis:
-        # Validate covariance invertibility (FAIL policy)
-        if not math.isfinite(sigma_logf) or sigma_logf <= 0:
-            raise ValueError(
-                f"Non-invertible covariance: sigma_logf={sigma_logf} "
-                f"(must be finite and > 0)")
-        if not math.isfinite(sigma_logQ) or sigma_logQ <= 0:
-            raise ValueError(
-                f"Non-invertible covariance: sigma_logQ={sigma_logQ} "
-                f"(must be finite and > 0)")
-        if not math.isfinite(cov_logf_logQ):
-            raise ValueError(
-                f"Non-invertible covariance: cov_logf_logQ={cov_logf_logQ} "
-                f"(must be finite)")
+        sigma_f_val = params.get("sigma_logf")
+        sigma_q_val = params.get("sigma_logQ")
+        if "cov_logf_logQ" in params:
+            r_val = params.get("cov_logf_logQ")
+        elif "r" in params:
+            r_val = params.get("r")
+        elif "rho" in params:
+            r_val = params.get("rho")
+        elif "corr_logf_logQ" in params:
+            r_val = params.get("corr_logf_logQ")
+        else:
+            r_val = 0.0
 
-        var_f = sigma_logf ** 2
-        var_Q = sigma_logQ ** 2
-        det = var_f * var_Q - cov_logf_logQ ** 2
-        if det <= 0:
-            raise ValueError(
-                f"Non-invertible covariance: det(Σ)={det:.6e} <= 0 "
-                f"(sigma_logf={sigma_logf}, sigma_logQ={sigma_logQ}, "
-                f"cov={cov_logf_logQ})")
+        if sigma_f_val is None or sigma_q_val is None:
+            raise ValueError("Non-invertible covariance: sigma_logf and sigma_logQ are required")
+        sigma_f_val = float(sigma_f_val)
+        sigma_q_val = float(sigma_q_val)
+        r_val = float(r_val)
 
-        # Σ⁻¹ for 2×2: [[var_Q, -cov], [-cov, var_f]] / det
-        inv_00 = var_Q / det
-        inv_11 = var_f / det
-        inv_01 = -cov_logf_logQ / det
+        if not math.isfinite(sigma_f_val) or sigma_f_val <= 0:
+            raise ValueError(
+                f"Non-invertible covariance: sigma_logf={sigma_f_val} (must be finite and > 0)")
+        if not math.isfinite(sigma_q_val) or sigma_q_val <= 0:
+            raise ValueError(
+                f"Non-invertible covariance: sigma_logQ={sigma_q_val} (must be finite and > 0)")
+        if not math.isfinite(r_val):
+            raise ValueError(
+                f"Non-invertible covariance: cov_logf_logQ={r_val} (must be finite)")
+        if r_val < -1.0 or r_val > 1.0:
+            raise ValueError(
+                f"Non-invertible covariance: cov_logf_logQ={r_val} (must be in [-1, 1])")
+        if abs(r_val) == 1.0:
+            raise ValueError(
+                f"Non-invertible covariance: |cov_logf_logQ|={abs(r_val)} => singular")
+
+        one_minus_r2 = 1.0 - r_val * r_val
+        if one_minus_r2 <= 0.0:
+            raise ValueError("Non-invertible covariance: 1-r² <= 0")
+
+        inv_00 = 1.0 / (sigma_f_val * sigma_f_val * one_minus_r2)
+        inv_11 = 1.0 / (sigma_q_val * sigma_q_val * one_minus_r2)
+        inv_01 = -r_val / (sigma_f_val * sigma_q_val * one_minus_r2)
 
     results: list[dict[str, Any]] = []
 
@@ -165,22 +211,27 @@ def compute_compatible_set(
         "observables": {"f_hz": f_obs, "Q": Q_obs},
         "epsilon": epsilon, "n_atlas": n_atlas, "n_compatible": n_compat,
         "bits_excluded": bits,
+        "bits_kl": bits,
         "compatible_geometries": compatible,
         "ranked_all": results[:50],
     }
 
     if use_mahalanobis:
         d2_values = [r["d2"] for r in results]
-        out["metric"] = "mahalanobis"
+        out["metric"] = "mahalanobis" if legacy_mode else "mahalanobis_log"
         out["threshold_d2"] = epsilon
         out["d2_min"] = min(d2_values) if d2_values else None
         out["covariance_logspace"] = {
-            "sigma_logf": sigma_logf,
-            "sigma_logQ": sigma_logQ,
-            "cov_logf_logQ": cov_logf_logQ,
+            "sigma_logf": sigma_f_val,
+            "sigma_logQ": sigma_q_val,
+            "cov_logf_logQ": r_val,
         }
+        for item in out["compatible_geometries"]:
+            item["d2"] = item.get("d2", item.get("dist2"))
+        for item in out["ranked_all"]:
+            item["d2"] = item.get("d2", item.get("dist2"))
     else:
-        out["metric"] = "euclidean"
+        out["metric"] = "euclidean" if legacy_mode else "euclidean_log"
 
     return out
 
@@ -238,12 +289,15 @@ def main() -> int:
         ctx.params["metric"] = "mahalanobis" if has_cov else "euclidean"
 
         atlas = _load_atlas(atlas_path)
-        result = compute_compatible_set(
-            f_obs, Q_obs, atlas, threshold,
-            sigma_logf=float(sigma_logf_raw) if has_cov else None,
-            sigma_logQ=float(sigma_logQ_raw) if has_cov else None,
-            cov_logf_logQ=float(cov_raw) if has_cov else 0.0,
-        )
+        if has_cov:
+            result = compute_compatible_set(
+                f_obs, Q_obs, atlas, threshold,
+                sigma_logf=float(sigma_logf_raw),
+                sigma_logQ=float(sigma_logQ_raw),
+                cov_logf_logQ=float(cov_raw),
+            )
+        else:
+            result = compute_compatible_set(f_obs, Q_obs, atlas, threshold, sigma_logf=None, sigma_logQ=None)
         result["event_id"] = estimates.get("event_id", "unknown")
         result["run_id"] = args.run
 
@@ -261,6 +315,12 @@ def main() -> int:
 
     except SystemExit:
         raise
+    except ValueError as exc:
+        abort(ctx, str(exc))
+        return 2
+    except ZeroDivisionError as exc:
+        abort(ctx, f"Non-invertible covariance: {exc}")
+        return 2
     except Exception as exc:
         abort(ctx, str(exc))
         return 2
