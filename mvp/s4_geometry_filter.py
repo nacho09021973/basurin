@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""MVP Stage 4: Filter compatible geometries from theoretical atlas.
-
-CLI:
-    python mvp/s4_geometry_filter.py --run <run_id> --atlas-path atlas.json \
-        [--epsilon 5.991]
-
-Inputs:  runs/<run>/s3_ringdown_estimates/outputs/estimates.json + atlas.json
-Outputs: runs/<run>/s4_geometry_filter/outputs/compatible_set.json
-
-Method: Mahalanobis distance in (log f, log Q) space using the covariance
-matrix from s3 combined_uncertainty.  Compatible if d² ≤ threshold
-(default: χ²₂(95%) = 5.991).  Falls back to Euclidean distance when
-covariance is unavailable.
-"""
+"""MVP Stage 4: Filter compatible geometries from theoretical atlas."""
 from __future__ import annotations
 
 import argparse
@@ -29,13 +16,11 @@ for _cand in [_here.parents[0], _here.parents[1]]:
             sys.path.insert(0, str(_cand))
         break
 
-from mvp.contracts import init_stage, check_inputs, finalize, abort
-from mvp.distance_metrics import mahalanobis_log
+from mvp.contracts import abort, check_inputs, finalize, init_stage
+from mvp.distance_metrics import euclidean_log, get_metric, mahalanobis_log
 from basurin_io import write_json_atomic
 
 STAGE = "s4_geometry_filter"
-
-# χ²(2 dof, 95%) — default threshold for 2D Mahalanobis compatibility
 CHI2_2DOF_95 = 5.991
 _UNSET = object()
 
@@ -59,186 +44,162 @@ def _load_atlas(atlas_path: Path) -> list[dict[str, Any]]:
     return entries
 
 
+def _normalize_metric(
+    metric: str | None,
+    metric_params: dict[str, Any] | None,
+    sigma_logf: float | object,
+    sigma_logQ: float | object,
+    cov_logf_logQ: float | object,
+) -> tuple[str, dict[str, Any]]:
+    params = dict(metric_params or {})
+
+    legacy_supplied = any(v is not _UNSET for v in (sigma_logf, sigma_logQ, cov_logf_logQ))
+    if legacy_supplied:
+        if sigma_logf is not _UNSET:
+            params.setdefault("sigma_logf", sigma_logf)
+        if sigma_logQ is not _UNSET:
+            params.setdefault("sigma_logQ", sigma_logQ)
+        if cov_logf_logQ is not _UNSET:
+            params.setdefault("cov_logf_logQ", cov_logf_logQ)
+
+    metric_name = metric or "euclidean_log"
+    if metric is None and any(k in params for k in ("sigma_lnf", "sigma_lnQ", "sigma_logf", "sigma_logQ", "cov_logf_logQ", "r", "rho", "correlation", "corr_logf_logQ")):
+        metric_name = "mahalanobis_log"
+
+    if metric_name not in {"euclidean_log", "mahalanobis_log"}:
+        raise ValueError(f"Unsupported metric: {metric_name}")
+
+    return metric_name, params
+
+
+def _coerce_covariance_for_output(metric_params: dict[str, Any]) -> dict[str, float]:
+    sigma_lnf = metric_params.get("sigma_lnf", metric_params.get("sigma_logf"))
+    sigma_lnQ = metric_params.get("sigma_lnQ", metric_params.get("sigma_logQ"))
+
+    if sigma_lnf is None or sigma_lnQ is None:
+        raise ValueError("Non-invertible covariance: sigma_lnf and sigma_lnQ are required")
+
+    sigma_lnf = float(sigma_lnf)
+    sigma_lnQ = float(sigma_lnQ)
+
+    r = metric_params.get("r")
+    if r is None:
+        r = metric_params.get("rho")
+    if r is None:
+        r = metric_params.get("correlation")
+    if r is None:
+        r = metric_params.get("corr_logf_logQ")
+
+    cov = metric_params.get("cov_logf_logQ")
+    if cov is not None:
+        cov = float(cov)
+        if not math.isfinite(cov):
+            raise ValueError("Non-invertible covariance: cov_logf_logQ must be finite")
+    else:
+        r = 0.0 if r is None else float(r)
+        cov = r * sigma_lnf * sigma_lnQ
+
+    return {
+        "sigma_logf": sigma_lnf,
+        "sigma_logQ": sigma_lnQ,
+        "cov_logf_logQ": cov,
+    }
+
+
 def compute_compatible_set(
-    f_obs: float, Q_obs: float,
-    atlas: list[dict[str, Any]], epsilon: float,
+    f_obs: float,
+    Q_obs: float,
+    atlas: list[dict[str, Any]],
+    epsilon: float,
     *,
-    metric: str | None = None,
+    metric: str = "euclidean_log",
     metric_params: dict[str, Any] | None = None,
     legacy_labels: bool = False,
     sigma_logf: float | object = _UNSET,
     sigma_logQ: float | object = _UNSET,
     cov_logf_logQ: float | object = _UNSET,
 ) -> dict[str, Any]:
-    """Filter atlas geometries by proximity in (log f, log Q) space.
+    del legacy_labels  # kept for compatibility with older callers
 
-    When *sigma_logf* and *sigma_logQ* are provided, uses Mahalanobis
-    distance d² = Δᵀ Σ⁻¹ Δ with *epsilon* as the d² threshold
-    (default recommendation: χ²₂(95%) = 5.991).
+    if f_obs <= 0 or Q_obs <= 0:
+        raise ValueError("Observed f_hz and Q must be > 0")
 
-    When covariance is not provided, falls back to Euclidean distance
-    with *epsilon* as the distance threshold (legacy behaviour).
-
-    Raises ``ValueError`` if the covariance matrix is non-invertible
-    (FAIL policy for singular Σ).
-    """
-    log_f, log_Q = math.log(f_obs), math.log(Q_obs)
-
-    legacy_kwargs_used = any(v is not _UNSET for v in (sigma_logf, sigma_logQ, cov_logf_logQ))
-    metric_was_explicit = metric is not None
-    use_legacy_labels = legacy_labels or (metric is None)
-
-    if metric is None and legacy_kwargs_used:
-        s_f = None if sigma_logf is _UNSET else sigma_logf
-        s_q = None if sigma_logQ is _UNSET else sigma_logQ
-        cov = 0.0 if cov_logf_logQ is _UNSET else cov_logf_logQ
-        has_sigma = (s_f is not None) or (s_q is not None)
-        has_cov = cov != 0.0
-        if has_sigma or has_cov:
-            if s_f is None or s_q is None:
-                raise ValueError("Non-invertible covariance: sigma_logf and sigma_logQ must be provided together")
-            metric_name = "mahalanobis_log"
-            metric_params = {
-                "sigma_logf": float(s_f),
-                "sigma_logQ": float(s_q),
-                "cov_logf_logQ": float(cov),
-            }
-        else:
-            metric_name = "euclidean_log"
-            metric_params = {}
-    else:
-        if not metric_was_explicit:
-            metric_name = "euclidean_log"
-        else:
-            metric_name = str(metric)
-
-    if metric_name not in {"euclidean_log", "mahalanobis_log"}:
-        raise ValueError(f"Unsupported metric: {metric_name}")
-
-    params = metric_params or {}
-    use_mahalanobis = metric_name == "mahalanobis_log"
-
-    sigma_f_val: float | None = None
-    sigma_q_val: float | None = None
-    cov_val: float | None = None
-    metric_kw: dict[str, Any] = dict(params)
-    if use_mahalanobis:
-        if "sigma_lnf" not in metric_kw and "sigma_logf" in metric_kw:
-            metric_kw["sigma_lnf"] = metric_kw.pop("sigma_logf")
-        if "sigma_lnQ" not in metric_kw and "sigma_logQ" in metric_kw:
-            metric_kw["sigma_lnQ"] = metric_kw.pop("sigma_logQ")
-
-        if "r" not in metric_kw:
-            if "correlation" in metric_kw:
-                metric_kw["r"] = metric_kw.pop("correlation")
-            elif "rho" in metric_kw:
-                metric_kw["r"] = metric_kw.pop("rho")
-            elif "corr_logf_logQ" in metric_kw:
-                metric_kw["r"] = metric_kw.pop("corr_logf_logQ")
-
-        if "cov_logf_logQ" in metric_kw and "r" not in metric_kw:
-            cov = float(metric_kw["cov_logf_logQ"])
-            sf = float(metric_kw.get("sigma_lnf", 0.0))
-            sq = float(metric_kw.get("sigma_lnQ", 0.0))
-            if sf <= 0 or sq <= 0:
-                raise ValueError("Non-invertible covariance: sigma_lnf and sigma_lnQ must be > 0")
-            metric_kw["r"] = cov / (sf * sq)
-
-        sigma_f_val = metric_kw.get("sigma_lnf")
-        sigma_q_val = metric_kw.get("sigma_lnQ")
-        if sigma_f_val is None or sigma_q_val is None:
-            raise ValueError("Non-invertible covariance: sigma_lnf and sigma_lnQ are required")
-        sigma_f_val = float(sigma_f_val)
-        sigma_q_val = float(sigma_q_val)
-
-        if "cov_logf_logQ" in metric_kw:
-            cov_val = float(metric_kw["cov_logf_logQ"])
-        else:
-            cov_val = float(metric_kw.get("r", 0.0)) * sigma_f_val * sigma_q_val
+    metric_name, params = _normalize_metric(metric, metric_params, sigma_logf, sigma_logQ, cov_logf_logQ)
+    metric_fn = get_metric(metric_name)
+    log_f_obs = math.log(f_obs)
+    log_Q_obs = math.log(Q_obs)
 
     results: list[dict[str, Any]] = []
 
     for entry in atlas:
         gid = entry["geometry_id"]
+        lnf_atlas: float
+        lnQ_atlas: float
+
         if "f_hz" in entry and "Q" in entry:
-            fa, Qa = float(entry["f_hz"]), float(entry["Q"])
+            fa = float(entry["f_hz"])
+            Qa = float(entry["Q"])
             if fa <= 0 or Qa <= 0:
                 continue
-            dlf = log_f - math.log(fa)
-            dlQ = log_Q - math.log(Qa)
-        elif "phi_atlas" in entry:
-            phi = entry["phi_atlas"]
-            if len(phi) >= 2:
-                dlf = log_f - phi[0]
-                dlQ = log_Q - phi[1]
-            elif not use_mahalanobis and len(phi) == 1:
-                # 1D fallback only in Euclidean mode
-                d = abs(log_Q - phi[0])
-                results.append({"geometry_id": gid, "distance": d,
-                                "compatible": d <= epsilon,
-                                "metadata": entry.get("metadata")})
-                continue
-            else:
-                continue
+            lnf_atlas = math.log(fa)
+            lnQ_atlas = math.log(Qa)
+        elif isinstance(entry.get("phi_atlas"), list) and len(entry["phi_atlas"]) >= 2:
+            lnf_atlas = float(entry["phi_atlas"][0])
+            lnQ_atlas = float(entry["phi_atlas"][1])
         else:
             continue
 
-        if use_mahalanobis:
-            d = mahalanobis_log(
-                log_f,
-                log_Q,
-                log_f - dlf,
-                log_Q - dlQ,
-                **metric_kw,
-            )
-            d2 = d * d
-            results.append({
-                "geometry_id": gid, "d2": round(d2, 10),
-                "distance": d,
-                "compatible": d2 <= epsilon,
-                "metadata": entry.get("metadata"),
-            })
-        else:
-            d = math.sqrt(dlf * dlf + dlQ * dlQ)
-            results.append({
-                "geometry_id": gid, "distance": d,
-                "compatible": d <= epsilon,
-                "metadata": entry.get("metadata"),
-            })
+        dist = float(metric_fn(log_f_obs, log_Q_obs, lnf_atlas, lnQ_atlas, **params))
 
-    sort_key = "d2" if use_mahalanobis else "distance"
-    results.sort(key=lambda x: x[sort_key])
-    compatible = [r for r in results if r["compatible"]]
-    n_atlas, n_compat = len(results), len(compatible)
-    bits = math.log2(n_atlas / n_compat) if n_atlas > 0 and n_compat > 0 else (
-        math.log2(n_atlas) if n_atlas > 0 else 0.0)
+        if metric_name == "mahalanobis_log":
+            d2 = dist * dist
+            results.append(
+                {
+                    "geometry_id": gid,
+                    "distance": dist,
+                    "d2": d2,
+                    "compatible": d2 <= epsilon,
+                    "metadata": entry.get("metadata"),
+                }
+            )
+        else:
+            results.append(
+                {
+                    "geometry_id": gid,
+                    "distance": dist,
+                    "compatible": dist <= epsilon,
+                    "metadata": entry.get("metadata"),
+                }
+            )
+
+    sort_key = "d2" if metric_name == "mahalanobis_log" else "distance"
+    results.sort(key=lambda row: row[sort_key])
+    compatible = [row for row in results if row["compatible"]]
+
+    n_atlas = len(results)
+    n_compatible = len(compatible)
+
+    bits_excluded = math.log2(n_atlas / n_compatible) if n_atlas > 0 and n_compatible > 0 else (math.log2(n_atlas) if n_atlas > 0 else 0.0)
+    # epsilon-independent information baseline (for modern tests)
+    bits_kl = math.log2(n_atlas) if n_atlas > 0 else 0.0
 
     out: dict[str, Any] = {
         "schema_version": "mvp_compatible_set_v1",
         "observables": {"f_hz": f_obs, "Q": Q_obs},
-        "epsilon": epsilon, "n_atlas": n_atlas, "n_compatible": n_compat,
-        "bits_excluded": bits,
-        "bits_kl": bits,
+        "metric": metric_name,
+        "epsilon": epsilon,
+        "n_atlas": n_atlas,
+        "n_compatible": n_compatible,
         "compatible_geometries": compatible,
         "ranked_all": results[:50],
+        "bits_excluded": bits_excluded,
+        "bits_kl": bits_kl,
     }
 
-    if use_mahalanobis:
-        d2_values = [r["d2"] for r in results]
-        out["metric"] = metric_name
+    if metric_name == "mahalanobis_log":
         out["threshold_d2"] = epsilon
-        out["d2_min"] = min(d2_values) if d2_values else None
-        out["covariance_logspace"] = {
-            "sigma_logf": sigma_f_val,
-            "sigma_logQ": sigma_q_val,
-            "cov_logf_logQ": cov_val,
-        }
-        for item in out["compatible_geometries"]:
-            item["d2"] = item.get("d2", item.get("dist2"))
-        for item in out["ranked_all"]:
-            item["d2"] = item.get("d2", item.get("dist2"))
-    else:
-        out["metric"] = metric_name
+        out["d2_min"] = min((row["d2"] for row in results), default=None)
+        out["covariance_logspace"] = _coerce_covariance_for_output(params)
 
     return out
 
@@ -247,21 +208,15 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=f"MVP {STAGE}: filter compatible geometries")
     ap.add_argument("--run", required=True)
     ap.add_argument("--atlas-path", required=True)
-    ap.add_argument("--epsilon", type=float, default=None,
-                    help="Threshold: d² for Mahalanobis (default χ²₂(95%%)=5.991), "
-                         "or Euclidean distance if no covariance available (default 0.3)")
-    ap.add_argument("--metric", choices=["euclidean_log", "mahalanobis_log"], default=None,
-                    help="Optional modern metric label override; default keeps legacy labels")
+    ap.add_argument("--epsilon", type=float, default=None)
+    ap.add_argument("--metric", choices=["euclidean_log", "mahalanobis_log"], default=None)
     args = ap.parse_args()
 
     atlas_path = Path(args.atlas_path)
     if not atlas_path.is_absolute():
         atlas_path = (Path.cwd() / atlas_path).resolve()
 
-    ctx = init_stage(args.run, STAGE, params={
-        "atlas_path": str(atlas_path),
-        "epsilon_cli": args.epsilon,
-    })
+    ctx = init_stage(args.run, STAGE, params={"atlas_path": str(atlas_path), "epsilon_cli": args.epsilon})
 
     estimates_path = ctx.run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
     if not atlas_path.exists():
@@ -271,73 +226,66 @@ def main() -> int:
     try:
         with open(estimates_path, "r", encoding="utf-8") as f:
             estimates = json.load(f)
+
         combined = estimates.get("combined", {})
-        f_obs, Q_obs = float(combined.get("f_hz", 0)), float(combined.get("Q", 0))
+        f_obs = float(combined.get("f_hz", 0.0))
+        Q_obs = float(combined.get("Q", 0.0))
         if f_obs <= 0:
             abort(ctx, f"Invalid f_hz: {f_obs}")
         if Q_obs <= 0:
             abort(ctx, f"Invalid Q: {Q_obs}")
 
-        # Extract covariance from s3 combined_uncertainty
         unc = estimates.get("combined_uncertainty", {})
         sigma_logf_raw = unc.get("sigma_logf")
         sigma_logQ_raw = unc.get("sigma_logQ")
-        cov_raw = unc.get("cov_logf_logQ", 0.0)
+        cov_raw = unc.get("cov_logf_logQ")
 
-        has_cov = (sigma_logf_raw is not None and sigma_logQ_raw is not None
-                   and isinstance(sigma_logf_raw, (int, float))
-                   and isinstance(sigma_logQ_raw, (int, float)))
+        has_covariance = sigma_logf_raw is not None and sigma_logQ_raw is not None
 
-        if has_cov:
+        metric_name = args.metric or ("mahalanobis_log" if has_covariance else "euclidean_log")
+        if metric_name == "mahalanobis_log":
             threshold = args.epsilon if args.epsilon is not None else CHI2_2DOF_95
+            params = {
+                "sigma_logf": sigma_logf_raw,
+                "sigma_logQ": sigma_logQ_raw,
+            }
+            if cov_raw is not None:
+                params["cov_logf_logQ"] = cov_raw
         else:
             threshold = args.epsilon if args.epsilon is not None else 0.3
+            params = {}
 
-        # Update params for traceability
         ctx.params["epsilon"] = threshold
-        ctx.params["metric"] = "mahalanobis" if has_cov else "euclidean"
+        ctx.params["metric"] = metric_name
 
         atlas = _load_atlas(atlas_path)
-        if has_cov:
-            if args.metric is None:
-                result = compute_compatible_set(
-                    f_obs, Q_obs, atlas, threshold,
-                    metric=None, legacy_labels=True,
-                    sigma_logf=float(sigma_logf_raw),
-                    sigma_logQ=float(sigma_logQ_raw),
-                    cov_logf_logQ=float(cov_raw),
-                )
-            else:
-                result = compute_compatible_set(
-                    f_obs, Q_obs, atlas, threshold,
-                    metric=args.metric,
-                    metric_params={
-                        "sigma_logf": float(sigma_logf_raw),
-                        "sigma_logQ": float(sigma_logQ_raw),
-                        "cov_logf_logQ": float(cov_raw),
-                    },
-                )
-        else:
-            result = compute_compatible_set(
-                f_obs, Q_obs, atlas, threshold,
-                metric=args.metric,
-                legacy_labels=(args.metric is None),
-            )
+        result = compute_compatible_set(
+            f_obs,
+            Q_obs,
+            atlas,
+            threshold,
+            metric=metric_name,
+            metric_params=params,
+        )
         result["event_id"] = estimates.get("event_id", "unknown")
         result["run_id"] = args.run
 
         cs_path = ctx.outputs_dir / "compatible_set.json"
         write_json_atomic(cs_path, result)
 
-        finalize(ctx, artifacts={"compatible_set": cs_path}, results={
-            "n_atlas": result["n_atlas"], "n_compatible": result["n_compatible"],
-            "bits_excluded": result["bits_excluded"],
-            "metric": result.get("metric", "unknown"),
-            "threshold_d2": result.get("threshold_d2"),
-            "d2_min": result.get("d2_min"),
-        })
+        finalize(
+            ctx,
+            artifacts={"compatible_set": cs_path},
+            results={
+                "n_atlas": result["n_atlas"],
+                "n_compatible": result["n_compatible"],
+                "bits_excluded": result["bits_excluded"],
+                "metric": result["metric"],
+                "threshold_d2": result.get("threshold_d2"),
+                "d2_min": result.get("d2_min"),
+            },
+        )
         return 0
-
     except SystemExit:
         raise
     except ValueError as exc:
