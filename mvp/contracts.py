@@ -143,6 +143,27 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         upstream_stages=["s3_ringdown_estimates"],
     ),
+    "s3b_multimode_estimates": StageContract(
+        name="s3b_multimode_estimates",
+        required_inputs=[
+            # Dynamic: discovers {H1,L1,V1}_rd.npz at runtime (like s3)
+        ],
+        produced_outputs=[
+            "outputs/multimode_estimates.json",
+        ],
+        upstream_stages=["s2_ringdown_window"],
+    ),
+    "s4c_kerr_consistency": StageContract(
+        name="s4c_kerr_consistency",
+        required_inputs=[
+            "s3_ringdown_estimates/outputs/estimates.json",
+            "s3b_multimode_estimates/outputs/multimode_estimates.json",
+        ],
+        produced_outputs=[
+            "outputs/kerr_consistency.json",
+        ],
+        upstream_stages=["s3_ringdown_estimates", "s3b_multimode_estimates"],
+    ),
 }
 
 
