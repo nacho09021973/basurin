@@ -132,6 +132,17 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         upstream_stages=["s3_ringdown_estimates", "s4_geometry_filter"],
     ),
+    "s4b_spectral_curvature": StageContract(
+        name="s4b_spectral_curvature",
+        required_inputs=[
+            "s3_ringdown_estimates/outputs/estimates.json",
+            # atlas_path is external, checked separately
+        ],
+        produced_outputs=[
+            "outputs/spectral_diagnostics.json",
+        ],
+        upstream_stages=["s3_ringdown_estimates"],
+    ),
 }
 
 
