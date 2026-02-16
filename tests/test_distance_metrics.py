@@ -94,12 +94,12 @@ class TestEuclideanLog:
 # ===========================================================================
 class TestMahalanobisLog:
     def test_zero_distance_at_same_point(self) -> None:
-        d = mahalanobis_log(5.0, 1.0, 5.0, 1.0)
+        d = mahalanobis_log(5.0, 1.0, 5.0, 1.0, sigma_lnf=0.1, sigma_lnQ=0.2)
         assert d == 0.0
 
     def test_symmetry(self) -> None:
-        d1 = mahalanobis_log(5.0, 1.0, 5.5, 1.2)
-        d2 = mahalanobis_log(5.5, 1.2, 5.0, 1.0)
+        d1 = mahalanobis_log(5.0, 1.0, 5.5, 1.2, sigma_lnf=0.1, sigma_lnQ=0.2)
+        d2 = mahalanobis_log(5.5, 1.2, 5.0, 1.0, sigma_lnf=0.1, sigma_lnQ=0.2)
         assert abs(d1 - d2) < 1e-15
 
     def test_reduces_to_euclidean_when_uncorrelated_unit_sigma(self) -> None:
@@ -156,17 +156,15 @@ class TestMahalanobisLog:
     def test_rejects_r_equals_1(self) -> None:
         """Correlation |r| = 1 makes covariance singular."""
         with pytest.raises(ValueError, match=r"\|r\| must be < 1"):
-            mahalanobis_log(0.0, 0.0, 0.1, 0.1, r=1.0)
+            mahalanobis_log(0.0, 0.0, 0.1, 0.1, sigma_lnf=0.1, sigma_lnQ=0.2, r=1.0)
 
     def test_rejects_r_equals_minus_1(self) -> None:
         with pytest.raises(ValueError, match=r"\|r\| must be < 1"):
-            mahalanobis_log(0.0, 0.0, 0.1, 0.1, r=-1.0)
+            mahalanobis_log(0.0, 0.0, 0.1, 0.1, sigma_lnf=0.1, sigma_lnQ=0.2, r=-1.0)
 
-    def test_default_params_are_sensible(self) -> None:
-        """Default sigma/r should produce a finite positive distance."""
-        d = mahalanobis_log(math.log(251), math.log(4.0),
-                            math.log(260), math.log(4.5))
-        assert math.isfinite(d) and d > 0
+    def test_requires_sigmas(self) -> None:
+        with pytest.raises(ValueError, match="sigma_lnf and sigma_lnQ are required"):
+            mahalanobis_log(math.log(251), math.log(4.0), math.log(260), math.log(4.5))
 
 
 # ===========================================================================
@@ -274,7 +272,8 @@ class TestS4MetricIntegration:
         r_euc = compute_compatible_set(251.0, 4.0, atlas, 999.0,
                                        metric="euclidean_log")
         r_mah = compute_compatible_set(251.0, 4.0, atlas, 999.0,
-                                       metric="mahalanobis_log")
+                                       metric="mahalanobis_log",
+                                       metric_params={"sigma_lnf": 0.07, "sigma_lnQ": 0.25, "r": 0.9})
 
         # Same atlas, same observables → same n_atlas
         assert r_euc["n_atlas"] == r_mah["n_atlas"]
@@ -291,7 +290,8 @@ class TestS4MetricIntegration:
         r_euc = compute_compatible_set(251.0, 4.0, atlas, 999.0,
                                        metric="euclidean_log")
         r_mah = compute_compatible_set(251.0, 4.0, atlas, 999.0,
-                                       metric="mahalanobis_log")
+                                       metric="mahalanobis_log",
+                                       metric_params={"sigma_lnf": 0.07, "sigma_lnQ": 0.25, "r": 0.9})
 
         ranking_euc = [e["geometry_id"] for e in r_euc["ranked_all"]]
         ranking_mah = [e["geometry_id"] for e in r_mah["ranked_all"]]
@@ -319,8 +319,15 @@ class TestS4MetricIntegration:
         from mvp.s4_geometry_filter import compute_compatible_set
 
         result = compute_compatible_set(251.0, 4.0, atlas, 3.0,
-                                        metric="mahalanobis_log")
+                                        metric="mahalanobis_log",
+                                        metric_params={"sigma_lnf": 0.07, "sigma_lnQ": 0.25})
         assert result["metric"] == "mahalanobis_log"
+
+    def test_mahalanobis_without_sigmas_raises(self, atlas: list[dict]) -> None:
+        from mvp.s4_geometry_filter import compute_compatible_set
+
+        with pytest.raises(ValueError, match="sigma_lnf and sigma_lnQ are required"):
+            compute_compatible_set(251.0, 4.0, atlas, 3.0, metric="mahalanobis_log")
 
     def test_backward_compat_no_metric_arg(self, atlas: list[dict]) -> None:
         """Calling without metric= should still work (euclidean default)."""

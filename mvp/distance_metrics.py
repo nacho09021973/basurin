@@ -29,7 +29,7 @@ from typing import Callable, Dict, Optional
 MetricFn = Callable[..., float]
 
 # ---------------------------------------------------------------------------
-# Public defaults (imported by tests / callers)
+# Public constants (kept for compatibility with older callers/tests)
 # ---------------------------------------------------------------------------
 
 DEFAULT_SIGMA_LNF: float = 0.07
@@ -89,10 +89,8 @@ def mahalanobis_log(
     if sigma_lnQ is None:
         sigma_lnQ = sigma_logQ
 
-    if sigma_lnf is None:
-        sigma_lnf = DEFAULT_SIGMA_LNF
-    if sigma_lnQ is None:
-        sigma_lnQ = DEFAULT_SIGMA_LNQ
+    if sigma_lnf is None or sigma_lnQ is None:
+        raise ValueError("sigma_lnf and sigma_lnQ are required")
 
     sigma_lnf = _as_float(sigma_lnf, name="sigma_logf")
     sigma_lnQ = _as_float(sigma_lnQ, name="sigma_logQ")
