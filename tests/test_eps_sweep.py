@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -17,7 +20,13 @@ def _create_run_valid(runs_root: Path, run_id: str) -> None:
     (rv_dir / "verdict.json").write_text(json.dumps({"verdict": "PASS"}), encoding="utf-8")
 
 
-def _create_s3_estimates(runs_root: Path, run_id: str, f_hz: float = 251.0, Q: float = 3.14) -> Path:
+def _create_s3_estimates(
+    runs_root: Path,
+    run_id: str,
+    f_hz: float = 251.0,
+    Q: float = 3.14,
+    include_uncertainty: bool = False,
+) -> Path:
     """Create synthetic s3 estimates as if s3 had run."""
     stage_dir = runs_root / run_id / "s3_ringdown_estimates"
     outputs_dir = stage_dir / "outputs"
@@ -31,6 +40,12 @@ def _create_s3_estimates(runs_root: Path, run_id: str, f_hz: float = 251.0, Q: f
         "per_detector": {"H1": {"f_hz": f_hz, "tau_s": 0.004, "Q": Q, "snr_peak": 8.0}},
         "n_detectors_valid": 1,
     }
+    if include_uncertainty:
+        estimates["combined_uncertainty"] = {
+            "sigma_logf": 0.2,
+            "sigma_logQ": 0.5,
+            "cov_logf_logQ": 0.0,
+        }
     est_path = outputs_dir / "estimates.json"
     est_path.write_text(json.dumps(estimates, indent=2), encoding="utf-8")
 
@@ -198,3 +213,53 @@ class TestEpsSweep:
         # Every hash should be a 64-char hex string
         for label, h in manifest["hashes"].items():
             assert len(h) == 64, f"Bad hash for {label}: {h}"
+
+    def test_cli_mahalanobis_requires_uncertainties(self, tmp_path: Path) -> None:
+        run_id = "test_cli_mah_requires_unc"
+        _create_run_valid(tmp_path, run_id)
+        _create_s3_estimates(tmp_path, run_id, include_uncertainty=False)
+
+        env = dict(**os.environ, BASURIN_RUNS_ROOT=str(tmp_path))
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(MVP_DIR / "experiment_eps_sweep.py"),
+                "--run", run_id,
+                "--atlas-path", str(ATLAS_FIXTURE),
+                "--metric", "mahalanobis_log",
+                "--epsilons", "0.1",
+            ],
+            cwd=str(REPO_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+        assert proc.returncode == 2
+        assert "requires uncertainties" in proc.stderr
+
+    def test_cli_mahalanobis_with_cli_sigmas_succeeds(self, tmp_path: Path) -> None:
+        run_id = "test_cli_mah_sigmas"
+        _create_run_valid(tmp_path, run_id)
+        _create_s3_estimates(tmp_path, run_id, include_uncertainty=False)
+
+        env = dict(**os.environ, BASURIN_RUNS_ROOT=str(tmp_path))
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(MVP_DIR / "experiment_eps_sweep.py"),
+                "--run", run_id,
+                "--atlas-path", str(ATLAS_FIXTURE),
+                "--metric", "mahalanobis_log",
+                "--epsilons", "0.1",
+                "--sigma-lnf", "0.2",
+                "--sigma-lnQ", "0.5",
+                "--correlation", "0.0",
+            ],
+            cwd=str(REPO_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+        assert proc.returncode == 0

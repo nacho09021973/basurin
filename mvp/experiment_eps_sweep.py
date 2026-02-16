@@ -40,6 +40,41 @@ EXPERIMENT_TAG = "ATLAS_REAL_EPS_SWEEP_V1"
 DEFAULT_EPSILONS = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50]
 
 
+def _resolve_mahalanobis_params(estimates: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    unc = estimates.get("combined_uncertainty", {}) or {}
+    params: dict[str, Any] = {}
+
+    sigma_logf = unc.get("sigma_logf")
+    sigma_logQ = unc.get("sigma_logQ")
+    cov_logf_logQ = unc.get("cov_logf_logQ")
+
+    if sigma_logf is not None:
+        params["sigma_lnf"] = sigma_logf
+    if sigma_logQ is not None:
+        params["sigma_lnQ"] = sigma_logQ
+    if cov_logf_logQ is not None:
+        params["cov_logf_logQ"] = cov_logf_logQ
+
+    for key in ("r", "correlation", "rho", "corr_logf_logQ"):
+        if key in unc and unc.get(key) is not None:
+            params["r"] = unc.get(key)
+            break
+
+    if args.sigma_lnf is not None:
+        params["sigma_lnf"] = args.sigma_lnf
+    if args.sigma_lnQ is not None:
+        params["sigma_lnQ"] = args.sigma_lnQ
+    if args.correlation is not None:
+        params["r"] = args.correlation
+
+    if params.get("sigma_lnf") is None or params.get("sigma_lnQ") is None:
+        raise ValueError(
+            "mahalanobis_log requires uncertainties: provide --sigma-lnf/--sigma-lnQ or regenerate s3 estimates with combined_uncertainty"
+        )
+
+    return params
+
+
 def run_eps_sweep(
     run_id: str,
     atlas_path: Path,
@@ -183,6 +218,9 @@ def main() -> int:
         choices=["euclidean_log", "mahalanobis_log"],
         help="Distance metric for compute_compatible_set",
     )
+    ap.add_argument("--sigma-lnf", type=float, default=None, help="Sigma for ln(f)")
+    ap.add_argument("--sigma-lnQ", type=float, default=None, help="Sigma for ln(Q)")
+    ap.add_argument("--correlation", type=float, default=None, help="Correlation r in log-space")
     args = ap.parse_args()
 
     atlas_path = Path(args.atlas_path)
@@ -195,8 +233,23 @@ def main() -> int:
         epsilons = DEFAULT_EPSILONS
 
     try:
-        run_eps_sweep(args.run, atlas_path, epsilons, metric=args.metric)
+        metric_params = None
+        if args.metric == "mahalanobis_log":
+            from basurin_io import resolve_out_root
+
+            out_root = resolve_out_root("runs")
+            estimates_path = out_root / args.run / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+            with open(estimates_path, "r", encoding="utf-8") as f:
+                estimates = json.load(f)
+            metric_params = _resolve_mahalanobis_params(estimates, args)
+
+        run_eps_sweep(args.run, atlas_path, epsilons, metric=args.metric, metric_params=metric_params)
         return 0
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        if "requires uncertainties" in str(exc):
+            return 2
+        return 1
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
