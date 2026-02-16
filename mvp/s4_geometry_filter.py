@@ -64,6 +64,7 @@ def compute_compatible_set(
     *,
     metric: str | None = None,
     metric_params: dict[str, Any] | None = None,
+    legacy_labels: bool = False,
     sigma_logf: float | object = _UNSET,
     sigma_logQ: float | object = _UNSET,
     cov_logf_logQ: float | object = _UNSET,
@@ -82,9 +83,10 @@ def compute_compatible_set(
     """
     log_f, log_Q = math.log(f_obs), math.log(Q_obs)
 
-    legacy_mode = metric is None
+    legacy_kwargs_used = any(v is not _UNSET for v in (sigma_logf, sigma_logQ, cov_logf_logQ))
+    use_legacy_labels = legacy_labels or (metric is None and legacy_kwargs_used)
 
-    if legacy_mode:
+    if metric is None and legacy_kwargs_used:
         s_f = None if sigma_logf is _UNSET else sigma_logf
         s_q = None if sigma_logQ is _UNSET else sigma_logQ
         cov = 0.0 if cov_logf_logQ is _UNSET else cov_logf_logQ
@@ -93,17 +95,18 @@ def compute_compatible_set(
         if has_sigma or has_cov:
             if s_f is None or s_q is None:
                 raise ValueError("Non-invertible covariance: sigma_logf and sigma_logQ must be provided together")
-            metric = "mahalanobis_log"
+            metric_name = "mahalanobis_log"
             metric_params = {
                 "sigma_logf": float(s_f),
                 "sigma_logQ": float(s_q),
                 "cov_logf_logQ": float(cov),
             }
         else:
-            metric = "euclidean_log"
+            metric_name = "euclidean_log"
             metric_params = {}
+    else:
+        metric_name = metric or "euclidean_log"
 
-    metric_name = metric or "euclidean_log"
     if metric_name not in {"euclidean_log", "mahalanobis_log"}:
         raise ValueError(f"Unsupported metric: {metric_name}")
 
@@ -118,12 +121,14 @@ def compute_compatible_set(
         sigma_q_val = params.get("sigma_logQ")
         if "cov_logf_logQ" in params:
             cov_val = params.get("cov_logf_logQ")
+        elif "correlation" in params:
+            cov_val = float(params["correlation"]) * float(params.get("sigma_logf", 0.0)) * float(params.get("sigma_logQ", 0.0))
         elif "r" in params:
-            cov_val = params.get("r")
+            cov_val = float(params["r"]) * float(params.get("sigma_logf", 0.0)) * float(params.get("sigma_logQ", 0.0))
         elif "rho" in params:
-            cov_val = params.get("rho")
+            cov_val = float(params["rho"]) * float(params.get("sigma_logf", 0.0)) * float(params.get("sigma_logQ", 0.0))
         elif "corr_logf_logQ" in params:
-            cov_val = params.get("corr_logf_logQ")
+            cov_val = float(params["corr_logf_logQ"]) * float(params.get("sigma_logf", 0.0)) * float(params.get("sigma_logQ", 0.0))
         else:
             cov_val = 0.0
 
@@ -213,7 +218,7 @@ def compute_compatible_set(
 
     if use_mahalanobis:
         d2_values = [r["d2"] for r in results]
-        out["metric"] = "mahalanobis" if legacy_mode else "mahalanobis_log"
+        out["metric"] = "mahalanobis" if use_legacy_labels else "mahalanobis_log"
         out["threshold_d2"] = epsilon
         out["d2_min"] = min(d2_values) if d2_values else None
         out["covariance_logspace"] = {
@@ -226,7 +231,7 @@ def compute_compatible_set(
         for item in out["ranked_all"]:
             item["d2"] = item.get("d2", item.get("dist2"))
     else:
-        out["metric"] = "euclidean" if legacy_mode else "euclidean_log"
+        out["metric"] = "euclidean" if use_legacy_labels else "euclidean_log"
 
     return out
 
@@ -287,19 +292,29 @@ def main() -> int:
 
         atlas = _load_atlas(atlas_path)
         if has_cov:
-            result = compute_compatible_set(
-                f_obs, Q_obs, atlas, threshold,
-                metric=args.metric,
-                sigma_logf=float(sigma_logf_raw),
-                sigma_logQ=float(sigma_logQ_raw),
-                cov_logf_logQ=float(cov_raw),
-            )
+            if args.metric is None:
+                result = compute_compatible_set(
+                    f_obs, Q_obs, atlas, threshold,
+                    metric=None, legacy_labels=True,
+                    sigma_logf=float(sigma_logf_raw),
+                    sigma_logQ=float(sigma_logQ_raw),
+                    cov_logf_logQ=float(cov_raw),
+                )
+            else:
+                result = compute_compatible_set(
+                    f_obs, Q_obs, atlas, threshold,
+                    metric=args.metric,
+                    metric_params={
+                        "sigma_logf": float(sigma_logf_raw),
+                        "sigma_logQ": float(sigma_logQ_raw),
+                        "cov_logf_logQ": float(cov_raw),
+                    },
+                )
         else:
             result = compute_compatible_set(
                 f_obs, Q_obs, atlas, threshold,
                 metric=args.metric,
-                sigma_logf=None,
-                sigma_logQ=None,
+                legacy_labels=(args.metric is None),
             )
         result["event_id"] = estimates.get("event_id", "unknown")
         result["run_id"] = args.run
