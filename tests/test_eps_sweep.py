@@ -59,6 +59,16 @@ def _create_s3_estimates(
     return est_path
 
 
+
+def test_suggest_sigma_scale_reference_value() -> None:
+    import sys
+    sys.path.insert(0, str(REPO_ROOT))
+
+    from mvp.experiment_eps_sweep import suggest_sigma_scale
+
+    scale = suggest_sigma_scale(215.463, 5.991)
+    assert scale == pytest.approx(5.99703649, abs=1e-3)
+
 class TestEpsSweep:
     """Tests for run_eps_sweep."""
 
@@ -263,6 +273,9 @@ class TestEpsSweep:
         )
 
         assert proc.returncode == 0
+        assert "sigma_scale_to_target_d2(5.991)" in proc.stdout
+        assert "sigma_scale_to_target_d2(9.210)" in proc.stdout
+        assert "sigma_scale_to_target_d2(11.829)" in proc.stdout
 
     def test_cli_mahalanobis_invalid_sigma_exits_2(self, tmp_path: Path) -> None:
         """Negative sigma → exit code 2 with Non-invertible covariance message."""

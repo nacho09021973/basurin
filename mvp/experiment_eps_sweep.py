@@ -38,6 +38,24 @@ from mvp.s4_geometry_filter import _load_atlas, compute_compatible_set
 
 EXPERIMENT_TAG = "ATLAS_REAL_EPS_SWEEP_V1"
 DEFAULT_EPSILONS = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50]
+SIGMA_SCALE_TARGETS_D2 = (5.991, 9.210, 11.829)
+
+
+def suggest_sigma_scale(d2_min: float, target_d2: float) -> float:
+    """Return sigma multiplier s needed to move d2_min close to target_d2.
+
+    Since Mahalanobis distance in log-space scales inversely with sigma,
+    d2 scales as 1 / s^2 for a uniform sigma scaling. Therefore:
+
+        target_d2 ~= d2_min / s^2  =>  s = sqrt(d2_min / target_d2)
+    """
+    d2 = float(d2_min)
+    target = float(target_d2)
+    if not math.isfinite(d2) or d2 <= 0:
+        raise ValueError(f"d2_min must be finite and > 0, got {d2}")
+    if not math.isfinite(target) or target <= 0:
+        raise ValueError(f"target_d2 must be finite and > 0, got {target}")
+    return math.sqrt(d2 / target)
 
 
 def _resolve_mahalanobis_params(estimates: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
@@ -269,6 +287,21 @@ def main() -> int:
             metric_params = _resolve_mahalanobis_params(estimates, args)
 
         run_eps_sweep(args.run, atlas_path, epsilons, metric=args.metric, metric_params=metric_params)
+
+        if args.metric == "mahalanobis_log" and args.sigma_lnf is not None and args.sigma_lnQ is not None:
+            from basurin_io import resolve_out_root
+
+            out_root = resolve_out_root("runs")
+            sweep_dir = out_root / args.run / "experiment" / EXPERIMENT_TAG
+            first_eps = sorted(epsilons)[0]
+            cs_path = sweep_dir / f"eps_{first_eps:.3f}" / "compatible_set.json"
+            with open(cs_path, "r", encoding="utf-8") as f:
+                cs = json.load(f)
+            d2_min = float(cs["d2_min"])
+            for target_d2 in SIGMA_SCALE_TARGETS_D2:
+                scale = suggest_sigma_scale(d2_min, target_d2)
+                print(f"sigma_scale_to_target_d2({target_d2:.3f}) = {scale:.6f}")
+
         return 0
     except ValueError as exc:
         msg = str(exc)
