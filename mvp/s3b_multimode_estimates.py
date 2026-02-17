@@ -112,6 +112,57 @@ def _discover_s2_npz(run_dir: Path) -> Path:
     return sorted(p for _, p in candidates)[0]
 
 
+def _discover_s2_window_meta(run_dir: Path) -> Path | None:
+    stage_dir = run_dir / "s2_ringdown_window"
+    manifest_path = stage_dir / "manifest.json"
+    if not manifest_path.exists():
+        return None
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, dict):
+        return None
+
+    raw = artifacts.get("window_meta")
+    if not isinstance(raw, str):
+        return None
+    path = _resolve_input_path(run_dir, stage_dir, raw)
+    if not path.exists():
+        return None
+    return path
+
+
+def compute_robust_stability(samples: list[tuple[float, float]]) -> dict[str, float | None]:
+    if not samples:
+        return {
+            "lnf_p10": None,
+            "lnf_p50": None,
+            "lnf_p90": None,
+            "lnQ_p10": None,
+            "lnQ_p50": None,
+            "lnQ_p90": None,
+            "lnf_span": None,
+            "lnQ_span": None,
+        }
+
+    arr = np.asarray(samples, dtype=float)
+    lnf = arr[:, 0]
+    lnq = arr[:, 1]
+    lnf_p10, lnf_p50, lnf_p90 = np.percentile(lnf, [10, 50, 90])
+    lnq_p10, lnq_p50, lnq_p90 = np.percentile(lnq, [10, 50, 90])
+
+    return {
+        "lnf_p10": float(lnf_p10),
+        "lnf_p50": float(lnf_p50),
+        "lnf_p90": float(lnf_p90),
+        "lnQ_p10": float(lnq_p10),
+        "lnQ_p50": float(lnq_p50),
+        "lnQ_p90": float(lnq_p90),
+        "lnf_span": float(lnf_p90 - lnf_p10),
+        "lnQ_span": float(lnq_p90 - lnq_p10),
+    }
+
+
 def _load_signal_from_npz(path: Path, *, window_meta: dict[str, Any] | None) -> tuple[np.ndarray, float]:
     try:
         data = np.load(path)
@@ -252,9 +303,18 @@ def evaluate_mode(
     seed: int,
     min_valid_fraction: float = 0.0,
     cv_threshold: float | None = None,
+    max_lnf_span: float = 1.0,
+    max_lnq_span: float = 1.0,
 ) -> tuple[dict[str, Any], list[str], bool]:
     flags: list[str] = []
-    stability = {"valid_fraction": 0.0, "n_successful": 0, "n_failed": int(n_bootstrap), "cv_f": None, "cv_Q": None}
+    stability = {
+        "valid_fraction": 0.0,
+        "n_successful": 0,
+        "n_failed": int(n_bootstrap),
+        "cv_f": None,
+        "cv_Q": None,
+        **compute_robust_stability([]),
+    }
     n_samples = int(signal.size)
     if n_samples <= 0 or n_samples < MIN_BOOTSTRAP_SAMPLES:
         flags.append("bootstrap_high_nonpositive")
@@ -286,10 +346,18 @@ def evaluate_mode(
             stability["message"] = "window too short after offset"
             return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
         raise
+    valid_mask = np.all(np.isfinite(samples), axis=1)
+    dropped_invalid = int(samples.shape[0] - int(np.count_nonzero(valid_mask)))
+    if dropped_invalid > 0:
+        flags.append(f"{label}_invalid_bootstrap_samples")
+    samples = samples[valid_mask]
+    n_failed += dropped_invalid
+
     valid_fraction = float(samples.shape[0] / n_bootstrap) if n_bootstrap > 0 else 0.0
     stability["valid_fraction"] = valid_fraction
     stability["n_successful"] = int(samples.shape[0])
     stability["n_failed"] = int(n_failed)
+    stability.update(compute_robust_stability([tuple(s) for s in samples.tolist()]))
 
     if samples.shape[0] < 2:
         flags.append(f"{label}_bootstrap_insufficient")
@@ -340,6 +408,22 @@ def evaluate_mode(
         flags.append(f"{label}_valid_fraction_low")
         ok = False
 
+    lnf_span = stability.get("lnf_span")
+    lnq_span = stability.get("lnQ_span")
+    if lnf_span is None or not math.isfinite(float(lnf_span)):
+        flags.append(f"{label}_lnf_span_invalid")
+        ok = False
+    elif float(lnf_span) > max_lnf_span:
+        flags.append(f"{label}_lnf_span_explosive")
+        ok = False
+
+    if lnq_span is None or not math.isfinite(float(lnq_span)):
+        flags.append(f"{label}_lnQ_span_invalid")
+        ok = False
+    elif float(lnq_span) > max_lnq_span:
+        flags.append(f"{label}_lnQ_span_explosive")
+        ok = False
+
     cv_f = None
     cv_q = None
     if cv_threshold is not None:
@@ -351,10 +435,8 @@ def evaluate_mode(
         stability["cv_Q"] = cv_q
         if cv_f > cv_threshold:
             flags.append(f"{label}_cv_f_explosive")
-            ok = False
         if cv_q > cv_threshold:
             flags.append(f"{label}_cv_Q_explosive")
-            ok = False
 
     if not (math.isfinite(ln_f) and math.isfinite(ln_q)):
         flags.append(f"{label}_non_finite_log")
@@ -378,7 +460,7 @@ def build_results_payload(
     verdict = "OK" if (mode_220_ok and mode_221_ok) else "INSUFFICIENT_DATA"
     messages: list[str] = []
     if verdict == "INSUFFICIENT_DATA":
-        messages.append("Best-effort multimode fit: mode 221 unavailable or unstable.")
+        messages.append("Best-effort multimode fit: one or more modes unavailable or unstable.")
     return {
         "schema_version": "multimode_estimates_v1",
         "run_id": run_id,
@@ -404,9 +486,13 @@ def main() -> int:
 
     try:
         window_meta = None
-        window_meta_path = ctx.run_dir / "s2_ringdown_window" / "outputs" / "window_meta.json"
+        default_window_meta_path = ctx.run_dir / "s2_ringdown_window" / "outputs" / "window_meta.json"
+        window_meta_path = _discover_s2_window_meta(ctx.run_dir) or default_window_meta_path
+        global_flags: list[str] = []
         if window_meta_path.exists():
             window_meta = json.loads(window_meta_path.read_text(encoding="utf-8"))
+        else:
+            global_flags.append("missing_window_meta")
 
         npz_path = _discover_s2_npz(ctx.run_dir)
         check_inputs(ctx, {"s2_rd_npz": npz_path}, optional={"s2_window_meta": window_meta_path})
@@ -440,7 +526,7 @@ def main() -> int:
             ok_220,
             mode_221,
             ok_221,
-            flags_220 + flags_221,
+            global_flags + flags_220 + flags_221,
         )
 
         out_path = ctx.outputs_dir / "multimode_estimates.json"
