@@ -205,4 +205,4 @@ def test_experiment_t0_sweep_full_s3_no_valid_estimate_is_insufficient_data(tmp_
     assert point_50["status"] == "INSUFFICIENT_DATA"
     assert "s3_no_valid_estimate" in point_50["quality_flags"]
     assert point_50["s4c"]["verdict"] == "INSUFFICIENT_DATA"
-
+    assert payload["summary"]["n_failed"] == 0
