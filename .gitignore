@@ -9,3 +9,6 @@ runs_tmp/
 
 # Local external data (H5, downloads)
 external/
+
+# Local datasets (do not commit)
+data/
