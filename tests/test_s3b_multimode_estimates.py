@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import json
 
 import numpy as np
 
@@ -15,6 +16,8 @@ _SPEC.loader.exec_module(_MODULE)
 build_results_payload = _MODULE.build_results_payload
 covariance_gate = _MODULE.covariance_gate
 evaluate_mode = _MODULE.evaluate_mode
+_discover_s2_npz = _MODULE._discover_s2_npz
+_load_signal_from_npz = _MODULE._load_signal_from_npz
 
 
 def _stable_estimator(signal: np.ndarray, fs: float) -> dict[str, float]:
@@ -97,3 +100,35 @@ def test_verdict_insufficient_when_missing_221() -> None:
     assert payload["results"]["verdict"] == "INSUFFICIENT_DATA"
     assert payload["modes"][1]["label"] == "221"
     assert payload["modes"][1]["ln_f"] is None
+
+
+def test_discover_s2_npz_prefers_h1_then_l1(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run_x"
+    stage_dir = run_dir / "s2_ringdown_window"
+    out_dir = stage_dir / "outputs"
+    out_dir.mkdir(parents=True)
+    h1 = out_dir / "H1_rd.npz"
+    l1 = out_dir / "L1_rd.npz"
+    np.savez(h1, strain=np.ones(32), sample_rate_hz=np.array([4096.0]))
+    np.savez(l1, strain=np.ones(32), sample_rate_hz=np.array([4096.0]))
+    (stage_dir / "manifest.json").write_text(
+        json.dumps({
+            "artifacts": {
+                "H1_rd": "s2_ringdown_window/outputs/H1_rd.npz",
+                "L1_rd": "s2_ringdown_window/outputs/L1_rd.npz",
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    assert _discover_s2_npz(run_dir) == h1
+
+
+def test_load_signal_from_npz_uses_window_meta_sample_rate(tmp_path: Path) -> None:
+    npz_path = tmp_path / "H1_rd.npz"
+    signal = np.linspace(-1.0, 1.0, 64)
+    np.savez(npz_path, strain=signal)
+
+    loaded, fs = _load_signal_from_npz(npz_path, window_meta={"sample_rate_hz": 2048.0})
+    assert np.allclose(loaded, signal)
+    assert fs == 2048.0

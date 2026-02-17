@@ -69,67 +69,73 @@ def covariance_gate(
     return len(reasons) == 0, reasons
 
 
-def _discover_s2_h5(run_dir: Path) -> Path:
-    outputs_dir = run_dir / "s2_ringdown_window" / "outputs"
-    if not outputs_dir.is_dir():
-        raise RuntimeError(f"missing s2 outputs directory: {outputs_dir}")
-
-    h5_files = sorted(p for p in outputs_dir.glob("*.h5") if p.is_file())
-    if not h5_files:
-        raise RuntimeError("missing canonical H5 output from s2")
-    if len(h5_files) == 1:
-        return h5_files[0]
-
-    priority = ["windowed_strain.h5", "ringdown_window.h5", "windowed.h5"]
-    by_name = {p.name: p for p in h5_files}
-    matches = [by_name[name] for name in priority if name in by_name]
-    if len(matches) == 1:
-        return matches[0]
-
-    listed = ", ".join(p.name for p in h5_files)
-    raise RuntimeError(f"ambiguous H5 inputs in s2 outputs: {listed}")
+def _resolve_input_path(run_dir: Path, stage_dir: Path, raw_path: str) -> Path:
+    cand = Path(raw_path)
+    if cand.is_absolute() and cand.exists():
+        return cand
+    rel_to_run = run_dir / cand
+    if rel_to_run.exists():
+        return rel_to_run
+    rel_to_stage = stage_dir / cand
+    if rel_to_stage.exists():
+        return rel_to_stage
+    return rel_to_run
 
 
-def _load_signal_from_h5(path: Path) -> tuple[np.ndarray, float]:
+def _discover_s2_npz(run_dir: Path) -> Path:
+    stage_dir = run_dir / "s2_ringdown_window"
+    manifest_path = stage_dir / "manifest.json"
+    if not manifest_path.exists():
+        raise RuntimeError(f"missing s2 manifest: {manifest_path}")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise RuntimeError("corrupt s2 manifest: missing artifacts map")
+
+    candidates: list[tuple[str, Path]] = []
+    for key, raw in artifacts.items():
+        if not isinstance(key, str) or not isinstance(raw, str):
+            continue
+        if key in {"H1_rd", "L1_rd"} or raw.endswith("_rd.npz"):
+            candidates.append((key, _resolve_input_path(run_dir, stage_dir, raw)))
+
+    if not candidates:
+        raise RuntimeError("missing canonical NPZ rd output from s2")
+
+    by_key = {k: p for k, p in candidates}
+    if "H1_rd" in by_key:
+        return by_key["H1_rd"]
+    if "L1_rd" in by_key:
+        return by_key["L1_rd"]
+    return sorted(p for _, p in candidates)[0]
+
+
+def _load_signal_from_npz(path: Path, *, window_meta: dict[str, Any] | None) -> tuple[np.ndarray, float]:
     try:
-        import h5py  # type: ignore
-    except Exception as exc:  # pragma: no cover
-        raise RuntimeError(f"h5py unavailable: {exc}") from exc
+        data = np.load(path)
+    except Exception as exc:
+        raise RuntimeError(f"corrupt s2 NPZ: cannot read {path}: {exc}") from exc
 
-    with h5py.File(path, "r") as h5:
-        signal = None
-        fs = None
+    if "strain" not in data:
+        raise RuntimeError("corrupt s2 NPZ: missing strain")
+    signal = np.asarray(data["strain"], dtype=float)
 
-        for key in ("strain", "signal", "data"):
-            if key in h5:
-                arr = np.asarray(h5[key])
-                if arr.ndim == 1:
-                    signal = arr
-                    break
-                if arr.ndim >= 2:
-                    signal = arr[0]
-                    break
-
-        if signal is None:
-            for det in ("H1", "L1", "V1"):
-                if det in h5:
-                    arr = np.asarray(h5[det])
-                    signal = arr if arr.ndim == 1 else arr[0]
-                    break
-
+    fs: float | None = None
+    for key in ("sample_rate_hz", "fs"):
+        if key in data:
+            fs = float(np.asarray(data[key]).flat[0])
+            break
+    if fs is None and window_meta:
         for key in ("sample_rate_hz", "fs"):
-            if key in h5:
-                fs = float(np.asarray(h5[key]).flat[0])
+            if key in window_meta:
+                fs = float(window_meta[key])
                 break
 
-    if signal is None or fs is None:
-        raise RuntimeError("corrupt s2 H5: missing signal/fs")
-
-    signal = np.asarray(signal, dtype=float)
     if signal.ndim != 1 or signal.size < 16 or not np.all(np.isfinite(signal)):
-        raise RuntimeError("corrupt s2 H5: invalid signal")
-    if not math.isfinite(fs) or fs <= 0:
-        raise RuntimeError("corrupt s2 H5: invalid sample rate")
+        raise RuntimeError("corrupt s2 NPZ: invalid strain")
+    if fs is None or not math.isfinite(fs) or fs <= 0:
+        raise RuntimeError("corrupt s2 NPZ: missing/invalid sample rate")
     return signal, fs
 
 
@@ -372,14 +378,14 @@ def main() -> int:
     ctx = init_stage(args.run_id, STAGE, params={"n_bootstrap": args.n_bootstrap, "seed": args.seed})
 
     try:
-        h5_path = _discover_s2_h5(ctx.run_dir)
-        check_inputs(ctx, {"s2_windowed_h5": h5_path})
-        signal, fs = _load_signal_from_h5(h5_path)
-
         window_meta = None
         window_meta_path = ctx.run_dir / "s2_ringdown_window" / "outputs" / "window_meta.json"
         if window_meta_path.exists():
             window_meta = json.loads(window_meta_path.read_text(encoding="utf-8"))
+
+        npz_path = _discover_s2_npz(ctx.run_dir)
+        check_inputs(ctx, {"s2_rd_npz": npz_path}, optional={"s2_window_meta": window_meta_path})
+        signal, fs = _load_signal_from_npz(npz_path, window_meta=window_meta)
 
         mode_220, flags_220, ok_220 = evaluate_mode(
             signal,
