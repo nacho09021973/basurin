@@ -32,6 +32,7 @@ from basurin_io import (
 
 EXPERIMENT_STAGE = "experiment/t0_sweep_full"
 RESULTS_NAME = "t0_sweep_full_results.json"
+S3_NO_VALID_ESTIMATE_MSG = "No detector produced a valid estimate"
 
 
 def run_cmd(cmd: list[str], env: dict[str, str], timeout: int) -> subprocess.CompletedProcess[str]:
@@ -329,7 +330,7 @@ def run_t0_sweep_full(
             if int(getattr(cp, "returncode", 1)) != 0:
                 stderr = (getattr(cp, "stderr", "") or "").strip()
                 is_s3 = Path(cmd[1]).stem == "s3_ringdown_estimates"
-                if is_s3 and "No detector produced a valid estimate" in stderr:
+                if is_s3 and S3_NO_VALID_ESTIMATE_MSG in stderr:
                     point["status"] = "INSUFFICIENT_DATA"
                     point["quality_flags"].append("s3_no_valid_estimate")
                     if stderr:
