@@ -1,8 +1,20 @@
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+
 import numpy as np
 
-from mvp.s3b_multimode_estimates import build_results_payload, covariance_gate, evaluate_mode
+
+_MODULE_PATH = Path(__file__).resolve().parents[1] / "mvp" / "s3b_multimode_estimates.py"
+_SPEC = importlib.util.spec_from_file_location("mvp_s3b_multimode_estimates", _MODULE_PATH)
+assert _SPEC is not None and _SPEC.loader is not None
+_MODULE = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_MODULE)
+
+build_results_payload = _MODULE.build_results_payload
+covariance_gate = _MODULE.covariance_gate
+evaluate_mode = _MODULE.evaluate_mode
 
 
 def _stable_estimator(signal: np.ndarray, fs: float) -> dict[str, float]:
