@@ -311,7 +311,7 @@ def run_t0_sweep_full(
         env["BASURIN_RUNS_ROOT"] = str(subruns_root)
 
         stages = [
-            [python, s3_script, "--run-id", subrun_id],
+            [python, s3_script, "--run", subrun_id],
             [python, s3b_script, "--run-id", subrun_id, "--n-bootstrap", str(args.n_bootstrap), "--seed", str(args.seed)],
             [python, s4c_script, "--run-id", subrun_id, "--atlas-path", str(args.atlas_path)],
         ]
