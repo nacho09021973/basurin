@@ -15,6 +15,7 @@ _SPEC.loader.exec_module(_MODULE)
 
 build_results_payload = _MODULE.build_results_payload
 covariance_gate = _MODULE.covariance_gate
+compute_robust_stability = _MODULE.compute_robust_stability
 evaluate_mode = _MODULE.evaluate_mode
 _discover_s2_npz = _MODULE._discover_s2_npz
 _load_signal_from_npz = _MODULE._load_signal_from_npz
@@ -172,3 +173,104 @@ def test_evaluate_mode_invalid_block_size_flags_bootstrap_block_invalid() -> Non
     assert not ok
     assert "bootstrap_block_invalid" in flags
     assert mode["fit"]["stability"]["message"] == "window too short after offset"
+
+
+def test_compute_robust_stability_quantiles_are_deterministic() -> None:
+    samples = [
+        (1.0, 2.0),
+        (2.0, 3.0),
+        (3.0, 4.0),
+        (4.0, 5.0),
+        (5.0, 6.0),
+    ]
+    stability = compute_robust_stability(samples)
+
+    assert np.isclose(stability["lnf_p10"], 1.4)
+    assert np.isclose(stability["lnf_p50"], 3.0)
+    assert np.isclose(stability["lnf_p90"], 4.6)
+    assert np.isclose(stability["lnQ_p10"], 2.4)
+    assert np.isclose(stability["lnQ_p50"], 4.0)
+    assert np.isclose(stability["lnQ_p90"], 5.6)
+    assert np.isclose(stability["lnf_span"], 3.2)
+    assert np.isclose(stability["lnQ_span"], 3.2)
+
+
+def test_cv_q_high_but_lnq_span_moderate_does_not_invalidate() -> None:
+    signal = np.linspace(-1.0, 1.0, 2048)
+
+    def estimator(_signal: np.ndarray, _fs: float) -> dict[str, float]:
+        return {"f_hz": 220.0, "Q": 12.0, "tau_s": 12.0 / (np.pi * 220.0)}
+
+    outlier_samples = np.array(
+        [
+            [np.log(220.0), np.log(8.0)],
+            [np.log(220.5), np.log(8.2)],
+            [np.log(221.0), np.log(8.4)],
+            [np.log(219.5), np.log(8.6)],
+            [np.log(220.2), np.log(60.0)],
+        ],
+        dtype=float,
+    )
+
+    original = _MODULE._bootstrap_mode_log_samples
+    _MODULE._bootstrap_mode_log_samples = lambda *_args, **_kwargs: (outlier_samples, 0)
+    try:
+        mode, flags, ok = evaluate_mode(
+            signal,
+            4096.0,
+            label="220",
+            mode=[2, 2, 0],
+            estimator=estimator,
+            n_bootstrap=5,
+            seed=7,
+            cv_threshold=0.5,
+            max_lnf_span=0.1,
+            max_lnq_span=2.5,
+        )
+    finally:
+        _MODULE._bootstrap_mode_log_samples = original
+
+    assert ok
+    assert "220_cv_Q_explosive" in flags
+    assert mode["ln_Q"] is not None
+
+
+def test_sigma_pathological_invalidates_mode_and_reports_flag() -> None:
+    signal = np.linspace(-1.0, 1.0, 2048)
+
+    def estimator(_signal: np.ndarray, _fs: float) -> dict[str, float]:
+        return {"f_hz": 220.0, "Q": 12.0, "tau_s": 12.0 / (np.pi * 220.0)}
+
+    singular_samples = np.array(
+        [
+            [np.log(220.0), np.log(12.0)],
+            [np.log(221.0), np.log(13.0)],
+            [np.log(222.0), np.log(14.0)],
+            [np.log(223.0), np.log(15.0)],
+        ],
+        dtype=float,
+    )
+    singular_samples[:, 1] = singular_samples[:, 0] + 0.5
+
+    original = _MODULE._bootstrap_mode_log_samples
+    _MODULE._bootstrap_mode_log_samples = lambda *_args, **_kwargs: (singular_samples, 0)
+    try:
+        mode, flags, ok = evaluate_mode(
+            signal,
+            4096.0,
+            label="220",
+            mode=[2, 2, 0],
+            estimator=estimator,
+            n_bootstrap=4,
+            seed=8,
+            max_lnf_span=5.0,
+            max_lnq_span=5.0,
+        )
+    finally:
+        _MODULE._bootstrap_mode_log_samples = original
+
+    assert not ok
+    assert "220_Sigma_not_invertible" in flags
+    assert mode["ln_f"] is None
+    assert mode["Sigma"] is None
+    assert mode["fit"]["stability"]["lnf_p50"] is not None
