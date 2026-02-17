@@ -141,17 +141,15 @@ def _bootstrap_mode_log_samples(
     n_bootstrap: int,
     rng: np.random.Generator,
 ) -> tuple[np.ndarray, int]:
-    base = estimator(signal, fs)
-    block = max(16, int(fs / max(float(base["f_hz"]), 1.0)))
     n = signal.size
-    n_blocks = max(1, n // block)
-    draws = -(-n // block)
+    block_len = max(64, n // 20)
+    n_blocks = int(math.ceil(n / block_len))
 
     samples: list[list[float]] = []
     failed = 0
     for _ in range(n_bootstrap):
-        idx = rng.integers(0, n_blocks, size=draws)
-        resampled = np.concatenate([signal[i * block:(i + 1) * block] for i in idx])[:n]
+        starts = rng.integers(0, n - block_len + 1, size=n_blocks)
+        resampled = np.concatenate([signal[s:s + block_len] for s in starts])[:n]
         try:
             est = estimator(resampled, fs)
             f_hz = float(est["f_hz"])
@@ -267,8 +265,45 @@ def evaluate_mode(
         return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
 
     sigma = compute_covariance(samples)
-    ok, reasons = covariance_gate(sigma)
-    flags.extend([f"{label}_{r}" for r in reasons])
+    if sigma.shape != (2, 2) or not np.all(np.isfinite(sigma)):
+        flags.append(f"{label}_Sigma_non_finite")
+        return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
+
+    ok = True
+    sigma_floor = 1e-4
+    sigma_ceiling = 2.0
+    corr_limit = 0.999
+
+    if sigma[0, 0] < sigma_floor**2:
+        sigma[0, 0] = sigma_floor**2
+        flags.append(f"{label}_sigma_lnf_floor_clamped")
+    if sigma[1, 1] < sigma_floor**2:
+        sigma[1, 1] = sigma_floor**2
+        flags.append(f"{label}_sigma_lnQ_floor_clamped")
+
+    s0 = float(math.sqrt(max(sigma[0, 0], 0.0)))
+    s1 = float(math.sqrt(max(sigma[1, 1], 0.0)))
+
+    det = float(np.linalg.det(sigma))
+    if det <= 0:
+        flags.append(f"{label}_Sigma_not_invertible")
+        ok = False
+
+    if s0 > sigma_ceiling:
+        flags.append(f"{label}_sigma_lnf_out_of_bounds")
+        ok = False
+    if s1 > sigma_ceiling:
+        flags.append(f"{label}_sigma_lnQ_out_of_bounds")
+        ok = False
+
+    if s0 <= 0 or s1 <= 0:
+        flags.append(f"{label}_sigma_zero")
+        ok = False
+    else:
+        r = float(sigma[0, 1] / (s0 * s1))
+        if abs(r) >= corr_limit:
+            flags.append(f"{label}_corr_too_high")
+            ok = False
 
     if valid_fraction < min_valid_fraction:
         flags.append(f"{label}_valid_fraction_low")
