@@ -139,9 +139,8 @@ def _bootstrap_mode_log_samples(
     estimator: Callable[[np.ndarray, float], dict[str, float]],
     *,
     n_bootstrap: int,
-    seed: int,
+    rng: np.random.Generator,
 ) -> tuple[np.ndarray, int]:
-    rng = np.random.default_rng(seed)
     base = estimator(signal, fs)
     block = max(16, int(fs / max(float(base["f_hz"]), 1.0)))
     n = signal.size
@@ -247,6 +246,7 @@ def evaluate_mode(
 ) -> tuple[dict[str, Any], list[str], bool]:
     flags: list[str] = []
     stability = {"valid_fraction": 0.0, "n_successful": 0, "n_failed": int(n_bootstrap), "cv_f": None, "cv_Q": None}
+    rng = np.random.default_rng(int(seed))
 
     try:
         point = estimator(signal, fs)
@@ -254,9 +254,9 @@ def evaluate_mode(
         ln_q = math.log(float(point["Q"]))
     except Exception:
         flags.append(f"{label}_point_estimate_failed")
-        return _mode_null(label, mode, n_bootstrap, seed, stability), flags, False
+        return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
 
-    samples, n_failed = _bootstrap_mode_log_samples(signal, fs, estimator, n_bootstrap=n_bootstrap, seed=seed)
+    samples, n_failed = _bootstrap_mode_log_samples(signal, fs, estimator, n_bootstrap=n_bootstrap, rng=rng)
     valid_fraction = float(samples.shape[0] / n_bootstrap) if n_bootstrap > 0 else 0.0
     stability["valid_fraction"] = valid_fraction
     stability["n_successful"] = int(samples.shape[0])
@@ -264,7 +264,7 @@ def evaluate_mode(
 
     if samples.shape[0] < 2:
         flags.append(f"{label}_bootstrap_insufficient")
-        return _mode_null(label, mode, n_bootstrap, seed, stability), flags, False
+        return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
 
     sigma = compute_covariance(samples)
     ok, reasons = covariance_gate(sigma)
@@ -295,9 +295,9 @@ def evaluate_mode(
         ok = False
 
     if not ok:
-        return _mode_null(label, mode, n_bootstrap, seed, stability), flags, False
+        return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
 
-    return _mode_payload(label, mode, ln_f, ln_q, sigma, n_bootstrap, seed, stability), flags, True
+    return _mode_payload(label, mode, ln_f, ln_q, sigma, n_bootstrap, seed, stability), sorted(flags), True
 
 
 def build_results_payload(
@@ -321,7 +321,7 @@ def build_results_payload(
         "results": {
             "verdict": verdict,
             "quality_flags": sorted(set(flags)),
-            "messages": messages,
+            "messages": sorted(messages),
         },
         "modes": [mode_220, mode_221],
     }
