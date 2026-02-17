@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -478,9 +479,13 @@ def build_results_payload(
 def main() -> int:
     ap = argparse.ArgumentParser(description="MVP s3b multimode estimates")
     ap.add_argument("--run-id", required=True)
+    ap.add_argument("--runs-root", default=None, help="Override BASURIN_RUNS_ROOT for this invocation")
     ap.add_argument("--n-bootstrap", type=int, default=200)
     ap.add_argument("--seed", type=int, default=12345)
     args = ap.parse_args()
+
+    if args.runs_root:
+        os.environ["BASURIN_RUNS_ROOT"] = str(Path(args.runs_root).resolve())
 
     ctx = init_stage(args.run_id, STAGE, params={"n_bootstrap": args.n_bootstrap, "seed": args.seed})
 
