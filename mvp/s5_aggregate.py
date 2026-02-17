@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -81,6 +82,13 @@ def aggregate_compatible_sets(
     source_data: list[dict[str, Any]], min_coverage: float = 1.0, top_k: int = 50,
 ) -> dict[str, Any]:
     n_events = len(source_data)
+    compatible_sets = [set(map(str, src.get("compatible_ids", set()))) for src in source_data]
+    if compatible_sets:
+        legacy_common_ids = sorted(set.intersection(*compatible_sets))
+    else:
+        legacy_common_ids = []
+    legacy_common_geometries = [{"geometry_id": gid} for gid in legacy_common_ids]
+
     if n_events == 0:
         return {
             "schema_version": "mvp_aggregate_v2",
@@ -221,7 +229,7 @@ def aggregate_compatible_sets(
         "schema_version": "mvp_aggregate_v2",
         "n_events": n_events, "min_coverage": min_coverage, "min_count": min_count,
         "n_total_unique_geometries": len(counter),
-        "n_common_geometries": len(common), "common_geometries": common,
+        "n_common_geometries": len(legacy_common_geometries), "common_geometries": legacy_common_geometries,
         "joint_posterior": {
             "prior_type": "uniform_entries",
             "normalization": "relative_only",
@@ -231,7 +239,7 @@ def aggregate_compatible_sets(
             "best_entry_id": best_entry_id,
             "d2_sum_min": d2_sum_min,
             "log_likelihood_rel_best": log_likelihood_rel_best,
-            "common_geometries": common,
+            "common_geometries": legacy_common_geometries,
             "joint_ranked_all": ranked,
         },
         "coverage_histogram": coverage_hist,
@@ -276,15 +284,23 @@ def main() -> int:
             with open(p, "r", encoding="utf-8") as f:
                 cs = json.load(f)
 
+            extracted_ids = _extract_compatible_geometry_ids(cs)
+            if os.environ.get("BASURIN_DEBUG_S5"):
+                print(
+                    f"[s5 debug] run={src} payload_keys={sorted(cs.keys())} extracted_ids={sorted(extracted_ids)}",
+                    file=sys.stderr,
+                )
+
             ranked_all = cs.get("ranked_all", [])
             if not ranked_all:
-                ranked_all = [{"geometry_id": gid} for gid in sorted(_extract_compatible_geometry_ids(cs))]
+                ranked_all = [{"geometry_id": gid} for gid in sorted(extracted_ids)]
 
             source_data.append({
                 "run_id": src, "event_id": cs.get("event_id", "unknown"),
                 "metric": cs.get("metric"),
                 "threshold_d2": cs.get("threshold_d2"),
                 "ranked_all": ranked_all,
+                "compatible_ids": extracted_ids,
                 "observables": cs.get("observables", {}),
             })
 
