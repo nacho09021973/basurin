@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
 import json
+import os
+from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 
@@ -274,3 +277,77 @@ def test_sigma_pathological_invalidates_mode_and_reports_flag() -> None:
     assert mode["ln_f"] is None
     assert mode["Sigma"] is None
     assert mode["fit"]["stability"]["lnf_p50"] is not None
+
+
+def _write_minimal_s2_inputs(run_root: Path, run_id: str) -> None:
+    run_dir = run_root / run_id
+    rv_dir = run_dir / "RUN_VALID"
+    rv_dir.mkdir(parents=True, exist_ok=True)
+    (rv_dir / "verdict.json").write_text(json.dumps({"verdict": "PASS"}), encoding="utf-8")
+
+    s2_outputs = run_dir / "s2_ringdown_window" / "outputs"
+    s2_outputs.mkdir(parents=True, exist_ok=True)
+    signal = np.cos(np.linspace(0, 8 * np.pi, 2048))
+    np.savez(s2_outputs / "H1_rd.npz", strain=signal, sample_rate_hz=np.array([4096.0]))
+
+    (run_dir / "s2_ringdown_window" / "manifest.json").write_text(
+        json.dumps({"artifacts": {"H1_rd": "s2_ringdown_window/outputs/H1_rd.npz"}}),
+        encoding="utf-8",
+    )
+
+
+def test_cli_runs_root_writes_under_explicit_root_only(tmp_path: Path) -> None:
+    run_id = "subrun_001"
+    tmp_runs = tmp_path / "subruns_root"
+    _write_minimal_s2_inputs(tmp_runs, run_id)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    cmd = [
+        sys.executable,
+        str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
+        "--runs-root",
+        str(tmp_runs),
+        "--run-id",
+        run_id,
+        "--n-bootstrap",
+        "8",
+        "--seed",
+        "101",
+    ]
+    env = os.environ.copy()
+    env.pop("BASURIN_RUNS_ROOT", None)
+
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+
+    stage_dir = tmp_runs / run_id / "s3b_multimode_estimates"
+    assert (stage_dir / "manifest.json").exists()
+    assert (stage_dir / "stage_summary.json").exists()
+    assert (stage_dir / "outputs" / "multimode_estimates.json").exists()
+
+    assert not (repo_root / "runs" / run_id / "s3b_multimode_estimates").exists()
+
+
+def test_cli_runs_root_still_enforces_run_valid_gate(tmp_path: Path) -> None:
+    run_id = "subrun_002"
+    tmp_runs = tmp_path / "subruns_root"
+    run_dir = tmp_runs / run_id
+    run_dir.mkdir(parents=True)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    cmd = [
+        sys.executable,
+        str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
+        "--runs-root",
+        str(tmp_runs),
+        "--run-id",
+        run_id,
+        "--n-bootstrap",
+        "4",
+    ]
+    env = os.environ.copy()
+    env.pop("BASURIN_RUNS_ROOT", None)
+
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, env=env)
+    assert result.returncode != 0
+    assert "RUN_VALID" in result.stderr
