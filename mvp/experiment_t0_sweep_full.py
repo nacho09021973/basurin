@@ -348,7 +348,14 @@ def run_t0_sweep_full(
         point["s3b"] = _extract_s3b(s3b_payload)
         point["s4c"] = _extract_s4c(s4c_payload)
         if skip_to_insufficient:
-            point["s4c"]["verdict"] = "INSUFFICIENT_DATA"
+            point["s4c"] = {
+                "verdict": "INSUFFICIENT_DATA",
+                "kerr_consistent_95": None,
+                "chi_best": None,
+                "d2_min": None,
+                "delta_logfreq": None,
+                "delta_logQ": None,
+            }
 
         if skip_to_insufficient:
             n_ins += 1

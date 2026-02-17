@@ -150,9 +150,12 @@ def test_experiment_t0_sweep_full_s3_no_valid_estimate_is_insufficient_data(tmp_
         stage_timeout_s=30,
     )
 
+    observed_cmds: list[list[str]] = []
+
     def fake_runner(cmd: list[str], env: dict[str, str], timeout: int):
         del env
         assert timeout == 30
+        observed_cmds.append(cmd)
         stage = Path(cmd[1]).stem
         if "--run-id" in cmd:
             subrun_id = cmd[cmd.index("--run-id") + 1]
@@ -205,4 +208,12 @@ def test_experiment_t0_sweep_full_s3_no_valid_estimate_is_insufficient_data(tmp_
     assert point_50["status"] == "INSUFFICIENT_DATA"
     assert "s3_no_valid_estimate" in point_50["quality_flags"]
     assert point_50["s4c"]["verdict"] == "INSUFFICIENT_DATA"
+    assert point_50["s4c"]["chi_best"] is None
+    assert point_50["s4c"]["d2_min"] is None
     assert payload["summary"]["n_failed"] == 0
+
+    assert not any(
+        Path(cmd[1]).stem == "s4c_kerr_consistency" and cmd[cmd.index("--run-id") + 1].endswith("t0ms0050")
+        for cmd in observed_cmds
+        if "--run-id" in cmd
+    )
