@@ -145,6 +145,82 @@ def _run_stage(
     return returncode if not timed_out else 124  # 124 = timeout convention
 
 
+def _run_optional_experiment_t0_sweep(
+    out_root: Path,
+    run_id: str,
+    timeline: dict[str, Any],
+    stage_timeout_s: float | None,
+) -> None:
+    script = "experiment_t0_sweep.py"
+    label = "experiment_t0_sweep"
+    script_path = MVP_DIR / script
+
+    stage_entry = {
+        "stage": label,
+        "script": script,
+        "started_utc": datetime.now(timezone.utc).isoformat(),
+        "ended_utc": None,
+        "duration_s": None,
+        "returncode": None,
+        "timed_out": False,
+        "best_effort": True,
+    }
+
+    if not script_path.exists():
+        stage_entry["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        stage_entry["status"] = "skipped_missing_script"
+        timeline["stages"].append(stage_entry)
+        _write_timeline(out_root, run_id, timeline)
+        print(f"[pipeline] WARNING: {script} not found, skipping best-effort experiment", flush=True)
+        return
+
+    args = ["--run", run_id]
+    rc = _run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s)
+    timeline["stages"][-1]["best_effort"] = True
+    _write_timeline(out_root, run_id, timeline)
+    if rc != 0:
+        print(f"[pipeline] WARNING: {label} failed (exit={rc}), continuing", flush=True)
+
+
+def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
+    results: dict[str, Any] = {
+        "kerr_consistent": None,
+        "chi_best": None,
+        "d2_min": None,
+        "extraction_quality": None,
+    }
+
+    s4c_path = out_root / run_id / "s4c_kerr_consistency" / "outputs" / "kerr_consistency.json"
+    try:
+        payload = json.loads(s4c_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"[pipeline] WARNING: cannot parse {s4c_path}: {exc}", flush=True)
+    else:
+        for key in ("consistent_kerr_95", "kerr_consistent", "consistent"):
+            if key in payload:
+                results["kerr_consistent"] = payload[key]
+                break
+        for key in ("chi_best_fit", "chi_best"):
+            if key in payload:
+                results["chi_best"] = payload[key]
+                break
+        if "d2_min" in payload:
+            results["d2_min"] = payload["d2_min"]
+
+    s3b_path = out_root / run_id / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
+    try:
+        payload_s3b = json.loads(s3b_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"[pipeline] WARNING: cannot parse {s3b_path}: {exc}", flush=True)
+    else:
+        if isinstance(payload_s3b.get("results"), dict):
+            results["extraction_quality"] = payload_s3b["results"].get("verdict")
+        elif payload_s3b.get("extraction_quality") is not None:
+            results["extraction_quality"] = payload_s3b.get("extraction_quality")
+
+    return results
+
+
 def run_single_event(
     event_id: str,
     atlas_path: str,
@@ -158,6 +234,7 @@ def run_single_event(
     epsilon: float = 0.3,
     stage_timeout_s: float | None = None,
     reuse_strain: bool = False,
+    with_t0_sweep: bool = False,
 ) -> tuple[int, str]:
     """Run full pipeline for a single event. Returns (exit_code, run_id)."""
     out_root = resolve_out_root("runs")
@@ -216,6 +293,9 @@ def run_single_event(
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
 
+    if with_t0_sweep:
+        _run_optional_experiment_t0_sweep(out_root, run_id, timeline, stage_timeout_s)
+
     # Stage 4: Geometry filter
     s4_args = ["--run", run_id, "--atlas-path", atlas_path, "--epsilon", str(epsilon)]
     rc = _run_stage("s4_geometry_filter.py", s4_args, "s4_geometry_filter", out_root, run_id, timeline, stage_timeout_s)
@@ -228,6 +308,111 @@ def run_single_event(
     _write_timeline(out_root, run_id, timeline)
 
     print(f"\n[pipeline] Single-event pipeline COMPLETE: run_id={run_id}")
+    return 0, run_id
+
+
+def run_multimode_event(
+    event_id: str,
+    atlas_path: str,
+    run_id: str | None = None,
+    synthetic: bool = False,
+    duration_s: float = 32.0,
+    dt_start_s: float = 0.003,
+    window_duration_s: float = 0.06,
+    band_low: float = 150.0,
+    band_high: float = 400.0,
+    epsilon: float = 0.3,
+    stage_timeout_s: float | None = None,
+    reuse_strain: bool = False,
+    with_t0_sweep: bool = False,
+    s3b_n_bootstrap: int = 200,
+    s3b_seed: int = 12345,
+) -> tuple[int, str]:
+    out_root = resolve_out_root("runs")
+
+    if run_id is None:
+        run_id = _generate_run_id(event_id)
+
+    print("\n[pipeline] Starting multimode pipeline")
+    print(f"[pipeline] event_id={event_id}, run_id={run_id}")
+    print(f"[pipeline] atlas={atlas_path}, synthetic={synthetic}")
+
+    _create_run_valid(out_root, run_id)
+    timeline: dict[str, Any] = {
+        "schema_version": "mvp_pipeline_timeline_v1",
+        "run_id": run_id,
+        "mode": "multimode",
+        "started_utc": datetime.now(timezone.utc).isoformat(),
+        "ended_utc": None,
+        "event_id": event_id,
+        "atlas_path": atlas_path,
+        "synthetic": synthetic,
+        "stages": [],
+        "multimode_results": {
+            "kerr_consistent": None,
+            "chi_best": None,
+            "d2_min": None,
+            "extraction_quality": None,
+        },
+    }
+    _write_timeline(out_root, run_id, timeline)
+
+    s1_args = ["--run", run_id, "--event-id", event_id, "--duration-s", str(duration_s)]
+    if synthetic:
+        s1_args.append("--synthetic")
+    if reuse_strain:
+        s1_args.append("--reuse-if-present")
+    rc = _run_stage("s1_fetch_strain.py", s1_args, "s1_fetch_strain", out_root, run_id, timeline, stage_timeout_s)
+    if rc != 0:
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return rc, run_id
+
+    s2_args = [
+        "--run", run_id, "--event-id", event_id,
+        "--dt-start-s", str(dt_start_s),
+        "--duration-s", str(window_duration_s),
+    ]
+    rc = _run_stage("s2_ringdown_window.py", s2_args, "s2_ringdown_window", out_root, run_id, timeline, stage_timeout_s)
+    if rc != 0:
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return rc, run_id
+
+    s3_args = ["--run", run_id, "--band-low", str(band_low), "--band-high", str(band_high)]
+    rc = _run_stage("s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates", out_root, run_id, timeline, stage_timeout_s)
+    if rc != 0:
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return rc, run_id
+
+    if with_t0_sweep:
+        _run_optional_experiment_t0_sweep(out_root, run_id, timeline, stage_timeout_s)
+
+    s3b_args = ["--run-id", run_id, "--n-bootstrap", str(s3b_n_bootstrap), "--seed", str(s3b_seed)]
+    rc = _run_stage("s3b_multimode_estimates.py", s3b_args, "s3b_multimode_estimates", out_root, run_id, timeline, stage_timeout_s)
+    if rc != 0:
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return rc, run_id
+
+    s4_args = ["--run", run_id, "--atlas-path", atlas_path, "--epsilon", str(epsilon)]
+    rc = _run_stage("s4_geometry_filter.py", s4_args, "s4_geometry_filter", out_root, run_id, timeline, stage_timeout_s)
+    if rc != 0:
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return rc, run_id
+
+    s4c_args = ["--run-id", run_id, "--atlas-path", atlas_path]
+    rc = _run_stage("s4c_kerr_consistency.py", s4c_args, "s4c_kerr_consistency", out_root, run_id, timeline, stage_timeout_s)
+    if rc != 0:
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return rc, run_id
+
+    timeline["multimode_results"] = _parse_multimode_results(out_root, run_id)
+    timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+    _write_timeline(out_root, run_id, timeline)
     return 0, run_id
 
 
@@ -320,6 +505,7 @@ def main() -> int:
         "--reuse-strain", action="store_true", default=False,
         help="Skip s1 download if outputs already exist and params match",
     )
+    sp_single.add_argument("--with-t0-sweep", action="store_true", default=False)
 
     # Multi event
     sp_multi = sub.add_parser("multi", help="Run pipeline for multiple events + aggregate")
@@ -342,6 +528,31 @@ def main() -> int:
         "--reuse-strain", action="store_true", default=False,
         help="Skip s1 download if outputs already exist and params match",
     )
+    sp_multi.add_argument("--with-t0-sweep", action="store_true", default=False)
+
+    # Single event multimode
+    sp_multimode = sub.add_parser("multimode", help="Run single-event multimode pipeline")
+    sp_multimode.add_argument("--event-id", required=True)
+    sp_multimode.add_argument("--atlas-path", required=True)
+    sp_multimode.add_argument("--run-id", default=None)
+    sp_multimode.add_argument("--synthetic", action="store_true")
+    sp_multimode.add_argument("--duration-s", type=float, default=32.0)
+    sp_multimode.add_argument("--dt-start-s", type=float, default=0.003)
+    sp_multimode.add_argument("--window-duration-s", type=float, default=0.06)
+    sp_multimode.add_argument("--band-low", type=float, default=150.0)
+    sp_multimode.add_argument("--band-high", type=float, default=400.0)
+    sp_multimode.add_argument("--epsilon", type=float, default=0.3)
+    sp_multimode.add_argument(
+        "--stage-timeout-s", type=float, default=None,
+        help="Kill a stage if it exceeds this many seconds (default: no limit)",
+    )
+    sp_multimode.add_argument(
+        "--reuse-strain", action="store_true", default=False,
+        help="Skip s1 download if outputs already exist and params match",
+    )
+    sp_multimode.add_argument("--with-t0-sweep", action="store_true", default=False)
+    sp_multimode.add_argument("--s3b-n-bootstrap", type=int, default=200)
+    sp_multimode.add_argument("--s3b-seed", type=int, default=12345)
 
     args = parser.parse_args()
 
@@ -359,6 +570,7 @@ def main() -> int:
             epsilon=args.epsilon,
             stage_timeout_s=args.stage_timeout_s,
             reuse_strain=args.reuse_strain,
+            with_t0_sweep=args.with_t0_sweep,
         )
         return rc
 
@@ -378,6 +590,27 @@ def main() -> int:
             epsilon=args.epsilon,
             stage_timeout_s=args.stage_timeout_s,
             reuse_strain=args.reuse_strain,
+            with_t0_sweep=args.with_t0_sweep,
+        )
+        return rc
+
+    elif args.mode == "multimode":
+        rc, run_id = run_multimode_event(
+            event_id=args.event_id,
+            atlas_path=args.atlas_path,
+            run_id=args.run_id,
+            synthetic=args.synthetic,
+            duration_s=args.duration_s,
+            dt_start_s=args.dt_start_s,
+            window_duration_s=args.window_duration_s,
+            band_low=args.band_low,
+            band_high=args.band_high,
+            epsilon=args.epsilon,
+            stage_timeout_s=args.stage_timeout_s,
+            reuse_strain=args.reuse_strain,
+            with_t0_sweep=args.with_t0_sweep,
+            s3b_n_bootstrap=args.s3b_n_bootstrap,
+            s3b_seed=args.s3b_seed,
         )
         return rc
 
