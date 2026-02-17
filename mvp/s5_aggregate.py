@@ -31,6 +31,52 @@ from basurin_io import sha256_file, utc_now_iso, write_json_atomic
 STAGE = "s5_aggregate"
 
 
+def _extract_compatible_geometry_ids(payload: dict[str, Any]) -> set[str]:
+    """Extract compatible geometry IDs from legacy and newer compatible_set schemas."""
+    compatible_geometries = payload.get("compatible_geometries")
+    if isinstance(compatible_geometries, list):
+        out: set[str] = set()
+        for row in compatible_geometries:
+            if not isinstance(row, dict):
+                continue
+            if "compatible" in row and row["compatible"] is not True:
+                continue
+            gid = row.get("geometry_id") or row.get("id")
+            if gid is not None:
+                out.add(str(gid))
+        return out
+
+    compatible_entries = payload.get("compatible_entries")
+    if isinstance(compatible_entries, list):
+        out = set()
+        for row in compatible_entries:
+            if isinstance(row, dict):
+                gid = row.get("geometry_id") or row.get("id")
+                if gid is not None:
+                    out.add(str(gid))
+            elif isinstance(row, str):
+                out.add(row)
+        return out
+
+    compatible_set = payload.get("compatible_set")
+    if isinstance(compatible_set, list):
+        out = set()
+        for row in compatible_set:
+            if isinstance(row, dict):
+                gid = row.get("geometry_id") or row.get("id")
+                if gid is not None:
+                    out.add(str(gid))
+            elif isinstance(row, str):
+                out.add(row)
+        return out
+
+    compatible_ids = payload.get("compatible_ids")
+    if isinstance(compatible_ids, list):
+        return {str(x) for x in compatible_ids}
+
+    return set()
+
+
 def aggregate_compatible_sets(
     source_data: list[dict[str, Any]], min_coverage: float = 1.0, top_k: int = 50,
 ) -> dict[str, Any]:
@@ -111,7 +157,7 @@ def aggregate_compatible_sets(
     for gid in sorted(d2_by_geo):
         per_event = d2_by_geo[gid]
         finite_d2 = [d for d in per_event if isinstance(d, (int, float)) and math.isfinite(d)]
-        coverage = len(finite_d2) / n_events
+        coverage = counter[gid] / n_events
         d2_sum = float(sum(finite_d2))
         row = {
             "geometry_id": gid,
@@ -229,11 +275,16 @@ def main() -> int:
         for src, p in source_paths.items():
             with open(p, "r", encoding="utf-8") as f:
                 cs = json.load(f)
+
+            ranked_all = cs.get("ranked_all", [])
+            if not ranked_all:
+                ranked_all = [{"geometry_id": gid} for gid in sorted(_extract_compatible_geometry_ids(cs))]
+
             source_data.append({
                 "run_id": src, "event_id": cs.get("event_id", "unknown"),
                 "metric": cs.get("metric"),
                 "threshold_d2": cs.get("threshold_d2"),
-                "ranked_all": cs.get("ranked_all", []),
+                "ranked_all": ranked_all,
                 "observables": cs.get("observables", {}),
             })
 
