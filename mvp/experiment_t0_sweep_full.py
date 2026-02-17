@@ -316,6 +316,8 @@ def run_t0_sweep_full(
             [python, s4c_script, "--run-id", subrun_id, "--atlas-path", str(args.atlas_path)],
         ]
 
+        skip_to_insufficient = False
+
         failed = False
         for cmd in stages:
             try:
@@ -326,6 +328,14 @@ def run_t0_sweep_full(
                 break
             if int(getattr(cp, "returncode", 1)) != 0:
                 stderr = (getattr(cp, "stderr", "") or "").strip()
+                is_s3 = Path(cmd[1]).stem == "s3_ringdown_estimates"
+                if is_s3 and "No detector produced a valid estimate" in stderr:
+                    point["status"] = "INSUFFICIENT_DATA"
+                    point["quality_flags"].append("s3_no_valid_estimate")
+                    if stderr:
+                        point["messages"].append(stderr)
+                    skip_to_insufficient = True
+                    break
                 point["messages"].append(f"stage failed rc={cp.returncode}: {' '.join(cmd)}")
                 if stderr:
                     point["messages"].append(stderr)
@@ -336,8 +346,12 @@ def run_t0_sweep_full(
         s4c_payload = _read_json_if_exists(subrun_dir / "s4c_kerr_consistency" / "outputs" / "kerr_consistency.json")
         point["s3b"] = _extract_s3b(s3b_payload)
         point["s4c"] = _extract_s4c(s4c_payload)
+        if skip_to_insufficient:
+            point["s4c"]["verdict"] = "INSUFFICIENT_DATA"
 
-        if failed:
+        if skip_to_insufficient:
+            n_ins += 1
+        elif failed:
             point["status"] = "FAILED_POINT"
             n_failed += 1
         elif point["s3b"]["verdict"] == "INSUFFICIENT_DATA":

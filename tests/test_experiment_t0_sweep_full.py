@@ -130,3 +130,79 @@ def test_experiment_t0_sweep_full_deterministic(tmp_path: Path) -> None:
             ),
         )
     assert _sha(out_json) == sha_first
+
+
+def test_experiment_t0_sweep_full_s3_no_valid_estimate_is_insufficient_data(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "test_t0_sweep_full_no_valid"
+    _write_min_run(runs_root, run_id)
+
+    args = SimpleNamespace(
+        run_id=run_id,
+        atlas_path="docs/ringdown/atlas/atlas_berti_v2.json",
+        t0_grid_ms="0,50",
+        t0_start_ms=0,
+        t0_stop_ms=50,
+        t0_step_ms=50,
+        n_bootstrap=50,
+        seed=123,
+        detector="auto",
+        stage_timeout_s=30,
+    )
+
+    def fake_runner(cmd: list[str], env: dict[str, str], timeout: int):
+        del env
+        assert timeout == 30
+        stage = Path(cmd[1]).stem
+        if "--run-id" in cmd:
+            subrun_id = cmd[cmd.index("--run-id") + 1]
+        else:
+            subrun_id = cmd[cmd.index("--run") + 1]
+        t0_ms = int(subrun_id.split("t0ms")[1])
+        run_dir = runs_root / run_id / "experiment" / "t0_sweep_full" / "runs" / subrun_id
+
+        if stage == "s3_ringdown_estimates" and t0_ms == 50:
+            return SimpleNamespace(
+                returncode=2,
+                stdout="",
+                stderr="ERROR: [s3_ringdown_estimates] No detector produced a valid estimate",
+            )
+
+        if stage == "s3b_multimode_estimates":
+            out = run_dir / "s3b_multimode_estimates" / "outputs"
+            out.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "results": {"verdict": "OK", "quality_flags": [], "messages": []},
+                "modes": [
+                    {"label": "220", "ln_f": 5.4, "ln_Q": 2.1},
+                    {"label": "221", "ln_f": 5.1, "ln_Q": 1.8},
+                ],
+            }
+            (out / "multimode_estimates.json").write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+        if stage == "s4c_kerr_consistency":
+            out = run_dir / "s4c_kerr_consistency" / "outputs"
+            out.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "kerr_consistent": True,
+                "chi_best": 0.68,
+                "d2_min": float(t0_ms),
+                "delta_logfreq": 0.01,
+                "delta_logQ": 0.02,
+                "source": {"multimode_verdict": "OK"},
+            }
+            (out / "kerr_consistency.json").write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with patch("mvp.experiment_t0_sweep_full.resolve_out_root", return_value=runs_root):
+        exp.run_t0_sweep_full(args, run_cmd_fn=fake_runner)
+
+    out_json = runs_root / run_id / "experiment" / "t0_sweep_full" / "outputs" / "t0_sweep_full_results.json"
+    payload = json.loads(out_json.read_text(encoding="utf-8"))
+
+    point_50 = next(p for p in payload["points"] if p["t0_ms"] == 50)
+    assert point_50["status"] == "INSUFFICIENT_DATA"
+    assert "s3_no_valid_estimate" in point_50["quality_flags"]
+    assert point_50["s4c"]["verdict"] == "INSUFFICIENT_DATA"
+
