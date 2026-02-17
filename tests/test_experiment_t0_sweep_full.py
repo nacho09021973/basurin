@@ -37,10 +37,14 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _fake_runner_factory(subruns_root: Path):
+def _fake_runner_factory(subruns_root: Path, observed_cmds: list[list[str]]):
     def _run(cmd: list[str], env: dict[str, str], timeout: int):
         assert timeout == 30
-        run_id = cmd[cmd.index("--run-id") + 1]
+        observed_cmds.append(cmd)
+        if "--run-id" in cmd:
+            run_id = cmd[cmd.index("--run-id") + 1]
+        else:
+            run_id = cmd[cmd.index("--run") + 1]
         stage = Path(cmd[1]).stem
         run_dir = subruns_root / run_id
 
@@ -93,8 +97,21 @@ def test_experiment_t0_sweep_full_deterministic(tmp_path: Path) -> None:
         stage_timeout_s=30,
     )
 
+    observed_cmds: list[list[str]] = []
     with patch("mvp.experiment_t0_sweep_full.resolve_out_root", return_value=runs_root):
-        exp.run_t0_sweep_full(args, run_cmd_fn=_fake_runner_factory(runs_root / run_id / "experiment" / "t0_sweep_full" / "runs"))
+        exp.run_t0_sweep_full(
+            args,
+            run_cmd_fn=_fake_runner_factory(
+                runs_root / run_id / "experiment" / "t0_sweep_full" / "runs",
+                observed_cmds,
+            ),
+        )
+
+    s3_cmd = next(cmd for cmd in observed_cmds if Path(cmd[1]).stem == "s3_ringdown_estimates")
+    subrun_id = f"{run_id}__t0ms0000"
+    assert "--run" in s3_cmd
+    assert s3_cmd[s3_cmd.index("--run") + 1] == subrun_id
+    assert "--run-id" not in s3_cmd
 
     out_json = runs_root / run_id / "experiment" / "t0_sweep_full" / "outputs" / "t0_sweep_full_results.json"
     assert out_json.exists()
@@ -103,6 +120,13 @@ def test_experiment_t0_sweep_full_deterministic(tmp_path: Path) -> None:
     assert [p["t0_ms"] for p in payload["points"]] == [0, 5, 10]
 
     sha_first = _sha(out_json)
+    observed_cmds.clear()
     with patch("mvp.experiment_t0_sweep_full.resolve_out_root", return_value=runs_root):
-        exp.run_t0_sweep_full(args, run_cmd_fn=_fake_runner_factory(runs_root / run_id / "experiment" / "t0_sweep_full" / "runs"))
+        exp.run_t0_sweep_full(
+            args,
+            run_cmd_fn=_fake_runner_factory(
+                runs_root / run_id / "experiment" / "t0_sweep_full" / "runs",
+                observed_cmds,
+            ),
+        )
     assert _sha(out_json) == sha_first
