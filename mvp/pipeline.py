@@ -151,34 +151,81 @@ def _run_optional_experiment_t0_sweep(
     timeline: dict[str, Any],
     stage_timeout_s: float | None,
 ) -> None:
-    script = "experiment_t0_sweep.py"
     label = "experiment_t0_sweep"
-    script_path = MVP_DIR / script
+    script = "mvp/experiment_t0_sweep.py"
+    script_path = MVP_DIR / "experiment_t0_sweep.py"
 
-    stage_entry = {
-        "stage": label,
-        "script": script,
-        "started_utc": datetime.now(timezone.utc).isoformat(),
-        "ended_utc": None,
-        "duration_s": None,
-        "returncode": None,
-        "timed_out": False,
-        "best_effort": True,
-    }
+    stage_started = datetime.now(timezone.utc).isoformat()
 
     if not script_path.exists():
-        stage_entry["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        stage_entry["status"] = "skipped_missing_script"
-        timeline["stages"].append(stage_entry)
+        timeline["stages"].append({
+            "stage": label,
+            "label": label,
+            "script": script,
+            "started_utc": stage_started,
+            "ended_utc": datetime.now(timezone.utc).isoformat(),
+            "duration_s": 0.0,
+            "returncode": None,
+            "timed_out": False,
+            "status": "SKIPPED",
+            "message": "missing script",
+            "best_effort": True,
+        })
         _write_timeline(out_root, run_id, timeline)
-        print(f"[pipeline] WARNING: {script} not found, skipping best-effort experiment", flush=True)
+        print("[pipeline] WARNING: experiment_t0_sweep.py not found, skipping best-effort experiment", flush=True)
         return
 
-    args = ["--run", run_id]
-    rc = _run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s)
-    timeline["stages"][-1]["best_effort"] = True
+    cmd = [sys.executable, str(script_path), "--run", run_id]
+    stage_t0 = time.time()
+    status = "OK"
+    message = "completed"
+    timed_out = False
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=stage_timeout_s,
+            check=False,
+        )
+        rc = proc.returncode
+        if rc != 0:
+            status = "FAILED"
+            stderr = (proc.stderr or "").strip()
+            if len(stderr) > 240:
+                stderr = stderr[:240] + "..."
+            message = f"exit={rc}: {stderr}" if stderr else f"exit={rc}"
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        rc = 124
+        status = "FAILED"
+        stderr = (exc.stderr or "")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+        stderr = stderr.strip()
+        if len(stderr) > 240:
+            stderr = stderr[:240] + "..."
+        message = f"timeout after {stage_timeout_s:.0f}s"
+        if stderr:
+            message = f"{message}: {stderr}"
+
+    timeline["stages"].append({
+        "stage": label,
+        "label": label,
+        "script": script,
+        "started_utc": stage_started,
+        "ended_utc": datetime.now(timezone.utc).isoformat(),
+        "duration_s": float(time.time() - stage_t0),
+        "returncode": rc,
+        "timed_out": timed_out,
+        "status": status,
+        "message": message,
+        "best_effort": True,
+    })
     _write_timeline(out_root, run_id, timeline)
-    if rc != 0:
+
+    if status != "OK":
         print(f"[pipeline] WARNING: {label} failed (exit={rc}), continuing", flush=True)
 
 

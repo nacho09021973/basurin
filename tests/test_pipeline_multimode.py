@@ -34,6 +34,7 @@ def test_single_with_t0_sweep_missing_script_is_best_effort(tmp_path, monkeypatc
         return 0
 
     monkeypatch.setattr(pipeline, "_run_stage", fake_run_stage)
+    monkeypatch.setattr(pipeline, "MVP_DIR", tmp_path / "missing_mvp")
 
     rc, run_id = pipeline.run_single_event(
         event_id="GW150914",
@@ -50,7 +51,12 @@ def test_single_with_t0_sweep_missing_script_is_best_effort(tmp_path, monkeypatc
     exp_entries = [s for s in timeline["stages"] if s["stage"] == "experiment_t0_sweep"]
     assert len(exp_entries) == 1
     assert exp_entries[0]["best_effort"] is True
-    assert exp_entries[0]["status"] == "skipped_missing_script"
+    assert exp_entries[0]["label"] == "experiment_t0_sweep"
+    assert exp_entries[0]["script"] == "mvp/experiment_t0_sweep.py"
+    assert exp_entries[0]["status"] == "SKIPPED"
+    assert exp_entries[0]["returncode"] is None
+    assert exp_entries[0]["duration_s"] == 0.0
+    assert exp_entries[0]["message"] == "missing script"
 
 
 def test_multimode_writes_multimode_results_and_stages(tmp_path, monkeypatch):
