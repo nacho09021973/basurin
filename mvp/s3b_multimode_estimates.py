@@ -25,6 +25,7 @@ TARGET_MODES = [
     {"mode": [2, 2, 0], "label": "220"},
     {"mode": [2, 2, 1], "label": "221"},
 ]
+MIN_BOOTSTRAP_SAMPLES = 128
 
 
 def compute_covariance(samples: np.ndarray) -> np.ndarray:
@@ -170,6 +171,10 @@ def _bootstrap_mode_log_samples(
     return np.asarray(samples, dtype=float), failed
 
 
+def _bootstrap_block_size(n_samples: int) -> int:
+    return max(64, n_samples // 20)
+
+
 def _estimate_220(signal: np.ndarray, fs: float) -> dict[str, float]:
     return estimate_ringdown_observables(signal, fs)
 
@@ -250,6 +255,18 @@ def evaluate_mode(
 ) -> tuple[dict[str, Any], list[str], bool]:
     flags: list[str] = []
     stability = {"valid_fraction": 0.0, "n_successful": 0, "n_failed": int(n_bootstrap), "cv_f": None, "cv_Q": None}
+    n_samples = int(signal.size)
+    if n_samples <= 0 or n_samples < MIN_BOOTSTRAP_SAMPLES:
+        flags.append("bootstrap_high_nonpositive")
+        stability["message"] = "window too short after offset"
+        return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
+
+    block_size = _bootstrap_block_size(n_samples)
+    if block_size <= 0 or block_size >= n_samples:
+        flags.append("bootstrap_block_invalid")
+        stability["message"] = "window too short after offset"
+        return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
+
     rng = np.random.default_rng(int(seed))
 
     try:
@@ -260,7 +277,15 @@ def evaluate_mode(
         flags.append(f"{label}_point_estimate_failed")
         return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
 
-    samples, n_failed = _bootstrap_mode_log_samples(signal, fs, estimator, n_bootstrap=n_bootstrap, rng=rng)
+    try:
+        samples, n_failed = _bootstrap_mode_log_samples(signal, fs, estimator, n_bootstrap=n_bootstrap, rng=rng)
+    except ValueError as exc:
+        msg = str(exc)
+        if "high <= 0" in msg or "low >= high" in msg:
+            flags.append("bootstrap_high_nonpositive")
+            stability["message"] = "window too short after offset"
+            return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
+        raise
     valid_fraction = float(samples.shape[0] / n_bootstrap) if n_bootstrap > 0 else 0.0
     stability["valid_fraction"] = valid_fraction
     stability["n_successful"] = int(samples.shape[0])

@@ -132,3 +132,43 @@ def test_load_signal_from_npz_uses_window_meta_sample_rate(tmp_path: Path) -> No
     loaded, fs = _load_signal_from_npz(npz_path, window_meta={"sample_rate_hz": 2048.0})
     assert np.allclose(loaded, signal)
     assert fs == 2048.0
+
+
+def test_evaluate_mode_short_window_flags_bootstrap_high_nonpositive() -> None:
+    signal = np.ones(32, dtype=float)
+    mode, flags, ok = evaluate_mode(
+        signal,
+        4096.0,
+        label="220",
+        mode=[2, 2, 0],
+        estimator=_stable_estimator,
+        n_bootstrap=20,
+        seed=12345,
+    )
+
+    assert not ok
+    assert "bootstrap_high_nonpositive" in flags
+    assert mode["fit"]["stability"]["message"] == "window too short after offset"
+
+
+def test_evaluate_mode_invalid_block_size_flags_bootstrap_block_invalid() -> None:
+    signal = np.ones(130, dtype=float)
+
+    original = _MODULE._bootstrap_block_size
+    _MODULE._bootstrap_block_size = lambda _: 130
+    try:
+        mode, flags, ok = evaluate_mode(
+            signal,
+            4096.0,
+            label="220",
+            mode=[2, 2, 0],
+            estimator=_stable_estimator,
+            n_bootstrap=20,
+            seed=12345,
+        )
+    finally:
+        _MODULE._bootstrap_block_size = original
+
+    assert not ok
+    assert "bootstrap_block_invalid" in flags
+    assert mode["fit"]["stability"]["message"] == "window too short after offset"
