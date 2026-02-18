@@ -490,12 +490,36 @@ def main() -> int:
     ap.add_argument("--runs-root", default=None, help="Override BASURIN_RUNS_ROOT for this invocation")
     ap.add_argument("--n-bootstrap", type=int, default=200)
     ap.add_argument("--seed", type=int, default=12345)
+    ap.add_argument("--max-lnf-span-220", type=float, default=1.0)
+    ap.add_argument("--max-lnq-span-220", type=float, default=1.0)
+    ap.add_argument("--max-lnf-span-221", type=float, default=1.0)
+    ap.add_argument("--max-lnq-span-221", type=float, default=1.0)
+    ap.add_argument("--min-valid-fraction-221", type=float, default=0.8)
+    ap.add_argument(
+        "--cv-threshold-221",
+        type=float,
+        default=1.0,
+        help="Only adds flags; does NOT gate verdict directly",
+    )
     args = ap.parse_args()
 
     if args.runs_root:
         os.environ["BASURIN_RUNS_ROOT"] = str(Path(args.runs_root).resolve())
 
-    ctx = init_stage(args.run_id, STAGE, params={"n_bootstrap": args.n_bootstrap, "seed": args.seed})
+    ctx = init_stage(
+        args.run_id,
+        STAGE,
+        params={
+            "n_bootstrap": args.n_bootstrap,
+            "seed": args.seed,
+            "max_lnf_span_220": args.max_lnf_span_220,
+            "max_lnq_span_220": args.max_lnq_span_220,
+            "max_lnf_span_221": args.max_lnf_span_221,
+            "max_lnq_span_221": args.max_lnq_span_221,
+            "min_valid_fraction_221": args.min_valid_fraction_221,
+            "cv_threshold_221": args.cv_threshold_221,
+        },
+    )
 
     try:
         window_meta = None
@@ -519,6 +543,8 @@ def main() -> int:
             estimator=_estimate_220,
             n_bootstrap=args.n_bootstrap,
             seed=args.seed,
+            max_lnf_span=args.max_lnf_span_220,
+            max_lnq_span=args.max_lnq_span_220,
             min_point_samples=50,
             min_point_valid_fraction=0.5,
         )
@@ -530,8 +556,10 @@ def main() -> int:
             estimator=_estimate_221_from_signal,
             n_bootstrap=args.n_bootstrap,
             seed=args.seed + 1,
-            min_valid_fraction=0.8,
-            cv_threshold=1.0,
+            min_valid_fraction=args.min_valid_fraction_221,
+            cv_threshold=args.cv_threshold_221,
+            max_lnf_span=args.max_lnf_span_221,
+            max_lnq_span=args.max_lnq_span_221,
             min_point_samples=50,
             min_point_valid_fraction=0.5,
         )
