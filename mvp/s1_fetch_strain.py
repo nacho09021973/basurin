@@ -234,6 +234,7 @@ def _try_reuse(
     detectors: list[str],
     duration_s: float,
     local_input_sha: dict[str, str] | None = None,
+    allow_synthetic_reuse: bool = False,
 ) -> bool:
     """Return True if existing outputs match params and pass hash validation.
 
@@ -256,6 +257,7 @@ def _try_reuse(
             detectors,
             duration_s,
             local_input_sha=local_input_sha,
+            allow_synthetic_reuse=allow_synthetic_reuse,
         ):
             return True
         print("[s1_fetch_strain] reuse: outputs not found, will fetch", flush=True)
@@ -327,6 +329,7 @@ def _try_reuse_from_other_runs(
     detectors: list[str],
     duration_s: float,
     local_input_sha: dict[str, str] | None = None,
+    allow_synthetic_reuse: bool = False,
 ) -> bool:
     """Try to reuse s1 outputs from a previous run in runs_root."""
     runs_root = resolve_out_root("runs")
@@ -347,6 +350,8 @@ def _try_reuse_from_other_runs(
         if prov.get("event_id") != event_id:
             continue
         if abs(float(prov.get("duration_s", -1.0)) - float(duration_s)) > 1e-9:
+            continue
+        if prov.get("source") == "synthetic" and not allow_synthetic_reuse:
             continue
 
         prov_dets = sorted([str(d).upper() for d in prov.get("detectors", [])])
@@ -394,6 +399,7 @@ def _try_reuse_from_other_runs(
         detectors,
         duration_s,
         local_input_sha=local_input_sha,
+        allow_synthetic_reuse=allow_synthetic_reuse,
     )
 
 
@@ -423,6 +429,12 @@ def main() -> int:
         default=False,
         help="Skip fetch if outputs/strain.npz + provenance.json already exist "
              "and event_id/duration_s/detectors match. Validates array hashes.",
+    )
+    ap.add_argument(
+        "--allow-synthetic-reuse",
+        action="store_true",
+        default=False,
+        help="Allow cross-run reuse from synthetic provenance when using --reuse-if-present.",
     )
     args = ap.parse_args()
 
@@ -458,7 +470,14 @@ def main() -> int:
     # --- Reuse check (before any network / generation) ---
     if args.reuse_if_present:
         try:
-            if _try_reuse(ctx, args.event_id, detectors, args.duration_s, local_input_sha=local_input_sha):
+            if _try_reuse(
+                ctx,
+                args.event_id,
+                detectors,
+                args.duration_s,
+                local_input_sha=local_input_sha,
+                allow_synthetic_reuse=args.allow_synthetic_reuse,
+            ):
                 return 0
         except SystemExit:
             raise
