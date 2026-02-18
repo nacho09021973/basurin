@@ -250,6 +250,14 @@ def _try_reuse(
     prov_path = ctx.outputs_dir / "provenance.json"
 
     if not npz_path.exists() or not prov_path.exists():
+        if _try_reuse_from_other_runs(
+            ctx,
+            event_id,
+            detectors,
+            duration_s,
+            local_input_sha=local_input_sha,
+        ):
+            return True
         print("[s1_fetch_strain] reuse: outputs not found, will fetch", flush=True)
         return False
 
@@ -311,6 +319,82 @@ def _try_reuse(
         extra_summary={"reused": True},
     )
     return True
+
+
+def _try_reuse_from_other_runs(
+    ctx,
+    event_id: str,
+    detectors: list[str],
+    duration_s: float,
+    local_input_sha: dict[str, str] | None = None,
+) -> bool:
+    """Try to reuse s1 outputs from a previous run in runs_root."""
+    runs_root = resolve_out_root("runs")
+    cur_run = ctx.run_id
+
+    candidates: list[tuple[str, Path]] = []
+    for prov_path in runs_root.glob("*/s1_fetch_strain/outputs/provenance.json"):
+        run_id = prov_path.parents[2].name
+        if run_id == cur_run:
+            continue
+
+        try:
+            with open(prov_path, "r", encoding="utf-8") as f:
+                prov = json.load(f)
+        except Exception:
+            continue
+
+        if prov.get("event_id") != event_id:
+            continue
+        if abs(float(prov.get("duration_s", -1.0)) - float(duration_s)) > 1e-9:
+            continue
+
+        prov_dets = sorted([str(d).upper() for d in prov.get("detectors", [])])
+        if prov_dets != sorted(detectors):
+            continue
+
+        if local_input_sha is not None:
+            if prov.get("source") != "local_hdf5":
+                continue
+            if prov.get("local_input_sha256", {}) != local_input_sha:
+                continue
+
+        npz_path = prov_path.parent / "strain.npz"
+        if not npz_path.exists():
+            continue
+
+        candidates.append((run_id, prov_path))
+
+    if not candidates:
+        return False
+
+    candidates.sort(key=lambda x: x[0])
+    src_run_id, src_prov_path = candidates[-1]
+    src_npz_path = src_prov_path.parent / "strain.npz"
+
+    print(f"[s1_fetch_strain] reuse: found matching outputs in run={src_run_id}, copying...", flush=True)
+    ctx.outputs_dir.mkdir(parents=True, exist_ok=True)
+    dst_npz = ctx.outputs_dir / "strain.npz"
+    dst_prov = ctx.outputs_dir / "provenance.json"
+    shutil.copy2(src_npz_path, dst_npz)
+    shutil.copy2(src_prov_path, dst_prov)
+
+    try:
+        with open(dst_prov, "r", encoding="utf-8") as f:
+            prov = json.load(f)
+        prov["reused_from_run_id"] = src_run_id
+        prov["reused_from_relpath"] = str(src_npz_path.relative_to(runs_root))
+        write_json_atomic(dst_prov, prov)
+    except Exception as exc:
+        print(f"[s1_fetch_strain] reuse: warning: could not enrich provenance ({exc})", flush=True)
+
+    return _try_reuse(
+        ctx,
+        event_id,
+        detectors,
+        duration_s,
+        local_input_sha=local_input_sha,
+    )
 
 
 def main() -> int:
