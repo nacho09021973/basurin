@@ -260,8 +260,11 @@ def compute_experiment_paths(run_id: str) -> tuple[Path, Path, Path]:
 
 def resolve_experiment_paths(run_id: str, *, out_root: Path | None = None) -> tuple[Path, Path, Path]:
     """Backwards-compatible wrapper returning ``(stage_dir, outputs_dir, subruns_root)``."""
-    root = out_root if out_root is not None else resolve_out_root("runs")
-    stage_dir = root / run_id / "experiment" / "t0_sweep_full"
+    if out_root is None:
+        _, stage_dir, subruns_root = compute_experiment_paths(run_id)
+    else:
+        stage_dir = out_root / run_id / "experiment" / "t0_sweep_full"
+        subruns_root = stage_dir / "runs"
     outputs_dir = stage_dir / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
     subruns_root.mkdir(parents=True, exist_ok=True)
