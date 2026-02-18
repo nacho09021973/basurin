@@ -157,6 +157,26 @@ def _discover_s2_window_meta(run_dir: Path) -> Path | None:
     return path
 
 
+def _resolve_s3_estimates(run_dir: Path, raw_path: str | None) -> Path:
+    if raw_path:
+        path = _resolve_input_path(run_dir, run_dir / STAGE, raw_path)
+        if path.exists():
+            return path
+    return run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+
+
+def _load_s3_band(path: Path) -> tuple[float, float]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    band = payload.get("band_hz")
+    if not isinstance(band, list) or len(band) != 2:
+        raise RuntimeError("invalid s3 estimates: missing band_hz")
+    low = float(band[0])
+    high = float(band[1])
+    if not (math.isfinite(low) and math.isfinite(high) and low > 0 and high > low):
+        raise RuntimeError("invalid s3 estimates: invalid band_hz values")
+    return low, high
+
+
 def compute_robust_stability(samples: list[tuple[float, float]]) -> dict[str, float | None]:
     if not samples:
         return {
@@ -253,8 +273,8 @@ def _bootstrap_block_size(n_samples: int) -> int:
     return max(64, n_samples // 20)
 
 
-def _estimate_220(signal: np.ndarray, fs: float) -> dict[str, float]:
-    return estimate_ringdown_observables(signal, fs)
+def _estimate_220(signal: np.ndarray, fs: float, *, band_low: float, band_high: float) -> dict[str, float]:
+    return estimate_ringdown_observables(signal, fs, band_low, band_high)
 
 
 def _template_220(signal: np.ndarray, fs: float, est220: dict[str, float]) -> np.ndarray:
@@ -272,10 +292,10 @@ def _template_220(signal: np.ndarray, fs: float, est220: dict[str, float]) -> np
     return (X @ coeffs).astype(float)
 
 
-def _estimate_221_from_signal(signal: np.ndarray, fs: float) -> dict[str, float]:
-    est220 = _estimate_220(signal, fs)
+def _estimate_221_from_signal(signal: np.ndarray, fs: float, *, band_low: float, band_high: float) -> dict[str, float]:
+    est220 = _estimate_220(signal, fs, band_low=band_low, band_high=band_high)
     residual = signal - _template_220(signal, fs, est220)
-    return estimate_ringdown_observables(residual, fs)
+    return estimate_ringdown_observables(residual, fs, band_low, band_high)
 
 
 def _mode_null(label: str, mode: list[int], n_bootstrap: int, seed: int, stability: dict[str, Any]) -> dict[str, Any]:
@@ -488,6 +508,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="MVP s3b multimode estimates")
     ap.add_argument("--run-id", required=True)
     ap.add_argument("--runs-root", default=None, help="Override BASURIN_RUNS_ROOT for this invocation")
+    ap.add_argument("--s3-estimates", default=None, help="Path to s3_ringdown_estimates outputs/estimates.json")
     ap.add_argument("--n-bootstrap", type=int, default=200)
     ap.add_argument("--seed", type=int, default=12345)
     ap.add_argument("--max-lnf-span-220", type=float, default=1.0)
@@ -524,6 +545,8 @@ def main() -> int:
     try:
         window_meta = None
         window_meta_path = _discover_s2_window_meta(ctx.run_dir)
+        s3_estimates_path = _resolve_s3_estimates(ctx.run_dir, args.s3_estimates)
+        band_low, band_high = _load_s3_band(s3_estimates_path)
         global_flags: list[str] = []
         if window_meta_path is not None and window_meta_path.exists():
             window_meta = json.loads(window_meta_path.read_text(encoding="utf-8"))
@@ -532,7 +555,11 @@ def main() -> int:
             window_meta_path = ctx.run_dir / "s2_ringdown_window" / "outputs" / "window_meta.json"
 
         npz_path = _discover_s2_npz(ctx.run_dir)
-        check_inputs(ctx, {"s2_rd_npz": npz_path}, optional={"s2_window_meta": window_meta_path})
+        check_inputs(
+            ctx,
+            {"s2_rd_npz": npz_path, "s3_estimates": s3_estimates_path},
+            optional={"s2_window_meta": window_meta_path},
+        )
         signal, fs = _load_signal_from_npz(npz_path, window_meta=window_meta)
 
         mode_220, flags_220, ok_220 = evaluate_mode(
@@ -540,7 +567,7 @@ def main() -> int:
             fs,
             label="220",
             mode=[2, 2, 0],
-            estimator=_estimate_220,
+            estimator=lambda sig, sr: _estimate_220(sig, sr, band_low=band_low, band_high=band_high),
             n_bootstrap=args.n_bootstrap,
             seed=args.seed,
             max_lnf_span=args.max_lnf_span_220,
@@ -553,7 +580,12 @@ def main() -> int:
             fs,
             label="221",
             mode=[2, 2, 1],
-            estimator=_estimate_221_from_signal,
+            estimator=lambda sig, sr: _estimate_221_from_signal(
+                sig,
+                sr,
+                band_low=band_low,
+                band_high=band_high,
+            ),
             n_bootstrap=args.n_bootstrap,
             seed=args.seed + 1,
             min_valid_fraction=args.min_valid_fraction_221,

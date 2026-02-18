@@ -436,7 +436,12 @@ def run_multimode_event(
     if with_t0_sweep:
         _run_optional_experiment_t0_sweep(out_root, run_id, timeline, stage_timeout_s)
 
-    s3b_args = ["--run-id", run_id, "--n-bootstrap", str(s3b_n_bootstrap), "--seed", str(s3b_seed)]
+    s3b_args = [
+        "--run-id", run_id,
+        "--s3-estimates", f"{run_id}/s3_ringdown_estimates/outputs/estimates.json",
+        "--n-bootstrap", str(s3b_n_bootstrap),
+        "--seed", str(s3b_seed),
+    ]
     rc = _run_stage("s3b_multimode_estimates.py", s3b_args, "s3b_multimode_estimates", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
