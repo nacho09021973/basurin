@@ -109,6 +109,7 @@ Cuando trabajes con subruns (por ejemplo en `experiment/t0_sweep_full`), es fác
 ➡️ **Lee este documento antes de depurar o ejecutar stages manuales:**
 
 - [`docs/readme_rutas.md`](docs/readme_rutas.md)
+- [`docs/request_flow.md`](docs/request_flow.md) (resumen del flujo de ejecución y validaciones por módulo).
 
 Ese documento detalla:
 
