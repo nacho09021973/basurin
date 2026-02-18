@@ -220,6 +220,8 @@ def _bootstrap_mode_log_samples(
         except Exception:
             failed += 1
 
+    if not samples:
+        return np.empty((0, 2), dtype=float), failed
     return np.asarray(samples, dtype=float), failed
 
 
@@ -316,6 +318,11 @@ def evaluate_mode(
             stability["message"] = "window too short after offset"
             return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
         raise
+    sigma_invalid_flag = f"{label}_Sigma_invalid"
+    if samples.ndim != 2 or samples.shape[1] != 2:
+        flags.append(sigma_invalid_flag)
+        return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(set(flags)), False
+
     valid_mask = np.all(np.isfinite(samples), axis=1)
     dropped_invalid = int(samples.shape[0] - int(np.count_nonzero(valid_mask)))
     if dropped_invalid > 0:
@@ -345,24 +352,25 @@ def evaluate_mode(
 
     if samples.shape[0] < 2:
         flags.append(f"{label}_bootstrap_insufficient")
+        flags.append(sigma_invalid_flag)
         return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
 
     sigma: np.ndarray | None = None
-    if samples.shape[0] >= int(min_point_samples):
+    if samples.ndim != 2 or samples.shape[1] != 2 or samples.shape[0] < int(min_point_samples):
+        flags.append(sigma_invalid_flag)
+    else:
         sigma_candidate = compute_covariance(samples)
         if sigma_candidate.shape == (2, 2) and np.all(np.isfinite(sigma_candidate)):
             sigma = sigma_candidate
         else:
-            flags.append(f"{label}_Sigma_invalid")
-    else:
-        flags.append(f"{label}_Sigma_invalid")
+            flags.append(sigma_invalid_flag)
 
     sigma_invertible = False
     if sigma is not None:
         det = float(np.linalg.det(sigma))
         sigma_invertible = math.isfinite(det) and det > 0
         if not sigma_invertible:
-            flags.append(f"{label}_Sigma_invalid")
+            flags.append(sigma_invalid_flag)
 
     ok = True
     if not sigma_invertible:

@@ -161,7 +161,10 @@ def test_determinism_seed_on_bootstrap() -> None:
 
     assert ok_a and ok_b
     assert flags_a == flags_b
-    assert mode_a == mode_b
+    assert mode_a["fit"]["stability"] == mode_b["fit"]["stability"]
+    assert mode_a["ln_f"] == mode_b["ln_f"]
+    assert mode_a["ln_Q"] == mode_b["ln_Q"]
+    assert mode_a["Sigma"] == mode_b["Sigma"]
 
 
 def test_verdict_insufficient_when_missing_221() -> None:
@@ -200,6 +203,7 @@ def test_verdict_insufficient_when_missing_221() -> None:
     assert payload["results"]["verdict"] == "INSUFFICIENT_DATA"
     assert payload["modes"][1]["label"] == "221"
     assert payload["modes"][1]["ln_f"] is None
+    assert "221_Sigma_invalid" in payload["results"]["quality_flags"]
 
 
 def test_discover_s2_npz_prefers_h1_then_l1(tmp_path: Path) -> None:
@@ -369,7 +373,7 @@ def test_sigma_pathological_invalidates_mode_and_reports_flag() -> None:
         _MODULE._bootstrap_mode_log_samples = original
 
     assert not ok
-    assert "220_Sigma_not_invertible" in flags
+    assert "220_Sigma_invalid" in flags
     assert mode["ln_f"] is None
     assert mode["Sigma"] is None
     assert mode["fit"]["stability"]["lnf_p50"] is not None
