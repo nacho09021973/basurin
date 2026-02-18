@@ -232,5 +232,7 @@ def test_build_subrun_stage_cmds_passes_seed_to_s3b() -> None:
     )
 
     s3b_cmd = next(cmd for cmd in cmds if Path(cmd[1]).stem == "s3b_multimode_estimates")
+    assert "--n-bootstrap" in s3b_cmd
+    assert s3b_cmd[s3b_cmd.index("--n-bootstrap") + 1] == "200"
     assert "--seed" in s3b_cmd
     assert s3b_cmd[s3b_cmd.index("--seed") + 1] == "101"
