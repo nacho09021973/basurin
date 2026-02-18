@@ -65,6 +65,50 @@ class TestExperimentT0SweepFullPaths(unittest.TestCase):
 
             os.environ.pop("BASURIN_RUNS_ROOT", None)
 
+
+    def test_run_t0_sweep_full_precheck_reads_s2_manifest_from_base_runs_root(self) -> None:
+        exp = importlib.import_module("mvp.experiment_t0_sweep_full")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            base_runs_root = base / "A"
+            out_runs_root = base / "B"
+            run_id = "BASE_RUN"
+
+            base_s2 = base_runs_root / run_id / "s2_ringdown_window"
+            base_s2_out = base_s2 / "outputs"
+            base_s2_out.mkdir(parents=True, exist_ok=True)
+            (base_s2 / "manifest.json").write_text("{}", encoding="utf-8")
+            fake_source_npz = base_s2_out / "H1_rd.npz"
+            fake_source_npz.write_bytes(b"npz-placeholder")
+
+            args = SimpleNamespace(
+                run_id=run_id,
+                base_runs_root=base_runs_root,
+                detector="auto",
+                t0_grid_ms="-1",
+                t0_start_ms=0,
+                t0_stop_ms=0,
+                t0_step_ms=1,
+                n_bootstrap=10,
+                seed=101,
+                atlas_path="atlas.json",
+                stage_timeout_s=1,
+            )
+
+            os.environ["BASURIN_RUNS_ROOT"] = str(out_runs_root)
+
+            with (
+                mock.patch.object(exp, "require_run_valid"),
+                mock.patch.object(exp, "_pick_detector", return_value=("H1", fake_source_npz)),
+                mock.patch.object(exp, "_load_npz", return_value=(FakeStrain(), 1024.0)),
+                mock.patch.object(exp, "sha256_file", return_value="sha"),
+            ):
+                result, _ = exp.run_t0_sweep_full(args, run_cmd_fn=lambda *_: SimpleNamespace(returncode=0, stderr=""))
+
+            self.assertEqual(result["summary"]["n_points"], 1)
+            os.environ.pop("BASURIN_RUNS_ROOT", None)
+
     def test_run_t0_sweep_full_passes_subruns_root_to_subprocess_env(self) -> None:
         exp = importlib.import_module("mvp.experiment_t0_sweep_full")
 
@@ -74,6 +118,7 @@ class TestExperimentT0SweepFullPaths(unittest.TestCase):
 
             args = SimpleNamespace(
                 run_id=run_id,
+                base_runs_root=runs_root,
                 detector="auto",
                 t0_grid_ms="0",
                 t0_start_ms=0,
