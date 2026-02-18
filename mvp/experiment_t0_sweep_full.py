@@ -319,12 +319,14 @@ def run_t0_sweep_full(
     run_cmd_fn: Callable[[list[str], dict[str, str], int], Any] = run_cmd,
 ) -> tuple[dict[str, Any], Path]:
     out_root, stage_dir, subruns_root = compute_experiment_paths(args.run_id)
+    base_root = Path(args.base_runs_root).expanduser().resolve()
     enforce_isolated_runsroot(out_root, args.run_id)
     ensure_seed_runsroot_layout(out_root, args.run_id)
     validate_run_id(args.run_id, out_root)
-    require_run_valid(out_root, args.run_id)
+    validate_run_id(args.run_id, base_root)
+    require_run_valid(base_root, args.run_id)
 
-    base_run_dir = out_root / args.run_id
+    base_run_dir = base_root / args.run_id
     s2_dir = base_run_dir / "s2_ringdown_window"
     s2_manifest = s2_dir / "manifest.json"
     if not s2_manifest.exists():
@@ -559,6 +561,7 @@ def run_t0_sweep_full(
 def main() -> int:
     ap = argparse.ArgumentParser(description="Experiment: full deterministic t0 sweep with subruns")
     ap.add_argument("--run-id", "--run", dest="run_id", required=True)
+    ap.add_argument("--base-runs-root", type=Path, default=Path.cwd() / "runs")
     ap.add_argument("--atlas-path", required=True)
     ap.add_argument("--t0-grid-ms", default=None)
     ap.add_argument("--t0-start-ms", type=int, default=0)

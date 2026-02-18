@@ -86,6 +86,7 @@ def test_experiment_t0_sweep_full_deterministic(tmp_path: Path) -> None:
 
     args = SimpleNamespace(
         run_id=run_id,
+        base_runs_root=runs_root,
         atlas_path="docs/ringdown/atlas/atlas_berti_v2.json",
         t0_grid_ms="0,5,10",
         t0_start_ms=0,
@@ -139,6 +140,7 @@ def test_experiment_t0_sweep_full_s3_no_valid_estimate_is_insufficient_data(tmp_
 
     args = SimpleNamespace(
         run_id=run_id,
+        base_runs_root=runs_root,
         atlas_path="docs/ringdown/atlas/atlas_berti_v2.json",
         t0_grid_ms="0,50",
         t0_start_ms=0,
