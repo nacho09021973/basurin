@@ -37,6 +37,7 @@ runs/<RUN_ID>/
   s1_fetch_strain/
     manifest.json
     stage_summary.json
+    inputs/                <-- si usas --local-hdf5, copia auditable de los .h5/.hdf5
     outputs/...
   s2_ringdown_window/
     manifest.json
@@ -187,3 +188,16 @@ find "runs/$RUN_ID/experiment/t0_sweep_full/runs" -maxdepth 2 -type f -path "*/$
 - **No relajar** `RUN_VALID`: si no existe `RUN_VALID/verdict.json` en el root efectivo, el stage debe fallar.
 - **IO determinista**: todo lo que el stage escriba debe quedar bajo `<RUNS_ROOT>/<run_id>/...`.
 
+---
+
+## 9) Recordatorio anti-descarga repetida (GW150914/GW150904)
+
+Si ya tienes strain en local para un evento, evita volver a bajar GWOSC en cada experimento:
+
+- ejecuta `s1_fetch_strain.py` con `--local-hdf5 DET=PATH` por detector,
+- y activa `--reuse-if-present` para reutilizar `strain.npz` cuando los parámetros/hash coinciden.
+
+Rutas clave para auditoría cuando usas local HDF5:
+
+- copia de entrada: `<RUNS_ROOT>/<run_id>/s1_fetch_strain/inputs/*.h5`
+- procedencia: `<RUNS_ROOT>/<run_id>/s1_fetch_strain/outputs/provenance.json`

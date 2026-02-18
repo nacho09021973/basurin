@@ -51,6 +51,37 @@ python mvp/pipeline.py multi \
   --atlas-path atlas.json
 ```
 
+## Evitar descargas repetidas de GW150914/GW150904 (modo offline recomendado)
+
+Si ya tienes los HDF5 completos en local (caso típico: repetir experimentos con el mismo evento),
+**no hace falta volver a descargar desde GWOSC** en cada corrida.
+
+Usa `s1_fetch_strain` en modo local:
+
+```bash
+python mvp/s1_fetch_strain.py \
+  --run <run_id> \
+  --event-id GW150914 \
+  --detectors H1,L1 \
+  --duration-s 32 \
+  --local-hdf5 H1=/ruta/local/H-H1_GWOSC_*.h5 \
+  --local-hdf5 L1=/ruta/local/L-L1_GWOSC_*.h5 \
+  --reuse-if-present
+```
+
+Notas prácticas:
+
+- `--local-hdf5` evita la descarga remota y fuerza lectura desde tus `.h5/.hdf5`.
+- `--reuse-if-present` evita repetir trabajo si `outputs/strain.npz` + `provenance.json`
+  ya coinciden con `event_id`, detectores y hashes.
+- Al ejecutar en modo local, BASURIN deja copia auditable de los HDF5 usados en:
+  - `runs/<run_id>/s1_fetch_strain/inputs/*.h5`
+  y la referencia en:
+  - `runs/<run_id>/s1_fetch_strain/outputs/provenance.json` (`local_inputs`, `local_input_sha256`).
+
+En resumen: para experimentación iterativa con GW150914/GW150904, apunta siempre a tus
+HDF5 locales y reutiliza artefactos para no saturar red ni perder tiempo.
+
 ## Semántica operacional importante
 
 - El pipeline crea `RUN_VALID` al inicializar el run.
