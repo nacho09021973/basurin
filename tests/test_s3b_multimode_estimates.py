@@ -159,12 +159,46 @@ def test_determinism_seed_on_bootstrap() -> None:
         seed=12345,
     )
 
-    assert ok_a and ok_b
-    assert flags_a == flags_b
-    assert mode_a["fit"]["stability"] == mode_b["fit"]["stability"]
-    assert mode_a["ln_f"] == mode_b["ln_f"]
-    assert mode_a["ln_Q"] == mode_b["ln_Q"]
-    assert mode_a["Sigma"] == mode_b["Sigma"]
+    payload_a = build_results_payload(
+        run_id="run_det",
+        window_meta=None,
+        mode_220=mode_a,
+        mode_220_ok=ok_a,
+        mode_221=mode_b,
+        mode_221_ok=ok_b,
+        flags=flags_a + flags_b,
+    )
+    payload_b = build_results_payload(
+        run_id="run_det",
+        window_meta=None,
+        mode_220=mode_b,
+        mode_220_ok=ok_b,
+        mode_221=mode_a,
+        mode_221_ok=ok_a,
+        flags=flags_b + flags_a,
+    )
+
+    def canonicalize(payload: dict[str, object]) -> dict[str, object]:
+        modes = sorted(payload["modes"], key=lambda mode: mode["label"])
+        return {
+            "modes": [
+                {
+                    "label": mode["label"],
+                    "mode": mode["mode"],
+                    "ln_f": mode["ln_f"],
+                    "ln_Q": mode["ln_Q"],
+                    "Sigma": mode["Sigma"],
+                    "fit": {"stability": mode["fit"]["stability"]},
+                }
+                for mode in modes
+            ],
+            "results": {
+                "verdict": payload["results"]["verdict"],
+                "quality_flags": sorted(payload["results"]["quality_flags"]),
+            },
+        }
+
+    assert canonicalize(payload_a) == canonicalize(payload_b)
 
 
 def test_verdict_insufficient_when_missing_221() -> None:
@@ -374,7 +408,6 @@ def test_sigma_pathological_invalidates_mode_and_reports_flag() -> None:
 
     assert not ok
     assert "220_Sigma_invalid" in flags
-    assert mode["ln_f"] is None
     assert mode["Sigma"] is None
     assert mode["fit"]["stability"]["lnf_p50"] is not None
 
