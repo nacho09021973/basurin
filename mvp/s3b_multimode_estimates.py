@@ -27,6 +27,8 @@ TARGET_MODES = [
     {"mode": [2, 2, 1], "label": "221"},
 ]
 MIN_BOOTSTRAP_SAMPLES = 128
+SIGMA_DET_EPS = 1e-12
+SIGMA_COND_MAX = 1e12
 
 
 def compute_covariance(samples: np.ndarray) -> np.ndarray:
@@ -35,6 +37,28 @@ def compute_covariance(samples: np.ndarray) -> np.ndarray:
     if samples.shape[0] < 2:
         raise ValueError("need >=2 samples for covariance")
     return np.cov(samples, rowvar=False, ddof=1)
+
+
+def is_valid_sigma_matrix(sigma: np.ndarray) -> bool:
+    if sigma.shape != (2, 2) or not np.all(np.isfinite(sigma)):
+        return False
+
+    det = float(np.linalg.det(sigma))
+    if not math.isfinite(det) or abs(det) <= SIGMA_DET_EPS:
+        return False
+
+    try:
+        cond = float(np.linalg.cond(sigma))
+    except np.linalg.LinAlgError:
+        return False
+    if not math.isfinite(cond) or cond > SIGMA_COND_MAX:
+        return False
+
+    try:
+        inv = np.linalg.inv(sigma)
+    except np.linalg.LinAlgError:
+        return False
+    return bool(np.all(np.isfinite(inv)))
 
 
 def covariance_gate(
@@ -360,17 +384,12 @@ def evaluate_mode(
         flags.append(sigma_invalid_flag)
     else:
         sigma_candidate = compute_covariance(samples)
-        if sigma_candidate.shape == (2, 2) and np.all(np.isfinite(sigma_candidate)):
+        if is_valid_sigma_matrix(sigma_candidate):
             sigma = sigma_candidate
         else:
             flags.append(sigma_invalid_flag)
 
-    sigma_invertible = False
-    if sigma is not None:
-        det = float(np.linalg.det(sigma))
-        sigma_invertible = math.isfinite(det) and det > 0
-        if not sigma_invertible:
-            flags.append(sigma_invalid_flag)
+    sigma_invertible = sigma is not None
 
     ok = True
     if not sigma_invertible:
