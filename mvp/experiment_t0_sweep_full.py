@@ -303,6 +303,16 @@ def resolve_experiment_paths(run_id: str, *, out_root: Path | None = None) -> tu
     return stage_dir, outputs_dir, subruns_root
 
 
+def ensure_seed_runsroot_layout(runsroot: Path, run_id: str) -> Path:
+    """Ensure ``runsroot/<run_id>`` exists as a real directory (never symlink)."""
+    run_root = runsroot / run_id
+    if run_root.exists() and run_root.is_symlink():
+        target = os.readlink(run_root)
+        raise RuntimeError(f"runsroot/{run_id} must be a real directory; found symlink to {target}")
+    run_root.mkdir(parents=True, exist_ok=True)
+    return run_root
+
+
 def run_t0_sweep_full(
     args: argparse.Namespace,
     *,
@@ -310,6 +320,7 @@ def run_t0_sweep_full(
 ) -> tuple[dict[str, Any], Path]:
     out_root, stage_dir, subruns_root = compute_experiment_paths(args.run_id)
     enforce_isolated_runsroot(out_root, args.run_id)
+    ensure_seed_runsroot_layout(out_root, args.run_id)
     validate_run_id(args.run_id, out_root)
     require_run_valid(out_root, args.run_id)
 
