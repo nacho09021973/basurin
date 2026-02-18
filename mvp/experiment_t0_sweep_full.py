@@ -215,7 +215,6 @@ def _extract_s4c(payload: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def build_subrun_stage_cmds(
-    *,
     python: str,
     s3_script: str,
     s3b_script: str,
@@ -225,9 +224,24 @@ def build_subrun_stage_cmds(
     s3b_seed: int,
     atlas_path: str,
 ) -> list[list[str]]:
+    """
+    Pure helper: build the per-subrun stage command lists.
+
+    NOTE: This is intentionally pure and deterministic: it only assembles argv.
+    Seed propagation to s3b is explicit via --seed <s3b_seed>.
+    """
     return [
         [python, s3_script, "--run", subrun_id],
-        [python, s3b_script, "--run-id", subrun_id, "--n-bootstrap", str(n_bootstrap), "--seed", str(s3b_seed)],
+        [
+            python,
+            s3b_script,
+            "--run-id",
+            subrun_id,
+            "--n-bootstrap",
+            str(int(n_bootstrap)),
+            "--seed",
+            str(int(s3b_seed)),
+        ],
         [python, s4c_script, "--run-id", subrun_id, "--atlas-path", atlas_path],
     ]
 
