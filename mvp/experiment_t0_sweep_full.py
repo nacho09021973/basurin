@@ -258,6 +258,38 @@ def compute_experiment_paths(run_id: str) -> tuple[Path, Path, Path]:
     return out_root, stage_dir, subruns_root
 
 
+def enforce_isolated_runsroot(out_root: Path, run_id: str) -> None:
+    """Abort if BASURIN_RUNS_ROOT aliases the legacy global experiment tree.
+
+    We intentionally reject symlinked/aliased seed-specific roots because those
+    can collapse multiple seeds into the same physical inode tree.
+    """
+    env_root = os.environ.get("BASURIN_RUNS_ROOT")
+    if not env_root:
+        return
+
+    requested_root = Path(env_root).expanduser()
+    if not requested_root.is_absolute():
+        requested_root = (Path.cwd() / requested_root)
+    requested_root = requested_root.absolute()
+    resolved_root = out_root.resolve()
+
+    if resolved_root != requested_root:
+        raise RuntimeError(
+            "BASURIN_RUNS_ROOT must not traverse symlinks: "
+            f"requested={requested_root} resolved={resolved_root}"
+        )
+
+    legacy_stage = (Path.cwd() / "runs" / run_id / "experiment" / "t0_sweep_full").resolve()
+    seed_stage = (out_root / run_id / "experiment" / "t0_sweep_full").resolve()
+    default_runs_root = (Path.cwd() / "runs").resolve()
+    if resolved_root != default_runs_root and seed_stage == legacy_stage:
+        raise RuntimeError(
+            "BASURIN_RUNS_ROOT aliases legacy runs/<run_id>/experiment/t0_sweep_full; "
+            "use a physical directory per seed instead of symlink/alias paths"
+        )
+
+
 def resolve_experiment_paths(run_id: str, *, out_root: Path | None = None) -> tuple[Path, Path, Path]:
     """Backwards-compatible wrapper returning ``(stage_dir, outputs_dir, subruns_root)``."""
     if out_root is None:
@@ -277,6 +309,7 @@ def run_t0_sweep_full(
     run_cmd_fn: Callable[[list[str], dict[str, str], int], Any] = run_cmd,
 ) -> tuple[dict[str, Any], Path]:
     out_root, stage_dir, subruns_root = compute_experiment_paths(args.run_id)
+    enforce_isolated_runsroot(out_root, args.run_id)
     validate_run_id(args.run_id, out_root)
     require_run_valid(out_root, args.run_id)
 
