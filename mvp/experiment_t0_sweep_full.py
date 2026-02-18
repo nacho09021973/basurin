@@ -246,6 +246,19 @@ def build_subrun_stage_cmds(
     ]
 
 
+def resolve_experiment_paths(run_id: str, *, out_root: Path | None = None) -> tuple[Path, Path, Path]:
+    """Resolve experiment directories under the active runs root.
+
+    Returns ``(stage_dir, outputs_dir, subruns_root)`` for
+    ``experiment/t0_sweep_full``.
+    """
+    root = out_root if out_root is not None else resolve_out_root("runs")
+    stage_dir, outputs_dir = ensure_stage_dirs(run_id, EXPERIMENT_STAGE, base_dir=root)
+    subruns_root = stage_dir / "runs"
+    subruns_root.mkdir(parents=True, exist_ok=True)
+    return stage_dir, outputs_dir, subruns_root
+
+
 def run_t0_sweep_full(
     args: argparse.Namespace,
     *,
@@ -270,9 +283,7 @@ def run_t0_sweep_full(
     source_sha = sha256_file(source_npz)
     grid = _parse_grid(args)
 
-    stage_dir, outputs_dir = ensure_stage_dirs(args.run_id, EXPERIMENT_STAGE, base_dir=out_root)
-    subruns_root = stage_dir / "runs"
-    subruns_root.mkdir(parents=True, exist_ok=True)
+    stage_dir, outputs_dir, subruns_root = resolve_experiment_paths(args.run_id, out_root=out_root)
 
     python = sys.executable
     s3_script = str((_here.parent / "s3_ringdown_estimates.py").resolve())
