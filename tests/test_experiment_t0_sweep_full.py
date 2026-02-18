@@ -217,3 +217,20 @@ def test_experiment_t0_sweep_full_s3_no_valid_estimate_is_insufficient_data(tmp_
         for cmd in observed_cmds
         if "--run-id" in cmd
     )
+
+
+def test_build_subrun_stage_cmds_passes_seed_to_s3b() -> None:
+    cmds = exp.build_subrun_stage_cmds(
+        python="python",
+        s3_script="mvp/s3_ringdown_estimates.py",
+        s3b_script="mvp/s3b_multimode_estimates.py",
+        s4c_script="mvp/s4c_kerr_consistency.py",
+        subrun_id="rid__t0ms0008",
+        n_bootstrap=200,
+        s3b_seed=101,
+        atlas_path="docs/ringdown/atlas/atlas_berti_v2_s4.json",
+    )
+
+    s3b_cmd = next(cmd for cmd in cmds if Path(cmd[1]).stem == "s3b_multimode_estimates")
+    assert "--seed" in s3b_cmd
+    assert s3b_cmd[s3b_cmd.index("--seed") + 1] == "101"

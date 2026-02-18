@@ -214,6 +214,24 @@ def _extract_s4c(payload: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def build_subrun_stage_cmds(
+    *,
+    python: str,
+    s3_script: str,
+    s3b_script: str,
+    s4c_script: str,
+    subrun_id: str,
+    n_bootstrap: int,
+    s3b_seed: int,
+    atlas_path: str,
+) -> list[list[str]]:
+    return [
+        [python, s3_script, "--run", subrun_id],
+        [python, s3b_script, "--run-id", subrun_id, "--n-bootstrap", str(n_bootstrap), "--seed", str(s3b_seed)],
+        [python, s4c_script, "--run-id", subrun_id, "--atlas-path", atlas_path],
+    ]
+
+
 def run_t0_sweep_full(
     args: argparse.Namespace,
     *,
@@ -311,11 +329,16 @@ def run_t0_sweep_full(
         env = os.environ.copy()
         env["BASURIN_RUNS_ROOT"] = str(subruns_root)
 
-        stages = [
-            [python, s3_script, "--run", subrun_id],
-            [python, s3b_script, "--run-id", subrun_id, "--n-bootstrap", str(args.n_bootstrap), "--seed", str(args.seed)],
-            [python, s4c_script, "--run-id", subrun_id, "--atlas-path", str(args.atlas_path)],
-        ]
+        stages = build_subrun_stage_cmds(
+            python=python,
+            s3_script=s3_script,
+            s3b_script=s3b_script,
+            s4c_script=s4c_script,
+            subrun_id=subrun_id,
+            n_bootstrap=int(args.n_bootstrap),
+            s3b_seed=int(args.seed),
+            atlas_path=str(args.atlas_path),
+        )
 
         skip_to_insufficient = False
 
