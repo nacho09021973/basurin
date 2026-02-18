@@ -181,6 +181,31 @@ SUBRUN_ID="${RUN_ID}__t0ms0000"
 find "runs/$RUN_ID/experiment/t0_sweep_full/runs" -maxdepth 2 -type f -path "*/$SUBRUN_ID/RUN_VALID/verdict.json" -print
 ```
 
+### 7.1) Caso `seed sweep`: valida primero que el `RUNSROOT` exista
+
+Cuando el experimento se ejecuta en árboles separados por semilla (ejemplo: `t0_sweep_full_seed101`),
+es fácil construir una ruta sintácticamente válida pero inexistente.
+
+Antes de leer `stage_summary.json` de un subrun, valida en este orden:
+
+```bash
+BASE_RUN="mvp_GW150914_nofetch_realfix_20260218T150000Z"
+seed=101
+RUNSROOT="runs/$BASE_RUN/experiment/t0_sweep_full_seed${seed}/runsroot"
+sub="$RUNSROOT/$BASE_RUN/experiment/t0_sweep_full/runs/${BASE_RUN}__t0ms0008"
+
+echo "RUNSROOT=$RUNSROOT"
+test -d "$RUNSROOT" && echo "OK: RUNSROOT existe" || echo "ERROR: RUNSROOT no existe"
+
+echo "SUB=$sub"
+test -f "$sub/s3b_multimode_estimates/stage_summary.json" \
+  && jq -r '.created, (.parameters | {seed, n_bootstrap})' "$sub/s3b_multimode_estimates/stage_summary.json" \
+  || echo "ERROR: stage_summary.json no existe en ese subrun"
+```
+
+Si `RUNSROOT` o el `stage_summary.json` no existen, no compares seeds todavía: primero hay que
+corregir la ruta efectiva (árbol equivocado, `runs_root` no materializado o `subrun_id` distinto).
+
 ---
 
 ## 8) Nota de gobernanza (recordatorio)
