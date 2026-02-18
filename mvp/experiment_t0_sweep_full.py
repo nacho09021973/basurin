@@ -12,15 +12,12 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-import numpy as np
-
 _here = Path(__file__).resolve()
 for _cand in (_here.parents[0], _here.parents[1]):
     if (_cand / "basurin_io.py").exists() and str(_cand) not in sys.path:
         sys.path.insert(0, str(_cand))
 
 from basurin_io import (
-    ensure_stage_dirs,
     require_run_valid,
     resolve_out_root,
     sha256_file,
@@ -76,7 +73,9 @@ def _pick_detector(outputs_dir: Path, detector: str) -> tuple[str, Path]:
     return "L1", available["L1"]
 
 
-def _load_npz(npz_path: Path, window_meta: dict[str, Any]) -> tuple[np.ndarray, float]:
+def _load_npz(npz_path: Path, window_meta: dict[str, Any]) -> tuple[Any, float]:
+    import numpy as np
+
     data = np.load(npz_path)
     if "strain" not in data:
         raise RuntimeError(f"corrupt s2 NPZ: missing strain in {npz_path}")
@@ -107,13 +106,15 @@ def _subrun_id(base_run_id: str, t0_ms: int) -> str:
 def _write_subrun_shadow_s2(
     subrun_dir: Path,
     detector: str,
-    trimmed: np.ndarray,
+    trimmed: Any,
     fs: float,
     t0_ms: int,
     offset_samples: int,
     original_npz: Path,
     original_sha: str,
 ) -> dict[str, Any]:
+    import numpy as np
+
     rv_path = subrun_dir / "RUN_VALID" / "verdict.json"
     rv_path.parent.mkdir(parents=True, exist_ok=True)
     write_json_atomic(rv_path, {"verdict": "PASS"})
@@ -246,15 +247,23 @@ def build_subrun_stage_cmds(
     ]
 
 
-def resolve_experiment_paths(run_id: str, *, out_root: Path | None = None) -> tuple[Path, Path, Path]:
-    """Resolve experiment directories under the active runs root.
+def compute_experiment_paths(run_id: str) -> tuple[Path, Path, Path]:
+    """Resolve output root and directories for ``experiment/t0_sweep_full``.
 
-    Returns ``(stage_dir, outputs_dir, subruns_root)`` for
-    ``experiment/t0_sweep_full``.
+    Returns ``(out_root, stage_dir, subruns_root)``.
     """
-    root = out_root if out_root is not None else resolve_out_root("runs")
-    stage_dir, outputs_dir = ensure_stage_dirs(run_id, EXPERIMENT_STAGE, base_dir=root)
+    out_root = resolve_out_root("runs")
+    stage_dir = out_root / run_id / "experiment" / "t0_sweep_full"
     subruns_root = stage_dir / "runs"
+    return out_root, stage_dir, subruns_root
+
+
+def resolve_experiment_paths(run_id: str, *, out_root: Path | None = None) -> tuple[Path, Path, Path]:
+    """Backwards-compatible wrapper returning ``(stage_dir, outputs_dir, subruns_root)``."""
+    root = out_root if out_root is not None else resolve_out_root("runs")
+    stage_dir = root / run_id / "experiment" / "t0_sweep_full"
+    outputs_dir = stage_dir / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
     subruns_root.mkdir(parents=True, exist_ok=True)
     return stage_dir, outputs_dir, subruns_root
 
@@ -264,7 +273,7 @@ def run_t0_sweep_full(
     *,
     run_cmd_fn: Callable[[list[str], dict[str, str], int], Any] = run_cmd,
 ) -> tuple[dict[str, Any], Path]:
-    out_root = resolve_out_root("runs")
+    out_root, stage_dir, subruns_root = compute_experiment_paths(args.run_id)
     validate_run_id(args.run_id, out_root)
     require_run_valid(out_root, args.run_id)
 
@@ -283,7 +292,9 @@ def run_t0_sweep_full(
     source_sha = sha256_file(source_npz)
     grid = _parse_grid(args)
 
-    stage_dir, outputs_dir, subruns_root = resolve_experiment_paths(args.run_id, out_root=out_root)
+    outputs_dir = stage_dir / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    subruns_root.mkdir(parents=True, exist_ok=True)
 
     python = sys.executable
     s3_script = str((_here.parent / "s3_ringdown_estimates.py").resolve())
