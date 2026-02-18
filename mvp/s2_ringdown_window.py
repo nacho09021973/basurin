@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -57,6 +58,14 @@ def main() -> int:
     ap.add_argument("--dt-start-s", type=float, default=0.003)
     ap.add_argument("--duration-s", type=float, default=0.06)
     ap.add_argument("--window-catalog", default="docs/ringdown/window_catalog_v1.json")
+    ap.add_argument(
+        "--strain-npz",
+        default=None,
+        help=(
+            "Optional explicit path to the full-strain NPZ. "
+            "Defaults to <runs_root>/<run>/s1_fetch_strain/outputs/strain.npz"
+        ),
+    )
     args = ap.parse_args()
 
     ctx = init_stage(args.run, STAGE, params={
@@ -64,8 +73,25 @@ def main() -> int:
         "duration_s": args.duration_s, "window_catalog": args.window_catalog,
     })
 
-    strain_path = ctx.run_dir / "s1_fetch_strain" / "outputs" / "strain.npz"
-    check_inputs(ctx, {"strain_npz": strain_path})
+    default_strain_path = ctx.run_dir / "s1_fetch_strain" / "outputs" / "strain.npz"
+    strain_path = Path(args.strain_npz).expanduser().resolve() if args.strain_npz else default_strain_path
+
+    try:
+        check_inputs(ctx, {"strain_npz": strain_path})
+    except SystemExit:
+        if not args.strain_npz and not default_strain_path.exists():
+            runs_root = os.environ.get("BASURIN_RUNS_ROOT", "<cwd>/runs")
+            abort(
+                ctx,
+                (
+                    "Missing required inputs: "
+                    f"strain_npz: {default_strain_path}. "
+                    "Hint: this run may be a subrun containing only pre-trimmed s2 outputs. "
+                    "Re-run with --strain-npz pointing to the original full-strain file from s1_fetch_strain, "
+                    f"or set BASURIN_RUNS_ROOT correctly (current={runs_root!r})."
+                ),
+            )
+        raise
 
     try:
         t0_gps, t0_source = _resolve_t0_gps(args.event_id, Path(args.window_catalog))
