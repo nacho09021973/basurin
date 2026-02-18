@@ -23,6 +23,102 @@ evaluate_mode = _MODULE.evaluate_mode
 _discover_s2_npz = _MODULE._discover_s2_npz
 _load_signal_from_npz = _MODULE._load_signal_from_npz
 
+_discover_s2_window_meta = _MODULE._discover_s2_window_meta
+
+
+def test_mode_keeps_point_estimate_when_gates_fail() -> None:
+    signal = np.linspace(-1.0, 1.0, 4096)
+
+    def estimator(_signal: np.ndarray, _fs: float) -> dict[str, float]:
+        return {"f_hz": 220.0, "Q": 12.0, "tau_s": 12.0 / (np.pi * 220.0)}
+
+    explosive_samples = np.array(
+        [[np.log(220.0), x] for x in np.linspace(np.log(2.0), np.log(120.0), 80)],
+        dtype=float,
+    )
+
+    original = _MODULE._bootstrap_mode_log_samples
+    _MODULE._bootstrap_mode_log_samples = lambda *_args, **_kwargs: (explosive_samples, 0)
+    try:
+        mode, flags, ok = evaluate_mode(
+            signal,
+            4096.0,
+            label="220",
+            mode=[2, 2, 0],
+            estimator=estimator,
+            n_bootstrap=80,
+            seed=9,
+            min_valid_fraction=0.95,
+            max_lnf_span=0.5,
+            max_lnq_span=0.2,
+            min_point_samples=50,
+            min_point_valid_fraction=0.5,
+        )
+    finally:
+        _MODULE._bootstrap_mode_log_samples = original
+
+    assert not ok
+    assert "220_lnQ_span_explosive" in flags
+    assert mode["ln_f"] is not None
+    assert mode["ln_Q"] is not None
+
+
+def test_discover_s2_window_meta_from_manifest(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run_x"
+    stage_dir = run_dir / "s2_ringdown_window"
+    out_dir = stage_dir / "outputs"
+    out_dir.mkdir(parents=True)
+    meta_path = out_dir / "window_meta.json"
+    meta_path.write_text(json.dumps({"sample_rate_hz": 4096.0}), encoding="utf-8")
+    (stage_dir / "manifest.json").write_text(
+        json.dumps({"artifacts": {"window_meta": "s2_ringdown_window/outputs/window_meta.json"}}),
+        encoding="utf-8",
+    )
+
+    assert _discover_s2_window_meta(run_dir) == meta_path
+
+
+def test_main_populates_source_window_and_avoids_missing_flag(tmp_path: Path) -> None:
+    run_id = "subrun_003"
+    tmp_runs = tmp_path / "subruns_root"
+    _write_minimal_s2_inputs(tmp_runs, run_id)
+    run_dir = tmp_runs / run_id
+
+    meta = {"sample_rate_hz": 4096.0, "offset_ms": 0}
+    meta_path = run_dir / "s2_ringdown_window" / "outputs" / "window_meta.json"
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    (run_dir / "s2_ringdown_window" / "manifest.json").write_text(
+        json.dumps({
+            "artifacts": {
+                "H1_rd": "s2_ringdown_window/outputs/H1_rd.npz",
+                "window_meta": "s2_ringdown_window/outputs/window_meta.json",
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    repo_root = Path(__file__).resolve().parents[1]
+    cmd = [
+        sys.executable,
+        str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
+        "--runs-root",
+        str(tmp_runs),
+        "--run-id",
+        run_id,
+        "--n-bootstrap",
+        "8",
+        "--seed",
+        "101",
+    ]
+
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+    output_path = tmp_runs / run_id / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["source"]["window"] == meta
+    assert "missing_window_meta" not in payload["results"]["quality_flags"]
+
 
 def _stable_estimator(signal: np.ndarray, fs: float) -> dict[str, float]:
     _ = signal, fs

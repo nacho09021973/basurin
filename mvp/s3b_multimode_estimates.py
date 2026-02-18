@@ -268,31 +268,6 @@ def _mode_null(label: str, mode: list[int], n_bootstrap: int, seed: int, stabili
     }
 
 
-def _mode_payload(
-    label: str,
-    mode: list[int],
-    ln_f: float,
-    ln_q: float,
-    sigma: np.ndarray,
-    n_bootstrap: int,
-    seed: int,
-    stability: dict[str, Any],
-) -> dict[str, Any]:
-    return {
-        "mode": mode,
-        "label": label,
-        "ln_f": float(ln_f),
-        "ln_Q": float(ln_q),
-        "Sigma": [[float(sigma[0, 0]), float(sigma[0, 1])], [float(sigma[1, 0]), float(sigma[1, 1])]],
-        "fit": {
-            "method": "hilbert_peakband",
-            "n_bootstrap": int(n_bootstrap),
-            "bootstrap_seed": int(seed),
-            "stability": stability,
-        },
-    }
-
-
 def evaluate_mode(
     signal: np.ndarray,
     fs: float,
@@ -306,6 +281,8 @@ def evaluate_mode(
     cv_threshold: float | None = None,
     max_lnf_span: float = 1.0,
     max_lnq_span: float = 1.0,
+    min_point_samples: int = 2,
+    min_point_valid_fraction: float = 0.0,
 ) -> tuple[dict[str, Any], list[str], bool]:
     flags: list[str] = []
     stability = {
@@ -331,14 +308,6 @@ def evaluate_mode(
     rng = np.random.default_rng(int(seed))
 
     try:
-        point = estimator(signal, fs)
-        ln_f = math.log(float(point["f_hz"]))
-        ln_q = math.log(float(point["Q"]))
-    except Exception:
-        flags.append(f"{label}_point_estimate_failed")
-        return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
-
-    try:
         samples, n_failed = _bootstrap_mode_log_samples(signal, fs, estimator, n_bootstrap=n_bootstrap, rng=rng)
     except ValueError as exc:
         msg = str(exc)
@@ -360,50 +329,44 @@ def evaluate_mode(
     stability["n_failed"] = int(n_failed)
     stability.update(compute_robust_stability([tuple(s) for s in samples.tolist()]))
 
+    can_materialize_point = (
+        samples.shape[0] >= int(min_point_samples)
+        and valid_fraction >= float(min_point_valid_fraction)
+        and stability.get("lnf_p50") is not None
+        and stability.get("lnQ_p50") is not None
+    )
+    if can_materialize_point:
+        ln_f = float(stability["lnf_p50"])
+        ln_q = float(stability["lnQ_p50"])
+    else:
+        ln_f = None
+        ln_q = None
+        flags.append(f"{label}_no_point_estimate")
+
     if samples.shape[0] < 2:
         flags.append(f"{label}_bootstrap_insufficient")
         return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
 
-    sigma = compute_covariance(samples)
-    if sigma.shape != (2, 2) or not np.all(np.isfinite(sigma)):
-        flags.append(f"{label}_Sigma_non_finite")
-        return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
+    sigma: np.ndarray | None = None
+    if samples.shape[0] >= int(min_point_samples):
+        sigma_candidate = compute_covariance(samples)
+        if sigma_candidate.shape == (2, 2) and np.all(np.isfinite(sigma_candidate)):
+            sigma = sigma_candidate
+        else:
+            flags.append(f"{label}_Sigma_invalid")
+    else:
+        flags.append(f"{label}_Sigma_invalid")
+
+    sigma_invertible = False
+    if sigma is not None:
+        det = float(np.linalg.det(sigma))
+        sigma_invertible = math.isfinite(det) and det > 0
+        if not sigma_invertible:
+            flags.append(f"{label}_Sigma_invalid")
 
     ok = True
-    sigma_floor = 1e-4
-    sigma_ceiling = 2.0
-    corr_limit = 0.999
-
-    if sigma[0, 0] < sigma_floor**2:
-        sigma[0, 0] = sigma_floor**2
-        flags.append(f"{label}_sigma_lnf_floor_clamped")
-    if sigma[1, 1] < sigma_floor**2:
-        sigma[1, 1] = sigma_floor**2
-        flags.append(f"{label}_sigma_lnQ_floor_clamped")
-
-    s0 = float(math.sqrt(max(sigma[0, 0], 0.0)))
-    s1 = float(math.sqrt(max(sigma[1, 1], 0.0)))
-
-    det = float(np.linalg.det(sigma))
-    if det <= 0:
-        flags.append(f"{label}_Sigma_not_invertible")
+    if not sigma_invertible:
         ok = False
-
-    if s0 > sigma_ceiling:
-        flags.append(f"{label}_sigma_lnf_out_of_bounds")
-        ok = False
-    if s1 > sigma_ceiling:
-        flags.append(f"{label}_sigma_lnQ_out_of_bounds")
-        ok = False
-
-    if s0 <= 0 or s1 <= 0:
-        flags.append(f"{label}_sigma_zero")
-        ok = False
-    else:
-        r = float(sigma[0, 1] / (s0 * s1))
-        if abs(r) >= corr_limit:
-            flags.append(f"{label}_corr_too_high")
-            ok = False
 
     if valid_fraction < min_valid_fraction:
         flags.append(f"{label}_valid_fraction_low")
@@ -439,14 +402,32 @@ def evaluate_mode(
         if cv_q > cv_threshold:
             flags.append(f"{label}_cv_Q_explosive")
 
-    if not (math.isfinite(ln_f) and math.isfinite(ln_q)):
+    if ln_f is None or ln_q is None:
+        ok = False
+    elif not (math.isfinite(ln_f) and math.isfinite(ln_q)):
         flags.append(f"{label}_non_finite_log")
         ok = False
 
-    if not ok:
-        return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
+    if sigma is None:
+        mode_payload = _mode_null(label, mode, n_bootstrap, seed, stability)
+        mode_payload["ln_f"] = ln_f
+        mode_payload["ln_Q"] = ln_q
+    else:
+        mode_payload = {
+            "mode": mode,
+            "label": label,
+            "ln_f": ln_f,
+            "ln_Q": ln_q,
+            "Sigma": [[float(sigma[0, 0]), float(sigma[0, 1])], [float(sigma[1, 0]), float(sigma[1, 1])]],
+            "fit": {
+                "method": "hilbert_peakband",
+                "n_bootstrap": int(n_bootstrap),
+                "bootstrap_seed": int(seed),
+                "stability": stability,
+            },
+        }
 
-    return _mode_payload(label, mode, ln_f, ln_q, sigma, n_bootstrap, seed, stability), sorted(flags), True
+    return mode_payload, sorted(set(flags)), ok
 
 
 def build_results_payload(
@@ -491,13 +472,13 @@ def main() -> int:
 
     try:
         window_meta = None
-        default_window_meta_path = ctx.run_dir / "s2_ringdown_window" / "outputs" / "window_meta.json"
-        window_meta_path = _discover_s2_window_meta(ctx.run_dir) or default_window_meta_path
+        window_meta_path = _discover_s2_window_meta(ctx.run_dir)
         global_flags: list[str] = []
-        if window_meta_path.exists():
+        if window_meta_path is not None and window_meta_path.exists():
             window_meta = json.loads(window_meta_path.read_text(encoding="utf-8"))
         else:
             global_flags.append("missing_window_meta")
+            window_meta_path = ctx.run_dir / "s2_ringdown_window" / "outputs" / "window_meta.json"
 
         npz_path = _discover_s2_npz(ctx.run_dir)
         check_inputs(ctx, {"s2_rd_npz": npz_path}, optional={"s2_window_meta": window_meta_path})
@@ -511,6 +492,8 @@ def main() -> int:
             estimator=_estimate_220,
             n_bootstrap=args.n_bootstrap,
             seed=args.seed,
+            min_point_samples=50,
+            min_point_valid_fraction=0.5,
         )
         mode_221, flags_221, ok_221 = evaluate_mode(
             signal,
@@ -522,6 +505,8 @@ def main() -> int:
             seed=args.seed + 1,
             min_valid_fraction=0.8,
             cv_threshold=1.0,
+            min_point_samples=50,
+            min_point_valid_fraction=0.5,
         )
 
         payload = build_results_payload(
