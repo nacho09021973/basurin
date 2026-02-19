@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -36,8 +37,12 @@ def _read_json(path: Path) -> dict[str, Any]:
 def main() -> int:
     ap = argparse.ArgumentParser(description="MVP s4c Kerr consistency wrapper")
     ap.add_argument("--run-id", required=True)
+    ap.add_argument("--runs-root", default=None, help="Override BASURIN_RUNS_ROOT for this invocation")
     ap.add_argument("--atlas-path", required=False, default=None)
     args = ap.parse_args()
+
+    if args.runs_root:
+        os.environ["BASURIN_RUNS_ROOT"] = str(Path(args.runs_root).expanduser().resolve())
 
     ctx = init_stage(args.run_id, STAGE, params={"atlas_path": args.atlas_path})
 

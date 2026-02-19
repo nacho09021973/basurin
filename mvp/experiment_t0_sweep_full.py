@@ -209,6 +209,10 @@ def _require_subrun_window_meta(subrun_dir: Path) -> Path:
     return path
 
 
+def _expected_subrun_window_meta_path(subrun_runs_root: Path, subrun_id: str) -> Path:
+    return subrun_runs_root / subrun_id / "s2_ringdown_window" / "outputs" / "window_meta.json"
+
+
 def _read_json_if_exists(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
@@ -387,6 +391,7 @@ def build_subrun_stage_cmds(
     s3_script: str,
     s3b_script: str,
     s4c_script: str,
+    subrun_runs_root: str,
     subrun_id: str,
     event_id: str,
     dt_start_s: float,
@@ -409,6 +414,10 @@ def build_subrun_stage_cmds(
             s2_script,
             "--run",
             subrun_id,
+            "--run-id",
+            subrun_id,
+            "--runs-root",
+            subrun_runs_root,
             "--event-id",
             event_id,
             "--dt-start-s",
@@ -418,12 +427,14 @@ def build_subrun_stage_cmds(
             "--strain-npz",
             strain_npz,
         ],
-        [python, s3_script, "--run", subrun_id],
+        [python, s3_script, "--run", subrun_id, "--run-id", subrun_id, "--runs-root", subrun_runs_root],
         [
             python,
             s3b_script,
             "--run-id",
             subrun_id,
+            "--runs-root",
+            subrun_runs_root,
             "--s3-estimates",
             s3_estimates,
             "--n-bootstrap",
@@ -431,7 +442,7 @@ def build_subrun_stage_cmds(
             "--seed",
             str(int(s3b_seed)),
         ],
-        [python, s4c_script, "--run-id", subrun_id, "--atlas-path", atlas_path],
+        [python, s4c_script, "--run-id", subrun_id, "--runs-root", subrun_runs_root, "--atlas-path", atlas_path],
     ]
 
 
@@ -443,6 +454,7 @@ def build_subrun_execution_plan(
     s3_script: str,
     s3b_script: str,
     s4c_script: str,
+    subrun_runs_root: Path,
     subrun_id: str,
     event_id: str,
     dt_start_s: float,
@@ -453,7 +465,7 @@ def build_subrun_execution_plan(
     atlas_path: str,
 ) -> dict[str, Any]:
     """Pure plan for one subrun including local provenance path expectations."""
-    window_meta = subrun_dir / "s2_ringdown_window" / "outputs" / "window_meta.json"
+    window_meta = _expected_subrun_window_meta_path(subrun_runs_root, subrun_id)
     return {
         "subrun_id": subrun_id,
         "expected_inputs": {
@@ -465,6 +477,7 @@ def build_subrun_execution_plan(
             s3_script=s3_script,
             s3b_script=s3b_script,
             s4c_script=s4c_script,
+            subrun_runs_root=str(subrun_runs_root),
             subrun_id=subrun_id,
             event_id=event_id,
             dt_start_s=dt_start_s,
@@ -557,16 +570,35 @@ def execute_subrun_stages_or_abort(
             break
 
         if stage_stem == "s2_ringdown_window":
+            expected_meta_path = _expected_subrun_window_meta_path(subrun_dir.parent, subrun_dir.name)
+            if trace is not None:
+                trace["s2_window_meta_check"] = {
+                    "expected_window_meta_path": str(expected_meta_path),
+                    "found": False,
+                }
+                if trace_path is not None:
+                    _write_subrun_trace(trace_path, trace)
             try:
                 meta_path = _require_subrun_window_meta(subrun_dir)
                 point["quality_flags"].append(f"subrun_window_meta={meta_path}")
+                if trace is not None:
+                    trace["s2_window_meta_check"] = {
+                        "expected_window_meta_path": str(expected_meta_path),
+                        "found": True,
+                    }
+                    if trace_path is not None:
+                        _write_subrun_trace(trace_path, trace)
             except FileNotFoundError:
-                subrun_abs = subrun_dir.resolve()
-                print(
-                    "[experiment_t0_sweep_full] ERROR: missing window_meta after s2 for "
-                    f"subrun_dir={subrun_abs}",
-                    file=sys.stderr,
+                subrun_id = str((trace or {}).get("subrun_id", subrun_dir.name))
+                seed = (trace or {}).get("seed")
+                t0_ms = (trace or {}).get("t0_ms")
+                msg = (
+                    "[experiment_t0_sweep_full] ERROR: missing window_meta after s2 "
+                    f"subrun_id={subrun_id} seed={seed} t0_ms={t0_ms} "
+                    f"expected_path={expected_meta_path}"
                 )
+                point["messages"].append(msg)
+                print(msg, file=sys.stderr)
                 raise SystemExit(2)
     return failed, skip_to_insufficient
 
@@ -786,6 +818,7 @@ def run_t0_sweep_full(
                 s3_script=s3_script,
                 s3b_script=s3b_script,
                 s4c_script=s4c_script,
+                subrun_runs_root=str(subruns_root),
                 subrun_id=subrun_id,
                 event_id=str(window_meta.get("event_id", "GW150914")),
                 dt_start_s=base_dt_start_s + (float(t0_ms) / 1000.0),

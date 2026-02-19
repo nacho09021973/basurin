@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -222,14 +223,22 @@ def bootstrap_ringdown_observables(
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=f"MVP {STAGE}: estimate f, tau, Q")
-    ap.add_argument("--run", required=True)
+    ap.add_argument("--run", default=None)
+    ap.add_argument("--run-id", default=None)
+    ap.add_argument("--runs-root", default=None, help="Override BASURIN_RUNS_ROOT for this invocation")
     ap.add_argument("--band-low", type=float, default=150.0)
     ap.add_argument("--band-high", type=float, default=400.0)
     ap.add_argument("--n-bootstrap", type=int, default=200,
                     help="Number of bootstrap resamples for uncertainty estimation (0=skip)")
     args = ap.parse_args()
 
-    ctx = init_stage(args.run, STAGE, params={
+    run_id = args.run_id or args.run
+    if not run_id:
+        ap.error("one of --run or --run-id is required")
+    if args.runs_root:
+        os.environ["BASURIN_RUNS_ROOT"] = str(Path(args.runs_root).expanduser().resolve())
+
+    ctx = init_stage(run_id, STAGE, params={
         "band_low_hz": args.band_low, "band_high_hz": args.band_high,
         "method": "hilbert_envelope", "n_bootstrap": args.n_bootstrap,
     })
