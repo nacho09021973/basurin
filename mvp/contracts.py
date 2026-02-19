@@ -33,6 +33,7 @@ for _cand in [_here.parents[0], _here.parents[1]]:
         break
 
 from basurin_io import (
+    assert_no_symlink_ancestors,
     ensure_stage_dirs,
     require_run_valid,
     resolve_out_root,
@@ -205,6 +206,11 @@ def init_stage(
     validate_run_id(run_id, out_root)
     run_dir = out_root / run_id
 
+    try:
+        assert_no_symlink_ancestors(run_dir)
+    except RuntimeError as exc:
+        _fatal(f"[{stage_name}] {exc}")
+
     if contract.check_run_valid:
         try:
             require_run_valid(out_root, run_id)
@@ -305,6 +311,7 @@ def finalize(
     summary: dict[str, Any] = {
         "stage": ctx.stage_name,
         "run": ctx.run_id,
+        "runs_root": str(ctx.out_root),
         "created": utc_now_iso(),
         "version": "v1",
         "parameters": ctx.params,
@@ -334,6 +341,7 @@ def abort(ctx: StageContext, reason: str) -> None:
     summary: dict[str, Any] = {
         "stage": ctx.stage_name,
         "run": ctx.run_id,
+        "runs_root": str(ctx.out_root),
         "created": utc_now_iso(),
         "version": "v1",
         "parameters": ctx.params,
