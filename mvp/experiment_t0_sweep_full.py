@@ -214,6 +214,121 @@ def _read_json_if_exists(path: Path) -> dict[str, Any] | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _artifact_fact(path: Path, *, include_sha: bool = True) -> dict[str, Any]:
+    exists = path.exists()
+    payload: dict[str, Any] = {
+        "path": str(path),
+        "exists": bool(exists),
+    }
+    if include_sha:
+        payload["sha256"] = sha256_file(path) if exists else None
+    return payload
+
+
+def _write_preflight_report_or_abort(
+    *,
+    run_id: str,
+    out_root: Path,
+    base_root: Path,
+    scan_root_abs: Path,
+    base_run_dir: Path,
+    preflight_path: Path,
+) -> dict[str, Any]:
+    run_valid = base_run_dir / "RUN_VALID" / "verdict.json"
+    s1_strain = base_run_dir / "s1_fetch_strain" / "outputs" / "strain.npz"
+    s3_estimates = base_run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+
+    rv_verdict = "MISSING"
+    if run_valid.exists():
+        try:
+            rv_payload = json.loads(run_valid.read_text(encoding="utf-8"))
+            rv_verdict = "PASS" if str(rv_payload.get("verdict")) == "PASS" else "FAIL"
+        except Exception:
+            rv_verdict = "FAIL"
+
+    checks = {
+        "RUN_VALID": {
+            "path": str(run_valid),
+            "exists": run_valid.exists(),
+            "verdict": rv_verdict,
+        },
+        "s1_strain_npz": _artifact_fact(s1_strain),
+        "s3_estimates_json": _artifact_fact(s3_estimates),
+    }
+
+    can_run = True
+    reason = "ok"
+    missing_path = None
+    if not checks["RUN_VALID"]["exists"]:
+        can_run = False
+        reason = "missing RUN_VALID verdict"
+        missing_path = checks["RUN_VALID"]["path"]
+    elif checks["RUN_VALID"]["verdict"] != "PASS":
+        can_run = False
+        reason = f"RUN_VALID verdict is {checks['RUN_VALID']['verdict']}"
+        missing_path = checks["RUN_VALID"]["path"]
+    elif not checks["s1_strain_npz"]["exists"]:
+        can_run = False
+        reason = "missing base s1 strain NPZ"
+        missing_path = checks["s1_strain_npz"]["path"]
+
+    report = {
+        "run_id": run_id,
+        "runs_root_abs": str(out_root),
+        "base_runs_root_abs": str(base_root),
+        "scan_root_abs": str(scan_root_abs),
+        "base_artifacts": checks,
+        "tooling": {
+            "python": sys.executable,
+            "cwd": str(Path.cwd()),
+            "env_BASURIN_RUNS_ROOT": os.environ.get("BASURIN_RUNS_ROOT"),
+        },
+        "decision": {
+            "can_run": bool(can_run),
+            "reason": reason,
+        },
+    }
+    write_json_atomic(preflight_path, report)
+    if not can_run:
+        print(
+            f"[experiment_t0_sweep_full] preflight failed: reason={reason} path={missing_path}",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    return report
+
+
+def _new_subrun_trace(subrun_id: str, seed: int, t0_ms: int, stages: list[list[str]]) -> dict[str, Any]:
+    return {
+        "subrun_id": subrun_id,
+        "seed": int(seed),
+        "t0_ms": int(t0_ms),
+        "planned_stages": [Path(cmd[1]).stem for cmd in stages if len(cmd) > 1],
+        "stages": [],
+        "aborted": False,
+        "abort_stage": None,
+        "exception": None,
+        "contract": {"missing": []},
+    }
+
+
+def _output_presence_map(subrun_dir: Path, stage: str) -> dict[str, dict[str, Any]]:
+    expected = {
+        "s2_ringdown_window": {"window_meta": subrun_dir / "s2_ringdown_window" / "outputs" / "window_meta.json"},
+        "s3_ringdown_estimates": {"estimates": subrun_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"},
+        "s3b_multimode_estimates": {
+            "multimode_estimates": subrun_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
+        },
+        "s4c_kerr_consistency": {"kerr_consistency": subrun_dir / "s4c_kerr_consistency" / "outputs" / "kerr_consistency.json"},
+    }
+    stage_expected = expected.get(stage, {})
+    return {key: _artifact_fact(path) for key, path in stage_expected.items()}
+
+
+def _write_subrun_trace(path: Path, trace: dict[str, Any]) -> None:
+    write_json_atomic(path, trace)
+
+
 def _extract_s3b(payload: dict[str, Any] | None) -> dict[str, Any]:
     empty = {
         "verdict": "INSUFFICIENT_DATA",
@@ -369,6 +484,8 @@ def execute_subrun_stages_or_abort(
     stage_timeout_s: int,
     run_cmd_fn: Callable[[list[str], dict[str, str], int], Any],
     point: dict[str, Any],
+    trace: dict[str, Any] | None = None,
+    trace_path: Path | None = None,
 ) -> tuple[bool, bool]:
     """Execute per-subrun commands with mandatory post-s2 window_meta precheck.
 
@@ -377,14 +494,42 @@ def execute_subrun_stages_or_abort(
     failed = False
     skip_to_insufficient = False
     for cmd in stages:
+        stage_stem = Path(cmd[1]).stem if len(cmd) > 1 else ""
+        stage_trace = {
+            "stage": stage_stem,
+            "started": True,
+            "finished": False,
+            "exit_code": None,
+            "outputs_present": {},
+        }
+        if trace is not None:
+            trace["stages"].append(stage_trace)
+            if trace_path is not None:
+                _write_subrun_trace(trace_path, trace)
         try:
             cp = run_cmd_fn(cmd, env, stage_timeout_s)
         except Exception as exc:
             point["messages"].append(f"subprocess error for {' '.join(cmd)}: {type(exc).__name__}: {exc}")
+            stage_trace["finished"] = True
+            stage_trace["exit_code"] = -1
+            stage_trace["outputs_present"] = _output_presence_map(subrun_dir, stage_stem)
+            if trace is not None:
+                trace["aborted"] = True
+                trace["abort_stage"] = stage_stem
+                trace["exception"] = {
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                }
+                if trace_path is not None:
+                    _write_subrun_trace(trace_path, trace)
             failed = True
             break
 
-        stage_stem = Path(cmd[1]).stem if len(cmd) > 1 else ""
+        stage_trace["finished"] = True
+        stage_trace["exit_code"] = int(getattr(cp, "returncode", 1))
+        stage_trace["outputs_present"] = _output_presence_map(subrun_dir, stage_stem)
+        if trace is not None and trace_path is not None:
+            _write_subrun_trace(trace_path, trace)
         if int(getattr(cp, "returncode", 1)) != 0:
             stderr = (getattr(cp, "stderr", "") or "").strip()
             is_s3 = stage_stem == "s3_ringdown_estimates"
@@ -398,6 +543,15 @@ def execute_subrun_stages_or_abort(
             point["messages"].append(f"stage failed rc={cp.returncode}: {' '.join(cmd)}")
             if stderr:
                 point["messages"].append(stderr)
+            if trace is not None:
+                trace["aborted"] = True
+                trace["abort_stage"] = stage_stem
+                trace["exception"] = {
+                    "type": "CalledProcessError",
+                    "message": stderr or f"stage returned {cp.returncode}",
+                }
+                if trace_path is not None:
+                    _write_subrun_trace(trace_path, trace)
             failed = True
             break
 
@@ -498,6 +652,7 @@ def run_t0_sweep_full(
     stage_dir = out_root / args.run_id / "experiment" / f"t0_sweep_full_seed{int(args.seed)}"
     subruns_root = stage_dir / "runs"
     trace_path = out_root / args.run_id / "experiment" / "derived" / "run_trace.json"
+    preflight_path = out_root / args.run_id / "experiment" / "derived" / "preflight_report.json"
     trace_payload: dict[str, Any] = {
         "phase": "run",
         "run_id": args.run_id,
@@ -525,6 +680,14 @@ def run_t0_sweep_full(
         validate_run_id(args.run_id, out_root)
         validate_run_id(args.run_id, base_root)
         require_run_valid(base_root, args.run_id)
+        _write_preflight_report_or_abort(
+            run_id=args.run_id,
+            out_root=out_root,
+            base_root=base_root,
+            scan_root_abs=scan_root_abs,
+            base_run_dir=base_run_dir,
+            preflight_path=preflight_path,
+        )
 
         print(f"[experiment_t0_sweep_full] creating_seed_dir={stage_dir.resolve()}", file=sys.stderr)
         stage_dir.mkdir(parents=True, exist_ok=True)
@@ -599,6 +762,7 @@ def run_t0_sweep_full(
                 continue
 
             subrun_dir = subruns_root / subrun_id
+            subrun_trace_path = subrun_dir / "derived" / "subrun_trace.json"
             if subrun_dir.exists():
                 shutil.rmtree(subrun_dir)
             _init_subrun_run_valid(subrun_dir)
@@ -630,6 +794,7 @@ def run_t0_sweep_full(
                 s3b_seed=int(args.seed),
                 atlas_path=str(args.atlas_path),
             )
+            subrun_trace = _new_subrun_trace(subrun_id, int(args.seed), int(t0_ms), stages)
             failed, skip_to_insufficient = execute_subrun_stages_or_abort(
                 stages=stages,
                 subrun_dir=subrun_dir,
@@ -637,7 +802,18 @@ def run_t0_sweep_full(
                 stage_timeout_s=args.stage_timeout_s,
                 run_cmd_fn=run_cmd_fn,
                 point=point,
+                trace=subrun_trace,
+                trace_path=subrun_trace_path,
             )
+
+            contract_ok = _check_subrun_contract(subrun_dir, subrun_trace)
+            if not contract_ok:
+                failed = True
+                point["status"] = "FAILED_POINT"
+                point["messages"].append("subrun contract failed: missing local provenance outputs")
+                for miss in subrun_trace["contract"]["missing"]:
+                    point["messages"].append(f"missing {miss['key']}: {miss['path']}")
+            _write_subrun_trace(subrun_trace_path, subrun_trace)
 
             s3b_payload = _read_json_if_exists(
                 subrun_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
@@ -792,6 +968,84 @@ def _pair_key(seed: int, t0_ms: int) -> str:
 
 def _inventory_path(runs_root_abs: Path, base_run: str) -> Path:
     return runs_root_abs / base_run / "experiment" / "derived" / "sweep_inventory.json"
+
+
+def _diagnose_path(runs_root_abs: Path, base_run: str) -> Path:
+    return runs_root_abs / base_run / "experiment" / "derived" / "diagnose_report.json"
+
+
+def _contract_expectations(subrun_dir: Path) -> dict[str, Path]:
+    return {
+        "window_meta": subrun_dir / "s2_ringdown_window" / "outputs" / "window_meta.json",
+        "estimates": subrun_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json",
+        "multimode_estimates": subrun_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json",
+    }
+
+
+def _check_subrun_contract(subrun_dir: Path, trace: dict[str, Any]) -> bool:
+    missing: list[dict[str, str]] = []
+    for key, path in _contract_expectations(subrun_dir).items():
+        if not path.exists():
+            missing.append({"key": key, "path": str(path)})
+    trace["contract"] = {
+        "missing": missing,
+        "ok": len(missing) == 0,
+    }
+    return len(missing) == 0
+
+
+def run_diagnose_phase(args: argparse.Namespace) -> dict[str, Any]:
+    runs_root_abs = _resolve_runs_root_arg(getattr(args, "runs_root", None))
+    base_run = args.run_id
+    base_run_dir = runs_root_abs / base_run
+    scan_root_abs = Path(args.scan_root).expanduser().resolve() if getattr(args, "scan_root", None) else (base_run_dir / "experiment").resolve()
+
+    stage_missing_counts: dict[str, int] = {
+        "window_meta": 0,
+        "estimates": 0,
+        "multimode_estimates": 0,
+    }
+    exception_counts: dict[str, int] = {}
+    worst: list[dict[str, Any]] = []
+    subrun_dirs = sorted([p for p in scan_root_abs.glob("**/*__t0ms*") if p.is_dir()], key=lambda p: p.as_posix())
+
+    for subrun_dir in subrun_dirs:
+        derived_trace = subrun_dir / "derived" / "subrun_trace.json"
+        trace = _read_json_if_exists(derived_trace)
+        if trace:
+            missing = trace.get("contract", {}).get("missing", [])
+            for item in missing:
+                key = item.get("key")
+                if key in stage_missing_counts:
+                    stage_missing_counts[key] += 1
+            exc = trace.get("exception") or {}
+            msg = str(exc.get("message", "")).strip()
+            if msg:
+                exception_counts[msg] = exception_counts.get(msg, 0) + 1
+        else:
+            missing = []
+            for key, path in _contract_expectations(subrun_dir).items():
+                if not path.exists():
+                    missing.append({"key": key, "path": str(path)})
+                    stage_missing_counts[key] += 1
+        if missing and len(worst) < 20:
+            worst.append({"subrun_dir": str(subrun_dir), "missing": missing, "trace_path": str(derived_trace)})
+
+    top_errors = sorted(
+        [{"message": msg, "count": count} for msg, count in exception_counts.items()],
+        key=lambda x: (-int(x["count"]), x["message"]),
+    )[:10]
+    payload = {
+        "run_id": base_run,
+        "runs_root_abs": str(runs_root_abs),
+        "scan_root_abs": str(scan_root_abs),
+        "stage_missing_counts": stage_missing_counts,
+        "top_exceptions": top_errors,
+        "worst_subruns": worst,
+        "subrun_count": len(subrun_dirs),
+    }
+    _atomic_json_dump(_diagnose_path(runs_root_abs, base_run), payload)
+    return payload
 
 
 def _flag_present(argv: list[str], *flags: str) -> bool:
@@ -986,7 +1240,7 @@ def main() -> int:
     ap.add_argument("--runs-root", default=None)
     ap.add_argument("--scan-root", default=None)
     ap.add_argument("--inventory-seeds", default=None)
-    ap.add_argument("--phase", choices=["run", "inventory", "finalize"], default="run")
+    ap.add_argument("--phase", choices=["run", "inventory", "finalize", "diagnose"], default="run")
     ap.add_argument("--max-missing-abs", type=int, default=0)
     ap.add_argument("--max-missing-frac", type=float, default=0.0)
     ap.add_argument("--atlas-path", default=None)
@@ -1011,6 +1265,10 @@ def main() -> int:
 
         if args.phase == "finalize":
             run_inventory_phase(args)
+            return 0
+
+        if args.phase == "diagnose":
+            run_diagnose_phase(args)
             return 0
 
         if args.phase == "run":
