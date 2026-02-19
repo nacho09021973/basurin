@@ -225,6 +225,35 @@ class TestGeometryTableScript(unittest.TestCase):
             self.assertIn("scan_root_abs=", proc.stderr)
             self.assertIn("s3b_multimode_estimates/stage_summary.json", proc.stderr)
 
+    def test_symlink_intermediate_directory_is_excluded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            run_id = "BASE_RUN"
+            run_root = base / "runs" / run_id
+            self._write_verdict_pass(run_root)
+
+            scan_root = run_root / "experiment" / "t0_sweep_full_seed101"
+            self._write_multimode(
+                scan_root / "segment__t0ms0001",
+                {"results": {"verdict": "OK"}, "modes": []},
+                stage_seed=101,
+            )
+
+            payload_dir = base / "payload_store" / "segment__t0ms0002"
+            self._write_multimode(
+                payload_dir,
+                {"results": {"verdict": "OK"}, "modes": []},
+                stage_seed=101,
+            )
+            (scan_root / "via_symlink").symlink_to(payload_dir, target_is_directory=True)
+
+            out = run_root / "experiment" / "derived" / "geometry_table.tsv"
+            self._run(base, run_id, scan_root, out)
+            _, rows = self._read_rows(out)
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["t0_ms"], "1")
+
 
 if __name__ == "__main__":
     unittest.main()
