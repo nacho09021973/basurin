@@ -116,6 +116,32 @@ class ExperimentT0SweepFullInventoryTests(unittest.TestCase):
             on_disk = json.loads(out.read_text(encoding="utf-8"))
             self.assertEqual(on_disk["status"], "PASS")
 
+    def test_inventory_detects_payloads_inside_runsroot_nested_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            scan_root = tmp / "runs" / "BASE_RUN" / "experiment"
+            nested_out = (
+                scan_root
+                / "t0_sweep_full_seed505"
+                / "runsroot"
+                / "BASE_RUN"
+                / "experiment"
+                / "t0_sweep_full"
+                / "runs"
+                / "BASE_RUN__t0ms0008"
+                / "s3b_multimode_estimates"
+                / "outputs"
+            )
+            nested_out.mkdir(parents=True, exist_ok=True)
+            (nested_out / "multimode_estimates.json").write_text("{}", encoding="utf-8")
+
+            args = self._args(tmp, "505", "8")
+            payload = exp.run_inventory_phase(args)
+
+            self.assertEqual(payload["expected_payload_count"], 1)
+            self.assertEqual(payload["observed_payload_count"], 1)
+            self.assertEqual(payload["missing_pairs"], [])
+
 
 class ExperimentT0SweepFullMainContractTests(unittest.TestCase):
     def _base_argv(self) -> list[str]:
