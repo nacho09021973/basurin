@@ -42,6 +42,7 @@ for _cand in [_here.parents[0], _here.parents[1]]:
 from basurin_io import resolve_out_root, write_json_atomic
 
 MVP_DIR = Path(__file__).resolve().parent
+DEFAULT_ATLAS_PATH = Path("docs/ringdown/atlas/atlas_berti_v2.json")
 
 
 def _ts() -> str:
@@ -537,6 +538,23 @@ def run_multi_event(
     return 0, agg_run_id
 
 
+def _resolve_atlas_path(atlas_path: str | None, atlas_default: bool) -> str:
+    if atlas_path:
+        return atlas_path
+
+    if atlas_default:
+        if not DEFAULT_ATLAS_PATH.exists():
+            print(
+                "Atlas not found. Generate it by running: "
+                "python mvp/generate_atlas_from_fits.py",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        return str(DEFAULT_ATLAS_PATH)
+
+    raise SystemExit("--atlas-path is required unless --atlas-default is set")
+
+
 def main() -> int:
     import argparse
 
@@ -546,7 +564,8 @@ def main() -> int:
     # Single event
     sp_single = sub.add_parser("single", help="Run pipeline for one event")
     sp_single.add_argument("--event-id", required=True)
-    sp_single.add_argument("--atlas-path", required=True)
+    sp_single.add_argument("--atlas-path", default=None)
+    sp_single.add_argument("--atlas-default", action="store_true", default=False)
     sp_single.add_argument("--run-id", default=None)
     sp_single.add_argument("--synthetic", action="store_true")
     sp_single.add_argument("--duration-s", type=float, default=32.0)
@@ -575,7 +594,8 @@ def main() -> int:
     # Multi event
     sp_multi = sub.add_parser("multi", help="Run pipeline for multiple events + aggregate")
     sp_multi.add_argument("--events", required=True, help="Comma-separated event IDs")
-    sp_multi.add_argument("--atlas-path", required=True)
+    sp_multi.add_argument("--atlas-path", default=None)
+    sp_multi.add_argument("--atlas-default", action="store_true", default=False)
     sp_multi.add_argument("--agg-run-id", default=None)
     sp_multi.add_argument("--min-coverage", type=float, default=1.0)
     sp_multi.add_argument("--synthetic", action="store_true")
@@ -605,7 +625,8 @@ def main() -> int:
     # Single event multimode
     sp_multimode = sub.add_parser("multimode", help="Run single-event multimode pipeline")
     sp_multimode.add_argument("--event-id", required=True)
-    sp_multimode.add_argument("--atlas-path", required=True)
+    sp_multimode.add_argument("--atlas-path", default=None)
+    sp_multimode.add_argument("--atlas-default", action="store_true", default=False)
     sp_multimode.add_argument("--run-id", default=None)
     sp_multimode.add_argument("--synthetic", action="store_true")
     sp_multimode.add_argument("--duration-s", type=float, default=32.0)
@@ -636,9 +657,10 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.mode == "single":
+        atlas_path = _resolve_atlas_path(args.atlas_path, args.atlas_default)
         rc, run_id = run_single_event(
             event_id=args.event_id,
-            atlas_path=args.atlas_path,
+            atlas_path=atlas_path,
             run_id=args.run_id,
             synthetic=args.synthetic,
             duration_s=args.duration_s,
@@ -655,10 +677,11 @@ def main() -> int:
         return rc
 
     elif args.mode == "multi":
+        atlas_path = _resolve_atlas_path(args.atlas_path, args.atlas_default)
         events = [e.strip() for e in args.events.split(",") if e.strip()]
         rc, agg_run_id = run_multi_event(
             events=events,
-            atlas_path=args.atlas_path,
+            atlas_path=atlas_path,
             agg_run_id=args.agg_run_id,
             min_coverage=args.min_coverage,
             synthetic=args.synthetic,
@@ -676,9 +699,10 @@ def main() -> int:
         return rc
 
     elif args.mode == "multimode":
+        atlas_path = _resolve_atlas_path(args.atlas_path, args.atlas_default)
         rc, run_id = run_multimode_event(
             event_id=args.event_id,
-            atlas_path=args.atlas_path,
+            atlas_path=atlas_path,
             run_id=args.run_id,
             synthetic=args.synthetic,
             duration_s=args.duration_s,

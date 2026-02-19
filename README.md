@@ -194,6 +194,8 @@ Ese documento detalla:
 3. `runs/<run_id>/<stage>/manifest.json`
 4. `docs/readme_rutas.md` para validar root efectivo y subruns.
 
+Nota breve de shell: el comando `.` es `source` de bash; si aparece `-bash: .: filename argument required`, es un error de shell, no de BASURIN.
+
 ## Estado del proyecto
 
 Este repositorio prioriza reproducibilidad y trazabilidad del MVP sobre ergonomía de packaging.
