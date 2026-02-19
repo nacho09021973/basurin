@@ -40,8 +40,28 @@ def resolve_out_root(root_name: str = "runs") -> Path:
         root = Path(env).resolve()
     else:
         root = Path.cwd() / root_name
+    assert_no_symlink_ancestors(root)
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def assert_no_symlink_ancestors(path: Path, *, stop_at: Path | None = None) -> None:
+    """Fail if *path* or any existing ancestor is a symlink.
+
+    Traverses from *path* up to *stop_at* (inclusive) when provided,
+    otherwise to the filesystem root.
+    """
+    current = Path(os.path.abspath(path))
+    boundary = Path(os.path.abspath(stop_at)) if stop_at is not None else None
+
+    while True:
+        if current.is_symlink():
+            raise RuntimeError(f"symlink ancestor forbidden: {current}")
+        if boundary is not None and current == boundary:
+            break
+        if current.parent == current:
+            break
+        current = current.parent
 
 
 def validate_run_id(run_id: str, out_root: Path) -> None:
@@ -137,6 +157,7 @@ def write_json_atomic(path: Path, data: Any) -> Path:
     readers never see a partial file.  Returns *path*.
     """
     path = Path(path)
+    assert_no_symlink_ancestors(path.parent)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     # Coerce Path values to str so json.dumps doesn't choke
