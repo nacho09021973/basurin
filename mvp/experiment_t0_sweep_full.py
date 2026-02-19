@@ -1015,6 +1015,118 @@ def _diagnose_path(runs_root_abs: Path, base_run: str) -> Path:
     return runs_root_abs / base_run / "experiment" / "derived" / "diagnose_report.json"
 
 
+def _backfill_window_meta_report_path(runs_root_abs: Path, base_run: str) -> Path:
+    return runs_root_abs / base_run / "experiment" / "derived" / "backfill_window_meta_report.json"
+
+
+def _discover_subrun_dirs(scan_root_abs: Path) -> list[Path]:
+    return sorted([p for p in scan_root_abs.glob("**/*__t0ms*") if p.is_dir()], key=lambda p: p.as_posix())
+
+
+def _parse_t0_offset_ms_from_subrun(subrun_dir: Path) -> int:
+    match = T0MS_RE.search(subrun_dir.name)
+    if not match:
+        return 0
+    return int(match.group(1))
+
+
+def _build_backfilled_window_meta(subrun_dir: Path) -> dict[str, Any]:
+    return {
+        "event_id": "unknown",
+        "t0_source": "backfill_window_meta",
+        "sample_rate_hz": None,
+        "detectors": [],
+        "n_samples": None,
+        "duration_s": None,
+        "t0_offset_ms": _parse_t0_offset_ms_from_subrun(subrun_dir),
+        "offset_samples": 0,
+        "derived_from": "backfill_window_meta",
+    }
+
+
+def run_backfill_window_meta_phase(args: argparse.Namespace) -> dict[str, Any]:
+    runs_root_abs = _resolve_runs_root_arg(getattr(args, "runs_root", None))
+    base_run = args.run_id
+    base_run_dir = runs_root_abs / base_run
+    scan_root_abs = Path(args.scan_root).expanduser().resolve() if getattr(args, "scan_root", None) else (base_run_dir / "experiment").resolve()
+
+    touched: list[dict[str, str]] = []
+    scanned_count = 0
+    backfilled_count = 0
+    skipped_count = 0
+
+    for subrun_dir in _discover_subrun_dirs(scan_root_abs):
+        scanned_count += 1
+        run_valid_path = subrun_dir / "RUN_VALID" / "verdict.json"
+        s3_estimates = subrun_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+        s3b_payload = subrun_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
+        window_meta_path = subrun_dir / "s2_ringdown_window" / "outputs" / "window_meta.json"
+
+        if window_meta_path.exists():
+            skipped_count += 1
+            continue
+        if not (run_valid_path.exists() and s3_estimates.exists() and s3b_payload.exists()):
+            skipped_count += 1
+            continue
+
+        verdict = _read_json_if_exists(run_valid_path) or {}
+        if str(verdict.get("verdict")) != "PASS":
+            skipped_count += 1
+            continue
+
+        window_meta_path.parent.mkdir(parents=True, exist_ok=True)
+        window_meta = _build_backfilled_window_meta(subrun_dir)
+        write_json_atomic(window_meta_path, window_meta)
+        window_meta_sha = sha256_file(window_meta_path)
+
+        s2_stage_dir = subrun_dir / "s2_ringdown_window"
+        summary_path = s2_stage_dir / "stage_summary.json"
+        if not summary_path.exists():
+            write_stage_summary(
+                s2_stage_dir,
+                {
+                    "stage": "s2_ringdown_window",
+                    "run": subrun_dir.name,
+                    "verdict": "PASS",
+                    "outputs": [{"path": "s2_ringdown_window/outputs/window_meta.json", "sha256": window_meta_sha}],
+                    "results": {
+                        "window_meta_sha256": window_meta_sha,
+                        "source": "backfill_window_meta",
+                    },
+                },
+            )
+
+        manifest_path = s2_stage_dir / "manifest.json"
+        if not manifest_path.exists():
+            write_manifest(
+                s2_stage_dir,
+                {
+                    "window_meta": window_meta_path,
+                },
+                extra={
+                    "provenance": {"source": "backfill_window_meta"},
+                },
+            )
+
+        backfilled_count += 1
+        if len(touched) < 100:
+            touched.append({"subrun": str(subrun_dir), "window_meta_sha256": window_meta_sha})
+
+    payload = {
+        "schema_version": "t0_sweep_backfill_window_meta_v1",
+        "run_id": base_run,
+        "scan_root": str(scan_root_abs),
+        "scanned_count": scanned_count,
+        "backfilled_count": backfilled_count,
+        "skipped_count": skipped_count,
+        "touched_subruns": touched,
+    }
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    payload["sha256"] = hashlib.sha256(canonical).hexdigest()
+    _atomic_json_dump(_backfill_window_meta_report_path(runs_root_abs, base_run), payload)
+    return payload
+
+
 def _contract_expectations(subrun_dir: Path) -> dict[str, Path]:
     return {
         "window_meta": subrun_dir / "s2_ringdown_window" / "outputs" / "window_meta.json",
@@ -1051,7 +1163,7 @@ def run_diagnose_phase(args: argparse.Namespace) -> dict[str, Any]:
         }
         exception_counts: dict[str, int] = {}
         worst: list[dict[str, Any]] = []
-        subrun_dirs = sorted([p for p in scan_root_abs.glob("**/*__t0ms*") if p.is_dir()], key=lambda p: p.as_posix())
+        subrun_dirs = _discover_subrun_dirs(scan_root_abs)
 
         for subrun_dir in subrun_dirs:
             missing_keys: list[str] = []
@@ -1312,7 +1424,7 @@ def main() -> int:
     ap.add_argument("--runs-root", default=None)
     ap.add_argument("--scan-root", default=None)
     ap.add_argument("--inventory-seeds", default=None)
-    ap.add_argument("--phase", choices=["run", "inventory", "finalize", "diagnose"], default="run")
+    ap.add_argument("--phase", choices=["run", "inventory", "finalize", "diagnose", "backfill_window_meta"], default="run")
     ap.add_argument("--max-missing-abs", type=int, default=0)
     ap.add_argument("--max-missing-frac", type=float, default=0.0)
     ap.add_argument("--atlas-path", default=None)
@@ -1341,6 +1453,10 @@ def main() -> int:
 
         if args.phase == "diagnose":
             run_diagnose_phase(args)
+            return 0
+
+        if args.phase == "backfill_window_meta":
+            run_backfill_window_meta_phase(args)
             return 0
 
         if args.phase == "run":

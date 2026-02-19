@@ -11,6 +11,54 @@ from mvp import experiment_t0_sweep_full as exp
 
 
 class TestExperimentT0SweepFullDiagnose(unittest.TestCase):
+    def test_phase_backfill_window_meta_writes_only_missing_and_is_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            run_id = "BASE"
+            scan_root = root / "runs" / run_id / "experiment" / "t0_sweep_full_seed606" / "runs"
+            missing_meta = scan_root / f"{run_id}__t0ms0008"
+            has_meta = scan_root / f"{run_id}__t0ms0010"
+
+            for subrun in (missing_meta, has_meta):
+                (subrun / "RUN_VALID").mkdir(parents=True, exist_ok=True)
+                (subrun / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
+                (subrun / "s3_ringdown_estimates" / "outputs").mkdir(parents=True, exist_ok=True)
+                (subrun / "s3_ringdown_estimates" / "outputs" / "estimates.json").write_text("{}", encoding="utf-8")
+                (subrun / "s3b_multimode_estimates" / "outputs").mkdir(parents=True, exist_ok=True)
+                (subrun / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json").write_text("{}", encoding="utf-8")
+
+            existing_meta = has_meta / "s2_ringdown_window" / "outputs" / "window_meta.json"
+            existing_meta.parent.mkdir(parents=True, exist_ok=True)
+            existing_meta.write_text('{"event_id":"existing"}', encoding="utf-8")
+
+            args = SimpleNamespace(run_id=run_id, runs_root=str(root / "runs"), scan_root=str(scan_root))
+            payload = exp.run_backfill_window_meta_phase(args)
+
+            self.assertEqual(payload["schema_version"], "t0_sweep_backfill_window_meta_v1")
+            self.assertEqual(payload["scanned_count"], 2)
+            self.assertEqual(payload["backfilled_count"], 1)
+            self.assertEqual(payload["skipped_count"], 1)
+            self.assertEqual(len(payload["touched_subruns"]), 1)
+            self.assertEqual(payload["touched_subruns"][0]["subrun"], str(missing_meta))
+
+            backfilled_meta = missing_meta / "s2_ringdown_window" / "outputs" / "window_meta.json"
+            self.assertTrue(backfilled_meta.exists())
+            self.assertEqual(json.loads(backfilled_meta.read_text(encoding="utf-8"))["t0_offset_ms"], 8)
+            self.assertEqual(json.loads(existing_meta.read_text(encoding="utf-8"))["event_id"], "existing")
+
+            report = root / "runs" / run_id / "experiment" / "derived" / "backfill_window_meta_report.json"
+            self.assertTrue(report.exists())
+            report_once = json.loads(report.read_text(encoding="utf-8"))
+
+            payload_second = exp.run_backfill_window_meta_phase(args)
+            report_twice = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload_second["backfilled_count"], 0)
+            self.assertEqual(report_twice["scanned_count"], 2)
+            self.assertEqual(report_twice["backfilled_count"], 0)
+            self.assertEqual(report_twice["skipped_count"], 2)
+            self.assertEqual(report_twice["touched_subruns"], [])
+            self.assertNotEqual(report_once["sha256"], report_twice["sha256"])
+
     def test_preflight_report_written_and_blocks_missing_contracts(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
