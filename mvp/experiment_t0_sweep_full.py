@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -590,6 +591,14 @@ def _atomic_json_dump(path: Path, payload: dict[str, Any]) -> None:
     os.replace(tmp_path, path)
 
 
+def _pair_key(seed: int, t0_ms: int) -> str:
+    return f"seed={int(seed)},t0_ms={int(t0_ms)}"
+
+
+def _inventory_path(runs_root_abs: Path, base_run: str) -> Path:
+    return runs_root_abs / base_run / "experiment" / "derived" / "sweep_inventory.json"
+
+
 def _flag_present(argv: list[str], *flags: str) -> bool:
     for arg in argv:
         for flag in flags:
@@ -653,6 +662,26 @@ def run_inventory_phase(args: argparse.Namespace) -> dict[str, Any]:
         counts_by_seed[str(seed)] = counts_by_seed.get(str(seed), 0) + 1
         counts_by_t0_ms[str(t0)] = counts_by_t0_ms.get(str(t0), 0) + 1
 
+    out_path = _inventory_path(runs_root_abs, base_run)
+    previous_payload = _read_json_if_exists(out_path) or {}
+    retry_counts = previous_payload.get("retry_counts", {})
+    if not isinstance(retry_counts, dict):
+        retry_counts = {}
+    normalized_retry_counts: dict[str, int] = {}
+    for key, value in retry_counts.items():
+        try:
+            normalized_retry_counts[str(key)] = int(value)
+        except (TypeError, ValueError):
+            continue
+
+    max_retries_per_pair = int(getattr(args, "max_retries_per_pair", 2))
+    blocked_pairs = [
+        pair for pair in missing_pairs if normalized_retry_counts.get(_pair_key(pair["seed"], pair["t0_ms"]), 0) >= max_retries_per_pair
+    ]
+    eligible_missing_pairs = [
+        pair for pair in missing_pairs if normalized_retry_counts.get(_pair_key(pair["seed"], pair["t0_ms"]), 0) < max_retries_per_pair
+    ]
+
     payload = {
         "base_run": base_run,
         "base_run_dir": str(base_run_dir),
@@ -661,6 +690,7 @@ def run_inventory_phase(args: argparse.Namespace) -> dict[str, Any]:
         "expected_pairs": expected_pairs,
         "observed_pairs": observed_pairs,
         "missing_pairs": missing_pairs,
+        "blocked_pairs": blocked_pairs,
         "counts_by_seed": counts_by_seed,
         "counts_by_t0_ms": counts_by_t0_ms,
         "observed_payload_count": len(observed_pairs),
@@ -669,6 +699,9 @@ def run_inventory_phase(args: argparse.Namespace) -> dict[str, Any]:
             "max_missing_abs": int(getattr(args, "max_missing_abs", 0)),
             "max_missing_frac": float(getattr(args, "max_missing_frac", 0.0)),
         },
+        "max_retries_per_pair": max_retries_per_pair,
+        "retry_counts": normalized_retry_counts,
+        "last_attempted_pairs": previous_payload.get("last_attempted_pairs", []),
     }
 
     missing_abs = len(missing_pairs)
@@ -682,16 +715,22 @@ def run_inventory_phase(args: argparse.Namespace) -> dict[str, Any]:
         missing_frac > payload["acceptance"]["max_missing_frac"]
     )
     if phase == "finalize":
+        has_blocked = len(blocked_pairs) > 0
         payload["status"] = "FAIL" if fail else "PASS"
+        if fail:
+            if has_blocked:
+                reason = "blocked_pairs exhausted retries"
+            else:
+                reason = "missing_pairs exceed acceptance thresholds"
+        else:
+            reason = "missing within acceptance thresholds"
         payload["decision"] = {
             "fail": bool(fail),
-            "reason": (
-                "missing exceeds acceptance thresholds"
-                if fail
-                else "missing within acceptance thresholds"
-            ),
+            "reason": reason,
             "missing_abs": missing_abs,
             "missing_frac": missing_frac,
+            "blocked_pairs": len(blocked_pairs),
+            "eligible_missing_pairs": len(eligible_missing_pairs),
         }
     else:
         payload["status"] = "IN_PROGRESS"
@@ -699,7 +738,6 @@ def run_inventory_phase(args: argparse.Namespace) -> dict[str, Any]:
     canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     payload["sha256"] = hashlib.sha256(canonical).hexdigest()
 
-    out_path = base_run_dir / "experiment" / "derived" / "sweep_inventory.json"
     _atomic_json_dump(out_path, payload)
 
     if missing_pairs:
@@ -718,6 +756,31 @@ def run_inventory_phase(args: argparse.Namespace) -> dict[str, Any]:
         raise SystemExit(2)
 
     return payload
+
+
+def _update_retry_state(
+    args: argparse.Namespace,
+    attempted_pairs: list[dict[str, int]],
+) -> None:
+    runs_root_abs = _resolve_runs_root_arg(getattr(args, "runs_root", None))
+    out_path = _inventory_path(runs_root_abs, args.run_id)
+    payload = _read_json_if_exists(out_path) or {}
+    retry_counts = payload.get("retry_counts", {})
+    if not isinstance(retry_counts, dict):
+        retry_counts = {}
+
+    for pair in attempted_pairs:
+        key = _pair_key(pair["seed"], pair["t0_ms"])
+        retry_counts[key] = int(retry_counts.get(key, 0)) + 1
+
+    payload["retry_counts"] = retry_counts
+    payload["last_attempted_pairs"] = [
+        {"seed": int(pair["seed"]), "t0_ms": int(pair["t0_ms"])} for pair in attempted_pairs
+    ]
+
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    payload["sha256"] = hashlib.sha256(canonical).hexdigest()
+    _atomic_json_dump(out_path, payload)
 
 
 def main() -> int:
@@ -740,13 +803,43 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=12345)
     ap.add_argument("--detector", choices=["auto", "H1", "L1"], default="auto")
     ap.add_argument("--stage-timeout-s", type=int, default=300)
+    ap.add_argument("--resume-missing", action="store_true")
+    ap.add_argument("--max-retries-per-pair", type=int, default=2)
+    ap.add_argument("--resume-batch-size", type=int, default=50)
     args = ap.parse_args()
 
     try:
         _validate_phase_contracts(args, raw_argv)
         if args.phase == "run":
-            run_t0_sweep_full(args)
-            run_inventory_phase(args)
+            if args.resume_missing:
+                inventory_payload = run_inventory_phase(args)
+                missing_pairs = list(inventory_payload.get("missing_pairs", []))
+                retry_counts = dict(inventory_payload.get("retry_counts", {}))
+                max_retries = int(args.max_retries_per_pair)
+                selected_pairs: list[dict[str, int]] = []
+                for pair in missing_pairs:
+                    seed = int(pair["seed"])
+                    t0_ms = int(pair["t0_ms"])
+                    key = _pair_key(seed, t0_ms)
+                    if retry_counts.get(key, 0) >= max_retries:
+                        continue
+                    if seed != int(args.seed):
+                        continue
+                    selected_pairs.append({"seed": seed, "t0_ms": t0_ms})
+                    if len(selected_pairs) >= int(args.resume_batch_size):
+                        break
+
+                if selected_pairs:
+                    _update_retry_state(args, selected_pairs)
+                for pair in selected_pairs:
+                    single_args = copy.copy(args)
+                    single_args.seed = int(pair["seed"])
+                    single_args.t0_grid_ms = str(int(pair["t0_ms"]))
+                    run_t0_sweep_full(single_args)
+                run_inventory_phase(args)
+            else:
+                run_t0_sweep_full(args)
+                run_inventory_phase(args)
         elif args.phase == "inventory":
             run_inventory_phase(args)
         elif args.phase == "finalize":

@@ -57,7 +57,9 @@ class ExperimentT0SweepFullInventoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)
             scan_root = tmp / "runs" / "BASE_RUN" / "experiment"
-            self._mk_payload(scan_root, 101, 0)
+            out = scan_root / "t0_sweep_full_seed101" / "segment__t0ms0000" / "s3b_multimode_estimates" / "outputs"
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "multimode_estimates.json").write_text("{}", encoding="utf-8")
 
             args = self._args(tmp, "101,202", "0,2")
             args.phase = "run"
@@ -70,7 +72,9 @@ class ExperimentT0SweepFullInventoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)
             scan_root = tmp / "runs" / "BASE_RUN" / "experiment"
-            self._mk_payload(scan_root, 101, 0)
+            out = scan_root / "t0_sweep_full_seed101" / "segment__t0ms0000" / "s3b_multimode_estimates" / "outputs"
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "multimode_estimates.json").write_text("{}", encoding="utf-8")
 
             args = self._args(tmp, "101,202", "0,2")
             args.phase = "inventory"
@@ -84,7 +88,9 @@ class ExperimentT0SweepFullInventoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)
             scan_root = tmp / "runs" / "BASE_RUN" / "experiment"
-            self._mk_payload(scan_root, 101, 0)
+            out = scan_root / "t0_sweep_full_seed101" / "segment__t0ms0000" / "s3b_multimode_estimates" / "outputs"
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "multimode_estimates.json").write_text("{}", encoding="utf-8")
 
             args_fail = self._args(tmp, "101,202", "0,2")
             args_fail.phase = "finalize"
@@ -196,6 +202,88 @@ class ExperimentT0SweepFullMainContractTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             payload = json.loads((tmp / "runs" / "BASE_RUN" / "experiment" / "derived" / "sweep_inventory.json").read_text(encoding="utf-8"))
             self.assertEqual(payload["acceptance"], {"max_missing_abs": 14, "max_missing_frac": 0.4})
+
+    def test_resume_missing_attempts_only_missing_pairs_for_seed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            runs_root = tmp / "runs"
+            scan_root = runs_root / "BASE_RUN" / "experiment"
+
+            out = scan_root / "t0_sweep_full_seed101" / "segment__t0ms0000" / "s3b_multimode_estimates" / "outputs"
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "multimode_estimates.json").write_text("{}", encoding="utf-8")
+
+            invoked_t0: list[str] = []
+
+            def fake_run_t0(args):
+                invoked_t0.append(str(args.t0_grid_ms))
+                out = (
+                    scan_root
+                    / f"t0_sweep_full_seed{int(args.seed)}"
+                    / f"segment__t0ms{int(args.t0_grid_ms):04d}"
+                    / "s3b_multimode_estimates"
+                    / "outputs"
+                )
+                out.mkdir(parents=True, exist_ok=True)
+                (out / "multimode_estimates.json").write_text("{}", encoding="utf-8")
+
+            argv = [
+                "prog", "--phase", "run", "--run-id", "BASE_RUN",
+                "--runs-root", str(runs_root), "--scan-root", str(scan_root),
+                "--inventory-seeds", "101", "--t0-grid-ms", "0,2,4",
+                "--seed", "101", "--atlas-path", "atlas.json",
+                "--resume-missing", "--resume-batch-size", "2",
+            ]
+
+            with mock.patch("sys.argv", argv):
+                with mock.patch("mvp.experiment_t0_sweep_full.run_t0_sweep_full", side_effect=fake_run_t0):
+                    rc = exp.main()
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(invoked_t0, ["2", "4"])
+
+            payload = json.loads((runs_root / "BASE_RUN" / "experiment" / "derived" / "sweep_inventory.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["missing_pairs"], [])
+            self.assertEqual(payload["last_attempted_pairs"], [{"seed": 101, "t0_ms": 2}, {"seed": 101, "t0_ms": 4}])
+            self.assertEqual(payload["retry_counts"]["seed=101,t0_ms=2"], 1)
+            self.assertEqual(payload["retry_counts"]["seed=101,t0_ms=4"], 1)
+
+    def test_finalize_reports_blocked_pairs_when_retries_exhausted(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            runs_root = tmp / "runs"
+            scan_root = runs_root / "BASE_RUN" / "experiment"
+
+            argv_run = [
+                "prog", "--phase", "run", "--run-id", "BASE_RUN",
+                "--runs-root", str(runs_root), "--scan-root", str(scan_root),
+                "--inventory-seeds", "101", "--t0-grid-ms", "0,2",
+                "--seed", "101", "--atlas-path", "atlas.json",
+                "--resume-missing", "--max-retries-per-pair", "0",
+            ]
+
+            with mock.patch("sys.argv", argv_run):
+                with mock.patch("mvp.experiment_t0_sweep_full.run_t0_sweep_full") as run_mock:
+                    rc = exp.main()
+            self.assertEqual(rc, 0)
+            run_mock.assert_not_called()
+
+            argv_finalize = [
+                "prog", "--phase", "finalize", "--run-id", "BASE_RUN",
+                "--runs-root", str(runs_root), "--scan-root", str(scan_root),
+                "--inventory-seeds", "101", "--t0-grid-ms", "0,2",
+                "--max-missing-abs", "0", "--max-missing-frac", "0.0",
+                "--max-retries-per-pair", "0",
+            ]
+
+            with mock.patch("sys.argv", argv_finalize):
+                with self.assertRaises(SystemExit) as ctx:
+                    exp.main()
+            self.assertEqual(ctx.exception.code, 2)
+
+            payload = json.loads((runs_root / "BASE_RUN" / "experiment" / "derived" / "sweep_inventory.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["blocked_pairs"]), 2)
+            self.assertIn("blocked_pairs", payload["decision"]["reason"])
 
 
 if __name__ == "__main__":
