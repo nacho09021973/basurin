@@ -12,8 +12,10 @@ Outputs (runs/<run>/s1_fetch_strain/outputs/):
 from __future__ import annotations
 
 import argparse
+import glob
 import hashlib
 import json
+import os
 import signal
 import shutil
 import sys
@@ -31,7 +33,7 @@ for _cand in [_here.parents[0], _here.parents[1]]:
             sys.path.insert(0, str(_cand))
         break
 
-from mvp.contracts import init_stage, finalize, abort
+from mvp.contracts import init_stage, finalize, abort, check_inputs
 from basurin_io import resolve_out_root, write_json_atomic, sha256_file, utc_now_iso
 
 STAGE = "s1_fetch_strain"
@@ -174,20 +176,106 @@ def _fetch_gps_center(event_id: str) -> float:
 
 
 def _parse_local_hdf5_args(items: list[str]) -> dict[str, Path]:
+    return _resolve_local_hdf5_mappings(items, event_id=None)
+
+
+def _resolve_local_hdf5_mappings(items: list[str], event_id: str | None) -> dict[str, Path]:
     local_by_det: dict[str, Path] = {}
     for item in items:
         det_raw, sep, path_raw = item.partition("=")
         det = det_raw.strip().upper()
-        path = Path(path_raw.strip())
+        path_expr = path_raw.strip()
         if not sep:
             raise ValueError(f"Invalid --local-hdf5 entry '{item}'. Expected DET=PATH")
         if det not in {"H1", "L1"}:
             raise ValueError(f"Invalid detector in --local-hdf5: {det}. Allowed: H1,L1")
         if det in local_by_det:
             raise ValueError(f"Duplicate --local-hdf5 detector: {det}")
-        if not path.exists() or not path.is_file():
-            raise ValueError(f"--local-hdf5 path for {det} not found or not a file: {path}")
-        local_by_det[det] = path
+        local_by_det[det] = _resolve_hdf5_candidate(path_expr, det, event_id=event_id)
+    return local_by_det
+
+
+def _resolve_hdf5_candidate(path_expr: str, det: str, event_id: str | None) -> Path:
+    path = Path(path_expr)
+    if path.exists() and path.is_file():
+        return path.resolve()
+
+    candidates: list[Path] = []
+    if path.exists() and path.is_dir():
+        candidates = _scan_hdf5_dir(path, det, event_id)
+    else:
+        candidates = [Path(p) for p in glob.glob(path_expr)]
+        candidates = [p for p in candidates if p.is_file()]
+
+    if len(candidates) == 1:
+        return candidates[0].resolve()
+
+    hint_event = event_id or "GW150914"
+    if not candidates:
+        raise ValueError(
+            f"No HDF5 found for {det} from '{path_expr}'. "
+            f"Try: find . -iname '*{hint_event}*{det}*.h5' -o -iname '*{hint_event}*{det}*.hdf5'"
+        )
+
+    short = "\n".join(f"  - {str(p)}" for p in sorted(candidates)[:10])
+    raise ValueError(
+        f"Ambiguous HDF5 for {det} from '{path_expr}': {len(candidates)} candidates. "
+        f"Please disambiguate with an exact path.\nCandidates (max 10):\n{short}"
+    )
+
+
+def _scan_hdf5_dir(base_dir: Path, det: str, event_id: str | None) -> list[Path]:
+    all_candidates = sorted(
+        [*base_dir.glob("*.h5"), *base_dir.glob("*.hdf5")],
+        key=lambda p: p.name,
+    )
+    if not all_candidates:
+        return []
+
+    det_tag = f"-{det}_"
+    event_upper = (event_id or "").upper()
+    scored: list[tuple[int, Path]] = []
+    for candidate in all_candidates:
+        name_upper = candidate.name.upper()
+        score = 0
+        if event_upper and event_upper in name_upper:
+            score += 10
+        if det_tag in candidate.name:
+            score += 5
+        if "GWOSC" in name_upper:
+            score += 1
+        if score > 0:
+            scored.append((score, candidate))
+
+    if not scored:
+        return all_candidates
+
+    best = max(score for score, _ in scored)
+    return sorted([path for score, path in scored if score == best], key=lambda p: p.name)
+
+
+def _resolve_local_cache_hdf5(
+    run_id: str,
+    event_id: str,
+    detectors: list[str],
+) -> dict[str, Path]:
+    runs_root = resolve_out_root("runs")
+    local_by_det: dict[str, Path] = {}
+    for det in detectors:
+        in_run_cache = runs_root / run_id / "external_inputs" / "gwosc" / event_id / det
+        if in_run_cache.exists():
+            try:
+                local_by_det[det] = _resolve_hdf5_candidate(str(in_run_cache), det, event_id=event_id)
+                continue
+            except ValueError:
+                pass
+
+        env_cache = os.environ.get("BASURIN_GWOSC_CACHE", "").strip()
+        if env_cache:
+            env_dir = Path(env_cache) / event_id / det
+            if env_dir.exists():
+                local_by_det[det] = _resolve_hdf5_candidate(str(env_dir), det, event_id=event_id)
+                continue
     return local_by_det
 
 
@@ -436,11 +524,18 @@ def main() -> int:
         default=False,
         help="Allow cross-run reuse from synthetic provenance when using --reuse-if-present.",
     )
+    ap.add_argument(
+        "--offline",
+        action="store_true",
+        default=False,
+        help="Disable GWOSC network fetches. Requires local --local-hdf5 or local cache.",
+    )
     args = ap.parse_args()
 
     detectors = [d.strip().upper() for d in (args.detectors or "").split(",") if d.strip()]
 
-    local_by_det = _parse_local_hdf5_args(args.local_hdf5)
+    explicit_local_by_det = _resolve_local_hdf5_mappings(args.local_hdf5, event_id=args.event_id)
+    local_by_det = dict(explicit_local_by_det)
     if local_by_det and not detectors:
         detectors = sorted(local_by_det.keys())
     if not detectors:
@@ -452,18 +547,16 @@ def main() -> int:
     if local_by_det and args.synthetic:
         print("ERROR: --local-hdf5 cannot be used with --synthetic", file=sys.stderr)
         raise SystemExit(2)
-    if local_by_det and sorted(local_by_det.keys()) != sorted(detectors):
-        print(
-            "ERROR: --detectors must match exactly detectors provided by --local-hdf5",
-            file=sys.stderr,
-        )
-        raise SystemExit(2)
+    if not local_by_det and not args.synthetic:
+        local_by_det = _resolve_local_cache_hdf5(args.run, args.event_id, detectors)
+    local_mode = bool(local_by_det)
 
-    local_input_sha = {det: sha256_file(path) for det, path in sorted(local_by_det.items())} if local_by_det else None
+    local_input_sha = {det: sha256_file(path) for det, path in sorted(local_by_det.items())} if local_mode else None
 
     ctx = init_stage(args.run, STAGE, params={
         "event_id": args.event_id, "detectors": detectors,
         "duration_s": args.duration_s, "synthetic": args.synthetic,
+        "offline": args.offline,
         "local_hdf5": {det: str(path) for det, path in sorted(local_by_det.items())},
     })
 
@@ -485,12 +578,17 @@ def main() -> int:
             print(f"[s1_fetch_strain] reuse check failed ({exc}), proceeding with fetch", flush=True)
 
     try:
-        if local_by_det:
+        if local_mode:
             gps_center = None
             gps_start = None
         elif args.synthetic:
             gps_center = 1126259462.4204
         else:
+            if args.offline:
+                raise RuntimeError(
+                    "--offline active and no local HDF5 found for all detectors. "
+                    "Provide --local-hdf5 DET=PATH or populate local cache."
+                )
             gps_center = _fetch_gps_center(args.event_id)
         if gps_center is not None:
             gps_start = gps_center - args.duration_s / 2.0
@@ -509,11 +607,11 @@ def main() -> int:
                 print(f"[s1_fetch_strain] Generating synthetic strain for {det} ...", flush=True)
                 strain, sr, library_version = _generate_synthetic_strain(det, gps_start, args.duration_s)
                 print(f"[s1_fetch_strain] Synthetic OK: {det}, n={strain.size}, fs={sr}", flush=True)
-            elif local_by_det:
+            elif det in local_by_det:
                 inputs_dir = ctx.stage_dir / "inputs"
                 inputs_dir.mkdir(parents=True, exist_ok=True)
                 src = local_by_det[det]
-                dst = inputs_dir / src.name
+                dst = inputs_dir / f"{det}.h5"
                 shutil.copy2(src, dst)
                 strain, sr, gps_start_local, library_version = _load_local_hdf5(dst)
                 if gps_start is None and gps_start_local is not None:
@@ -521,6 +619,10 @@ def main() -> int:
                     gps_center = gps_start + args.duration_s / 2.0
                 print(f"[s1_fetch_strain] Local HDF5 OK: {det}, n={strain.size}, fs={sr}", flush=True)
             else:
+                if args.offline:
+                    raise RuntimeError(
+                        f"--offline active and detector {det} has no local HDF5 source."
+                    )
                 strain, sr, library_version = _fetch_via_gwpy(
                     det,
                     gps_start,
@@ -551,21 +653,31 @@ def main() -> int:
 
         provenance = {
             "event_id": args.event_id,
-            "source": "local_hdf5" if local_by_det else ("synthetic" if args.synthetic else "GWOSC"),
+            "source": "local_hdf5" if local_mode else ("synthetic" if args.synthetic else "GWOSC"),
             "detectors": detectors, "gps_center": gps_center,
             "gps_start": gps_start, "duration_s": args.duration_s,
             "sample_rate_hz": sample_rate_hz, "library_version": library_version,
             "sha256_per_detector": sha_by_det, "timestamp": utc_now_iso(),
         }
-        if local_by_det:
+        if local_mode:
             provenance["local_inputs"] = {
-                det: f"inputs/{local_by_det[det].name}" for det in detectors
+                det: f"inputs/{det}.h5" for det in detectors if det in local_by_det
             }
             provenance["local_input_sha256"] = {
-                det: sha256_file(ctx.stage_dir / provenance["local_inputs"][det]) for det in detectors
+                det: sha256_file(ctx.stage_dir / provenance["local_inputs"][det]) for det in provenance["local_inputs"]
             }
         prov_path = ctx.outputs_dir / "provenance.json"
         write_json_atomic(prov_path, provenance)
+
+        if local_mode:
+            check_inputs(
+                ctx,
+                {
+                    f"local_hdf5_{det}": ctx.stage_dir / f"inputs/{det}.h5"
+                    for det in detectors
+                    if (ctx.stage_dir / f"inputs/{det}.h5").exists()
+                },
+            )
 
         finalize(ctx, artifacts={"strain_npz": npz_path, "provenance": prov_path},
                  results={"detectors": detectors, "sample_rate_hz": sample_rate_hz})
