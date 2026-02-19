@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import datetime
 import hashlib
 import json
 import math
@@ -999,51 +1000,82 @@ def run_diagnose_phase(args: argparse.Namespace) -> dict[str, Any]:
     base_run = args.run_id
     base_run_dir = runs_root_abs / base_run
     scan_root_abs = Path(args.scan_root).expanduser().resolve() if getattr(args, "scan_root", None) else (base_run_dir / "experiment").resolve()
+    generated_at_utc = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
 
-    stage_missing_counts: dict[str, int] = {
-        "window_meta": 0,
-        "estimates": 0,
-        "multimode_estimates": 0,
-    }
-    exception_counts: dict[str, int] = {}
-    worst: list[dict[str, Any]] = []
-    subrun_dirs = sorted([p for p in scan_root_abs.glob("**/*__t0ms*") if p.is_dir()], key=lambda p: p.as_posix())
+    try:
+        counts_missing: dict[str, int] = {
+            "window_meta": 0,
+            "s3_estimates": 0,
+            "s3b_payload": 0,
+            "RUN_VALID": 0,
+        }
+        exception_counts: dict[str, int] = {}
+        worst: list[dict[str, Any]] = []
+        subrun_dirs = sorted([p for p in scan_root_abs.glob("**/*__t0ms*") if p.is_dir()], key=lambda p: p.as_posix())
 
-    for subrun_dir in subrun_dirs:
-        derived_trace = subrun_dir / "derived" / "subrun_trace.json"
-        trace = _read_json_if_exists(derived_trace)
-        if trace:
-            missing = trace.get("contract", {}).get("missing", [])
-            for item in missing:
-                key = item.get("key")
-                if key in stage_missing_counts:
-                    stage_missing_counts[key] += 1
-            exc = trace.get("exception") or {}
-            msg = str(exc.get("message", "")).strip()
-            if msg:
-                exception_counts[msg] = exception_counts.get(msg, 0) + 1
-        else:
-            missing = []
-            for key, path in _contract_expectations(subrun_dir).items():
+        for subrun_dir in subrun_dirs:
+            missing_keys: list[str] = []
+            checks = {
+                "window_meta": subrun_dir / "s2_ringdown_window" / "outputs" / "window_meta.json",
+                "s3_estimates": subrun_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json",
+                "s3b_payload": subrun_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json",
+                "RUN_VALID": subrun_dir / "RUN_VALID" / "verdict.json",
+            }
+            for key, path in checks.items():
                 if not path.exists():
-                    missing.append({"key": key, "path": str(path)})
-                    stage_missing_counts[key] += 1
-        if missing and len(worst) < 20:
-            worst.append({"subrun_dir": str(subrun_dir), "missing": missing, "trace_path": str(derived_trace)})
+                    counts_missing[key] += 1
+                    missing_keys.append(key)
 
-    top_errors = sorted(
-        [{"message": msg, "count": count} for msg, count in exception_counts.items()],
-        key=lambda x: (-int(x["count"]), x["message"]),
-    )[:10]
-    payload = {
-        "run_id": base_run,
-        "runs_root_abs": str(runs_root_abs),
-        "scan_root_abs": str(scan_root_abs),
-        "stage_missing_counts": stage_missing_counts,
-        "top_exceptions": top_errors,
-        "worst_subruns": worst,
-        "subrun_count": len(subrun_dirs),
-    }
+            derived_trace = subrun_dir / "derived" / "subrun_trace.json"
+            trace = _read_json_if_exists(derived_trace)
+            error_msg = None
+            if trace:
+                exc = trace.get("exception") or {}
+                msg = str(exc.get("message", "")).strip()
+                if msg:
+                    exception_counts[msg] = exception_counts.get(msg, 0) + 1
+                    error_msg = msg
+
+            if (missing_keys or error_msg) and len(worst) < 20:
+                worst.append(
+                    {
+                        "path": str(subrun_dir),
+                        "missing": sorted(missing_keys),
+                        "error": error_msg,
+                    }
+                )
+
+        top_errors = sorted(
+            [{"message": msg, "count": count} for msg, count in exception_counts.items()],
+            key=lambda x: (-int(x["count"]), x["message"]),
+        )[:10]
+        worst_subruns = sorted(worst, key=lambda item: str(item.get("path", "")))
+        payload = {
+            "schema_version": "t0_sweep_diagnose_v1",
+            "run_id": base_run,
+            "scan_root": str(scan_root_abs),
+            "generated_at_utc": generated_at_utc,
+            "n_subruns_scanned": len(subrun_dirs),
+            "counts_missing": counts_missing,
+            "top_errors": top_errors,
+            "worst_subruns": worst_subruns,
+        }
+    except Exception as exc:
+        payload = {
+            "schema_version": "t0_sweep_diagnose_v1",
+            "run_id": base_run,
+            "scan_root": str(scan_root_abs),
+            "generated_at_utc": generated_at_utc,
+            "n_subruns_scanned": 0,
+            "counts_missing": {},
+            "top_errors": [],
+            "worst_subruns": [],
+            "exception": {
+                "type": type(exc).__name__,
+                "message": str(exc),
+            },
+        }
+
     _atomic_json_dump(_diagnose_path(runs_root_abs, base_run), payload)
     return payload
 
