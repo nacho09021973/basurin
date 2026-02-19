@@ -102,6 +102,7 @@ class TestExperimentT0SweepFullIntegration(unittest.TestCase):
             s3_script="mvp/s3_ringdown_estimates.py",
             s3b_script="mvp/s3b_multimode_estimates.py",
             s4c_script="mvp/s4c_kerr_consistency.py",
+            subrun_runs_root="runs/rid",
             subrun_id="rid__t0ms0008",
             event_id="GW150914",
             dt_start_s=0.003,

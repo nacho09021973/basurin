@@ -53,7 +53,9 @@ def _resolve_t0_gps(event_id: str, window_catalog_path: Path) -> tuple[float, st
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=f"MVP {STAGE}: crop ringdown window")
-    ap.add_argument("--run", required=True)
+    ap.add_argument("--run", default=None)
+    ap.add_argument("--run-id", default=None)
+    ap.add_argument("--runs-root", default=None, help="Override BASURIN_RUNS_ROOT for this invocation")
     ap.add_argument("--event-id", default="GW150914")
     ap.add_argument("--dt-start-s", type=float, default=0.003)
     ap.add_argument("--duration-s", type=float, default=0.06)
@@ -68,7 +70,13 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    ctx = init_stage(args.run, STAGE, params={
+    run_id = args.run_id or args.run
+    if not run_id:
+        ap.error("one of --run or --run-id is required")
+    if args.runs_root:
+        os.environ["BASURIN_RUNS_ROOT"] = str(Path(args.runs_root).expanduser().resolve())
+
+    ctx = init_stage(run_id, STAGE, params={
         "event_id": args.event_id, "dt_start_s": args.dt_start_s,
         "duration_s": args.duration_s, "window_catalog": args.window_catalog,
     })
