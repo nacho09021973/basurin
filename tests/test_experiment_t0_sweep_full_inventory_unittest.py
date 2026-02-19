@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -108,6 +109,93 @@ class ExperimentT0SweepFullInventoryTests(unittest.TestCase):
 
             on_disk = json.loads(out.read_text(encoding="utf-8"))
             self.assertEqual(on_disk["status"], "PASS")
+
+
+class ExperimentT0SweepFullMainContractTests(unittest.TestCase):
+    def _base_argv(self) -> list[str]:
+        return [
+            "prog",
+            "--run-id",
+            "BASE_RUN",
+            "--runs-root",
+            "/tmp/runs",
+            "--scan-root",
+            "/tmp/runs/BASE_RUN/experiment",
+            "--inventory-seeds",
+            "101,202",
+            "--t0-grid-ms",
+            "0,2",
+        ]
+
+    def test_inventory_does_not_require_atlas(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            scan_root = tmp / "runs" / "BASE_RUN" / "experiment"
+            out = scan_root / "t0_sweep_full_seed101" / "segment__t0ms0000" / "s3b_multimode_estimates" / "outputs"
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "multimode_estimates.json").write_text("{}", encoding="utf-8")
+
+            argv = [
+                "prog", "--phase", "inventory", "--run-id", "BASE_RUN",
+                "--runs-root", str(tmp / "runs"), "--scan-root", str(scan_root),
+                "--inventory-seeds", "101", "--t0-grid-ms", "0"
+            ]
+            with mock.patch("sys.argv", argv):
+                rc = exp.main()
+            self.assertEqual(rc, 0)
+            self.assertTrue((tmp / "runs" / "BASE_RUN" / "experiment" / "derived" / "sweep_inventory.json").exists())
+
+    def test_finalize_does_not_require_atlas(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            scan_root = tmp / "runs" / "BASE_RUN" / "experiment"
+            out = scan_root / "t0_sweep_full_seed101" / "segment__t0ms0000" / "s3b_multimode_estimates" / "outputs"
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "multimode_estimates.json").write_text("{}", encoding="utf-8")
+
+            argv_fail = [
+                "prog", "--phase", "finalize", "--run-id", "BASE_RUN",
+                "--runs-root", str(tmp / "runs"), "--scan-root", str(scan_root),
+                "--inventory-seeds", "101,202", "--t0-grid-ms", "0,2",
+                "--max-missing-abs", "0", "--max-missing-frac", "0.0"
+            ]
+            with mock.patch("sys.argv", argv_fail):
+                with self.assertRaises(SystemExit) as ctx:
+                    exp.main()
+            self.assertEqual(ctx.exception.code, 2)
+
+            argv_pass = [
+                "prog", "--phase", "finalize", "--run-id", "BASE_RUN",
+                "--runs-root", str(tmp / "runs"), "--scan-root", str(scan_root),
+                "--inventory-seeds", "101,202", "--t0-grid-ms", "0,2",
+                "--max-missing-abs", "3", "--max-missing-frac", "1.0"
+            ]
+            with mock.patch("sys.argv", argv_pass):
+                rc = exp.main()
+            self.assertEqual(rc, 0)
+
+    def test_inventory_requires_explicit_seeds_and_grid(self) -> None:
+        argv = ["prog", "--phase", "inventory", "--run-id", "BASE_RUN"]
+        with mock.patch("sys.argv", argv):
+            with self.assertRaises(SystemExit) as ctx:
+                exp.main()
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_acceptance_written_from_cli(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            scan_root = tmp / "runs" / "BASE_RUN" / "experiment"
+            argv = [
+                "prog", "--phase", "inventory", "--run-id", "BASE_RUN",
+                "--runs-root", str(tmp / "runs"), "--scan-root", str(scan_root),
+                "--inventory-seeds", "101,202", "--t0-grid-ms", "0,2",
+                "--max-missing-abs", "14", "--max-missing-frac", "0.4"
+            ]
+            with mock.patch("sys.argv", argv):
+                rc = exp.main()
+            self.assertEqual(rc, 0)
+            payload = json.loads((tmp / "runs" / "BASE_RUN" / "experiment" / "derived" / "sweep_inventory.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["acceptance"], {"max_missing_abs": 14, "max_missing_frac": 0.4})
 
 
 if __name__ == "__main__":

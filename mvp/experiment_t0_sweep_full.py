@@ -590,6 +590,37 @@ def _atomic_json_dump(path: Path, payload: dict[str, Any]) -> None:
     os.replace(tmp_path, path)
 
 
+def _flag_present(argv: list[str], *flags: str) -> bool:
+    for arg in argv:
+        for flag in flags:
+            if arg == flag or arg.startswith(f"{flag}="):
+                return True
+    return False
+
+
+def _validate_phase_contracts(args: argparse.Namespace, argv: list[str]) -> None:
+    if args.phase == "run" and not args.atlas_path:
+        print("phase=run requiere --atlas-path", file=sys.stderr)
+        raise SystemExit(2)
+
+    if args.phase not in {"inventory", "finalize"}:
+        return
+
+    has_explicit_seeds = _flag_present(argv, "--inventory-seeds")
+    has_explicit_grid = _flag_present(argv, "--t0-grid-ms") or (
+        _flag_present(argv, "--t0-start-ms")
+        and _flag_present(argv, "--t0-stop-ms")
+        and _flag_present(argv, "--t0-step-ms")
+    )
+    if not (has_explicit_seeds and has_explicit_grid):
+        print(
+            "inventory/finalize requiere definir expected_pairs: "
+            "pasa --inventory-seeds y --t0-grid-ms (o start/stop/step) para evitar defaults",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+
 def run_inventory_phase(args: argparse.Namespace) -> dict[str, Any]:
     runs_root_abs = _resolve_runs_root_arg(getattr(args, "runs_root", None))
     base_run = args.run_id
@@ -652,6 +683,16 @@ def run_inventory_phase(args: argparse.Namespace) -> dict[str, Any]:
     )
     if phase == "finalize":
         payload["status"] = "FAIL" if fail else "PASS"
+        payload["decision"] = {
+            "fail": bool(fail),
+            "reason": (
+                "missing exceeds acceptance thresholds"
+                if fail
+                else "missing within acceptance thresholds"
+            ),
+            "missing_abs": missing_abs,
+            "missing_frac": missing_frac,
+        }
     else:
         payload["status"] = "IN_PROGRESS"
 
@@ -680,6 +721,7 @@ def run_inventory_phase(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main() -> int:
+    raw_argv = sys.argv[1:]
     ap = argparse.ArgumentParser(description="Experiment: full deterministic t0 sweep with subruns")
     ap.add_argument("--run-id", "--run", dest="run_id", required=True)
     ap.add_argument("--base-runs-root", type=Path, default=Path.cwd() / "runs")
@@ -689,7 +731,7 @@ def main() -> int:
     ap.add_argument("--phase", choices=["run", "inventory", "finalize"], default="run")
     ap.add_argument("--max-missing-abs", type=int, default=0)
     ap.add_argument("--max-missing-frac", type=float, default=0.0)
-    ap.add_argument("--atlas-path", required=True)
+    ap.add_argument("--atlas-path", default=None)
     ap.add_argument("--t0-grid-ms", default=None)
     ap.add_argument("--t0-start-ms", type=int, default=0)
     ap.add_argument("--t0-stop-ms", type=int, default=30)
@@ -701,6 +743,7 @@ def main() -> int:
     args = ap.parse_args()
 
     try:
+        _validate_phase_contracts(args, raw_argv)
         if args.phase == "run":
             run_t0_sweep_full(args)
             run_inventory_phase(args)
