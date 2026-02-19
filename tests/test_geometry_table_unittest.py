@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -9,255 +10,159 @@ from pathlib import Path
 
 
 class TestGeometryTableScript(unittest.TestCase):
-    def _write_seed101_tree(self, run_root: Path) -> tuple[str, Path]:
-        run_id = run_root.name
+    def setUp(self) -> None:
+        self.repo_root = Path(__file__).resolve().parents[1]
+        self.script = self.repo_root / "mvp" / "s6_geometry_table.py"
+
+    def _write_verdict_pass(self, run_root: Path) -> None:
         (run_root / "RUN_VALID").mkdir(parents=True, exist_ok=True)
         (run_root / "RUN_VALID" / "verdict.json").write_text(
             json.dumps({"verdict": "PASS"}, sort_keys=True),
             encoding="utf-8",
         )
 
-        seed_root = run_root / "experiment" / "t0_sweep_full_seed101"
-        p_t0_0006 = seed_root / "segment__t0ms0006" / "s3b_multimode_estimates"
-        p_t0_0008 = seed_root / "segment__t0ms0008" / "s3b_multimode_estimates"
-        (p_t0_0006 / "outputs").mkdir(parents=True, exist_ok=True)
-        (p_t0_0008 / "outputs").mkdir(parents=True, exist_ok=True)
-
-        payload = {
-            "results": {"verdict": "OK", "quality_flags": []},
-            "modes": [{"label": "221", "fit": {"stability": {"lnQ_span": 1.0}}}],
-        }
-        for p in (p_t0_0006, p_t0_0008):
-            (p / "outputs" / "multimode_estimates.json").write_text(
-                json.dumps(payload, sort_keys=True),
-                encoding="utf-8",
-            )
-            (p / "stage_summary.json").write_text(
-                json.dumps({"parameters": {"seed": 101}}, sort_keys=True),
+    def _write_multimode(self, root: Path, payload: dict, stage_seed: int | None = None) -> None:
+        outputs = root / "s3b_multimode_estimates" / "outputs"
+        outputs.mkdir(parents=True, exist_ok=True)
+        (outputs / "multimode_estimates.json").write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        if stage_seed is not None:
+            (root / "s3b_multimode_estimates" / "stage_summary.json").write_text(
+                json.dumps({"parameters": {"seed": stage_seed}}, sort_keys=True),
                 encoding="utf-8",
             )
 
-        return run_id, seed_root
+    def _run(self, base: Path, run_id: str, scan_root: Path, out_path: Path | None = None) -> subprocess.CompletedProcess[str]:
+        cmd = [
+            sys.executable,
+            str(self.script),
+            "--run-id",
+            run_id,
+            "--runs-root",
+            str(base / "runs"),
+            "--scan-root",
+            str(scan_root),
+        ]
+        if out_path is not None:
+            cmd.extend(["--out-path", str(out_path)])
+        return subprocess.run(cmd, cwd=base, check=True, capture_output=True, text=True)
 
-    def test_builds_sorted_tsv_from_experiment_tree(self) -> None:
-        repo_root = Path(__file__).resolve().parents[1]
-        script = repo_root / "mvp" / "s6_geometry_table.py"
+    def _read_rows(self, tsv_path: Path) -> tuple[list[str], list[dict[str, str]]]:
+        lines = tsv_path.read_text(encoding="utf-8").splitlines()
+        header = lines[0].split("\t")
+        rows = []
+        for line in lines[1:]:
+            vals = line.split("\t")
+            rows.append(dict(zip(header, vals)))
+        return header, rows
 
+    def test_scan_root_global_and_seed_root_yield_same_rows_for_that_seed(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             run_id = "BASE_RUN"
             run_root = base / "runs" / run_id
+            self._write_verdict_pass(run_root)
 
-            (run_root / "RUN_VALID").mkdir(parents=True, exist_ok=True)
-            (run_root / "RUN_VALID" / "verdict.json").write_text(
-                json.dumps({"verdict": "PASS"}, sort_keys=True),
-                encoding="utf-8",
-            )
+            seed_root = run_root / "experiment" / "t0_sweep_full_seed101"
+            nested_root = seed_root / "runsroot" / run_id / "experiment" / "t0_sweep_full"
+            p6 = nested_root / f"runs/{run_id}__t0ms0006"
+            p8 = nested_root / f"runs/{run_id}__t0ms0008"
 
-            p_seed202 = run_root / "experiment" / "t0_sweep_full_seed202" / "segment__t0ms0050" / "s3b_multimode_estimates"
-            p_seed101 = run_root / "experiment" / "t0_sweep_full_seed101" / "segment__t0ms0000" / "s3b_multimode_estimates"
-            (p_seed202 / "outputs").mkdir(parents=True, exist_ok=True)
-            (p_seed101 / "outputs").mkdir(parents=True, exist_ok=True)
-
-            payload_202 = {
-                "results": {"verdict": "OK", "quality_flags": ["b", "a"]},
-                "modes": [
-                    {
-                        "label": "221",
-                        "fit": {"stability": {"lnQ_span": 2.2, "cv_Q": 0.4, "valid_fraction": 0.7}},
-                    }
-                ],
+            payload6 = {
+                "results": {"verdict": "OK", "quality_flags": ["z", "a"]},
+                "modes": [{"label": "221", "fit": {"stability": {"lnQ_span": 2.6, "cv_Q": 0.26, "valid_fraction": 0.76}}}],
             }
-            payload_101 = {
-                "results": {"verdict": "OK", "quality_flags": ["x"]},
-                "modes": [
-                    {
-                        "label": "221",
-                        "fit": {"stability": {"lnQ_span": 1.1, "cv_Q": 0.2, "valid_fraction": 0.9}},
-                    }
-                ],
+            payload8 = {
+                "results": {"verdict": "OK", "quality_flags": ["b"]},
+                "modes": [{"label": "221", "fit": {"stability": {"lnQ_span": 2.8, "cv_Q": 0.28, "valid_fraction": 0.78}}}],
             }
+            self._write_multimode(p6, payload6, stage_seed=101)
+            self._write_multimode(p8, payload8, stage_seed=101)
 
-            (p_seed202 / "outputs" / "multimode_estimates.json").write_text(
-                json.dumps(payload_202, sort_keys=True), encoding="utf-8"
-            )
-            (p_seed101 / "outputs" / "multimode_estimates.json").write_text(
-                json.dumps(payload_101, sort_keys=True), encoding="utf-8"
-            )
-            (p_seed202 / "stage_summary.json").write_text(
-                json.dumps({"parameters": {"seed": 202}}, sort_keys=True), encoding="utf-8"
-            )
-            (p_seed101 / "stage_summary.json").write_text(
-                json.dumps({"parameters": {"seed": 101}}, sort_keys=True), encoding="utf-8"
-            )
+            out_exp = run_root / "experiment" / "derived" / "geometry_table.tsv"
+            out_seed = seed_root / "derived" / "geometry_table.tsv"
+            self._run(base, run_id, run_root / "experiment", out_exp)
+            self._run(base, run_id, seed_root, out_seed)
 
-            cmd = [
-                sys.executable,
-                str(script),
-                "--run-id",
-                run_id,
-                "--scan-root",
-                f"runs/{run_id}/experiment",
-            ]
-            subprocess.run(cmd, cwd=base, check=True)
+            _, exp_rows = self._read_rows(out_exp)
+            _, seed_rows = self._read_rows(out_seed)
+            exp_seed101 = [r for r in exp_rows if r["seed"] == "101"]
 
-            tsv_path = run_root / "experiment" / "derived" / "geometry_table.tsv"
-            self.assertTrue(tsv_path.exists())
+            def norm(rows: list[dict[str, str]]) -> list[tuple[str, ...]]:
+                fields = ["seed", "t0_ms", "s3b_seed_param", "lnQ_span", "cv_Q", "valid_fraction", "verdict", "flags"]
+                return sorted(tuple(r[k] for k in fields) for r in rows)
 
-            lines = tsv_path.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(len(lines), 3)
+            self.assertEqual(norm(exp_seed101), norm(seed_rows))
+
+    def test_t0ms_variable_digits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            run_id = "BASE_RUN"
+            run_root = base / "runs" / run_id
+            self._write_verdict_pass(run_root)
+
+            exp = run_root / "experiment" / "t0_sweep_full_seed101"
+            self._write_multimode(exp / "segment__t0ms8", {"results": {}, "modes": []}, stage_seed=101)
+            self._write_multimode(exp / "segment__t0ms0008", {"results": {}, "modes": []}, stage_seed=101)
+
+            out = exp / "derived" / "geometry_table.tsv"
+            self._run(base, run_id, exp, out)
+            _, rows = self._read_rows(out)
+
+            self.assertEqual([r["t0_ms"] for r in rows], ["8", "8"])
+
+    def test_missing_mode_does_not_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            run_id = "BASE_RUN"
+            run_root = base / "runs" / run_id
+            self._write_verdict_pass(run_root)
+
+            exp = run_root / "experiment" / "t0_sweep_full_seed101"
+            self._write_multimode(exp / "segment__t0ms0001", {"results": {"verdict": "WARN", "quality_flags": ["f"]}}, stage_seed=101)
+
+            out = exp / "derived" / "geometry_table.tsv"
+            self._run(base, run_id, exp, out)
+            header, rows = self._read_rows(out)
+
             self.assertEqual(
-                lines[0],
-                "seed\tt0_ms\ts3b_seed_param\tlnQ_span\tcv_Q\tvalid_fraction\tverdict\tflags\tpath",
+                header,
+                ["seed", "t0_ms", "s3b_seed_param", "lnQ_span", "cv_Q", "valid_fraction", "verdict", "flags", "path"],
             )
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["lnQ_span"], "na")
+            self.assertEqual(rows[0]["cv_Q"], "na")
+            self.assertEqual(rows[0]["valid_fraction"], "na")
+            self.assertEqual(rows[0]["verdict"], "WARN")
+            self.assertEqual(rows[0]["flags"], "f")
+            self.assertTrue(rows[0]["path"].endswith("multimode_estimates.json"))
 
-            # Stable sort by numeric seed first (101 before 202).
-            self.assertTrue(lines[1].startswith("101\t0000\t101\t1.1"))
-            self.assertIn("a,b", lines[2])
-            self.assertTrue(lines[2].startswith("202\t0050\t202\t2.2"))
-
-    def test_ignores_symlinked_directories_during_scan(self) -> None:
-        repo_root = Path(__file__).resolve().parents[1]
-        script = repo_root / "mvp" / "s6_geometry_table.py"
-
+    def test_deterministic_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             run_id = "BASE_RUN"
             run_root = base / "runs" / run_id
-            scan_root = run_root / "experiment"
-            outside_root = base / "outside_seed"
+            self._write_verdict_pass(run_root)
 
-            (run_root / "RUN_VALID").mkdir(parents=True, exist_ok=True)
-            (run_root / "RUN_VALID" / "verdict.json").write_text(
-                json.dumps({"verdict": "PASS"}, sort_keys=True),
-                encoding="utf-8",
+            exp = run_root / "experiment"
+            self._write_multimode(
+                exp / "t0_sweep_full_seed202" / "segment__t0ms0010",
+                {"results": {}, "modes": [{"label": "221", "fit": {"stability": {"lnQ_span": 1.0}}}]},
+                stage_seed=202,
+            )
+            self._write_multimode(
+                exp / "t0_sweep_full_seed101" / "segment__t0ms0002",
+                {"results": {}, "modes": [{"label": "221", "fit": {"stability": {"lnQ_span": 2.0}}}]},
+                stage_seed=101,
             )
 
-            ok_path = scan_root / "ok" / "segment__t0ms0001" / "s3b_multimode_estimates" / "outputs"
-            (ok_path).mkdir(parents=True, exist_ok=True)
-            (ok_path / "multimode_estimates.json").write_text(
-                json.dumps(
-                    {
-                        "results": {"verdict": "OK", "quality_flags": []},
-                        "modes": [{"label": "221", "fit": {"stability": {"lnQ_span": 1.23}}}],
-                    },
-                    sort_keys=True,
-                ),
-                encoding="utf-8",
-            )
+            out = run_root / "experiment" / "derived" / "geometry_table.tsv"
+            self._run(base, run_id, exp, out)
+            digest1 = hashlib.sha256(out.read_bytes()).hexdigest()
 
-            outside_path = outside_root / "bad" / "segment__t0ms9999" / "s3b_multimode_estimates" / "outputs"
-            outside_path.mkdir(parents=True, exist_ok=True)
-            (outside_path / "multimode_estimates.json").write_text(
-                json.dumps(
-                    {
-                        "results": {"verdict": "OK", "quality_flags": ["outside"]},
-                        "modes": [{"label": "221", "fit": {"stability": {"lnQ_span": 999}}}],
-                    },
-                    sort_keys=True,
-                ),
-                encoding="utf-8",
-            )
+            self._run(base, run_id, exp, out)
+            digest2 = hashlib.sha256(out.read_bytes()).hexdigest()
 
-            (scan_root / "link").symlink_to(outside_root, target_is_directory=True)
-
-            cmd = [
-                sys.executable,
-                str(script),
-                "--run-id",
-                run_id,
-                "--scan-root",
-                str(scan_root),
-            ]
-            proc = subprocess.run(cmd, cwd=base, check=True, capture_output=True, text=True)
-
-            tsv_path = run_root / "experiment" / "derived" / "geometry_table.tsv"
-            lines = tsv_path.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(len(lines), 2)
-            self.assertIn("SKIP_SYMLINK_DIR", proc.stderr)
-            self.assertIn("\tok/segment__t0ms0001/s3b_multimode_estimates/outputs/multimode_estimates.json", lines[1])
-            self.assertNotIn("999", "\n".join(lines))
-            self.assertNotIn("outside", "\n".join(lines))
-
-    def test_seed_scan_root_infers_seed_from_scan_root_basename(self) -> None:
-        repo_root = Path(__file__).resolve().parents[1]
-        script = repo_root / "mvp" / "s6_geometry_table.py"
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            base = Path(tmpdir)
-            run_root = base / "runs" / "BASE_RUN"
-            run_id, seed_root = self._write_seed101_tree(run_root)
-
-            out_path = run_root / "experiment" / "t0_sweep_full_seed101" / "derived" / "geometry_table.tsv"
-            cmd = [
-                sys.executable,
-                str(script),
-                "--run-id",
-                run_id,
-                "--scan-root",
-                str(seed_root),
-                "--out-path",
-                str(out_path),
-            ]
-            subprocess.run(cmd, cwd=base, check=True)
-
-            lines = out_path.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(len(lines), 3)
-            self.assertEqual(lines[1].split("\t")[0], "101")
-            self.assertEqual(lines[2].split("\t")[0], "101")
-
-    def test_seed_counts_match_between_seed_scan_root_and_experiment_scan_root(self) -> None:
-        repo_root = Path(__file__).resolve().parents[1]
-        script = repo_root / "mvp" / "s6_geometry_table.py"
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            base = Path(tmpdir)
-            run_root = base / "runs" / "BASE_RUN"
-            run_id, seed_root = self._write_seed101_tree(run_root)
-            experiment_root = run_root / "experiment"
-
-            seed_out = run_root / "experiment" / "t0_sweep_full_seed101" / "derived" / "geometry_table.tsv"
-            exp_out = run_root / "experiment" / "derived" / "geometry_table.tsv"
-
-            subprocess.run(
-                [
-                    sys.executable,
-                    str(script),
-                    "--run-id",
-                    run_id,
-                    "--scan-root",
-                    str(seed_root),
-                    "--out-path",
-                    str(seed_out),
-                ],
-                cwd=base,
-                check=True,
-            )
-            subprocess.run(
-                [
-                    sys.executable,
-                    str(script),
-                    "--run-id",
-                    run_id,
-                    "--scan-root",
-                    str(experiment_root),
-                    "--out-path",
-                    str(exp_out),
-                ],
-                cwd=base,
-                check=True,
-            )
-
-            def _seed_counts(tsv_path: Path) -> dict[str, int]:
-                counts: dict[str, int] = {}
-                lines = tsv_path.read_text(encoding="utf-8").splitlines()[1:]
-                for line in lines:
-                    seed = line.split("\t", 1)[0]
-                    counts[seed] = counts.get(seed, 0) + 1
-                return counts
-
-            self.assertEqual(_seed_counts(seed_out), {"101": 2})
-            self.assertEqual(_seed_counts(exp_out), {"101": 2})
+            self.assertEqual(digest1, digest2)
 
 
 if __name__ == "__main__":

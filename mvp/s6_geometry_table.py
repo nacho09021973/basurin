@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,7 @@ for _cand in (_here.parents[0], _here.parents[1]):
 from basurin_io import sha256_file, write_json_atomic
 
 SEED_RE = re.compile(r"(?:^|/)t0_sweep_full_seed(\d+)(?:/|$)")
-T0MS_RE = re.compile(r"__t0ms(\d+)")
+T0MS_RE = re.compile(r"__t0ms(\d{1,6})")
 
 TSV_HEADER = [
     "seed",
@@ -41,7 +42,7 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _resolve_out_root() -> Path:
+def _resolve_runs_root() -> Path:
     env = os.environ.get("BASURIN_RUNS_ROOT")
     if env:
         return Path(env).resolve()
@@ -61,24 +62,26 @@ def _iter_multimode_paths(scan_root: Path) -> list[Path]:
                 continue
             kept.append(dirname)
         dirnames[:] = kept
-        if "multimode_estimates.json" in filenames:
-            found.append(root_path / "multimode_estimates.json")
-    return sorted(found)
+        candidate = root_path / "multimode_estimates.json"
+        if candidate.as_posix().endswith("/s3b_multimode_estimates/outputs/multimode_estimates.json"):
+            found.append(candidate)
+    return sorted(found, key=lambda p: p.as_posix())
 
 
-def _parse_seed_from_path(path_text: str) -> str:
-    m = SEED_RE.search(path_text.replace("\\", "/"))
-    return m.group(1) if m else "na"
+def parse_context(path_abs: Path, scan_root_abs: Path) -> tuple[str, str]:
+    path_text = path_abs.as_posix()
+    t0_match = T0MS_RE.search(path_text)
+    t0_ms = str(int(t0_match.group(1))) if t0_match else "na"
 
+    seed_match = SEED_RE.search(path_text)
+    if seed_match:
+        return seed_match.group(1), t0_ms
 
-def _parse_t0ms_from_path(path_text: str) -> str:
-    m = T0MS_RE.search(path_text.replace("\\", "/"))
-    return m.group(1) if m else "na"
+    seed_scan_root = re.match(r"^t0_sweep_full_seed(\d+)$", scan_root_abs.name)
+    if seed_scan_root:
+        return seed_scan_root.group(1), t0_ms
 
-
-def _infer_seed_default(scan_root: Path) -> str:
-    m = re.match(r"^t0_sweep_full_seed(\d+)$", scan_root.name)
-    return m.group(1) if m else "na"
+    return "na", t0_ms
 
 
 def _safe_mode_value(payload: dict[str, Any], mode_label: str, field: str) -> str:
@@ -119,13 +122,8 @@ def _within(path: Path, root: Path) -> bool:
 
 
 def _default_out_path(scan_root: Path, out_root: Path, run_id: str) -> Path:
-    canonical_run_root = out_root / run_id
-    experiment_root = canonical_run_root / "experiment"
-    if scan_root.resolve() == canonical_run_root.resolve():
-        return scan_root / "derived_geometry_table" / "outputs" / "geometry_table.tsv"
-    if scan_root.resolve() == experiment_root.resolve():
-        return scan_root / "derived" / "geometry_table.tsv"
-    return scan_root / "derived" / "geometry_table.tsv"
+    _ = scan_root
+    return (out_root / run_id / "experiment" / "derived" / "geometry_table.tsv").resolve()
 
 
 def _sort_key(row: dict[str, str]) -> tuple[int, int, int, int, str]:
@@ -141,6 +139,7 @@ def _sort_key(row: dict[str, str]) -> tuple[int, int, int, int, str]:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Build deterministic geometry table from s3b outputs")
     ap.add_argument("--run-id", required=True)
+    ap.add_argument("--runs-root", default=None)
     ap.add_argument("--base-runs-root", default=None)
     ap.add_argument("--scan-root", default=None)
     ap.add_argument("--out", default=None)
@@ -150,16 +149,23 @@ def main() -> int:
     ap.add_argument("--no-run-valid-check", action="store_true")
     args = ap.parse_args()
 
-    out_root = Path(args.base_runs_root).resolve() if args.base_runs_root else _resolve_out_root()
-    run_root = out_root / args.run_id
+    runs_root_arg = args.runs_root if args.runs_root else args.base_runs_root
+    runs_root = Path(runs_root_arg).resolve() if runs_root_arg else _resolve_runs_root()
+    run_root = (runs_root / args.run_id).resolve()
 
     if not args.no_run_valid_check:
         verdict_path = run_root / "RUN_VALID" / "verdict.json"
         if not verdict_path.exists():
-            raise FileNotFoundError(f"RUN_VALID verdict not found: {verdict_path.resolve()}")
-        verdict = _read_json(verdict_path).get("verdict")
+            print(f"RUN_VALID verdict not found: {verdict_path.resolve()}", file=sys.stderr)
+            raise SystemExit(2)
+        try:
+            verdict = _read_json(verdict_path).get("verdict")
+        except Exception as exc:
+            print(f"failed to read RUN_VALID verdict at {verdict_path.resolve()}: {exc}", file=sys.stderr)
+            raise SystemExit(2) from exc
         if verdict != "PASS":
-            raise RuntimeError(f"RUN_VALID verdict is not PASS: {verdict!r} at {verdict_path.resolve()}")
+            print(f"RUN_VALID verdict is not PASS: {verdict!r} at {verdict_path.resolve()}", file=sys.stderr)
+            raise SystemExit(2)
 
     scan_root = Path(args.scan_root).resolve() if args.scan_root else run_root.resolve()
     if not scan_root.exists():
@@ -169,7 +175,7 @@ def main() -> int:
         raise RuntimeError(f"scan root must stay under run root: {scan_root} not in {run_root}")
 
     out_arg = args.out_path if args.out_path else args.out
-    out_path = Path(out_arg).resolve() if out_arg else _default_out_path(scan_root, out_root, args.run_id).resolve()
+    out_path = Path(out_arg).resolve() if out_arg else _default_out_path(scan_root, runs_root, args.run_id).resolve()
     if not _within(out_path, run_root):
         raise RuntimeError(f"--out-path/--out must stay under run root: {out_path.resolve()} not in {run_root.resolve()}")
 
@@ -178,38 +184,44 @@ def main() -> int:
         raise RuntimeError(f"--jsonl-out must stay under run root: {jsonl_path.resolve()} not in {run_root.resolve()}")
 
     mm_paths = _iter_multimode_paths(scan_root)
-    seed_default = _infer_seed_default(scan_root)
 
     rows: list[dict[str, str]] = []
     input_records: list[dict[str, str]] = []
     input_seen: set[str] = set()
     rows_with_span = 0
+    skipped_invalid = 0
 
     for mm_path in mm_paths:
         rel_path = mm_path.resolve().relative_to(scan_root).as_posix()
-        payload = _read_json(mm_path)
+        try:
+            payload = _read_json(mm_path)
+        except Exception as exc:
+            skipped_invalid += 1
+            print(f"WARN skip invalid multimode json at {mm_path.resolve()}: {exc}", file=sys.stderr)
+            continue
 
-        seed = _parse_seed_from_path(rel_path)
-        if seed == "na":
-            seed = seed_default
-        t0_ms = _parse_t0ms_from_path(rel_path)
+        seed, t0_ms = parse_context(mm_path.resolve(), scan_root.resolve())
 
         s3b_seed_param = "na"
         s3b_summary = mm_path.parent.parent / "stage_summary.json"
         if s3b_summary.exists():
-            summary_payload = _read_json(s3b_summary)
-            params = summary_payload.get("parameters")
-            if isinstance(params, dict) and isinstance(params.get("seed"), (int, float, str)):
-                s3b_seed_param = str(params.get("seed"))
-            rel_s3b = s3b_summary.resolve().relative_to(scan_root).as_posix()
-            key = f"s3b_stage_summary:{rel_s3b}"
-            if key not in input_seen:
-                input_seen.add(key)
-                input_records.append({
-                    "label": "s3b_stage_summary",
-                    "path": rel_s3b,
-                    "sha256": sha256_file(s3b_summary),
-                })
+            try:
+                summary_payload = _read_json(s3b_summary)
+            except Exception as exc:
+                print(f"WARN invalid stage summary at {s3b_summary.resolve()}: {exc}", file=sys.stderr)
+            else:
+                params = summary_payload.get("parameters")
+                if isinstance(params, dict) and isinstance(params.get("seed"), (int, float, str)):
+                    s3b_seed_param = str(params.get("seed"))
+                rel_s3b = s3b_summary.resolve().relative_to(scan_root).as_posix()
+                key = f"s3b_stage_summary:{rel_s3b}"
+                if key not in input_seen:
+                    input_seen.add(key)
+                    input_records.append({
+                        "label": "s3b_stage_summary",
+                        "path": rel_s3b,
+                        "sha256": sha256_file(s3b_summary),
+                    })
 
         lnq_span = _safe_mode_value(payload, args.mode_label, "lnQ_span")
         cv_q = _safe_mode_value(payload, args.mode_label, "cv_Q")
@@ -253,10 +265,12 @@ def main() -> int:
     input_records.sort(key=lambda x: (x["label"], x["path"]))
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8", newline="\n") as fh:
-        fh.write("\t".join(TSV_HEADER) + "\n")
+    with tempfile.NamedTemporaryFile("w", delete=False, dir=out_path.parent, encoding="utf-8", newline="\n") as tf:
+        tf.write("\t".join(TSV_HEADER) + "\n")
         for row in rows:
-            fh.write("\t".join(row[key] for key in TSV_HEADER) + "\n")
+            tf.write("\t".join(row[key] for key in TSV_HEADER) + "\n")
+        tmp_name = tf.name
+    os.replace(tmp_name, out_path)
 
     if jsonl_path is not None:
         jsonl_path.parent.mkdir(parents=True, exist_ok=True)
@@ -279,6 +293,7 @@ def main() -> int:
         "counts": {
             "total_files": len(mm_paths),
             "rows_written": len(rows),
+            "files_skipped_invalid": skipped_invalid,
             "rows_with_221_lnQ_span": rows_with_span if args.mode_label == "221" else 0,
             "rows_with_mode_lnQ_span": rows_with_span,
         },
