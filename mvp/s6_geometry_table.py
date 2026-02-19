@@ -76,6 +76,11 @@ def _parse_t0ms_from_path(path_text: str) -> str:
     return m.group(1) if m else "na"
 
 
+def _infer_seed_default(scan_root: Path) -> str:
+    m = re.match(r"^t0_sweep_full_seed(\d+)$", scan_root.name)
+    return m.group(1) if m else "na"
+
+
 def _safe_mode_value(payload: dict[str, Any], mode_label: str, field: str) -> str:
     modes = payload.get("modes")
     if not isinstance(modes, list):
@@ -173,6 +178,7 @@ def main() -> int:
         raise RuntimeError(f"--jsonl-out must stay under run root: {jsonl_path.resolve()} not in {run_root.resolve()}")
 
     mm_paths = _iter_multimode_paths(scan_root)
+    seed_default = _infer_seed_default(scan_root)
 
     rows: list[dict[str, str]] = []
     input_records: list[dict[str, str]] = []
@@ -184,6 +190,8 @@ def main() -> int:
         payload = _read_json(mm_path)
 
         seed = _parse_seed_from_path(rel_path)
+        if seed == "na":
+            seed = seed_default
         t0_ms = _parse_t0ms_from_path(rel_path)
 
         s3b_seed_param = "na"
