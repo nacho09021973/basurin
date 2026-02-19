@@ -282,6 +282,7 @@ def run_single_event(
     stage_timeout_s: float | None = None,
     reuse_strain: bool = False,
     with_t0_sweep: bool = False,
+    local_hdf5: list[str] | None = None,
 ) -> tuple[int, str]:
     """Run full pipeline for a single event. Returns (exit_code, run_id)."""
     out_root = resolve_out_root("runs")
@@ -314,6 +315,8 @@ def run_single_event(
         s1_args.append("--synthetic")
     if reuse_strain:
         s1_args.append("--reuse-if-present")
+    for mapping in (local_hdf5 or []):
+        s1_args.extend(["--local-hdf5", mapping])
     rc = _run_stage("s1_fetch_strain.py", s1_args, "s1_fetch_strain", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
@@ -372,6 +375,7 @@ def run_multimode_event(
     stage_timeout_s: float | None = None,
     reuse_strain: bool = False,
     with_t0_sweep: bool = False,
+    local_hdf5: list[str] | None = None,
     s3b_n_bootstrap: int = 200,
     s3b_seed: int = 12345,
 ) -> tuple[int, str]:
@@ -409,6 +413,8 @@ def run_multimode_event(
         s1_args.append("--synthetic")
     if reuse_strain:
         s1_args.append("--reuse-if-present")
+    for mapping in (local_hdf5 or []):
+        s1_args.extend(["--local-hdf5", mapping])
     rc = _run_stage("s1_fetch_strain.py", s1_args, "s1_fetch_strain", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
@@ -558,6 +564,13 @@ def main() -> int:
         help="Skip s1 download if outputs already exist and params match",
     )
     sp_single.add_argument("--with-t0-sweep", action="store_true", default=False)
+    sp_single.add_argument(
+        "--local-hdf5",
+        action="append",
+        default=[],
+        metavar="DET=PATH",
+        help="Forward local HDF5 detector mapping(s) to s1_fetch_strain (repeatable)",
+    )
 
     # Multi event
     sp_multi = sub.add_parser("multi", help="Run pipeline for multiple events + aggregate")
@@ -581,6 +594,13 @@ def main() -> int:
         help="Skip s1 download if outputs already exist and params match",
     )
     sp_multi.add_argument("--with-t0-sweep", action="store_true", default=False)
+    sp_multi.add_argument(
+        "--local-hdf5",
+        action="append",
+        default=[],
+        metavar="DET=PATH",
+        help="Forward local HDF5 detector mapping(s) to per-event s1_fetch_strain (repeatable)",
+    )
 
     # Single event multimode
     sp_multimode = sub.add_parser("multimode", help="Run single-event multimode pipeline")
@@ -605,6 +625,13 @@ def main() -> int:
     sp_multimode.add_argument("--with-t0-sweep", action="store_true", default=False)
     sp_multimode.add_argument("--s3b-n-bootstrap", type=int, default=200)
     sp_multimode.add_argument("--s3b-seed", type=int, default=12345)
+    sp_multimode.add_argument(
+        "--local-hdf5",
+        action="append",
+        default=[],
+        metavar="DET=PATH",
+        help="Forward local HDF5 detector mapping(s) to s1_fetch_strain (repeatable)",
+    )
 
     args = parser.parse_args()
 
@@ -623,6 +650,7 @@ def main() -> int:
             stage_timeout_s=args.stage_timeout_s,
             reuse_strain=args.reuse_strain,
             with_t0_sweep=args.with_t0_sweep,
+            local_hdf5=args.local_hdf5,
         )
         return rc
 
@@ -643,6 +671,7 @@ def main() -> int:
             stage_timeout_s=args.stage_timeout_s,
             reuse_strain=args.reuse_strain,
             with_t0_sweep=args.with_t0_sweep,
+            local_hdf5=args.local_hdf5,
         )
         return rc
 
@@ -663,6 +692,7 @@ def main() -> int:
             with_t0_sweep=args.with_t0_sweep,
             s3b_n_bootstrap=args.s3b_n_bootstrap,
             s3b_seed=args.s3b_seed,
+            local_hdf5=args.local_hdf5,
         )
         return rc
 
