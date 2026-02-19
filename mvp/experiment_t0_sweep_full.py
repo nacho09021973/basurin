@@ -634,7 +634,27 @@ def run_inventory_phase(args: argparse.Namespace) -> dict[str, Any]:
         "counts_by_t0_ms": counts_by_t0_ms,
         "observed_payload_count": len(observed_pairs),
         "expected_payload_count": len(expected_pairs),
+        "acceptance": {
+            "max_missing_abs": int(getattr(args, "max_missing_abs", 0)),
+            "max_missing_frac": float(getattr(args, "max_missing_frac", 0.0)),
+        },
     }
+
+    missing_abs = len(missing_pairs)
+    expected_payload_count = payload["expected_payload_count"]
+    missing_frac = (missing_abs / expected_payload_count) if expected_payload_count > 0 else 0.0
+    payload["missing_abs"] = missing_abs
+    payload["missing_frac"] = missing_frac
+
+    phase = getattr(args, "phase", "run")
+    fail = (missing_abs > payload["acceptance"]["max_missing_abs"]) or (
+        missing_frac > payload["acceptance"]["max_missing_frac"]
+    )
+    if phase == "finalize":
+        payload["status"] = "FAIL" if fail else "PASS"
+    else:
+        payload["status"] = "IN_PROGRESS"
+
     canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     payload["sha256"] = hashlib.sha256(canonical).hexdigest()
 
@@ -643,11 +663,19 @@ def run_inventory_phase(args: argparse.Namespace) -> dict[str, Any]:
 
     if missing_pairs:
         first = ", ".join(f"(seed={p['seed']},t0_ms={p['t0_ms']})" for p in missing_pairs[:20])
-        print(
-            f"[experiment_t0_sweep_full] inventory missing pairs: total={len(missing_pairs)} first={first}",
-            file=sys.stderr,
+        summary = (
+            "[experiment_t0_sweep_full] inventory missing pairs: "
+            f"total={len(missing_pairs)} first={first} "
+            f"missing_abs={missing_abs} missing_frac={missing_frac:.6f} "
+            f"threshold_abs={payload['acceptance']['max_missing_abs']} "
+            f"threshold_frac={payload['acceptance']['max_missing_frac']:.6f} phase={phase}"
         )
+        print(summary, file=sys.stderr)
+
+    if phase == "finalize" and fail:
+        print("[experiment_t0_sweep_full] finalize status=FAIL", file=sys.stderr)
         raise SystemExit(2)
+
     return payload
 
 
@@ -658,6 +686,9 @@ def main() -> int:
     ap.add_argument("--runs-root", default=None)
     ap.add_argument("--scan-root", default=None)
     ap.add_argument("--inventory-seeds", default=None)
+    ap.add_argument("--phase", choices=["run", "inventory", "finalize"], default="run")
+    ap.add_argument("--max-missing-abs", type=int, default=0)
+    ap.add_argument("--max-missing-frac", type=float, default=0.0)
     ap.add_argument("--atlas-path", required=True)
     ap.add_argument("--t0-grid-ms", default=None)
     ap.add_argument("--t0-start-ms", type=int, default=0)
@@ -670,8 +701,13 @@ def main() -> int:
     args = ap.parse_args()
 
     try:
-        run_t0_sweep_full(args)
-        run_inventory_phase(args)
+        if args.phase == "run":
+            run_t0_sweep_full(args)
+            run_inventory_phase(args)
+        elif args.phase == "inventory":
+            run_inventory_phase(args)
+        elif args.phase == "finalize":
+            run_inventory_phase(args)
         return 0
     except Exception as exc:
         print(f"[experiment_t0_sweep_full] ERROR: {exc}", file=sys.stderr)
