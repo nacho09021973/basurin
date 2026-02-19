@@ -487,227 +487,276 @@ def run_t0_sweep_full(
     *,
     run_cmd_fn: Callable[[list[str], dict[str, str], int], Any] = run_cmd,
 ) -> tuple[dict[str, Any], Path]:
-    out_root, _, _ = compute_experiment_paths(args.run_id)
+    out_root = _resolve_runs_root_arg(getattr(args, "runs_root", None))
+    base_root = Path(args.base_runs_root).expanduser().resolve()
+    base_run_dir = base_root / args.run_id
+    scan_root_abs = (
+        Path(args.scan_root).expanduser().resolve()
+        if getattr(args, "scan_root", None)
+        else (base_run_dir / "experiment").resolve()
+    )
     stage_dir = out_root / args.run_id / "experiment" / f"t0_sweep_full_seed{int(args.seed)}"
     subruns_root = stage_dir / "runs"
-    base_root = Path(args.base_runs_root).expanduser().resolve()
-    enforce_isolated_runsroot(out_root, args.run_id)
-    ensure_seed_runsroot_layout(out_root, args.run_id)
-    validate_run_id(args.run_id, out_root)
-    validate_run_id(args.run_id, base_root)
-    require_run_valid(base_root, args.run_id)
+    trace_path = out_root / args.run_id / "experiment" / "derived" / "run_trace.json"
+    trace_payload: dict[str, Any] = {
+        "phase": "run",
+        "run_id": args.run_id,
+        "runs_root": str(out_root),
+        "base_runs_root": str(base_root),
+        "scan_root_abs": str(scan_root_abs),
+        "seed": int(args.seed),
+        "t0_grid_ms": str(args.t0_grid_ms) if args.t0_grid_ms is not None else None,
+        "creating_seed_dir": str(stage_dir.resolve()),
+        "created_seed_dir": False,
+        "exception": None,
+    }
 
-    base_run_dir = base_root / args.run_id
-    s2_dir = base_run_dir / "s2_ringdown_window"
-    s2_manifest = s2_dir / "manifest.json"
-    if not s2_manifest.exists():
-        raise FileNotFoundError(f"Missing s2 manifest: {s2_manifest}")
+    print(
+        "[experiment_t0_sweep_full] "
+        f"phase=run run_id={args.run_id} runs_root_abs={out_root} "
+        f"base_runs_root_abs={base_root} scan_root_abs={scan_root_abs} "
+        f"seed={int(args.seed)} t0_grid_ms={trace_payload['t0_grid_ms']}",
+        file=sys.stderr,
+    )
 
-    s2_outputs = s2_dir / "outputs"
-    detector, source_npz = _pick_detector(s2_outputs, args.detector)
+    try:
+        enforce_isolated_runsroot(out_root, args.run_id)
+        ensure_seed_runsroot_layout(out_root, args.run_id)
+        validate_run_id(args.run_id, out_root)
+        validate_run_id(args.run_id, base_root)
+        require_run_valid(base_root, args.run_id)
 
-    window_meta_path = s2_outputs / "window_meta.json"
-    window_meta = json.loads(window_meta_path.read_text(encoding="utf-8")) if window_meta_path.exists() else {}
-    strain, fs = _load_npz(source_npz, window_meta)
-    source_sha = sha256_file(source_npz)
-    grid = _parse_grid(args)
+        print(f"[experiment_t0_sweep_full] creating_seed_dir={stage_dir.resolve()}", file=sys.stderr)
+        stage_dir.mkdir(parents=True, exist_ok=True)
+        outputs_dir = stage_dir / "outputs"
+        outputs_dir.mkdir(parents=True, exist_ok=True)
+        subruns_root.mkdir(parents=True, exist_ok=True)
+        trace_payload["created_seed_dir"] = stage_dir.exists()
+        print(f"[experiment_t0_sweep_full] seed_dir_exists={str(stage_dir.exists()).lower()}", file=sys.stderr)
+        write_json_atomic(trace_path, trace_payload)
 
-    outputs_dir = stage_dir / "outputs"
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-    subruns_root.mkdir(parents=True, exist_ok=True)
+        s2_dir = base_run_dir / "s2_ringdown_window"
+        s2_manifest = s2_dir / "manifest.json"
+        if not s2_manifest.exists():
+            raise FileNotFoundError(f"Missing s2 manifest required for phase=run: {s2_manifest}")
 
-    python = sys.executable
-    s2_script = str((_here.parent / "s2_ringdown_window.py").resolve())
-    s3_script = str((_here.parent / "s3_ringdown_estimates.py").resolve())
-    s3b_script = str((_here.parent / "s3b_multimode_estimates.py").resolve())
-    s4c_script = str((_here.parent / "s4c_kerr_consistency.py").resolve())
+        s2_outputs = s2_dir / "outputs"
+        detector, source_npz = _pick_detector(s2_outputs, args.detector)
 
-    points: list[dict[str, Any]] = []
-    n_ok = n_ins = n_failed = 0
+        window_meta_path = s2_outputs / "window_meta.json"
+        window_meta = json.loads(window_meta_path.read_text(encoding="utf-8")) if window_meta_path.exists() else {}
+        strain, fs = _load_npz(source_npz, window_meta)
+        source_sha = sha256_file(source_npz)
+        grid = _parse_grid(args)
 
-    for t0_ms in grid:
-        subrun_id = _subrun_id(args.run_id, int(t0_ms))
-        point = {
-            "t0_ms": int(t0_ms),
-            "subrun_id": subrun_id,
-            "status": "FAILED_POINT",
-            "s3b": {
-                "verdict": "INSUFFICIENT_DATA",
-                "has_221": False,
-                "ln_f_220": None,
-                "ln_Q_220": None,
-                "ln_f_221": None,
-                "ln_Q_221": None,
-            },
-            "s4c": {
-                "verdict": "FAIL",
-                "kerr_consistent_95": None,
-                "chi_best": None,
-                "d2_min": None,
-                "delta_logfreq": None,
-                "delta_logQ": None,
-            },
-            "quality_flags": [],
-            "messages": [],
-        }
+        python = sys.executable
+        s2_script = str((_here.parent / "s2_ringdown_window.py").resolve())
+        s3_script = str((_here.parent / "s3_ringdown_estimates.py").resolve())
+        s3b_script = str((_here.parent / "s3b_multimode_estimates.py").resolve())
+        s4c_script = str((_here.parent / "s4c_kerr_consistency.py").resolve())
 
-        if t0_ms < 0:
-            point["status"] = "SKIPPED_POINT_EARLY"
-            point["messages"].append("t0 offset < 0 unsupported")
-            points.append(point)
-            continue
+        points: list[dict[str, Any]] = []
+        n_ok = n_ins = n_failed = 0
 
-        offset_samples = int(round((float(t0_ms) / 1000.0) * fs))
-        if offset_samples >= strain.size:
-            point["status"] = "INSUFFICIENT_DATA"
-            point["messages"].append("offset exceeds window length")
-            n_ins += 1
-            points.append(point)
-            continue
-
-        subrun_dir = subruns_root / subrun_id
-        if subrun_dir.exists():
-            shutil.rmtree(subrun_dir)
-        _init_subrun_run_valid(subrun_dir)
-
-        base_dt_start_s = float(window_meta.get("dt_start_s", 0.0))
-        base_duration_s = float(window_meta.get("duration_s", float(strain.size) / float(fs)))
-        s1_strain_npz = base_run_dir / "s1_fetch_strain" / "outputs" / "strain.npz"
-        if not s1_strain_npz.exists():
-            raise FileNotFoundError(f"Missing base s1 strain NPZ required for subrun s2: {s1_strain_npz}")
-
-        env = os.environ.copy()
-        env["BASURIN_RUNS_ROOT"] = str(subruns_root)
-
-        stages = build_subrun_stage_cmds(
-            python=python,
-            s2_script=s2_script,
-            s3_script=s3_script,
-            s3b_script=s3b_script,
-            s4c_script=s4c_script,
-            subrun_id=subrun_id,
-            event_id=str(window_meta.get("event_id", "GW150914")),
-            dt_start_s=base_dt_start_s + (float(t0_ms) / 1000.0),
-            duration_s=base_duration_s - (float(t0_ms) / 1000.0),
-            strain_npz=str(s1_strain_npz),
-            n_bootstrap=int(args.n_bootstrap),
-            s3b_seed=int(args.seed),
-            atlas_path=str(args.atlas_path),
-        )
-        failed, skip_to_insufficient = execute_subrun_stages_or_abort(
-            stages=stages,
-            subrun_dir=subrun_dir,
-            env=env,
-            stage_timeout_s=args.stage_timeout_s,
-            run_cmd_fn=run_cmd_fn,
-            point=point,
-        )
-
-        s3b_payload = _read_json_if_exists(subrun_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json")
-        s4c_payload = _read_json_if_exists(subrun_dir / "s4c_kerr_consistency" / "outputs" / "kerr_consistency.json")
-        point["s3b"] = _extract_s3b(s3b_payload)
-        point["s4c"] = _extract_s4c(s4c_payload)
-        if skip_to_insufficient:
-            point["s4c"] = {
-                "verdict": "INSUFFICIENT_DATA",
-                "kerr_consistent_95": None,
-                "chi_best": None,
-                "d2_min": None,
-                "delta_logfreq": None,
-                "delta_logQ": None,
+        for t0_ms in grid:
+            subrun_id = _subrun_id(args.run_id, int(t0_ms))
+            point = {
+                "t0_ms": int(t0_ms),
+                "subrun_id": subrun_id,
+                "status": "FAILED_POINT",
+                "s3b": {
+                    "verdict": "INSUFFICIENT_DATA",
+                    "has_221": False,
+                    "ln_f_220": None,
+                    "ln_Q_220": None,
+                    "ln_f_221": None,
+                    "ln_Q_221": None,
+                },
+                "s4c": {
+                    "verdict": "FAIL",
+                    "kerr_consistent_95": None,
+                    "chi_best": None,
+                    "d2_min": None,
+                    "delta_logfreq": None,
+                    "delta_logQ": None,
+                },
+                "quality_flags": [],
+                "messages": [],
             }
 
-        if skip_to_insufficient:
-            n_ins += 1
-        elif failed:
-            point["status"] = "FAILED_POINT"
-            n_failed += 1
-        elif point["s3b"]["verdict"] == "INSUFFICIENT_DATA":
-            point["status"] = "INSUFFICIENT_DATA"
-            n_ins += 1
-        elif point["s3b"]["verdict"] == "OK" and point["s4c"]["verdict"] == "OK":
-            point["status"] = "OK"
-            n_ok += 1
-        else:
-            point["status"] = "FAILED_POINT"
-            n_failed += 1
+            if t0_ms < 0:
+                point["status"] = "SKIPPED_POINT_EARLY"
+                point["messages"].append("t0 offset < 0 unsupported")
+                points.append(point)
+                continue
 
-        if s3b_payload:
-            point["quality_flags"].extend(s3b_payload.get("results", {}).get("quality_flags", []))
-            point["messages"].extend(s3b_payload.get("results", {}).get("messages", []))
+            offset_samples = int(round((float(t0_ms) / 1000.0) * fs))
+            if offset_samples >= strain.size:
+                point["status"] = "INSUFFICIENT_DATA"
+                point["messages"].append("offset exceeds window length")
+                n_ins += 1
+                points.append(point)
+                continue
 
-        points.append(point)
+            subrun_dir = subruns_root / subrun_id
+            if subrun_dir.exists():
+                shutil.rmtree(subrun_dir)
+            _init_subrun_run_valid(subrun_dir)
 
-    best_t0 = None
-    best_value = None
-    for p in points:
-        if p.get("s4c", {}).get("verdict") != "OK":
-            continue
-        d2 = p.get("s4c", {}).get("d2_min")
-        if d2 is None:
-            continue
-        try:
-            val = float(d2)
-        except (TypeError, ValueError):
-            continue
-        if not math.isfinite(val):
-            continue
-        if best_value is None or val < best_value:
-            best_value = val
-            best_t0 = int(p["t0_ms"])
+            base_dt_start_s = float(window_meta.get("dt_start_s", 0.0))
+            base_duration_s = float(window_meta.get("duration_s", float(strain.size) / float(fs)))
+            s1_strain_npz = base_run_dir / "s1_fetch_strain" / "outputs" / "strain.npz"
+            if not s1_strain_npz.exists():
+                raise FileNotFoundError(
+                    "Missing base s1 strain NPZ required for subrun s2: "
+                    f"{s1_strain_npz}"
+                )
 
-    results = {
-        "schema_version": "experiment_t0_sweep_full_v1",
-        "run_id": args.run_id,
-        "atlas_path": str(args.atlas_path),
-        "subruns_root": str(subruns_root),
-        "source": {
-            "stage": "s2_ringdown_window",
-            "detector": detector,
-            "fs_hz": float(fs),
-            "npz_original_sha256": source_sha,
-            "t0_base_s": window_meta.get("t0_start_s"),
-        },
-        "grid": {
-            "t0_offsets_ms": [int(x) for x in grid],
-            "interpreted_as": "offsets_from_s2_window_start_nonnegative_only",
-        },
-        "summary": {
-            "n_points": len(points),
-            "n_ok": n_ok,
-            "n_insufficient": n_ins,
-            "n_failed": n_failed,
-            "best_point": {
-                "t0_ms": best_t0,
-                "metric": "min_d2",
-                "value": best_value,
+            env = os.environ.copy()
+            env["BASURIN_RUNS_ROOT"] = str(subruns_root)
+
+            stages = build_subrun_stage_cmds(
+                python=python,
+                s2_script=s2_script,
+                s3_script=s3_script,
+                s3b_script=s3b_script,
+                s4c_script=s4c_script,
+                subrun_id=subrun_id,
+                event_id=str(window_meta.get("event_id", "GW150914")),
+                dt_start_s=base_dt_start_s + (float(t0_ms) / 1000.0),
+                duration_s=base_duration_s - (float(t0_ms) / 1000.0),
+                strain_npz=str(s1_strain_npz),
+                n_bootstrap=int(args.n_bootstrap),
+                s3b_seed=int(args.seed),
+                atlas_path=str(args.atlas_path),
+            )
+            failed, skip_to_insufficient = execute_subrun_stages_or_abort(
+                stages=stages,
+                subrun_dir=subrun_dir,
+                env=env,
+                stage_timeout_s=args.stage_timeout_s,
+                run_cmd_fn=run_cmd_fn,
+                point=point,
+            )
+
+            s3b_payload = _read_json_if_exists(
+                subrun_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
+            )
+            s4c_payload = _read_json_if_exists(subrun_dir / "s4c_kerr_consistency" / "outputs" / "kerr_consistency.json")
+            point["s3b"] = _extract_s3b(s3b_payload)
+            point["s4c"] = _extract_s4c(s4c_payload)
+            if skip_to_insufficient:
+                point["s4c"] = {
+                    "verdict": "INSUFFICIENT_DATA",
+                    "kerr_consistent_95": None,
+                    "chi_best": None,
+                    "d2_min": None,
+                    "delta_logfreq": None,
+                    "delta_logQ": None,
+                }
+
+            if skip_to_insufficient:
+                n_ins += 1
+            elif failed:
+                point["status"] = "FAILED_POINT"
+                n_failed += 1
+            elif point["s3b"]["verdict"] == "INSUFFICIENT_DATA":
+                point["status"] = "INSUFFICIENT_DATA"
+                n_ins += 1
+            elif point["s3b"]["verdict"] == "OK" and point["s4c"]["verdict"] == "OK":
+                point["status"] = "OK"
+                n_ok += 1
+            else:
+                point["status"] = "FAILED_POINT"
+                n_failed += 1
+
+            if s3b_payload:
+                point["quality_flags"].extend(s3b_payload.get("results", {}).get("quality_flags", []))
+                point["messages"].extend(s3b_payload.get("results", {}).get("messages", []))
+
+            points.append(point)
+
+        best_t0 = None
+        best_value = None
+        for p in points:
+            if p.get("s4c", {}).get("verdict") != "OK":
+                continue
+            d2 = p.get("s4c", {}).get("d2_min")
+            if d2 is None:
+                continue
+            try:
+                val = float(d2)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(val):
+                continue
+            if best_value is None or val < best_value:
+                best_value = val
+                best_t0 = int(p["t0_ms"])
+
+        results = {
+            "schema_version": "experiment_t0_sweep_full_v1",
+            "run_id": args.run_id,
+            "atlas_path": str(args.atlas_path),
+            "subruns_root": str(subruns_root),
+            "source": {
+                "stage": "s2_ringdown_window",
+                "detector": detector,
+                "fs_hz": float(fs),
+                "npz_original_sha256": source_sha,
+                "t0_base_s": window_meta.get("t0_start_s"),
             },
-        },
-        "points": points,
-    }
+            "grid": {
+                "t0_offsets_ms": [int(x) for x in grid],
+                "interpreted_as": "offsets_from_s2_window_start_nonnegative_only",
+            },
+            "summary": {
+                "n_points": len(points),
+                "n_ok": n_ok,
+                "n_insufficient": n_ins,
+                "n_failed": n_failed,
+                "best_point": {
+                    "t0_ms": best_t0,
+                    "metric": "min_d2",
+                    "value": best_value,
+                },
+            },
+            "points": points,
+        }
 
-    out_path = outputs_dir / RESULTS_NAME
-    write_json_atomic(out_path, results)
+        out_path = outputs_dir / RESULTS_NAME
+        write_json_atomic(out_path, results)
 
-    stage_summary = {
-        "stage": EXPERIMENT_STAGE,
-        "run_id": args.run_id,
-        "verdict": "PASS",
-        "results": {
-            "n_points": len(points),
-            "n_ok": n_ok,
-            "n_insufficient": n_ins,
-            "n_failed": n_failed,
-            "results_sha256": sha256_file(out_path),
-        },
-    }
-    write_stage_summary(stage_dir, stage_summary)
-    write_manifest(
-        stage_dir,
-        {"t0_sweep_full_results": out_path},
-        extra={"subruns_root": str(subruns_root), "source_npz_sha256": source_sha},
-    )
-    return results, out_path
+        stage_summary = {
+            "stage": EXPERIMENT_STAGE,
+            "run_id": args.run_id,
+            "verdict": "PASS",
+            "results": {
+                "n_points": len(points),
+                "n_ok": n_ok,
+                "n_insufficient": n_ins,
+                "n_failed": n_failed,
+                "results_sha256": sha256_file(out_path),
+            },
+        }
+        write_stage_summary(stage_dir, stage_summary)
+        write_manifest(
+            stage_dir,
+            {"t0_sweep_full_results": out_path},
+            extra={"subruns_root": str(subruns_root), "source_npz_sha256": source_sha},
+        )
+        trace_payload["created_seed_dir"] = stage_dir.exists()
+        trace_payload["exception"] = None
+        write_json_atomic(trace_path, trace_payload)
+        return results, out_path
+    except Exception as exc:
+        trace_payload["created_seed_dir"] = stage_dir.exists()
+        trace_payload["exception"] = {
+            "type": type(exc).__name__,
+            "message": str(exc),
+        }
+        write_json_atomic(trace_path, trace_payload)
+        raise
 
 
 def _parse_int_csv(raw: str | None) -> list[int]:

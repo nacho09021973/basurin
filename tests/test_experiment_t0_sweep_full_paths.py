@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import sys
 import tempfile
@@ -231,6 +232,129 @@ class TestExperimentT0SweepFullPaths(unittest.TestCase):
             self.assertTrue(seen_envs)
             self.assertTrue(all(e.get("BASURIN_RUNS_ROOT") == str(expected_subruns_root) for e in seen_envs))
             os.environ.pop("BASURIN_RUNS_ROOT", None)
+
+    def test_phase_run_creates_seed_dir_and_trace_file(self) -> None:
+        exp = importlib.import_module("mvp.experiment_t0_sweep_full")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            runs_root = base / "runs"
+            run_id = "BASE"
+
+            run_dir = runs_root / run_id
+            (run_dir / "RUN_VALID").mkdir(parents=True, exist_ok=True)
+            (run_dir / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
+            s2_dir = run_dir / "s2_ringdown_window"
+            (s2_dir / "outputs").mkdir(parents=True, exist_ok=True)
+            (s2_dir / "manifest.json").write_text("{}", encoding="utf-8")
+            source_npz = s2_dir / "outputs" / "H1_rd.npz"
+            source_npz.write_bytes(b"npz-placeholder")
+            (run_dir / "s1_fetch_strain" / "outputs").mkdir(parents=True, exist_ok=True)
+            (run_dir / "s1_fetch_strain" / "outputs" / "strain.npz").write_bytes(b"npz-placeholder")
+
+            def _fake_run(cmd: list[str], env: dict[str, str], timeout: int) -> SimpleNamespace:
+                if Path(cmd[1]).stem == "s2_ringdown_window":
+                    subrun_id = cmd[cmd.index("--run") + 1]
+                    meta = (
+                        runs_root
+                        / run_id
+                        / "experiment"
+                        / "t0_sweep_full_seed606"
+                        / "runs"
+                        / subrun_id
+                        / "s2_ringdown_window"
+                        / "outputs"
+                        / "window_meta.json"
+                    )
+                    meta.parent.mkdir(parents=True, exist_ok=True)
+                    meta.write_text("{}", encoding="utf-8")
+                return SimpleNamespace(returncode=0, stderr="")
+
+            argv = [
+                "experiment_t0_sweep_full.py",
+                "--phase",
+                "run",
+                "--run-id",
+                run_id,
+                "--runs-root",
+                str(runs_root),
+                "--base-runs-root",
+                str(runs_root),
+                "--atlas-path",
+                "dummy_atlas.h5",
+                "--seed",
+                "606",
+                "--t0-grid-ms",
+                "8",
+            ]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(exp, "run_cmd", side_effect=_fake_run),
+                mock.patch.object(exp, "sha256_file", return_value="sha"),
+                mock.patch.object(exp, "_pick_detector", return_value=("H1", source_npz)),
+                mock.patch.object(exp, "_load_npz", return_value=(FakeStrain(), 1024.0)),
+                mock.patch.object(exp, "_read_json_if_exists", return_value=None),
+            ):
+                rc = exp.main()
+
+            self.assertEqual(rc, 0)
+            seed_dir = runs_root / run_id / "experiment" / "t0_sweep_full_seed606"
+            self.assertTrue(seed_dir.exists())
+            trace_path = runs_root / run_id / "experiment" / "derived" / "run_trace.json"
+            self.assertTrue(trace_path.exists())
+            trace = json.loads(trace_path.read_text(encoding="utf-8"))
+            self.assertTrue(trace["created_seed_dir"])
+
+    def test_phase_run_missing_base_strain_aborts_with_trace(self) -> None:
+        exp = importlib.import_module("mvp.experiment_t0_sweep_full")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            runs_root = base / "runs"
+            run_id = "BASE"
+
+            run_dir = runs_root / run_id
+            (run_dir / "RUN_VALID").mkdir(parents=True, exist_ok=True)
+            (run_dir / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
+            s2_dir = run_dir / "s2_ringdown_window"
+            (s2_dir / "outputs").mkdir(parents=True, exist_ok=True)
+            (s2_dir / "manifest.json").write_text("{}", encoding="utf-8")
+            source_npz = s2_dir / "outputs" / "H1_rd.npz"
+            source_npz.write_bytes(b"npz-placeholder")
+
+            argv = [
+                "experiment_t0_sweep_full.py",
+                "--phase",
+                "run",
+                "--run-id",
+                run_id,
+                "--runs-root",
+                str(runs_root),
+                "--base-runs-root",
+                str(runs_root),
+                "--atlas-path",
+                "dummy_atlas.h5",
+                "--seed",
+                "606",
+                "--t0-grid-ms",
+                "8",
+            ]
+
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(exp, "_pick_detector", return_value=("H1", source_npz)),
+                mock.patch.object(exp, "_load_npz", return_value=(FakeStrain(), 1024.0)),
+                mock.patch.object(exp, "sha256_file", return_value="sha"),
+            ):
+                with self.assertRaises(SystemExit) as ctx:
+                    raise SystemExit(exp.main())
+
+            self.assertEqual(ctx.exception.code, 2)
+            trace_path = runs_root / run_id / "experiment" / "derived" / "run_trace.json"
+            self.assertTrue(trace_path.exists())
+            trace = json.loads(trace_path.read_text(encoding="utf-8"))
+            self.assertEqual(trace["exception"]["type"], "FileNotFoundError")
+            self.assertIn("s1_fetch_strain/outputs/strain.npz", trace["exception"]["message"])
 
 
 if __name__ == "__main__":
