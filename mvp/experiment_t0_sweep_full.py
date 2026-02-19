@@ -267,10 +267,15 @@ def _extract_s4c(payload: dict[str, Any] | None) -> dict[str, Any]:
 
 def build_subrun_stage_cmds(
     python: str,
+    s2_script: str,
     s3_script: str,
     s3b_script: str,
     s4c_script: str,
     subrun_id: str,
+    event_id: str,
+    dt_start_s: float,
+    duration_s: float,
+    strain_npz: str,
     n_bootstrap: int,
     s3b_seed: int,
     atlas_path: str,
@@ -281,14 +286,30 @@ def build_subrun_stage_cmds(
     NOTE: This is intentionally pure and deterministic: it only assembles argv.
     Seed propagation to s3b is explicit via --seed <s3b_seed>.
     """
+    s3_estimates = f"runs/{subrun_id}/s3_ringdown_estimates/outputs/estimates.json"
     return [
-        [python, "shadow_s2_materialized", "--run", subrun_id],
+        [
+            python,
+            s2_script,
+            "--run",
+            subrun_id,
+            "--event-id",
+            event_id,
+            "--dt-start-s",
+            str(float(dt_start_s)),
+            "--duration-s",
+            str(float(duration_s)),
+            "--strain-npz",
+            strain_npz,
+        ],
         [python, s3_script, "--run", subrun_id],
         [
             python,
             s3b_script,
             "--run-id",
             subrun_id,
+            "--s3-estimates",
+            s3_estimates,
             "--n-bootstrap",
             str(int(n_bootstrap)),
             "--seed",
@@ -302,10 +323,15 @@ def build_subrun_execution_plan(
     *,
     subrun_dir: Path,
     python: str,
+    s2_script: str,
     s3_script: str,
     s3b_script: str,
     s4c_script: str,
     subrun_id: str,
+    event_id: str,
+    dt_start_s: float,
+    duration_s: float,
+    strain_npz: str,
     n_bootstrap: int,
     s3b_seed: int,
     atlas_path: str,
@@ -319,15 +345,75 @@ def build_subrun_execution_plan(
         },
         "commands": build_subrun_stage_cmds(
             python=python,
+            s2_script=s2_script,
             s3_script=s3_script,
             s3b_script=s3b_script,
             s4c_script=s4c_script,
             subrun_id=subrun_id,
+            event_id=event_id,
+            dt_start_s=dt_start_s,
+            duration_s=duration_s,
+            strain_npz=strain_npz,
             n_bootstrap=n_bootstrap,
             s3b_seed=s3b_seed,
             atlas_path=atlas_path,
         ),
     }
+
+
+def execute_subrun_stages_or_abort(
+    *,
+    stages: list[list[str]],
+    subrun_dir: Path,
+    env: dict[str, str],
+    stage_timeout_s: int,
+    run_cmd_fn: Callable[[list[str], dict[str, str], int], Any],
+    point: dict[str, Any],
+) -> tuple[bool, bool]:
+    """Execute per-subrun commands with mandatory post-s2 window_meta precheck.
+
+    Returns ``(failed, skip_to_insufficient)``.
+    """
+    failed = False
+    skip_to_insufficient = False
+    for cmd in stages:
+        try:
+            cp = run_cmd_fn(cmd, env, stage_timeout_s)
+        except Exception as exc:
+            point["messages"].append(f"subprocess error for {' '.join(cmd)}: {type(exc).__name__}: {exc}")
+            failed = True
+            break
+
+        stage_stem = Path(cmd[1]).stem if len(cmd) > 1 else ""
+        if int(getattr(cp, "returncode", 1)) != 0:
+            stderr = (getattr(cp, "stderr", "") or "").strip()
+            is_s3 = stage_stem == "s3_ringdown_estimates"
+            if is_s3 and S3_NO_VALID_ESTIMATE_MSG in stderr:
+                point["status"] = "INSUFFICIENT_DATA"
+                point["quality_flags"].append("s3_no_valid_estimate")
+                if stderr:
+                    point["messages"].append(stderr)
+                skip_to_insufficient = True
+                break
+            point["messages"].append(f"stage failed rc={cp.returncode}: {' '.join(cmd)}")
+            if stderr:
+                point["messages"].append(stderr)
+            failed = True
+            break
+
+        if stage_stem == "s2_ringdown_window":
+            try:
+                meta_path = _require_subrun_window_meta(subrun_dir)
+                point["quality_flags"].append(f"subrun_window_meta={meta_path}")
+            except FileNotFoundError:
+                subrun_abs = subrun_dir.resolve()
+                print(
+                    "[experiment_t0_sweep_full] ERROR: missing window_meta after s2 for "
+                    f"subrun_dir={subrun_abs}",
+                    file=sys.stderr,
+                )
+                raise SystemExit(2)
+    return failed, skip_to_insufficient
 
 
 def compute_experiment_paths(run_id: str) -> tuple[Path, Path, Path]:
@@ -429,6 +515,7 @@ def run_t0_sweep_full(
     subruns_root.mkdir(parents=True, exist_ok=True)
 
     python = sys.executable
+    s2_script = str((_here.parent / "s2_ringdown_window.py").resolve())
     s3_script = str((_here.parent / "s3_ringdown_estimates.py").resolve())
     s3b_script = str((_here.parent / "s3b_multimode_estimates.py").resolve())
     s4c_script = str((_here.parent / "s4c_kerr_consistency.py").resolve())
@@ -476,79 +563,43 @@ def run_t0_sweep_full(
             points.append(point)
             continue
 
-        trimmed = strain[offset_samples:]
         subrun_dir = subruns_root / subrun_id
         if subrun_dir.exists():
             shutil.rmtree(subrun_dir)
-        provenance = _write_subrun_shadow_s2(
-            subrun_dir,
-            detector,
-            trimmed,
-            fs,
-            int(t0_ms),
-            offset_samples,
-            source_npz,
-            source_sha,
-            base_window_meta=window_meta,
-        )
-        point["quality_flags"].append(
-            "provenance:"
-            f"offset_samples={provenance.get('offset_samples')},"
-            f"trimmed_sha={provenance.get('npz_trimmed_sha256')},"
-            f"window_meta_sha={provenance.get('window_meta_sha256')}"
-        )
+        _init_subrun_run_valid(subrun_dir)
+
+        base_dt_start_s = float(window_meta.get("dt_start_s", 0.0))
+        base_duration_s = float(window_meta.get("duration_s", float(strain.size) / float(fs)))
+        s1_strain_npz = base_run_dir / "s1_fetch_strain" / "outputs" / "strain.npz"
+        if not s1_strain_npz.exists():
+            raise FileNotFoundError(f"Missing base s1 strain NPZ required for subrun s2: {s1_strain_npz}")
 
         env = os.environ.copy()
         env["BASURIN_RUNS_ROOT"] = str(subruns_root)
 
         stages = build_subrun_stage_cmds(
             python=python,
+            s2_script=s2_script,
             s3_script=s3_script,
             s3b_script=s3b_script,
             s4c_script=s4c_script,
             subrun_id=subrun_id,
+            event_id=str(window_meta.get("event_id", "GW150914")),
+            dt_start_s=base_dt_start_s + (float(t0_ms) / 1000.0),
+            duration_s=base_duration_s - (float(t0_ms) / 1000.0),
+            strain_npz=str(s1_strain_npz),
             n_bootstrap=int(args.n_bootstrap),
             s3b_seed=int(args.seed),
             atlas_path=str(args.atlas_path),
         )
-
-        skip_to_insufficient = False
-
-        failed = False
-        for cmd in stages:
-            if len(cmd) > 1 and cmd[1] == "shadow_s2_materialized":
-                continue
-
-            if len(cmd) > 1 and Path(cmd[1]).stem == "s3b_multimode_estimates":
-                try:
-                    meta_path = _require_subrun_window_meta(subrun_dir)
-                    point["quality_flags"].append(f"subrun_window_meta={meta_path}")
-                except FileNotFoundError as exc:
-                    point["status"] = "FAILED_POINT"
-                    point["messages"].append(str(exc))
-                    failed = True
-                    break
-            try:
-                cp = run_cmd_fn(cmd, env, args.stage_timeout_s)
-            except Exception as exc:
-                point["messages"].append(f"subprocess error for {' '.join(cmd)}: {type(exc).__name__}: {exc}")
-                failed = True
-                break
-            if int(getattr(cp, "returncode", 1)) != 0:
-                stderr = (getattr(cp, "stderr", "") or "").strip()
-                is_s3 = Path(cmd[1]).stem == "s3_ringdown_estimates"
-                if is_s3 and S3_NO_VALID_ESTIMATE_MSG in stderr:
-                    point["status"] = "INSUFFICIENT_DATA"
-                    point["quality_flags"].append("s3_no_valid_estimate")
-                    if stderr:
-                        point["messages"].append(stderr)
-                    skip_to_insufficient = True
-                    break
-                point["messages"].append(f"stage failed rc={cp.returncode}: {' '.join(cmd)}")
-                if stderr:
-                    point["messages"].append(stderr)
-                failed = True
-                break
+        failed, skip_to_insufficient = execute_subrun_stages_or_abort(
+            stages=stages,
+            subrun_dir=subrun_dir,
+            env=env,
+            stage_timeout_s=args.stage_timeout_s,
+            run_cmd_fn=run_cmd_fn,
+            point=point,
+        )
 
         s3b_payload = _read_json_if_exists(subrun_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json")
         s4c_payload = _read_json_if_exists(subrun_dir / "s4c_kerr_consistency" / "outputs" / "kerr_consistency.json")

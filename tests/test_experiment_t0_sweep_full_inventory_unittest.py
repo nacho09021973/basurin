@@ -290,17 +290,22 @@ class ExperimentT0SweepFullPlanAndLayoutTests(unittest.TestCase):
     def test_build_subrun_stage_cmds_includes_s2_before_s3b(self) -> None:
         cmds = exp.build_subrun_stage_cmds(
             python="python",
+            s2_script="mvp/s2_ringdown_window.py",
             s3_script="mvp/s3_ringdown_estimates.py",
             s3b_script="mvp/s3b_multimode_estimates.py",
             s4c_script="mvp/s4c_kerr_consistency.py",
             subrun_id="rid__t0ms0008",
+            event_id="GW150914",
+            dt_start_s=0.003,
+            duration_s=0.06,
+            strain_npz="runs/BASE_RUN/s1_fetch_strain/outputs/strain.npz",
             n_bootstrap=200,
             s3b_seed=101,
             atlas_path="docs/ringdown/atlas/atlas_berti_v2_s4.json",
         )
         stage_names = [Path(cmd[1]).stem for cmd in cmds]
-        self.assertIn("shadow_s2_materialized", stage_names)
-        self.assertLess(stage_names.index("shadow_s2_materialized"), stage_names.index("s3b_multimode_estimates"))
+        self.assertIn("s2_ringdown_window", stage_names)
+        self.assertLess(stage_names.index("s2_ringdown_window"), stage_names.index("s3b_multimode_estimates"))
 
     def test_require_subrun_window_meta(self) -> None:
         with tempfile.TemporaryDirectory() as td:
