@@ -80,3 +80,28 @@ def test_experiment_t0_sweep_deterministic(tmp_path: Path) -> None:
     assert second.returncode == 0, second.stderr
     sha_second = _sha(out_json)
     assert sha_first == sha_second
+
+
+def test_experiment_t0_sweep_quiet_has_no_stderr(tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[1]
+    runs_root = tmp_path / "runs"
+    run_id = "test_t0_sweep_quiet"
+    _write_min_run(runs_root, run_id)
+
+    env = os.environ.copy()
+    env["BASURIN_RUNS_ROOT"] = str(runs_root)
+
+    cmd = [
+        sys.executable,
+        "mvp/experiment_t0_sweep.py",
+        "--run-id",
+        run_id,
+        "--t0-grid-ms",
+        "0",
+        "--mode",
+        "single",
+        "--quiet",
+    ]
+    proc = subprocess.run(cmd, cwd=repo, env=env, check=False, capture_output=True)
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", errors="replace")
+    assert proc.stderr == b""
