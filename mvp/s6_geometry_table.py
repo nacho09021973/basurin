@@ -80,13 +80,42 @@ def has_symlink_ancestor(path: Path, root: Path) -> bool:
 
 
 def parse_context(path_abs: Path, scan_root_abs: Path) -> tuple[str, str]:
+    stage_summary_path = path_abs.parent.parent / "stage_summary.json"
+    try:
+        summary_payload = _read_json(stage_summary_path)
+    except FileNotFoundError:
+        summary_payload = None
+    except Exception as exc:
+        print(f"WARN invalid stage summary at {stage_summary_path.resolve()}: {exc}", file=sys.stderr)
+        summary_payload = None
+
+    seed_from_params = "na"
+    t0_from_params = "na"
+    if isinstance(summary_payload, dict):
+        params = summary_payload.get("params")
+        if isinstance(params, dict):
+            seed_raw = params.get("seed")
+            t0_raw = params.get("t0_ms")
+            if isinstance(seed_raw, int):
+                seed_from_params = str(seed_raw)
+            if isinstance(t0_raw, int):
+                t0_from_params = str(t0_raw)
+
     path_text = path_abs.as_posix()
     t0_match = T0MS_RE.search(path_text)
     t0_ms = str(int(t0_match.group(1))) if t0_match else "na"
+    if t0_from_params != "na":
+        t0_ms = t0_from_params
 
     seed_match = SEED_RE.search(path_text)
     if seed_match:
-        return seed_match.group(1), t0_ms
+        seed = seed_match.group(1)
+        if seed_from_params != "na":
+            seed = seed_from_params
+        return seed, t0_ms
+
+    if seed_from_params != "na":
+        return seed_from_params, t0_ms
 
     seed_scan_root = re.match(r"^t0_sweep_full_seed(\d+)$", scan_root_abs.name)
     if seed_scan_root:

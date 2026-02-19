@@ -225,6 +225,33 @@ class TestGeometryTableScript(unittest.TestCase):
             self.assertIn("scan_root_abs=", proc.stderr)
             self.assertIn("s3b_multimode_estimates/stage_summary.json", proc.stderr)
 
+    def test_parse_context_prefers_stage_summary_params_over_path_regex(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            run_id = "BASE_RUN"
+            run_root = base / "runs" / run_id
+            self._write_verdict_pass(run_root)
+
+            exp = run_root / "experiment" / "generic_seedless" / "segment_without_t0"
+            outputs = exp / "s3b_multimode_estimates" / "outputs"
+            outputs.mkdir(parents=True, exist_ok=True)
+            (outputs / "multimode_estimates.json").write_text(
+                json.dumps({"results": {}, "modes": []}, sort_keys=True),
+                encoding="utf-8",
+            )
+            (exp / "s3b_multimode_estimates" / "stage_summary.json").write_text(
+                json.dumps({"params": {"seed": 777, "t0_ms": 42}}, sort_keys=True),
+                encoding="utf-8",
+            )
+
+            out = run_root / "experiment" / "derived" / "geometry_table.tsv"
+            self._run(base, run_id, run_root / "experiment", out)
+            _, rows = self._read_rows(out)
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["seed"], "777")
+            self.assertEqual(rows[0]["t0_ms"], "42")
+
     def test_symlink_intermediate_directory_is_excluded(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
