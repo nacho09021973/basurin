@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
@@ -30,6 +33,8 @@ from basurin_io import (
 EXPERIMENT_STAGE = "experiment/t0_sweep_full"
 RESULTS_NAME = "t0_sweep_full_results.json"
 S3_NO_VALID_ESTIMATE_MSG = "No detector produced a valid estimate"
+SEED_RE = re.compile(r"t0_sweep_full_seed(\d+)")
+T0MS_RE = re.compile(r"__t0ms(\d+)")
 
 
 def run_cmd(cmd: list[str], env: dict[str, str], timeout: int) -> subprocess.CompletedProcess[str]:
@@ -558,10 +563,101 @@ def run_t0_sweep_full(
     return results, out_path
 
 
+def _parse_int_csv(raw: str | None) -> list[int]:
+    if raw is None:
+        return []
+    vals = [int(x.strip()) for x in raw.split(",") if x.strip()]
+    return sorted(set(vals))
+
+
+def _resolve_runs_root_arg(runs_root: str | None) -> Path:
+    if runs_root:
+        return Path(runs_root).expanduser().resolve()
+    env_root = os.environ.get("BASURIN_RUNS_ROOT")
+    if env_root:
+        return Path(env_root).expanduser().resolve()
+    return resolve_out_root("runs").resolve()
+
+
+def _atomic_json_dump(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rendered = json.dumps(payload, sort_keys=True, ensure_ascii=False, indent=2) + "\n"
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=str(path.parent), delete=False) as tmp:
+        tmp.write(rendered)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        tmp_path = Path(tmp.name)
+    os.replace(tmp_path, path)
+
+
+def run_inventory_phase(args: argparse.Namespace) -> dict[str, Any]:
+    runs_root_abs = _resolve_runs_root_arg(getattr(args, "runs_root", None))
+    base_run = args.run_id
+    base_run_dir = runs_root_abs / base_run
+    scan_root_abs = Path(args.scan_root).expanduser().resolve() if getattr(args, "scan_root", None) else (base_run_dir / "experiment").resolve()
+
+    expected_seeds = _parse_int_csv(getattr(args, "inventory_seeds", None)) or [int(args.seed)]
+    expected_t0 = _parse_grid(args)
+    expected_pairs = [{"seed": int(seed), "t0_ms": int(t0)} for seed in expected_seeds for t0 in expected_t0]
+    expected_pairs.sort(key=lambda p: (p["seed"], p["t0_ms"]))
+
+    observed_set: set[tuple[int, int]] = set()
+    pattern = "**/s3b_multimode_estimates/outputs/multimode_estimates.json"
+    if scan_root_abs.exists():
+        for path in sorted(scan_root_abs.glob(pattern), key=lambda p: p.as_posix()):
+            path_text = path.as_posix()
+            seed_match = SEED_RE.search(path_text)
+            t0_match = T0MS_RE.search(path_text)
+            if not seed_match or not t0_match:
+                continue
+            observed_set.add((int(seed_match.group(1)), int(t0_match.group(1))))
+
+    expected_set = {(p["seed"], p["t0_ms"]) for p in expected_pairs}
+    observed_pairs = [{"seed": seed, "t0_ms": t0} for (seed, t0) in sorted(observed_set)]
+    missing_pairs = [{"seed": seed, "t0_ms": t0} for (seed, t0) in sorted(expected_set - observed_set)]
+
+    counts_by_seed = {str(seed): 0 for seed in expected_seeds}
+    counts_by_t0_ms = {str(t0): 0 for t0 in expected_t0}
+    for seed, t0 in observed_set:
+        counts_by_seed[str(seed)] = counts_by_seed.get(str(seed), 0) + 1
+        counts_by_t0_ms[str(t0)] = counts_by_t0_ms.get(str(t0), 0) + 1
+
+    payload = {
+        "base_run": base_run,
+        "base_run_dir": str(base_run_dir),
+        "scan_root_abs": str(scan_root_abs),
+        "runs_root_abs": str(runs_root_abs),
+        "expected_pairs": expected_pairs,
+        "observed_pairs": observed_pairs,
+        "missing_pairs": missing_pairs,
+        "counts_by_seed": counts_by_seed,
+        "counts_by_t0_ms": counts_by_t0_ms,
+        "observed_payload_count": len(observed_pairs),
+        "expected_payload_count": len(expected_pairs),
+    }
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    payload["sha256"] = hashlib.sha256(canonical).hexdigest()
+
+    out_path = base_run_dir / "experiment" / "derived" / "sweep_inventory.json"
+    _atomic_json_dump(out_path, payload)
+
+    if missing_pairs:
+        first = ", ".join(f"(seed={p['seed']},t0_ms={p['t0_ms']})" for p in missing_pairs[:20])
+        print(
+            f"[experiment_t0_sweep_full] inventory missing pairs: total={len(missing_pairs)} first={first}",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    return payload
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Experiment: full deterministic t0 sweep with subruns")
     ap.add_argument("--run-id", "--run", dest="run_id", required=True)
     ap.add_argument("--base-runs-root", type=Path, default=Path.cwd() / "runs")
+    ap.add_argument("--runs-root", default=None)
+    ap.add_argument("--scan-root", default=None)
+    ap.add_argument("--inventory-seeds", default=None)
     ap.add_argument("--atlas-path", required=True)
     ap.add_argument("--t0-grid-ms", default=None)
     ap.add_argument("--t0-start-ms", type=int, default=0)
@@ -575,6 +671,7 @@ def main() -> int:
 
     try:
         run_t0_sweep_full(args)
+        run_inventory_phase(args)
         return 0
     except Exception as exc:
         print(f"[experiment_t0_sweep_full] ERROR: {exc}", file=sys.stderr)
