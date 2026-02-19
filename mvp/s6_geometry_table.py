@@ -51,8 +51,32 @@ def _resolve_runs_root() -> Path:
 
 def _iter_stage_summaries(scan_root: Path) -> list[Path]:
     pattern = "**/s3b_multimode_estimates/stage_summary.json"
-    found = [p.resolve() for p in scan_root.glob(pattern) if p.is_file()]
+    found = [p.absolute() for p in scan_root.glob(pattern) if p.is_file() and not has_symlink_ancestor(p, scan_root)]
     return sorted(found, key=lambda p: p.as_posix())
+
+
+def has_symlink_ancestor(path: Path, root: Path) -> bool:
+    """Return True when ``path`` has any symlink ancestor between ``root`` and the file.
+
+    The check walks from ``path.parent`` upwards and rejects deterministically if
+    ``path`` is not under ``root``.
+    """
+    path_abs = path.absolute()
+    root_abs = root.absolute()
+    try:
+        path_abs.relative_to(root_abs)
+    except ValueError:
+        return True
+
+    current = path_abs.parent
+    while True:
+        if current.is_symlink():
+            return True
+        if current == root_abs:
+            return False
+        if current == current.parent:
+            return True
+        current = current.parent
 
 
 def parse_context(path_abs: Path, scan_root_abs: Path) -> tuple[str, str]:
