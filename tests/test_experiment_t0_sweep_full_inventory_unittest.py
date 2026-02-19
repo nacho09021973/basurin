@@ -243,15 +243,17 @@ class ExperimentT0SweepFullMainContractTests(unittest.TestCase):
 
             def fake_run_t0(args):
                 invoked_t0.append(str(args.t0_grid_ms))
-                out = (
-                    scan_root
-                    / f"t0_sweep_full_seed{int(args.seed)}"
-                    / f"segment__t0ms{int(args.t0_grid_ms):04d}"
-                    / "s3b_multimode_estimates"
-                    / "outputs"
-                )
-                out.mkdir(parents=True, exist_ok=True)
-                (out / "multimode_estimates.json").write_text("{}", encoding="utf-8")
+                t0_values = [int(x.strip()) for x in str(args.t0_grid_ms).split(",") if x.strip()]
+                for t0_ms in t0_values:
+                    out = (
+                        scan_root
+                        / f"t0_sweep_full_seed{int(args.seed)}"
+                        / f"segment__t0ms{t0_ms:04d}"
+                        / "s3b_multimode_estimates"
+                        / "outputs"
+                    )
+                    out.mkdir(parents=True, exist_ok=True)
+                    (out / "multimode_estimates.json").write_text("{}", encoding="utf-8")
 
             argv = [
                 "prog", "--phase", "run", "--run-id", "BASE_RUN",
@@ -266,13 +268,12 @@ class ExperimentT0SweepFullMainContractTests(unittest.TestCase):
                     rc = exp.main()
 
             self.assertEqual(rc, 0)
-            self.assertEqual(invoked_t0, ["2", "4"])
+            self.assertEqual(invoked_t0, ["0,2,4"])
 
             payload = json.loads((runs_root / "BASE_RUN" / "experiment" / "derived" / "sweep_inventory.json").read_text(encoding="utf-8"))
             self.assertEqual(payload["missing_pairs"], [])
-            self.assertEqual(payload["last_attempted_pairs"], [{"seed": 101, "t0_ms": 2}, {"seed": 101, "t0_ms": 4}])
-            self.assertEqual(payload["retry_counts"]["seed=101,t0_ms=2"], 1)
-            self.assertEqual(payload["retry_counts"]["seed=101,t0_ms=4"], 1)
+            self.assertEqual(payload["last_attempted_pairs"], [])
+            self.assertEqual(payload["retry_counts"], {})
 
     def test_finalize_reports_blocked_pairs_when_retries_exhausted(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -292,7 +293,7 @@ class ExperimentT0SweepFullMainContractTests(unittest.TestCase):
                 with mock.patch("mvp.experiment_t0_sweep_full.run_t0_sweep_full") as run_mock:
                     rc = exp.main()
             self.assertEqual(rc, 0)
-            run_mock.assert_not_called()
+            run_mock.assert_called_once()
 
             argv_finalize = [
                 "prog", "--phase", "finalize", "--run-id", "BASE_RUN",
@@ -310,6 +311,88 @@ class ExperimentT0SweepFullMainContractTests(unittest.TestCase):
             payload = json.loads((runs_root / "BASE_RUN" / "experiment" / "derived" / "sweep_inventory.json").read_text(encoding="utf-8"))
             self.assertEqual(len(payload["blocked_pairs"]), 2)
             self.assertIn("blocked_pairs", payload["decision"]["reason"])
+
+    def test_phase_run_keeps_explicit_base_runs_root(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            runs_root = tmp / "runs_a"
+            base_root = tmp / "runs_b"
+
+            def _fake_run(args):
+                self.assertEqual(Path(args.base_runs_root), base_root)
+
+            def _fake_inventory(args):
+                return {"status": "IN_PROGRESS", "missing_pairs": []}
+
+            argv = [
+                "prog", "--phase", "run", "--run-id", "BASE_RUN",
+                "--runs-root", str(runs_root), "--base-runs-root", str(base_root),
+                "--scan-root", str(runs_root / "BASE_RUN" / "experiment"),
+                "--seed", "606", "--t0-grid-ms", "8", "--atlas-path", "atlas.json",
+            ]
+
+            with mock.patch("sys.argv", argv):
+                with mock.patch("mvp.experiment_t0_sweep_full.run_t0_sweep_full", side_effect=_fake_run):
+                    with mock.patch("mvp.experiment_t0_sweep_full.run_inventory_phase", side_effect=_fake_inventory):
+                        rc = exp.main()
+
+            self.assertEqual(rc, 0)
+
+    def test_phase_run_uses_runs_root_as_base_runs_root_when_not_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            runs_root = tmp / "alt_runs"
+
+            def _fake_run(args):
+                self.assertEqual(Path(args.base_runs_root), runs_root)
+
+            def _fake_inventory(args):
+                return {"status": "IN_PROGRESS", "missing_pairs": []}
+
+            argv = [
+                "prog", "--phase", "run", "--run-id", "BASE_RUN",
+                "--runs-root", str(runs_root), "--scan-root", str(runs_root / "BASE_RUN" / "experiment"),
+                "--seed", "606", "--t0-grid-ms", "8", "--atlas-path", "atlas.json",
+            ]
+
+            with mock.patch("sys.argv", argv):
+                with mock.patch("mvp.experiment_t0_sweep_full.run_t0_sweep_full", side_effect=_fake_run):
+                    with mock.patch("mvp.experiment_t0_sweep_full.run_inventory_phase", side_effect=_fake_inventory):
+                        rc = exp.main()
+
+            self.assertEqual(rc, 0)
+
+    def test_phase_run_with_seed_and_grid_executes_sweep_then_inventory_without_inventory_seeds(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            runs_root = tmp / "runs"
+            calls: list[str] = []
+
+            def _fake_run(args):
+                calls.append("run")
+                stage_dir = runs_root / args.run_id / "experiment" / f"t0_sweep_full_seed{int(args.seed)}"
+                stage_dir.mkdir(parents=True, exist_ok=True)
+
+            def _fake_inventory(args):
+                calls.append("inventory")
+                self.assertEqual(args.inventory_seeds, "606")
+                stage_dir = runs_root / args.run_id / "experiment" / "t0_sweep_full_seed606"
+                self.assertTrue(stage_dir.exists())
+                return {"status": "IN_PROGRESS", "missing_pairs": []}
+
+            argv = [
+                "prog", "--phase", "run", "--run-id", "BASE_RUN",
+                "--runs-root", str(runs_root), "--scan-root", str(runs_root / "BASE_RUN" / "experiment"),
+                "--seed", "606", "--t0-grid-ms", "8", "--atlas-path", "atlas.json",
+            ]
+
+            with mock.patch("sys.argv", argv):
+                with mock.patch("mvp.experiment_t0_sweep_full.run_t0_sweep_full", side_effect=_fake_run):
+                    with mock.patch("mvp.experiment_t0_sweep_full.run_inventory_phase", side_effect=_fake_inventory):
+                        rc = exp.main()
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(calls, ["run", "inventory"])
 
     def test_phase_run_executes_sweep_before_inventory_and_uses_seed_dir(self) -> None:
         with tempfile.TemporaryDirectory() as td:
