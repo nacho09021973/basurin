@@ -312,6 +312,30 @@ class ExperimentT0SweepFullMainContractTests(unittest.TestCase):
             self.assertEqual(len(payload["blocked_pairs"]), 2)
             self.assertIn("blocked_pairs", payload["decision"]["reason"])
 
+    def test_phase_run_uses_runs_root_as_base_runs_root_when_not_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            runs_root = tmp / "alt_runs"
+
+            def _fake_run(args):
+                self.assertEqual(Path(args.base_runs_root), runs_root)
+
+            def _fake_inventory(args):
+                return {"status": "IN_PROGRESS", "missing_pairs": []}
+
+            argv = [
+                "prog", "--phase", "run", "--run-id", "BASE_RUN",
+                "--runs-root", str(runs_root), "--scan-root", str(runs_root / "BASE_RUN" / "experiment"),
+                "--seed", "606", "--t0-grid-ms", "8", "--atlas-path", "atlas.json",
+            ]
+
+            with mock.patch("sys.argv", argv):
+                with mock.patch("mvp.experiment_t0_sweep_full.run_t0_sweep_full", side_effect=_fake_run):
+                    with mock.patch("mvp.experiment_t0_sweep_full.run_inventory_phase", side_effect=_fake_inventory):
+                        rc = exp.main()
+
+            self.assertEqual(rc, 0)
+
     def test_phase_run_with_seed_and_grid_executes_sweep_then_inventory_without_inventory_seeds(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)
