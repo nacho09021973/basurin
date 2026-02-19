@@ -35,6 +35,28 @@ BASURIN implementa un pipeline reproducible para análisis de ringdown con estas
 
 ## Ejecución básica
 
+### Prerrequisitos mínimos del entorno Python
+
+Antes de ejecutar `pipeline.py` o cualquier stage del MVP, valida que estén disponibles
+las dependencias base del flujo real (`numpy`) y del fetch de strain (`requests`, `gwpy`):
+
+```bash
+python - << 'PY'
+mods = ["numpy", "requests", "gwpy"]
+missing = []
+for m in mods:
+    try:
+        __import__(m)
+    except Exception:
+        missing.append(m)
+if missing:
+    raise SystemExit(f"Faltan dependencias: {', '.join(missing)}")
+print("OK: entorno listo para s1/s2/s3")
+PY
+```
+
+Para modo local con `--local-hdf5`, añade además `h5py` a la verificación.
+
 ### 1) Single-event
 
 ```bash
