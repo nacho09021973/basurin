@@ -53,6 +53,13 @@ python mvp/pipeline.py multi \
 
 ## Experimentos (`t0_sweep_full`) e inventario por fases
 
+- `mvp/experiment_t0_sweep_full.py`: **recomendado para escala/producción**, contract-first con fases `run`/`inventory`/`finalize`.
+- `mvp/experiment_t0_sweep.py`: herramienta **DEV/INTEGRATION** para sanity-check rápido; no contract-first, no inventory/finalize, no aislamiento por subrun. **No usar para conteos oficiales**.
+
+Cuándo usar cada uno:
+- Usa `t0_sweep_full` cuando necesites reproducibilidad auditada, gobernanza por fases y barridos escalables.
+- Usa `t0_sweep` simple solo para validar wiring/integración local rápida sobre un run ya preparado.
+
 `experiment_t0_sweep_full.py` soporta fases explícitas con contrato estable:
 
 - `--phase run`: ejecuta subruns del barrido y mantiene semántica fail-fast.

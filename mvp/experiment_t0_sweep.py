@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Deterministic t0-sweep experiment over existing s2 ringdown window outputs."""
+"""DEV/INTEGRATION deterministic t0-sweep over existing s2 outputs.
+
+This script is intentionally lightweight and does not implement the
+contract-first/inventory/finalize flow nor subrun isolation required for
+official reproducible sweeps. For scalable/governed execution use
+``mvp/experiment_t0_sweep_full.py``.
+"""
 from __future__ import annotations
 
 import argparse
@@ -36,6 +42,12 @@ from mvp.s3b_multimode_estimates import (
 
 EXPERIMENT_STAGE = "experiment/t0_sweep"
 RESULTS_NAME = "t0_sweep_results.json"
+DEV_TOOL_BANNER = (
+    "DEV/INTEGRATION TOOL: no contract-first, no inventory/finalize, "
+    "no subrun isolation\n"
+    "Para resultados reproducibles y escalables usa: "
+    "mvp/experiment_t0_sweep_full.py"
+)
 
 
 def _parse_grid(args: argparse.Namespace) -> list[int]:
@@ -331,7 +343,14 @@ def run_t0_sweep(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Experiment: deterministic t0 sweep")
+    ap = argparse.ArgumentParser(
+        description=(
+            "Experiment (DEV/INTEGRATION): deterministic t0 sweep over existing s2 outputs. "
+            "No contract-first, no inventory/finalize, no subrun isolation. "
+            "Para resultados reproducibles y escalables usa: "
+            "mvp/experiment_t0_sweep_full.py"
+        )
+    )
     ap.add_argument("--run-id", "--run", dest="run_id", required=True)
     ap.add_argument("--t0-grid-ms", default=None)
     ap.add_argument("--t0-start-ms", type=int, default=None)
@@ -342,9 +361,12 @@ def main() -> int:
     ap.add_argument("--mode", choices=["single", "multimode"], default="single")
     ap.add_argument("--detector", choices=["H1", "L1", "auto"], default="auto")
     ap.add_argument("--atlas-path", default=None)
+    ap.add_argument("--quiet", action="store_true", help="Suppress DEV/INTEGRATION banner")
     args = ap.parse_args()
 
     try:
+        if not args.quiet:
+            print(f"[experiment_t0_sweep] {DEV_TOOL_BANNER}", file=sys.stderr)
         run_t0_sweep(args)
         return 0
     except Exception as exc:

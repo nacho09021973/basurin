@@ -6,8 +6,12 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import unittest
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - env dependent
+    raise unittest.SkipTest("integration requires numpy")
 
 
 _MODULE_PATH = Path(__file__).resolve().parents[1] / "mvp" / "s3b_multimode_estimates.py"

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-import numpy as np
+import unittest
+
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - env dependent
+    raise unittest.SkipTest("integration requires numpy")
 
 import mvp.s3b_multimode_estimates as s3b
 
