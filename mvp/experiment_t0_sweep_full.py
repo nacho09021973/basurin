@@ -109,6 +109,12 @@ def _subrun_id(base_run_id: str, t0_ms: int) -> str:
     return f"{base_run_id}__t0ms{int(t0_ms):04d}"
 
 
+def _init_subrun_run_valid(subrun_dir: Path) -> None:
+    rv_path = subrun_dir / "RUN_VALID" / "verdict.json"
+    rv_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(rv_path, {"verdict": "PASS"})
+
+
 def _write_subrun_shadow_s2(
     subrun_dir: Path,
     detector: str,
@@ -118,12 +124,12 @@ def _write_subrun_shadow_s2(
     offset_samples: int,
     original_npz: Path,
     original_sha: str,
+    *,
+    base_window_meta: dict[str, Any] | None,
 ) -> dict[str, Any]:
     import numpy as np
 
-    rv_path = subrun_dir / "RUN_VALID" / "verdict.json"
-    rv_path.parent.mkdir(parents=True, exist_ok=True)
-    write_json_atomic(rv_path, {"verdict": "PASS"})
+    _init_subrun_run_valid(subrun_dir)
 
     s2_stage_dir = subrun_dir / "s2_ringdown_window"
     s2_out = s2_stage_dir / "outputs"
@@ -131,6 +137,31 @@ def _write_subrun_shadow_s2(
     subrun_npz = s2_out / f"{detector}_rd.npz"
     np.savez(subrun_npz, strain=trimmed.astype(np.float64), sample_rate_hz=np.array([fs], dtype=np.float64))
     subrun_sha = sha256_file(subrun_npz)
+    base = dict(base_window_meta or {})
+    t_start = base.get("t_start_gps")
+    if t_start is not None:
+        try:
+            t_start = float(t_start) + (float(t0_ms) / 1000.0)
+        except (TypeError, ValueError):
+            t_start = None
+    duration_s = float(trimmed.size) / float(fs)
+    window_meta = {
+        "event_id": base.get("event_id", "unknown"),
+        "t0_source": base.get("t0_source"),
+        "sample_rate_hz": float(fs),
+        "detectors": [detector],
+        "n_samples": int(trimmed.size),
+        "duration_s": duration_s,
+        "t0_offset_ms": int(t0_ms),
+        "offset_samples": int(offset_samples),
+        "derived_from": str(original_npz),
+    }
+    if t_start is not None:
+        window_meta["t_start_gps"] = t_start
+        window_meta["t_end_gps"] = t_start + duration_s
+    meta_path = s2_out / "window_meta.json"
+    write_json_atomic(meta_path, window_meta)
+    window_meta_sha = sha256_file(meta_path)
 
     stage_summary = {
         "stage": "s2_ringdown_window",
@@ -143,6 +174,7 @@ def _write_subrun_shadow_s2(
             "offset_samples": int(offset_samples),
             "npz_original_sha256": original_sha,
             "npz_trimmed_sha256": subrun_sha,
+            "window_meta_sha256": window_meta_sha,
             "derived_from": str(original_npz),
         },
     }
@@ -150,8 +182,8 @@ def _write_subrun_shadow_s2(
 
     manifest = {
         "schema_version": "mvp_manifest_v1",
-        "artifacts": {f"{detector}_rd": f"outputs/{detector}_rd.npz"},
-        "hashes": {f"{detector}_rd": subrun_sha},
+        "artifacts": {f"{detector}_rd": f"outputs/{detector}_rd.npz", "window_meta": "outputs/window_meta.json"},
+        "hashes": {f"{detector}_rd": subrun_sha, "window_meta": window_meta_sha},
         "provenance": {
             "source_stage": "s2_ringdown_window",
             "npz_original_sha256": original_sha,
@@ -161,7 +193,19 @@ def _write_subrun_shadow_s2(
         },
     }
     write_json_atomic(s2_stage_dir / "manifest.json", manifest)
-    return {"npz_trimmed_sha256": subrun_sha, "offset_samples": int(offset_samples)}
+    return {
+        "npz_trimmed_sha256": subrun_sha,
+        "offset_samples": int(offset_samples),
+        "window_meta_sha256": window_meta_sha,
+        "window_meta_path": str(meta_path),
+    }
+
+
+def _require_subrun_window_meta(subrun_dir: Path) -> Path:
+    path = subrun_dir / "s2_ringdown_window" / "outputs" / "window_meta.json"
+    if not path.exists():
+        raise FileNotFoundError(f"missing required subrun provenance: {path}")
+    return path
 
 
 def _read_json_if_exists(path: Path) -> dict[str, Any] | None:
@@ -238,6 +282,7 @@ def build_subrun_stage_cmds(
     Seed propagation to s3b is explicit via --seed <s3b_seed>.
     """
     return [
+        [python, "shadow_s2_materialized", "--run", subrun_id],
         [python, s3_script, "--run", subrun_id],
         [
             python,
@@ -251,6 +296,38 @@ def build_subrun_stage_cmds(
         ],
         [python, s4c_script, "--run-id", subrun_id, "--atlas-path", atlas_path],
     ]
+
+
+def build_subrun_execution_plan(
+    *,
+    subrun_dir: Path,
+    python: str,
+    s3_script: str,
+    s3b_script: str,
+    s4c_script: str,
+    subrun_id: str,
+    n_bootstrap: int,
+    s3b_seed: int,
+    atlas_path: str,
+) -> dict[str, Any]:
+    """Pure plan for one subrun including local provenance path expectations."""
+    window_meta = subrun_dir / "s2_ringdown_window" / "outputs" / "window_meta.json"
+    return {
+        "subrun_id": subrun_id,
+        "expected_inputs": {
+            "s2_window_meta": str(window_meta),
+        },
+        "commands": build_subrun_stage_cmds(
+            python=python,
+            s3_script=s3_script,
+            s3b_script=s3b_script,
+            s4c_script=s4c_script,
+            subrun_id=subrun_id,
+            n_bootstrap=n_bootstrap,
+            s3b_seed=s3b_seed,
+            atlas_path=atlas_path,
+        ),
+    }
 
 
 def compute_experiment_paths(run_id: str) -> tuple[Path, Path, Path]:
@@ -412,9 +489,13 @@ def run_t0_sweep_full(
             offset_samples,
             source_npz,
             source_sha,
+            base_window_meta=window_meta,
         )
         point["quality_flags"].append(
-            f"provenance:offset_samples={provenance['offset_samples']},trimmed_sha={provenance['npz_trimmed_sha256']}"
+            "provenance:"
+            f"offset_samples={provenance.get('offset_samples')},"
+            f"trimmed_sha={provenance.get('npz_trimmed_sha256')},"
+            f"window_meta_sha={provenance.get('window_meta_sha256')}"
         )
 
         env = os.environ.copy()
@@ -435,6 +516,18 @@ def run_t0_sweep_full(
 
         failed = False
         for cmd in stages:
+            if len(cmd) > 1 and cmd[1] == "shadow_s2_materialized":
+                continue
+
+            if len(cmd) > 1 and Path(cmd[1]).stem == "s3b_multimode_estimates":
+                try:
+                    meta_path = _require_subrun_window_meta(subrun_dir)
+                    point["quality_flags"].append(f"subrun_window_meta={meta_path}")
+                except FileNotFoundError as exc:
+                    point["status"] = "FAILED_POINT"
+                    point["messages"].append(str(exc))
+                    failed = True
+                    break
             try:
                 cp = run_cmd_fn(cmd, env, args.stage_timeout_s)
             except Exception as exc:
