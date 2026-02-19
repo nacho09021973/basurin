@@ -82,6 +82,30 @@ runs/<RUN_ID>/experiment/t0_sweep_full/
 - `SUBRUN_ID` (run_id del subrun):
   - p.ej. `<RUN_ID>__t0ms0000`, `<RUN_ID>__t0ms0005`, …
 
+### 3.2) Caso `seed sweep` con `runsroot`
+
+Cuando se usa separación por semilla, el layout observado puede verse así:
+
+```
+runs/<RUN_ID>/experiment/t0_sweep_full_seed<seed>/runsroot/<RUN_ID>/experiment/t0_sweep_full/runs/<SUBRUN_ID>/...
+```
+
+Este patrón aparece al materializar subruns por seed dentro de un `runsroot` dedicado.
+Para inventarios/agregados, conviene tratar `runsroot` como `scan_root` y no inferir subruns por prefijos.
+
+### 3.3) Dónde viven los agregados deterministas
+
+Bajo el run principal:
+
+```
+runs/<RUN_ID>/experiment/derived/
+  geometry_table.tsv
+  sweep_inventory.json
+```
+
+- `geometry_table.tsv`: agregado de geometría (`s6_geometry_table.py`) con escaneo determinista.
+- `sweep_inventory.json`: inventario/aceptación/decisión del experimento (`phase=inventory/finalize`).
+
 ---
 
 ## 4) El error típico (y por qué pasa)
@@ -205,6 +229,16 @@ test -f "$sub/s3b_multimode_estimates/stage_summary.json" \
 
 Si `RUNSROOT` o el `stage_summary.json` no existen, no compares seeds todavía: primero hay que
 corregir la ruta efectiva (árbol equivocado, `runs_root` no materializado o `subrun_id` distinto).
+
+### 7.2) Recordatorio para `experiment_t0_sweep_full`
+
+- Los stages siguen interpretando `--run-id` como `<RUNS_ROOT>/<run_id>/...`.
+- Para `phase=inventory` y `phase=finalize`, el experimento usa `--runs-root/--scan-root` explícitos y no depende de `BASURIN_RUNS_ROOT`.
+- En `inventory/finalize`, pasa siempre seeds + grilla explícitas (`--inventory-seeds`, `--t0-grid-ms` o equivalente start/stop/step).
+
+### 7.3) Warning reforzado sobre symlinks
+
+No dependas de symlinks en `runsroot` para agregación/inventario: al agregar, se excluyen ancestros symlink para evitar conteo duplicado o rutas alias.
 
 ---
 
