@@ -49,22 +49,9 @@ def _resolve_runs_root() -> Path:
     return (Path.cwd() / "runs").resolve()
 
 
-def _iter_multimode_paths(scan_root: Path) -> list[Path]:
-    """Collect multimode_estimates.json paths without traversing symlink dirs."""
-    found: list[Path] = []
-    for root, dirnames, filenames in os.walk(scan_root, followlinks=False):
-        root_path = Path(root)
-        kept: list[str] = []
-        for dirname in dirnames:
-            cand = root_path / dirname
-            if cand.is_symlink():
-                print(f"SKIP_SYMLINK_DIR {cand.resolve()}", file=sys.stderr)
-                continue
-            kept.append(dirname)
-        dirnames[:] = kept
-        candidate = root_path / "multimode_estimates.json"
-        if candidate.as_posix().endswith("/s3b_multimode_estimates/outputs/multimode_estimates.json"):
-            found.append(candidate)
+def _iter_stage_summaries(scan_root: Path) -> list[Path]:
+    pattern = "**/s3b_multimode_estimates/stage_summary.json"
+    found = [p.resolve() for p in scan_root.glob(pattern) if p.is_file()]
     return sorted(found, key=lambda p: p.as_posix())
 
 
@@ -129,11 +116,11 @@ def _default_out_path(scan_root: Path, out_root: Path, run_id: str) -> Path:
 def _sort_key(row: dict[str, str]) -> tuple[int, int, int, int, str]:
     seed = row["seed"]
     t0 = row["t0_ms"]
-    seed_ok = 0 if seed.isdigit() else 1
-    t0_ok = 0 if t0.isdigit() else 1
-    seed_num = int(seed) if seed_ok == 0 else 0
-    t0_num = int(t0) if t0_ok == 0 else 0
-    return (seed_ok, seed_num, t0_ok, t0_num, row["path"])
+    seed_is_na = 1 if seed == "na" else 0
+    t0_is_na = 1 if t0 == "na" else 0
+    seed_num = int(seed) if seed.isdigit() else 0
+    t0_num = int(t0) if t0.isdigit() else 0
+    return (seed_is_na, seed_num, t0_is_na, t0_num, row["path"])
 
 
 def main() -> int:
@@ -183,45 +170,62 @@ def main() -> int:
     if jsonl_path is not None and not _within(jsonl_path, run_root):
         raise RuntimeError(f"--jsonl-out must stay under run root: {jsonl_path.resolve()} not in {run_root.resolve()}")
 
-    mm_paths = _iter_multimode_paths(scan_root)
+    stage_pattern = "**/s3b_multimode_estimates/stage_summary.json"
+    s3b_summaries = _iter_stage_summaries(scan_root)
 
     rows: list[dict[str, str]] = []
     input_records: list[dict[str, str]] = []
     input_seen: set[str] = set()
     rows_with_span = 0
     skipped_invalid = 0
+    skipped_missing_payload = 0
 
-    for mm_path in mm_paths:
+    for s3b_summary in s3b_summaries:
+        s3b_root = s3b_summary.parent
+        mm_path = s3b_root / "outputs" / "multimode_estimates.json"
         rel_path = mm_path.resolve().relative_to(scan_root).as_posix()
+        seed, t0_ms = parse_context(mm_path.resolve(), scan_root.resolve())
+        s3b_seed_param = "na"
+        try:
+            summary_payload = _read_json(s3b_summary)
+        except Exception as exc:
+            print(f"WARN invalid stage summary at {s3b_summary.resolve()}: {exc}", file=sys.stderr)
+        else:
+            params = summary_payload.get("parameters")
+            if isinstance(params, dict) and isinstance(params.get("seed"), (int, float, str)):
+                s3b_seed_param = str(params.get("seed"))
+
+        rel_s3b = s3b_summary.resolve().relative_to(scan_root).as_posix()
+        key = f"s3b_stage_summary:{rel_s3b}"
+        if key not in input_seen:
+            input_seen.add(key)
+            input_records.append({
+                "label": "s3b_stage_summary",
+                "path": rel_s3b,
+                "sha256": sha256_file(s3b_summary),
+            })
+
+        if not mm_path.exists():
+            skipped_missing_payload += 1
+            rows.append({
+                "seed": seed,
+                "t0_ms": t0_ms,
+                "s3b_seed_param": s3b_seed_param,
+                "lnQ_span": "na",
+                "cv_Q": "na",
+                "valid_fraction": "na",
+                "verdict": "na",
+                "flags": "missing_multimode_estimates_json",
+                "path": rel_path,
+            })
+            continue
+
         try:
             payload = _read_json(mm_path)
         except Exception as exc:
             skipped_invalid += 1
             print(f"WARN skip invalid multimode json at {mm_path.resolve()}: {exc}", file=sys.stderr)
             continue
-
-        seed, t0_ms = parse_context(mm_path.resolve(), scan_root.resolve())
-
-        s3b_seed_param = "na"
-        s3b_summary = mm_path.parent.parent / "stage_summary.json"
-        if s3b_summary.exists():
-            try:
-                summary_payload = _read_json(s3b_summary)
-            except Exception as exc:
-                print(f"WARN invalid stage summary at {s3b_summary.resolve()}: {exc}", file=sys.stderr)
-            else:
-                params = summary_payload.get("parameters")
-                if isinstance(params, dict) and isinstance(params.get("seed"), (int, float, str)):
-                    s3b_seed_param = str(params.get("seed"))
-                rel_s3b = s3b_summary.resolve().relative_to(scan_root).as_posix()
-                key = f"s3b_stage_summary:{rel_s3b}"
-                if key not in input_seen:
-                    input_seen.add(key)
-                    input_records.append({
-                        "label": "s3b_stage_summary",
-                        "path": rel_s3b,
-                        "sha256": sha256_file(s3b_summary),
-                    })
 
         lnq_span = _safe_mode_value(payload, args.mode_label, "lnQ_span")
         cv_q = _safe_mode_value(payload, args.mode_label, "cv_Q")
@@ -239,7 +243,7 @@ def main() -> int:
             flags = sorted(str(x) for x in qflags)
             flags_value = ",".join(flags) if flags else ""
 
-        row = {
+        rows.append({
             "seed": seed,
             "t0_ms": t0_ms,
             "s3b_seed_param": s3b_seed_param,
@@ -249,8 +253,7 @@ def main() -> int:
             "verdict": verdict,
             "flags": flags_value,
             "path": rel_path,
-        }
-        rows.append(row)
+        })
 
         key_mm = f"multimode_estimates:{rel_path}"
         if key_mm not in input_seen:
@@ -260,6 +263,15 @@ def main() -> int:
                 "path": rel_path,
                 "sha256": sha256_file(mm_path),
             })
+
+    if len(rows) == 0:
+        print(
+            "No geometry rows discovered: "
+            f"scan_root_abs={scan_root.resolve()} pattern={stage_pattern}. "
+            "Hint: the layout likely does not contain s3b_multimode_estimates/stage_summary.json",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
 
     rows.sort(key=_sort_key)
     input_records.sort(key=lambda x: (x["label"], x["path"]))
@@ -291,9 +303,10 @@ def main() -> int:
         },
         "inputs": input_records,
         "counts": {
-            "total_files": len(mm_paths),
+            "total_files": len(s3b_summaries),
             "rows_written": len(rows),
             "files_skipped_invalid": skipped_invalid,
+            "files_skipped_missing_payload": skipped_missing_payload,
             "rows_with_221_lnQ_span": rows_with_span if args.mode_label == "221" else 0,
             "rows_with_mode_lnQ_span": rows_with_span,
         },
