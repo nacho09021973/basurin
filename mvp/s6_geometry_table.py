@@ -48,6 +48,24 @@ def _resolve_out_root() -> Path:
     return (Path.cwd() / "runs").resolve()
 
 
+def _iter_multimode_paths(scan_root: Path) -> list[Path]:
+    """Collect multimode_estimates.json paths without traversing symlink dirs."""
+    found: list[Path] = []
+    for root, dirnames, filenames in os.walk(scan_root, followlinks=False):
+        root_path = Path(root)
+        kept: list[str] = []
+        for dirname in dirnames:
+            cand = root_path / dirname
+            if cand.is_symlink():
+                print(f"SKIP_SYMLINK_DIR {cand.resolve()}", file=sys.stderr)
+                continue
+            kept.append(dirname)
+        dirnames[:] = kept
+        if "multimode_estimates.json" in filenames:
+            found.append(root_path / "multimode_estimates.json")
+    return sorted(found)
+
+
 def _parse_seed_from_path(path_text: str) -> str:
     m = SEED_RE.search(path_text.replace("\\", "/"))
     return m.group(1) if m else "na"
@@ -118,40 +136,43 @@ def _sort_key(row: dict[str, str]) -> tuple[int, int, int, int, str]:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Build deterministic geometry table from s3b outputs")
     ap.add_argument("--run-id", required=True)
+    ap.add_argument("--base-runs-root", default=None)
     ap.add_argument("--scan-root", default=None)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--out-path", default=None)
     ap.add_argument("--jsonl-out", default=None)
     ap.add_argument("--mode-label", default="221")
     ap.add_argument("--no-run-valid-check", action="store_true")
     args = ap.parse_args()
 
-    out_root = _resolve_out_root()
+    out_root = Path(args.base_runs_root).resolve() if args.base_runs_root else _resolve_out_root()
     run_root = out_root / args.run_id
 
     if not args.no_run_valid_check:
         verdict_path = run_root / "RUN_VALID" / "verdict.json"
         if not verdict_path.exists():
-            raise FileNotFoundError(f"RUN_VALID verdict not found: {verdict_path}")
+            raise FileNotFoundError(f"RUN_VALID verdict not found: {verdict_path.resolve()}")
         verdict = _read_json(verdict_path).get("verdict")
         if verdict != "PASS":
-            raise RuntimeError(f"RUN_VALID verdict is not PASS: {verdict!r}")
+            raise RuntimeError(f"RUN_VALID verdict is not PASS: {verdict!r} at {verdict_path.resolve()}")
 
     scan_root = Path(args.scan_root).resolve() if args.scan_root else run_root.resolve()
     if not scan_root.exists():
-        raise FileNotFoundError(f"scan root does not exist: {scan_root}")
+        raise FileNotFoundError(f"scan root does not exist: {scan_root.resolve()}")
 
     if not _within(scan_root, run_root):
         raise RuntimeError(f"scan root must stay under run root: {scan_root} not in {run_root}")
 
-    out_path = Path(args.out).resolve() if args.out else _default_out_path(scan_root, out_root, args.run_id).resolve()
-    if not _within(out_path, scan_root):
-        raise RuntimeError(f"--out must stay under scan root: {out_path} not in {scan_root}")
+    out_arg = args.out_path if args.out_path else args.out
+    out_path = Path(out_arg).resolve() if out_arg else _default_out_path(scan_root, out_root, args.run_id).resolve()
+    if not _within(out_path, run_root):
+        raise RuntimeError(f"--out-path/--out must stay under run root: {out_path.resolve()} not in {run_root.resolve()}")
 
     jsonl_path = Path(args.jsonl_out).resolve() if args.jsonl_out else None
-    if jsonl_path is not None and not _within(jsonl_path, scan_root):
-        raise RuntimeError(f"--jsonl-out must stay under scan root: {jsonl_path} not in {scan_root}")
+    if jsonl_path is not None and not _within(jsonl_path, run_root):
+        raise RuntimeError(f"--jsonl-out must stay under run root: {jsonl_path.resolve()} not in {run_root.resolve()}")
 
-    mm_paths = sorted(scan_root.rglob("multimode_estimates.json"))
+    mm_paths = _iter_multimode_paths(scan_root)
 
     rows: list[dict[str, str]] = []
     input_records: list[dict[str, str]] = []

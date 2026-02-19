@@ -86,6 +86,69 @@ class TestGeometryTableScript(unittest.TestCase):
             self.assertIn("a,b", lines[2])
             self.assertTrue(lines[2].startswith("202\t0050\t202\t2.2"))
 
+    def test_ignores_symlinked_directories_during_scan(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        script = repo_root / "mvp" / "s6_geometry_table.py"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            run_id = "BASE_RUN"
+            run_root = base / "runs" / run_id
+            scan_root = run_root / "experiment"
+            outside_root = base / "outside_seed"
+
+            (run_root / "RUN_VALID").mkdir(parents=True, exist_ok=True)
+            (run_root / "RUN_VALID" / "verdict.json").write_text(
+                json.dumps({"verdict": "PASS"}, sort_keys=True),
+                encoding="utf-8",
+            )
+
+            ok_path = scan_root / "ok" / "segment__t0ms0001" / "s3b_multimode_estimates" / "outputs"
+            (ok_path).mkdir(parents=True, exist_ok=True)
+            (ok_path / "multimode_estimates.json").write_text(
+                json.dumps(
+                    {
+                        "results": {"verdict": "OK", "quality_flags": []},
+                        "modes": [{"label": "221", "fit": {"stability": {"lnQ_span": 1.23}}}],
+                    },
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+
+            outside_path = outside_root / "bad" / "segment__t0ms9999" / "s3b_multimode_estimates" / "outputs"
+            outside_path.mkdir(parents=True, exist_ok=True)
+            (outside_path / "multimode_estimates.json").write_text(
+                json.dumps(
+                    {
+                        "results": {"verdict": "OK", "quality_flags": ["outside"]},
+                        "modes": [{"label": "221", "fit": {"stability": {"lnQ_span": 999}}}],
+                    },
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+
+            (scan_root / "link").symlink_to(outside_root, target_is_directory=True)
+
+            cmd = [
+                sys.executable,
+                str(script),
+                "--run-id",
+                run_id,
+                "--scan-root",
+                str(scan_root),
+            ]
+            proc = subprocess.run(cmd, cwd=base, check=True, capture_output=True, text=True)
+
+            tsv_path = run_root / "experiment" / "derived" / "geometry_table.tsv"
+            lines = tsv_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 2)
+            self.assertIn("SKIP_SYMLINK_DIR", proc.stderr)
+            self.assertIn("\tok/segment__t0ms0001/s3b_multimode_estimates/outputs/multimode_estimates.json", lines[1])
+            self.assertNotIn("999", "\n".join(lines))
+            self.assertNotIn("outside", "\n".join(lines))
+
 
 if __name__ == "__main__":
     unittest.main()
