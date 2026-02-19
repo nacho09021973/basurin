@@ -22,6 +22,69 @@ class FakeStrain:
 
 
 class TestExperimentT0SweepFullPaths(unittest.TestCase):
+    def test_subrun_plan_includes_s2_before_s3b_and_writes_in_subrun(self) -> None:
+        exp = importlib.import_module("mvp.experiment_t0_sweep_full")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subrun_dir = Path(tmpdir) / "runs" / "BASE_RUN__t0ms0008"
+            subrun_dir.mkdir(parents=True, exist_ok=True)
+
+            plan = exp.build_subrun_execution_plan(
+                subrun_dir=subrun_dir,
+                python="python",
+                s2_script="mvp/s2_ringdown_window.py",
+                s3_script="mvp/s3_ringdown_estimates.py",
+                s3b_script="mvp/s3b_multimode_estimates.py",
+                s4c_script="mvp/s4c_kerr_consistency.py",
+                subrun_id="BASE_RUN__t0ms0008",
+                event_id="GW150914",
+                dt_start_s=0.011,
+                duration_s=0.052,
+                strain_npz="/tmp/base/s1_fetch_strain/outputs/strain.npz",
+                n_bootstrap=200,
+                s3b_seed=101,
+                atlas_path="atlas.json",
+            )
+
+            stage_names = [Path(cmd[1]).stem for cmd in plan["commands"]]
+            self.assertLess(stage_names.index("s2_ringdown_window"), stage_names.index("s3b_multimode_estimates"))
+            self.assertEqual(
+                plan["expected_inputs"]["s2_window_meta"],
+                str(subrun_dir / "s2_ringdown_window" / "outputs" / "window_meta.json"),
+            )
+
+    def test_missing_window_meta_aborts_before_s3b(self) -> None:
+        exp = importlib.import_module("mvp.experiment_t0_sweep_full")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subrun_dir = Path(tmpdir) / "runs" / "BASE_RUN__t0ms0008"
+            subrun_dir.mkdir(parents=True, exist_ok=True)
+            point = {"messages": [], "quality_flags": [], "status": "FAILED_POINT"}
+            seen: list[str] = []
+
+            def _fake_run(cmd: list[str], env: dict[str, str], timeout: int) -> SimpleNamespace:
+                seen.append(Path(cmd[1]).stem)
+                return SimpleNamespace(returncode=0, stderr="")
+
+            stages = [
+                ["python", "mvp/s2_ringdown_window.py", "--run", "BASE_RUN__t0ms0008"],
+                ["python", "mvp/s3_ringdown_estimates.py", "--run", "BASE_RUN__t0ms0008"],
+                ["python", "mvp/s3b_multimode_estimates.py", "--run-id", "BASE_RUN__t0ms0008"],
+            ]
+
+            with self.assertRaises(SystemExit) as ctx:
+                exp.execute_subrun_stages_or_abort(
+                    stages=stages,
+                    subrun_dir=subrun_dir,
+                    env={},
+                    stage_timeout_s=1,
+                    run_cmd_fn=_fake_run,
+                    point=point,
+                )
+
+            self.assertEqual(ctx.exception.code, 2)
+            self.assertEqual(seen, ["s2_ringdown_window"])
+
     def test_compute_experiment_paths_follow_seed_runsroot(self) -> None:
         exp = importlib.import_module("mvp.experiment_t0_sweep_full")
 
@@ -137,11 +200,18 @@ class TestExperimentT0SweepFullPaths(unittest.TestCase):
             fake_source_npz.parent.mkdir(parents=True, exist_ok=True)
             fake_source_npz.write_bytes(b"npz-placeholder")
             (expected_out_root / run_id / "s2_ringdown_window" / "manifest.json").write_text("{}", encoding="utf-8")
+            (expected_out_root / run_id / "s1_fetch_strain" / "outputs").mkdir(parents=True, exist_ok=True)
+            (expected_out_root / run_id / "s1_fetch_strain" / "outputs" / "strain.npz").write_bytes(b"npz-placeholder")
 
             seen_envs: list[dict[str, str]] = []
 
             def _fake_run_cmd(cmd: list[str], env: dict[str, str], timeout: int) -> SimpleNamespace:
                 seen_envs.append(dict(env))
+                if Path(cmd[1]).stem == "s2_ringdown_window":
+                    run_id_arg = cmd[cmd.index("--run") + 1]
+                    meta = expected_subruns_root / run_id_arg / "s2_ringdown_window" / "outputs" / "window_meta.json"
+                    meta.parent.mkdir(parents=True, exist_ok=True)
+                    meta.write_text("{}", encoding="utf-8")
                 return SimpleNamespace(returncode=0, stderr="")
 
             with (
