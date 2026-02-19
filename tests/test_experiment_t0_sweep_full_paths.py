@@ -23,6 +23,40 @@ class FakeStrain:
 
 
 class TestExperimentT0SweepFullPaths(unittest.TestCase):
+    def test_build_subrun_stage_cmds_wires_s2_to_subrun_id_and_subrun_runs_root(self) -> None:
+        exp = importlib.import_module("mvp.experiment_t0_sweep_full")
+
+        base_runs_root = Path("/tmp/base_runs")
+        subrun_runs_root = Path("/tmp/subrun_runs")
+        subrun_id = "BASE_RUN__t0ms0008"
+
+        cmds = exp.build_subrun_stage_cmds(
+            python="python",
+            s2_script="mvp/s2_ringdown_window.py",
+            s3_script="mvp/s3_ringdown_estimates.py",
+            s3b_script="mvp/s3b_multimode_estimates.py",
+            s4c_script="mvp/s4c_kerr_consistency.py",
+            subrun_runs_root=str(subrun_runs_root),
+            subrun_id=subrun_id,
+            event_id="GW150914",
+            dt_start_s=0.011,
+            duration_s=0.052,
+            strain_npz=str(base_runs_root / "BASE_RUN" / "s1_fetch_strain" / "outputs" / "strain.npz"),
+            n_bootstrap=200,
+            s3b_seed=606,
+            atlas_path="atlas.json",
+        )
+
+        s2_cmd = next(cmd for cmd in cmds if Path(cmd[1]).stem == "s2_ringdown_window")
+        self.assertEqual(s2_cmd[s2_cmd.index("--run-id") + 1], subrun_id)
+        self.assertEqual(s2_cmd[s2_cmd.index("--runs-root") + 1], str(subrun_runs_root))
+
+        expected_window_meta = exp._expected_subrun_window_meta_path(subrun_runs_root, subrun_id)
+        self.assertEqual(
+            expected_window_meta,
+            subrun_runs_root / subrun_id / "s2_ringdown_window" / "outputs" / "window_meta.json",
+        )
+
     def test_subrun_plan_includes_s2_before_s3b_and_writes_in_subrun(self) -> None:
         exp = importlib.import_module("mvp.experiment_t0_sweep_full")
 
@@ -120,6 +154,36 @@ class TestExperimentT0SweepFullPaths(unittest.TestCase):
             self.assertFalse(skip)
             self.assertEqual(trace["s2_window_meta_check"]["expected_window_meta_path"], str(meta_path))
             self.assertTrue(trace["s2_window_meta_check"]["found"])
+
+    def test_window_meta_precheck_passes_when_simulated_s2_writes_expected_path(self) -> None:
+        exp = importlib.import_module("mvp.experiment_t0_sweep_full")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runs_root = Path(tmpdir) / "runs"
+            subrun_id = "BASE_RUN__t0ms0008"
+            subrun_dir = runs_root / subrun_id
+            point = {"messages": [], "quality_flags": [], "status": "FAILED_POINT"}
+
+            stages = [["python", "mvp/s2_ringdown_window.py", "--run-id", subrun_id]]
+
+            def _fake_run(cmd: list[str], env: dict[str, str], timeout: int) -> SimpleNamespace:
+                expected_meta = exp._expected_subrun_window_meta_path(runs_root, subrun_id)
+                expected_meta.parent.mkdir(parents=True, exist_ok=True)
+                expected_meta.write_text("{}", encoding="utf-8")
+                return SimpleNamespace(returncode=0, stderr="")
+
+            failed, skip = exp.execute_subrun_stages_or_abort(
+                stages=stages,
+                subrun_dir=subrun_dir,
+                env={},
+                stage_timeout_s=1,
+                run_cmd_fn=_fake_run,
+                point=point,
+                subrun_runs_root=runs_root,
+            )
+
+            self.assertFalse(failed)
+            self.assertFalse(skip)
 
     def test_compute_experiment_paths_follow_seed_runsroot(self) -> None:
         exp = importlib.import_module("mvp.experiment_t0_sweep_full")
