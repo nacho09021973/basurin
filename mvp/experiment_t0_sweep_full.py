@@ -166,8 +166,12 @@ def _write_subrun_shadow_s2(
 
     stage_summary = {
         "stage": "s2_ringdown_window",
-        "run_id": subrun_dir.name,
+        "run": subrun_dir.name,
         "verdict": "PASS",
+        "outputs": [
+            {"path": f"s2_ringdown_window/outputs/{detector}_rd.npz", "sha256": subrun_sha},
+            {"path": "s2_ringdown_window/outputs/window_meta.json", "sha256": window_meta_sha},
+        ],
         "results": {
             "detector": detector,
             "fs_hz": float(fs),
