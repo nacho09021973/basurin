@@ -194,7 +194,8 @@ class TestExperimentT0SweepFullPaths(unittest.TestCase):
             )
 
             os.environ["BASURIN_RUNS_ROOT"] = str(runs_root)
-            expected_out_root, _, expected_subruns_root = exp.compute_experiment_paths(run_id)
+            expected_out_root, _, _ = exp.compute_experiment_paths(run_id)
+            expected_subruns_root = expected_out_root / run_id / "experiment" / f"t0_sweep_full_seed{int(args.seed)}" / "runs"
 
             fake_source_npz = expected_out_root / run_id / "s2_ringdown_window" / "outputs" / "H1_rd.npz"
             fake_source_npz.parent.mkdir(parents=True, exist_ok=True)

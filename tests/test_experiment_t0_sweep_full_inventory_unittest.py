@@ -311,6 +311,38 @@ class ExperimentT0SweepFullMainContractTests(unittest.TestCase):
             self.assertEqual(len(payload["blocked_pairs"]), 2)
             self.assertIn("blocked_pairs", payload["decision"]["reason"])
 
+    def test_phase_run_executes_sweep_before_inventory_and_uses_seed_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            runs_root = tmp / "runs"
+            calls: list[str] = []
+
+            def _fake_run(args):
+                calls.append("run")
+                stage_dir = runs_root / args.run_id / "experiment" / f"t0_sweep_full_seed{int(args.seed)}"
+                stage_dir.mkdir(parents=True, exist_ok=True)
+
+            def _fake_inventory(args):
+                calls.append("inventory")
+                stage_dir = runs_root / args.run_id / "experiment" / f"t0_sweep_full_seed{int(args.seed)}"
+                self.assertTrue(stage_dir.exists())
+                return {"status": "IN_PROGRESS", "missing_pairs": []}
+
+            argv = [
+                "prog", "--phase", "run", "--run-id", "BASE_RUN",
+                "--runs-root", str(runs_root), "--scan-root", str(runs_root / "BASE_RUN" / "experiment"),
+                "--seed", "606", "--t0-grid-ms", "8", "--atlas-path", "atlas.json",
+            ]
+
+            with mock.patch("sys.argv", argv):
+                with mock.patch("mvp.experiment_t0_sweep_full.run_t0_sweep_full", side_effect=_fake_run):
+                    with mock.patch("mvp.experiment_t0_sweep_full.run_inventory_phase", side_effect=_fake_inventory):
+                        rc = exp.main()
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(calls, ["run", "inventory"])
+            self.assertTrue((runs_root / "BASE_RUN" / "experiment" / "t0_sweep_full_seed606").exists())
+
 
 class ExperimentT0SweepFullPlanAndLayoutTests(unittest.TestCase):
     def test_build_subrun_stage_cmds_includes_s2_before_s3b(self) -> None:

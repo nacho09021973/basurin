@@ -487,7 +487,9 @@ def run_t0_sweep_full(
     *,
     run_cmd_fn: Callable[[list[str], dict[str, str], int], Any] = run_cmd,
 ) -> tuple[dict[str, Any], Path]:
-    out_root, stage_dir, subruns_root = compute_experiment_paths(args.run_id)
+    out_root, _, _ = compute_experiment_paths(args.run_id)
+    stage_dir = out_root / args.run_id / "experiment" / f"t0_sweep_full_seed{int(args.seed)}"
+    subruns_root = stage_dir / "runs"
     base_root = Path(args.base_runs_root).expanduser().resolve()
     enforce_isolated_runsroot(out_root, args.run_id)
     ensure_seed_runsroot_layout(out_root, args.run_id)
@@ -954,6 +956,14 @@ def main() -> int:
 
     try:
         _validate_phase_contracts(args, raw_argv)
+        if args.phase == "inventory":
+            run_inventory_phase(args)
+            return 0
+
+        if args.phase == "finalize":
+            run_inventory_phase(args)
+            return 0
+
         if args.phase == "run":
             if args.resume_missing:
                 inventory_payload = run_inventory_phase(args)
@@ -980,13 +990,10 @@ def main() -> int:
                     single_args.seed = int(pair["seed"])
                     single_args.t0_grid_ms = str(int(pair["t0_ms"]))
                     run_t0_sweep_full(single_args)
-                run_inventory_phase(args)
             else:
                 run_t0_sweep_full(args)
-                run_inventory_phase(args)
-        elif args.phase == "inventory":
-            run_inventory_phase(args)
-        elif args.phase == "finalize":
+            if not args.inventory_seeds:
+                args.inventory_seeds = str(int(args.seed))
             run_inventory_phase(args)
         return 0
     except Exception as exc:
