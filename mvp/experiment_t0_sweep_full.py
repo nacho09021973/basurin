@@ -965,6 +965,8 @@ def main() -> int:
             return 0
 
         if args.phase == "run":
+            run_t0_sweep_full(args)
+
             if args.resume_missing:
                 inventory_payload = run_inventory_phase(args)
                 missing_pairs = list(inventory_payload.get("missing_pairs", []))
@@ -990,9 +992,8 @@ def main() -> int:
                     single_args.seed = int(pair["seed"])
                     single_args.t0_grid_ms = str(int(pair["t0_ms"]))
                     run_t0_sweep_full(single_args)
-            else:
-                run_t0_sweep_full(args)
-            if not args.inventory_seeds:
+
+            if not args.inventory_seeds and _flag_present(raw_argv, "--seed"):
                 args.inventory_seeds = str(int(args.seed))
             run_inventory_phase(args)
         return 0
