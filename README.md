@@ -51,6 +51,61 @@ python mvp/pipeline.py multi \
   --atlas-path atlas.json
 ```
 
+## Experimentos (`t0_sweep_full`) e inventario por fases
+
+`experiment_t0_sweep_full.py` soporta fases explícitas con contrato estable:
+
+- `--phase run`: ejecuta subruns del barrido y mantiene semántica fail-fast.
+- `--phase inventory`: escaneo barato/determinista de completitud (sin atlas).
+- `--phase finalize`: aplica gating final por faltantes (sin atlas).
+
+### a) Sweep completo (`phase=run`, aquí sí va `--atlas-path`)
+
+```bash
+RUN_ID="mvp_GW150914_20260219T120000Z"
+ATLAS_PATH="/ruta/al/atlas"
+
+python mvp/experiment_t0_sweep_full.py \
+  --run-id "$RUN_ID" \
+  --phase run \
+  --atlas-path "$ATLAS_PATH" \
+  --t0-grid-ms 0,2,4,6,8 \
+  --seed 101
+```
+
+### b) Inventario barato (`phase=inventory`, sin atlas)
+
+```bash
+RUN_ID="mvp_GW150914_20260219T120000Z"
+
+python mvp/experiment_t0_sweep_full.py \
+  --run-id "$RUN_ID" \
+  --phase inventory \
+  --inventory-seeds 101,202 \
+  --t0-grid-ms 0,2,4,6,8
+```
+
+### c) Finalize estricto/tolerante (`phase=finalize`, sin atlas)
+
+```bash
+RUN_ID="mvp_GW150914_20260219T120000Z"
+
+python mvp/experiment_t0_sweep_full.py \
+  --run-id "$RUN_ID" \
+  --phase finalize \
+  --inventory-seeds 101,202 \
+  --t0-grid-ms 0,2,4,6,8 \
+  --max-missing-abs 0 \
+  --max-missing-frac 0.0
+```
+
+Artefactos agregados a vigilar:
+
+- `runs/<RUN_ID>/experiment/derived/geometry_table.tsv` (agregado de `s6_geometry_table.py`).
+- `runs/<RUN_ID>/experiment/derived/sweep_inventory.json` (inventario/decisión de sweep).
+
+Nota sobre subruns por seed: el experimento crea árboles por semilla para aislar trazabilidad y reintentos. Por eso, los agregados deben escanearse desde `scan_root` (global o por seed) y no por prefijos de nombre; además, se excluyen ancestros symlink para evitar duplicados/alias.
+
 ## Evitar descargas repetidas de GW150914/GW150904 (modo offline recomendado)
 
 Si ya tienes los HDF5 completos en local (caso típico: repetir experimentos con el mismo evento),

@@ -58,3 +58,61 @@ Este documento resume cómo fluye una ejecución iniciada por CLI (por ejemplo `
 
 1. **RUNS_ROOT/subruns**: si cambias el cwd o no propagas `BASURIN_RUNS_ROOT`, stages manuales pueden buscar `RUN_VALID` en un árbol incorrecto.
 2. **Compatibilidad de incertidumbre**: `s4_geometry_filter` soporta claves legacy y modernas (`sigma_logf` vs `sigma_lnf`, etc.). Cambios de naming pueden romper auditorías/tests de contrato si eliminas alias.
+
+
+## 7) Experimentos: `phase=run` vs `inventory` vs `finalize`
+
+`mvp/experiment_t0_sweep_full.py` separa ejecución y validación final en tres fases:
+
+- `phase=run`
+  - Requiere `--atlas-path` cuando el sweep usa atlas.
+  - Ejecuta subruns del barrido y deja estado operativo (`IN_PROGRESS`) mientras exista trabajo pendiente.
+- `phase=inventory`
+  - No requiere atlas.
+  - Solo escanea subruns y escribe `runs/<RUN_ID>/experiment/derived/sweep_inventory.json`.
+  - Requiere seeds y grilla explícitas (`--inventory-seeds` + `--t0-grid-ms` o `start/stop/step`).
+- `phase=finalize`
+  - No requiere atlas.
+  - Evalúa decisión PASS/FAIL comparando faltantes con umbrales de aceptación.
+  - Escribe la decisión en `sweep_inventory.json` y retorna exit code `2` en FAIL.
+
+Qué valida y dónde:
+
+- `inventory` valida completitud: `expected_pairs` vs `observed_pairs` y reporta `missing_abs`/`missing_frac`.
+- `finalize` aplica umbrales: `max_missing_abs` y `max_missing_frac` sobre el inventario previo.
+
+### Ejemplos mínimos por fase
+
+```bash
+RUN_ID="mvp_GW150914_20260219T120000Z"
+ATLAS_PATH="/ruta/al/atlas"
+
+python mvp/experiment_t0_sweep_full.py \
+  --run-id "$RUN_ID" \
+  --phase run \
+  --atlas-path "$ATLAS_PATH" \
+  --t0-grid-ms 0,2,4,6,8 \
+  --seed 101
+```
+
+```bash
+RUN_ID="mvp_GW150914_20260219T120000Z"
+
+python mvp/experiment_t0_sweep_full.py \
+  --run-id "$RUN_ID" \
+  --phase inventory \
+  --inventory-seeds 101,202 \
+  --t0-grid-ms 0,2,4,6,8
+```
+
+```bash
+RUN_ID="mvp_GW150914_20260219T120000Z"
+
+python mvp/experiment_t0_sweep_full.py \
+  --run-id "$RUN_ID" \
+  --phase finalize \
+  --inventory-seeds 101,202 \
+  --t0-grid-ms 0,2,4,6,8 \
+  --max-missing-abs 0 \
+  --max-missing-frac 0.0
+```
