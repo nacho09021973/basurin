@@ -143,6 +143,10 @@ class TestExperimentT0SweepFullPaths(unittest.TestCase):
             base_s2_out = base_s2 / "outputs"
             base_s2_out.mkdir(parents=True, exist_ok=True)
             (base_s2 / "manifest.json").write_text("{}", encoding="utf-8")
+            (base_runs_root / run_id / "RUN_VALID").mkdir(parents=True, exist_ok=True)
+            (base_runs_root / run_id / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
+            (base_runs_root / run_id / "s1_fetch_strain" / "outputs").mkdir(parents=True, exist_ok=True)
+            (base_runs_root / run_id / "s1_fetch_strain" / "outputs" / "strain.npz").write_bytes(b"npz-placeholder")
             fake_source_npz = base_s2_out / "H1_rd.npz"
             fake_source_npz.write_bytes(b"npz-placeholder")
 
@@ -202,6 +206,8 @@ class TestExperimentT0SweepFullPaths(unittest.TestCase):
             fake_source_npz.parent.mkdir(parents=True, exist_ok=True)
             fake_source_npz.write_bytes(b"npz-placeholder")
             (expected_out_root / run_id / "s2_ringdown_window" / "manifest.json").write_text("{}", encoding="utf-8")
+            (expected_out_root / run_id / "RUN_VALID").mkdir(parents=True, exist_ok=True)
+            (expected_out_root / run_id / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
             (expected_out_root / run_id / "s1_fetch_strain" / "outputs").mkdir(parents=True, exist_ok=True)
             (expected_out_root / run_id / "s1_fetch_strain" / "outputs" / "strain.npz").write_bytes(b"npz-placeholder")
 
@@ -350,11 +356,11 @@ class TestExperimentT0SweepFullPaths(unittest.TestCase):
                     raise SystemExit(exp.main())
 
             self.assertEqual(ctx.exception.code, 2)
-            trace_path = runs_root / run_id / "experiment" / "derived" / "run_trace.json"
-            self.assertTrue(trace_path.exists())
-            trace = json.loads(trace_path.read_text(encoding="utf-8"))
-            self.assertEqual(trace["exception"]["type"], "FileNotFoundError")
-            self.assertIn("s1_fetch_strain/outputs/strain.npz", trace["exception"]["message"])
+            preflight_path = runs_root / run_id / "experiment" / "derived" / "preflight_report.json"
+            self.assertTrue(preflight_path.exists())
+            preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+            self.assertFalse(preflight["decision"]["can_run"])
+            self.assertIn("s1_fetch_strain/outputs/strain.npz", preflight["base_artifacts"]["s1_strain_npz"]["path"])
 
 
 if __name__ == "__main__":
