@@ -284,6 +284,7 @@ def run_single_event(
     reuse_strain: bool = False,
     with_t0_sweep: bool = False,
     local_hdf5: list[str] | None = None,
+    offline: bool = False,
 ) -> tuple[int, str]:
     """Run full pipeline for a single event. Returns (exit_code, run_id)."""
     out_root = resolve_out_root("runs")
@@ -318,6 +319,8 @@ def run_single_event(
         s1_args.append("--reuse-if-present")
     for mapping in (local_hdf5 or []):
         s1_args.extend(["--local-hdf5", mapping])
+    if offline:
+        s1_args.append("--offline")
     rc = _run_stage("s1_fetch_strain.py", s1_args, "s1_fetch_strain", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
@@ -379,6 +382,7 @@ def run_multimode_event(
     local_hdf5: list[str] | None = None,
     s3b_n_bootstrap: int = 200,
     s3b_seed: int = 12345,
+    offline: bool = False,
 ) -> tuple[int, str]:
     out_root = resolve_out_root("runs")
 
@@ -416,6 +420,8 @@ def run_multimode_event(
         s1_args.append("--reuse-if-present")
     for mapping in (local_hdf5 or []):
         s1_args.extend(["--local-hdf5", mapping])
+    if offline:
+        s1_args.append("--offline")
     rc = _run_stage("s1_fetch_strain.py", s1_args, "s1_fetch_strain", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
@@ -590,6 +596,7 @@ def main() -> int:
         metavar="DET=PATH",
         help="Forward local HDF5 detector mapping(s) to s1_fetch_strain (repeatable)",
     )
+    sp_single.add_argument("--offline", action="store_true", default=False)
 
     # Multi event
     sp_multi = sub.add_parser("multi", help="Run pipeline for multiple events + aggregate")
@@ -621,6 +628,7 @@ def main() -> int:
         metavar="DET=PATH",
         help="Forward local HDF5 detector mapping(s) to per-event s1_fetch_strain (repeatable)",
     )
+    sp_multi.add_argument("--offline", action="store_true", default=False)
 
     # Single event multimode
     sp_multimode = sub.add_parser("multimode", help="Run single-event multimode pipeline")
@@ -653,6 +661,7 @@ def main() -> int:
         metavar="DET=PATH",
         help="Forward local HDF5 detector mapping(s) to s1_fetch_strain (repeatable)",
     )
+    sp_multimode.add_argument("--offline", action="store_true", default=False)
 
     args = parser.parse_args()
 
@@ -673,6 +682,7 @@ def main() -> int:
             reuse_strain=args.reuse_strain,
             with_t0_sweep=args.with_t0_sweep,
             local_hdf5=args.local_hdf5,
+            offline=args.offline,
         )
         return rc
 
@@ -695,6 +705,7 @@ def main() -> int:
             reuse_strain=args.reuse_strain,
             with_t0_sweep=args.with_t0_sweep,
             local_hdf5=args.local_hdf5,
+            offline=args.offline,
         )
         return rc
 
@@ -717,6 +728,7 @@ def main() -> int:
             s3b_n_bootstrap=args.s3b_n_bootstrap,
             s3b_seed=args.s3b_seed,
             local_hdf5=args.local_hdf5,
+            offline=args.offline,
         )
         return rc
 
