@@ -187,6 +187,53 @@ Ese documento detalla:
 - Incluir pruebas o validaciones mínimas al modificar lógica de pipeline/stages.
 - Documentar decisiones de rutas/IO cuando afecten reproducibilidad.
 
+## Diagnóstico de crecimiento en tests (actualización de gobernanza)
+
+Correcto: con el criterio “desde hoy 12:00” y contando **altas** de `*.py`, son **3 scripts nuevos** y el conteo está bien hecho.
+
+### Diagnóstico
+
+Estamos pagando “deuda de gobernanza” (CLI + contratos) a base de **añadir tests unitarios**. Eso es saludable, pero el riesgo real es el señalado: **crecimiento de superficie** (más ficheros, más mantenimiento, más tiempo de CI) sin una estrategia de consolidación.
+
+Los tres añadidos son de **tres áreas distintas** (experimento, pipeline/CLI, contrato s2). Eso suele ocurrir cuando no existe aún una convención fuerte de “dónde vive cada test” y “cuándo se amplía uno existente vs crear fichero nuevo”.
+
+### Acción mínima (para no “engordar al monstruo”)
+
+1. **Regla operativa**: por defecto, **no se crea fichero nuevo** si:
+   - el test es del mismo stage/feature, o
+   - es el mismo tipo (CLI help, contract, smoke determinista).
+   En ese caso se **agrega al fichero existente**.
+2. **Consolidación inmediata** (sin reescribir medio repo):
+   - `tests/test_pipeline_cli_local_hdf5.py`: convertirlo en el hogar de *todo* lo relacionado con CLI de `mvp/pipeline.py` (help flags, atlas-default fail, passthrough, etc.).
+   - `tests/test_s2_ringdown_window_contract_unittest.py`: mantenerlo como “contract tests” de s2, pero evitar duplicar utilidades; extraer helpers a `tests/_util_contract.py` si ya hay repetición (un único helper compartido vale más que tres copias).
+   - `tests/test_experiment_t0_sweep_full_diagnose_unittest.py`: si esto es “experiment”, idealmente debería vivir bajo un patrón estable (p.ej. `tests/experiments/test_t0_sweep_full_*.py`) o convertirse en un **smoke test** más pequeño. Los experiments tienden a crecer sin control.
+3. **Presupuesto de tests por cambio** (pragmático):
+   - Cambios de parser/CLI: 1 fichero.
+   - Cambios de contrato por stage: 1 fichero por stage.
+   - Experimentos: 1 fichero por experimento (y preferir asserts de “manifiesto/gating”, no loops gigantes).
+
+### Comandos útiles (para vigilar crecimiento)
+
+Archivos añadidos hoy:
+
+```bash
+git log --since='today 12:00' --name-status --pretty=format: \
+| awk '$1=="A" && $2 ~ /\.py$/ {print $2}' | sort -u
+```
+
+“Hotspots” (muchos ficheros tocados por commit):
+
+```bash
+git show --stat b08a7b7
+```
+
+### Riesgos / supuestos
+
+- Si esos tests nuevos están evitando regresiones reales (lo parecen), no es “basura”: es **control de daños**.
+- El peligro no es crear 3 ficheros una vez; es no poner una regla y acabar con 80 ficheros micro-especializados.
+
+Si hace falta, se puede convertir esta guía en una convención concreta de estructura `tests/` (nombres + carpetas + helpers) con criterio de “cuándo crear fichero nuevo”.
+
 ## Dónde mirar primero al depurar
 
 1. `runs/<run_id>/pipeline_timeline.json`
