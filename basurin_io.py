@@ -189,10 +189,17 @@ def write_manifest(
     of artifact labels to their string representations (Paths → str).
     *extra* fields are merged at the top level.
     """
-    artifact_strings = {k: str(v) for k, v in artifacts.items()}
+    artifact_strings: dict[str, str] = {}
     artifact_hashes: dict[str, str] = {}
     for label, value in artifacts.items():
         path = Path(value)
+        if not path.is_absolute():
+            path = stage_dir / path
+        path = path.resolve()
+        try:
+            artifact_strings[label] = str(path.relative_to(stage_dir))
+        except ValueError:
+            artifact_strings[label] = str(value)
         if path.is_file():
             artifact_hashes[label] = sha256_file(path)
 

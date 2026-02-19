@@ -17,7 +17,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 
 _here = Path(__file__).resolve()
 for _cand in [_here.parents[0], _here.parents[1]]:
@@ -27,10 +26,21 @@ for _cand in [_here.parents[0], _here.parents[1]]:
         break
 
 from mvp.contracts import init_stage, check_inputs, finalize, abort
-from basurin_io import write_json_atomic
+from basurin_io import sha256_file, write_json_atomic
 
 STAGE = "s2_ringdown_window"
 
+def _ensure_window_meta_contract(ctx: Any, artifacts: dict[str, Path], strain_path: Path) -> None:
+    ctx.outputs_dir.mkdir(parents=True, exist_ok=True)
+    meta_path = ctx.outputs_dir / "window_meta.json"
+    if not ctx.inputs_record and strain_path.exists():
+        try:
+            rel = str(strain_path.relative_to(ctx.run_dir))
+        except ValueError:
+            rel = str(strain_path)
+        ctx.inputs_record = [{"label": "strain_npz", "path": rel, "sha256": sha256_file(strain_path)}]
+    if not artifacts or not meta_path.exists() or "window_meta" not in artifacts:
+        abort(ctx, "PASS_WITHOUT_OUTPUTS")
 
 def _resolve_t0_gps(event_id: str, window_catalog_path: Path) -> tuple[float, str]:
     if window_catalog_path.exists():
@@ -102,6 +112,8 @@ def main() -> int:
         raise
 
     try:
+        import numpy as np
+
         t0_gps, t0_source = _resolve_t0_gps(args.event_id, Path(args.window_catalog))
         t_start_gps = t0_gps + args.dt_start_s
         t_end_gps = t_start_gps + args.duration_s
@@ -149,6 +161,7 @@ def main() -> int:
         write_json_atomic(meta_path, window_meta)
         artifacts["window_meta"] = meta_path
 
+        _ensure_window_meta_contract(ctx, artifacts, strain_path)
         finalize(ctx, artifacts, results=window_meta)
         return 0
 
