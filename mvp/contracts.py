@@ -307,6 +307,12 @@ def finalize(
             rel = str(path)
         outputs_list.append({"path": rel, "sha256": sha256_file(path)})
 
+    final_verdict = verdict
+    summary_error: str | None = None
+    if verdict == "PASS" and not outputs_list:
+        final_verdict = "FAIL"
+        summary_error = "PASS_WITHOUT_OUTPUTS"
+
     # Write stage_summary.json
     summary: dict[str, Any] = {
         "stage": ctx.stage_name,
@@ -317,8 +323,10 @@ def finalize(
         "parameters": ctx.params,
         "inputs": ctx.inputs_record,
         "outputs": outputs_list,
-        "verdict": verdict,
+        "verdict": final_verdict,
     }
+    if summary_error is not None:
+        summary["error"] = summary_error
     if results:
         summary["results"] = results
     if extra_summary:
@@ -328,9 +336,12 @@ def finalize(
     artifacts["stage_summary"] = sp
 
     # Write manifest.json
-    write_manifest(ctx.stage_dir, artifacts, extra={"inputs": ctx.inputs_record})
+    manifest_extra: dict[str, Any] = {"inputs": ctx.inputs_record}
+    if summary_error is not None:
+        manifest_extra.update({"verdict": "FAIL", "error": summary_error})
+    write_manifest(ctx.stage_dir, artifacts, extra=manifest_extra)
 
-    print(f"OK: {ctx.stage_name} {verdict}")
+    print(f"OK: {ctx.stage_name} {final_verdict}")
 
 
 def abort(ctx: StageContext, reason: str) -> None:
