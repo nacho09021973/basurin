@@ -10,9 +10,13 @@ import math
 import os
 import subprocess
 import sys
+import unittest
 from pathlib import Path
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - env dependent
+    raise unittest.SkipTest("integration requires numpy")
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

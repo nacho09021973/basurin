@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import json
 import sys
+import unittest
 from pathlib import Path
 from types import SimpleNamespace
+
+try:
+    import numpy as np  # noqa: F401
+except ImportError:  # pragma: no cover - env dependent
+    raise unittest.SkipTest("integration requires numpy")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:

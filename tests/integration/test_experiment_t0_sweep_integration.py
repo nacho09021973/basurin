@@ -5,9 +5,13 @@ import json
 import os
 import subprocess
 import sys
+import unittest
 from pathlib import Path
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - env dependent
+    raise unittest.SkipTest("integration requires numpy")
 
 
 def _write_min_run(runs_root: Path, run_id: str) -> None:
