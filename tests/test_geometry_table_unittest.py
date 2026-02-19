@@ -25,8 +25,13 @@ class TestGeometryTableScript(unittest.TestCase):
         outputs = root / "s3b_multimode_estimates" / "outputs"
         outputs.mkdir(parents=True, exist_ok=True)
         (outputs / "multimode_estimates.json").write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        self._write_stage_summary(root, stage_seed)
+
+    def _write_stage_summary(self, root: Path, stage_seed: int | None = None) -> None:
+        stage_dir = root / "s3b_multimode_estimates"
+        stage_dir.mkdir(parents=True, exist_ok=True)
         if stage_seed is not None:
-            (root / "s3b_multimode_estimates" / "stage_summary.json").write_text(
+            (stage_dir / "stage_summary.json").write_text(
                 json.dumps({"parameters": {"seed": stage_seed}}, sort_keys=True),
                 encoding="utf-8",
             )
@@ -163,6 +168,62 @@ class TestGeometryTableScript(unittest.TestCase):
             digest2 = hashlib.sha256(out.read_bytes()).hexdigest()
 
             self.assertEqual(digest1, digest2)
+
+    def test_stage_summary_without_payload_writes_row_with_missing_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            run_id = "BASE_RUN"
+            run_root = base / "runs" / run_id
+            self._write_verdict_pass(run_root)
+
+            exp = run_root / "experiment" / "t0_sweep_full_seed101" / "segment__t0ms0001"
+            self._write_stage_summary(exp, stage_seed=101)
+
+            out = run_root / "experiment" / "derived" / "geometry_table.tsv"
+            self._run(base, run_id, run_root / "experiment", out)
+            _, rows = self._read_rows(out)
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["seed"], "101")
+            self.assertEqual(rows[0]["t0_ms"], "1")
+            self.assertEqual(rows[0]["s3b_seed_param"], "101")
+            self.assertEqual(rows[0]["lnQ_span"], "na")
+            self.assertEqual(rows[0]["cv_Q"], "na")
+            self.assertEqual(rows[0]["valid_fraction"], "na")
+            self.assertEqual(rows[0]["verdict"], "na")
+            self.assertEqual(rows[0]["flags"], "missing_multimode_estimates_json")
+
+            summary = json.loads((out.parent / "stage_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["counts"]["files_skipped_missing_payload"], 1)
+
+    def test_scan_root_without_stage_summary_aborts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            run_id = "BASE_RUN"
+            run_root = base / "runs" / run_id
+            self._write_verdict_pass(run_root)
+
+            scan_root = run_root / "experiment"
+            scan_root.mkdir(parents=True, exist_ok=True)
+            out = run_root / "experiment" / "derived" / "geometry_table.tsv"
+
+            cmd = [
+                sys.executable,
+                str(self.script),
+                "--run-id",
+                run_id,
+                "--runs-root",
+                str(base / "runs"),
+                "--scan-root",
+                str(scan_root),
+                "--out-path",
+                str(out),
+            ]
+            proc = subprocess.run(cmd, cwd=base, capture_output=True, text=True)
+
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("scan_root_abs=", proc.stderr)
+            self.assertIn("s3b_multimode_estimates/stage_summary.json", proc.stderr)
 
 
 if __name__ == "__main__":
