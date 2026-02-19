@@ -260,3 +260,34 @@ Rutas clave para auditoría cuando usas local HDF5:
 
 - copia de entrada: `<RUNS_ROOT>/<run_id>/s1_fetch_strain/inputs/*.h5`
 - procedencia: `<RUNS_ROOT>/<run_id>/s1_fetch_strain/outputs/provenance.json`
+
+---
+
+## 10) Scripts de test nuevos y guía anti-crecimiento (basura nueva)
+
+Para controlar la expansión desordenada de tests, se registran aquí los tres scripts nuevos identificados en el corte “desde hoy 12:00”:
+
+- `tests/test_pipeline_cli_local_hdf5.py`
+- `tests/test_s2_ringdown_window_contract_unittest.py`
+- `tests/test_experiment_t0_sweep_full_diagnose_unittest.py`
+
+Acción mínima recomendada de consolidación:
+
+1. **CLI/pipeline**: centralizar nuevos casos en `tests/test_pipeline_cli_local_hdf5.py`.
+2. **Contratos s2**: mantener `tests/test_s2_ringdown_window_contract_unittest.py` como hogar único de contract tests s2 y mover utilidades repetidas a helper compartido (`tests/_util_contract.py`) si aparece duplicación.
+3. **Experimentos**: estabilizar naming/path para `t0_sweep_full` (idealmente bajo `tests/experiments/`) o reducirlo a smoke tests de gating/manifiesto.
+
+Presupuesto pragmático por tipo de cambio:
+
+- parser/CLI: 1 fichero,
+- contrato por stage: 1 fichero por stage,
+- experimento: 1 fichero por experimento.
+
+Comandos útiles para vigilancia continua:
+
+```bash
+git log --since='today 12:00' --name-status --pretty=format: \
+| awk '$1=="A" && $2 ~ /\.py$/ {print $2}' | sort -u
+
+git show --stat b08a7b7
+```
