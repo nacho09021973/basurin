@@ -9,6 +9,36 @@ from pathlib import Path
 
 
 class TestGeometryTableScript(unittest.TestCase):
+    def _write_seed101_tree(self, run_root: Path) -> tuple[str, Path]:
+        run_id = run_root.name
+        (run_root / "RUN_VALID").mkdir(parents=True, exist_ok=True)
+        (run_root / "RUN_VALID" / "verdict.json").write_text(
+            json.dumps({"verdict": "PASS"}, sort_keys=True),
+            encoding="utf-8",
+        )
+
+        seed_root = run_root / "experiment" / "t0_sweep_full_seed101"
+        p_t0_0006 = seed_root / "segment__t0ms0006" / "s3b_multimode_estimates"
+        p_t0_0008 = seed_root / "segment__t0ms0008" / "s3b_multimode_estimates"
+        (p_t0_0006 / "outputs").mkdir(parents=True, exist_ok=True)
+        (p_t0_0008 / "outputs").mkdir(parents=True, exist_ok=True)
+
+        payload = {
+            "results": {"verdict": "OK", "quality_flags": []},
+            "modes": [{"label": "221", "fit": {"stability": {"lnQ_span": 1.0}}}],
+        }
+        for p in (p_t0_0006, p_t0_0008):
+            (p / "outputs" / "multimode_estimates.json").write_text(
+                json.dumps(payload, sort_keys=True),
+                encoding="utf-8",
+            )
+            (p / "stage_summary.json").write_text(
+                json.dumps({"parameters": {"seed": 101}}, sort_keys=True),
+                encoding="utf-8",
+            )
+
+        return run_id, seed_root
+
     def test_builds_sorted_tsv_from_experiment_tree(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
         script = repo_root / "mvp" / "s6_geometry_table.py"
@@ -148,6 +178,86 @@ class TestGeometryTableScript(unittest.TestCase):
             self.assertIn("\tok/segment__t0ms0001/s3b_multimode_estimates/outputs/multimode_estimates.json", lines[1])
             self.assertNotIn("999", "\n".join(lines))
             self.assertNotIn("outside", "\n".join(lines))
+
+    def test_seed_scan_root_infers_seed_from_scan_root_basename(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        script = repo_root / "mvp" / "s6_geometry_table.py"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            run_root = base / "runs" / "BASE_RUN"
+            run_id, seed_root = self._write_seed101_tree(run_root)
+
+            out_path = run_root / "experiment" / "t0_sweep_full_seed101" / "derived" / "geometry_table.tsv"
+            cmd = [
+                sys.executable,
+                str(script),
+                "--run-id",
+                run_id,
+                "--scan-root",
+                str(seed_root),
+                "--out-path",
+                str(out_path),
+            ]
+            subprocess.run(cmd, cwd=base, check=True)
+
+            lines = out_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 3)
+            self.assertEqual(lines[1].split("\t")[0], "101")
+            self.assertEqual(lines[2].split("\t")[0], "101")
+
+    def test_seed_counts_match_between_seed_scan_root_and_experiment_scan_root(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        script = repo_root / "mvp" / "s6_geometry_table.py"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            run_root = base / "runs" / "BASE_RUN"
+            run_id, seed_root = self._write_seed101_tree(run_root)
+            experiment_root = run_root / "experiment"
+
+            seed_out = run_root / "experiment" / "t0_sweep_full_seed101" / "derived" / "geometry_table.tsv"
+            exp_out = run_root / "experiment" / "derived" / "geometry_table.tsv"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--run-id",
+                    run_id,
+                    "--scan-root",
+                    str(seed_root),
+                    "--out-path",
+                    str(seed_out),
+                ],
+                cwd=base,
+                check=True,
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--run-id",
+                    run_id,
+                    "--scan-root",
+                    str(experiment_root),
+                    "--out-path",
+                    str(exp_out),
+                ],
+                cwd=base,
+                check=True,
+            )
+
+            def _seed_counts(tsv_path: Path) -> dict[str, int]:
+                counts: dict[str, int] = {}
+                lines = tsv_path.read_text(encoding="utf-8").splitlines()[1:]
+                for line in lines:
+                    seed = line.split("\t", 1)[0]
+                    counts[seed] = counts.get(seed, 0) + 1
+                return counts
+
+            self.assertEqual(_seed_counts(seed_out), {"101": 2})
+            self.assertEqual(_seed_counts(exp_out), {"101": 2})
 
 
 if __name__ == "__main__":
