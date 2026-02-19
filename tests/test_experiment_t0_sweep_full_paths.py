@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+import importlib.util
 from types import SimpleNamespace
 from unittest import mock
 from pathlib import Path
@@ -184,6 +185,40 @@ class TestExperimentT0SweepFullPaths(unittest.TestCase):
 
             self.assertFalse(failed)
             self.assertFalse(skip)
+
+
+    @unittest.skipUnless(importlib.util.find_spec("numpy") is not None, "numpy is required")
+    def test_shadow_s2_writes_window_meta_and_registers_in_manifest_and_summary(self) -> None:
+        exp = importlib.import_module("mvp.experiment_t0_sweep_full")
+        np = importlib.import_module("numpy")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subrun_dir = Path(tmpdir) / "runs" / "BASE_RUN__t0ms0008"
+            trimmed = np.arange(16, dtype=np.float64)
+
+            result = exp._write_subrun_shadow_s2(
+                subrun_dir=subrun_dir,
+                detector="H1",
+                trimmed=trimmed,
+                fs=1024.0,
+                t0_ms=8,
+                offset_samples=8,
+                original_npz=Path("/tmp/source/H1_rd.npz"),
+                original_sha="origsha",
+                base_window_meta={"event_id": "GW150914", "t_start_gps": 1126259462.4},
+            )
+
+            meta_path = subrun_dir / "s2_ringdown_window" / "outputs" / "window_meta.json"
+            self.assertTrue(meta_path.exists())
+            self.assertEqual(result["window_meta_path"], str(meta_path))
+
+            manifest = json.loads((subrun_dir / "s2_ringdown_window" / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["artifacts"]["window_meta"], "outputs/window_meta.json")
+
+            summary = json.loads((subrun_dir / "s2_ringdown_window" / "stage_summary.json").read_text(encoding="utf-8"))
+            output_paths = {entry["path"] for entry in summary["outputs"]}
+            self.assertIn("s2_ringdown_window/outputs/window_meta.json", output_paths)
+            self.assertEqual(summary["verdict"], "PASS")
 
     def test_compute_experiment_paths_follow_seed_runsroot(self) -> None:
         exp = importlib.import_module("mvp.experiment_t0_sweep_full")
