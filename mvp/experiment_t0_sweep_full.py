@@ -498,6 +498,7 @@ def execute_subrun_stages_or_abort(
     stage_timeout_s: int,
     run_cmd_fn: Callable[[list[str], dict[str, str], int], Any],
     point: dict[str, Any],
+    subrun_runs_root: Path | None = None,
     trace: dict[str, Any] | None = None,
     trace_path: Path | None = None,
 ) -> tuple[bool, bool]:
@@ -570,7 +571,8 @@ def execute_subrun_stages_or_abort(
             break
 
         if stage_stem == "s2_ringdown_window":
-            expected_meta_path = _expected_subrun_window_meta_path(subrun_dir.parent, subrun_dir.name)
+            effective_runs_root = subrun_runs_root if subrun_runs_root is not None else subrun_dir.parent
+            expected_meta_path = _expected_subrun_window_meta_path(effective_runs_root, subrun_dir.name)
             if trace is not None:
                 trace["s2_window_meta_check"] = {
                     "expected_window_meta_path": str(expected_meta_path),
@@ -836,6 +838,7 @@ def run_t0_sweep_full(
                 stage_timeout_s=args.stage_timeout_s,
                 run_cmd_fn=run_cmd_fn,
                 point=point,
+                subrun_runs_root=subruns_root,
                 trace=subrun_trace,
                 trace_path=subrun_trace_path,
             )
