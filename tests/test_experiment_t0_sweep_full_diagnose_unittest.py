@@ -90,12 +90,53 @@ class TestExperimentT0SweepFullDiagnose(unittest.TestCase):
             args = SimpleNamespace(run_id=run_id, runs_root=str(root / "runs"), scan_root=str(scan_root))
             payload = exp.run_diagnose_phase(args)
 
-            self.assertEqual(payload["stage_missing_counts"]["window_meta"], 1)
-            self.assertEqual(payload["stage_missing_counts"]["multimode_estimates"], 1)
-            self.assertEqual(payload["stage_missing_counts"]["estimates"], 0)
+            self.assertEqual(payload["schema_version"], "t0_sweep_diagnose_v1")
+            self.assertIn("run_id", payload)
+            self.assertIn("scan_root", payload)
+            self.assertIn("generated_at_utc", payload)
+            self.assertIn("n_subruns_scanned", payload)
+            self.assertIn("counts_missing", payload)
+            self.assertIn("top_errors", payload)
+            self.assertIn("worst_subruns", payload)
+
+            self.assertIsInstance(payload["run_id"], str)
+            self.assertIsInstance(payload["scan_root"], str)
+            self.assertIsInstance(payload["generated_at_utc"], str)
+            self.assertIsInstance(payload["n_subruns_scanned"], int)
+            self.assertIsInstance(payload["counts_missing"], dict)
+            self.assertIsInstance(payload["top_errors"], list)
+            self.assertIsInstance(payload["worst_subruns"], list)
+
+            self.assertIsNotNone(payload["counts_missing"])
+            self.assertIsNotNone(payload["top_errors"])
+            self.assertIsNotNone(payload["worst_subruns"])
+
+            self.assertEqual(payload["counts_missing"]["window_meta"], 1)
+            self.assertEqual(payload["counts_missing"]["s3b_payload"], 1)
+            self.assertEqual(payload["counts_missing"]["s3_estimates"], 0)
+            self.assertEqual(payload["counts_missing"]["RUN_VALID"], 3)
+
+            worst_paths = [item["path"] for item in payload["worst_subruns"]]
+            self.assertEqual(worst_paths, sorted(worst_paths))
 
             report = root / "runs" / run_id / "experiment" / "derived" / "diagnose_report.json"
             self.assertTrue(report.exists())
+
+    def test_phase_diagnose_writes_fallback_payload_on_internal_exception(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            run_id = "BASE"
+            args = SimpleNamespace(run_id=run_id, runs_root=str(root / "runs"), scan_root=str(root / "runs" / run_id / "experiment"))
+
+            with mock.patch.object(Path, "glob", side_effect=RuntimeError("boom")):
+                payload = exp.run_diagnose_phase(args)
+
+            self.assertEqual(payload["schema_version"], "t0_sweep_diagnose_v1")
+            self.assertEqual(payload["n_subruns_scanned"], 0)
+            self.assertEqual(payload["counts_missing"], {})
+            self.assertEqual(payload["top_errors"], [])
+            self.assertEqual(payload["worst_subruns"], [])
+            self.assertEqual(payload["exception"]["type"], "RuntimeError")
 
 
 if __name__ == "__main__":
