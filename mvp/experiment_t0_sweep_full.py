@@ -1567,6 +1567,9 @@ def run_finalize_phase(args: argparse.Namespace) -> dict[str, Any]:
         "run_id": base_run,
         "verdict": "FAIL" if final_fail else "PASS",
         "results": {
+            "final_verdict": oracle_report.get("final_verdict"),
+            "fail_global_reason": oracle_fail_reason,
+            "chosen_t0": oracle_report.get("chosen_t0"),
             "inventory_status": inventory_payload.get("status"),
             "oracle_final_verdict": oracle_report.get("final_verdict"),
             "oracle_fail_global_reason": oracle_fail_reason,
