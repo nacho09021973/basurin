@@ -209,6 +209,192 @@ Ese documento detalla:
 - Incluir pruebas o validaciones mínimas al modificar lógica de pipeline/stages.
 - Documentar decisiones de rutas/IO cuando afecten reproducibilidad.
 
+## Reglas generales de BASURIN (para no volver a iterar a ciegas)
+
+### 0) Principio soberano
+
+**El pipeline existe para producir física reproducible, no para “tener pipeline”.**
+Todo cambio debe cerrar un ciclo completo: **Inputs deterministas → Estimación → Oracle externo → Veredicto PASS/FAIL → Auditoría**.
+
+---
+
+## 1) “Oracle-first”: sin oracle externo no hay progreso
+
+**Definición:** un *oracle* es un baseline independiente (paper/catálogo/tabla publicada) con valores y/o intervalos reproducibles y una regla cuantitativa de PASS/FAIL.
+
+**Regla:**
+
+* Cualquier nuevo análisis canónico debe declarar un oracle externo antes de añadir complejidad.
+* Si no existe oracle, el trabajo debe ir a `experiment/` y **no** al pipeline canónico.
+
+**Artefactos mínimos del oracle (versionados):**
+
+* `docs/baselines/<oracle_id>.json` con:
+
+  * referencia (paper/doi/arxiv),
+  * parámetros objetivo (p.ej. f, tau, …),
+  * intervalos o incertidumbres,
+  * tolerancias (relativas/absolutas),
+  * versión/fecha.
+
+**Criterio de aceptación:**
+
+* Existe un `physics_gate.json` (o equivalente) que da `PASS/FAIL` contra el oracle.
+* En `FAIL`, el run se invalida (ver regla 3).
+
+---
+
+## 2) MVP científico mínimo (antes de fase 2)
+
+**Regla:**
+
+* El MVP científico de cualquier nuevo “tema” es: **1 caso + 1 observable + 1 oracle + PASS/FAIL**.
+* Multi-evento, multimode, consistencia Kerr, geometría, agregación, sweeps masivos… son **fase 2** y quedan bloqueados hasta que el MVP pase.
+
+**Anti-pattern prohibido:**
+
+* “Añadir un stage nuevo” sin un test que demuestre que mejora o mantiene el oracle PASS.
+
+---
+
+## 3) RUN_VALID y abort semantics (gobernanza dura)
+
+**Regla soberana:**
+
+* `RUN_VALID` es la **única puerta** hacia downstream.
+* Si `RUN_VALID != PASS` o falta `runs/<run_id>/RUN_VALID/verdict.json`, ningún stage downstream puede correr.
+* Si un stage falla, el run **no existe** a efectos downstream (fail-fast).
+
+**Criterio de aceptación:**
+
+* Cada stage ejecuta `require_run_valid` (salvo excepciones explícitas).
+* El pipeline corta en rc != 0 sin intentar “continuar”.
+
+---
+
+## 4) IO determinista: prohibido escribir fuera de `runs/<run_id>/`
+
+**Regla:**
+
+* Toda salida y todo artefacto intermedio debe vivir bajo `runs/<run_id>/...` (o `BASURIN_RUNS_ROOT`).
+* **Prohibido** escribir en `docs/`, `./`, `/tmp`, home, etc., salvo:
+
+  * documentación versionada (README/docs),
+  * baselines versionados en `docs/baselines/`,
+  * tests.
+
+**Criterio de aceptación:**
+
+* Cada stage produce:
+
+  * `manifest.json` (SHA256 de inputs/outputs),
+  * `stage_summary.json` (parámetros, veredictos, métricas),
+  * `outputs/` (artefactos).
+
+---
+
+## 5) Datos externos: “offline-first” y inputs formalizados
+
+**Regla:**
+
+* Ningún stage puede depender de red “por defecto”.
+* Los inputs externos deben formalizarse como:
+
+  * `--local-*` / `--atlas-path` / `--external-inputs` (rutas explícitas),
+  * o como `runs/<run_id>/external_inputs/...` con hashes.
+
+**Política recomendada:**
+
+* **Red sólo con opt-in** (`--allow-network`) y siempre cacheando con hash.
+* Si `OFFLINE=1` y falta input local ⇒ FAIL temprano con mensaje claro.
+
+**Criterio de aceptación:**
+
+* Se puede ejecutar el pipeline completo en un entorno sin red si los inputs existen localmente.
+
+---
+
+## 6) Superficie canónica mínima: separación estricta canónico vs experimento
+
+**Reglas:**
+
+* Canónico:
+
+  * vive en `mvp/` + `contracts.py`,
+  * pequeño, estable, orientado a oracle.
+* Experimentos:
+
+  * viven bajo `runs/<run_id>/experiment/<name>/...`,
+  * no mutan artefactos canónicos,
+  * no cambian `RUN_VALID`.
+
+**Anti-pattern prohibido:**
+
+* “s3b/s4b/s4c…” sin deprecación clara y sin test oracle.
+* Scripts sueltos sin contrato ni trazabilidad.
+
+---
+
+## 7) Sweeps y “1000 runs”: solo si hay función objetivo y logging auditable
+
+**Regla:**
+
+* Un sweep masivo sólo es aceptable si existe:
+
+  * oracle PASS/FAIL o loss cuantitativa,
+  * logging por subrun con seed/params,
+  * resumen agregado (p.ej. `summary.jsonl` o `summary.csv`),
+  * selección reproducible del “best”.
+
+**Criterio de aceptación:**
+
+* Dado el mismo seed y mismos inputs hash, el sweep produce el mismo “best” y el mismo veredicto.
+
+---
+
+## 8) Preflight de entorno (Stage 0) obligatorio
+
+**Regla:**
+
+* Antes de crear un run se valida:
+
+  * Python version,
+  * dependencias críticas importables,
+  * presencia de inputs externos requeridos (si OFFLINE),
+  * espacio en disco mínimo.
+
+**Criterio de aceptación:**
+
+* Si falla preflight, no se crea `runs/<run_id>/` (o se crea y queda `RUN_VALID=FAIL` con razón explícita).
+
+---
+
+## 9) Regla práctica de productividad (evitar 14 meses)
+
+**Regla:**
+
+* Cada PR debe mejorar al menos uno de:
+
+  1. probabilidad de oracle PASS,
+  2. determinismo/auditoría,
+  3. reducción de superficie canónica.
+
+Si no cumple, va a `experiment/` o se rechaza.
+
+---
+
+### Apéndice: Definition of Done (DoD) para cambios canónicos
+
+Un cambio canónico está “DONE” si:
+
+* `pytest -q` pasa,
+* el oracle PASS/FAIL está implementado (o no se degrada),
+* no se introducen escrituras fuera de `runs/<run_id>/`,
+* todos los artefactos tienen `manifest.json` + `stage_summary.json`,
+* la ejecución offline es posible con inputs locales.
+
+---
+
 ## Diagnóstico de crecimiento en tests (actualización de gobernanza)
 
 Correcto: con el criterio “desde hoy 12:00” y contando **altas** de `*.py`, son **3 scripts nuevos** y el conteo está bien hecho.
