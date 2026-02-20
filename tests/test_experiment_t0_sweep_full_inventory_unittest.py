@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
@@ -529,6 +531,13 @@ class ExperimentT0SweepFullMainContractTests(unittest.TestCase):
 
 
 class ExperimentT0SweepFullPlanAndLayoutTests(unittest.TestCase):
+    def test_phase_run_without_atlas_is_not_rejected_by_global_contract_gate(self) -> None:
+        args = SimpleNamespace(phase="run", atlas_path=None)
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            exp._validate_phase_contracts(args, [])
+        self.assertNotIn("phase=run requiere --atlas-path", stderr.getvalue())
+
     def test_build_subrun_stage_cmds_includes_s2_before_s3b(self) -> None:
         cmds = exp.build_subrun_stage_cmds(
             python="python",
@@ -549,6 +558,30 @@ class ExperimentT0SweepFullPlanAndLayoutTests(unittest.TestCase):
         stage_names = [Path(cmd[1]).stem for cmd in cmds]
         self.assertIn("s2_ringdown_window", stage_names)
         self.assertLess(stage_names.index("s2_ringdown_window"), stage_names.index("s3b_multimode_estimates"))
+
+    def test_build_subrun_stage_cmds_requires_atlas_for_s4c(self) -> None:
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as ctx:
+                exp.build_subrun_stage_cmds(
+                    python="python",
+                    s2_script="mvp/s2_ringdown_window.py",
+                    s3_script="mvp/s3_ringdown_estimates.py",
+                    s3b_script="mvp/s3b_multimode_estimates.py",
+                    s4c_script="mvp/s4c_kerr_consistency.py",
+                    subrun_runs_root="runs/rid",
+                    subrun_id="rid__t0ms0008",
+                    event_id="GW150914",
+                    dt_start_s=0.003,
+                    duration_s=0.06,
+                    strain_npz="runs/BASE_RUN/s1_fetch_strain/outputs/strain.npz",
+                    n_bootstrap=200,
+                    s3b_seed=101,
+                    atlas_path=None,
+                )
+
+        self.assertEqual(ctx.exception.code, 2)
+        self.assertIn("stage=s4c_kerr_consistency requiere --atlas-path", stderr.getvalue())
 
     def test_require_subrun_window_meta(self) -> None:
         with tempfile.TemporaryDirectory() as td:
