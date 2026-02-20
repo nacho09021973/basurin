@@ -118,6 +118,14 @@ def _init_subrun_run_valid(subrun_dir: Path) -> None:
     write_json_atomic(rv_path, {"verdict": "PASS"})
 
 
+def _init_parent_run_valid(runs_root: Path, run_id: str) -> None:
+    rv_path = runs_root / run_id / "RUN_VALID" / "verdict.json"
+    if rv_path.exists():
+        return
+    rv_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(rv_path, {"verdict": "PASS"})
+
+
 def _write_subrun_shadow_s2(
     subrun_dir: Path,
     detector: str,
@@ -731,6 +739,7 @@ def run_t0_sweep_full(
         ensure_seed_runsroot_layout(out_root, args.run_id)
         validate_run_id(args.run_id, out_root)
         validate_run_id(args.run_id, base_root)
+        _init_parent_run_valid(out_root, args.run_id)
         require_run_valid(base_root, args.run_id)
         _write_preflight_report_or_abort(
             run_id=args.run_id,
