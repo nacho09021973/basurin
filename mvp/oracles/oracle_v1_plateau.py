@@ -10,6 +10,23 @@ from typing import Any
 SIGMA_FLOOR = 1e-12
 FAIL_MISSING_FIELD = "FAIL_MISSING_FIELD"
 FAIL_SIGMA_MISSING = "FAIL_SIGMA_MISSING"
+FAIL_COV_MISSING = "FAIL_COV_MISSING"
+FAIL_COND_MAX = "FAIL_COND_MAX"
+FAIL_LOW_INFO_MISSING = "FAIL_LOW_INFO_MISSING"
+FAIL_LOW_INFO = "FAIL_LOW_INFO"
+FAIL_WHITE_MISSING = "FAIL_WHITE_MISSING"
+FAIL_WHITE = "FAIL_WHITE"
+FAIL_COH_MISSING = "FAIL_COH_MISSING"
+FAIL_COH = "FAIL_COH"
+
+WARN_WHITE_NOT_EVALUATED_LOW_POWER = "WARN_WHITE_NOT_EVALUATED_LOW_POWER"
+
+Z_MAX = 2.0
+K_PLATEAU = 3
+COND_MAX = 100.0
+DELTA_BIC_MIN = 10.0
+P_WHITE_MIN = 0.01
+N_LOW = 100
 
 
 @dataclass(frozen=True)
@@ -193,3 +210,136 @@ def load_window_metrics_from_subrun(subrun_root: Path) -> WindowMetrics:
 def load_window_metrics_from_subruns(subrun_roots: list[Path]) -> list[WindowMetrics]:
     metrics = [load_window_metrics_from_subrun(root) for root in subrun_roots]
     return sorted(metrics, key=lambda item: item.t0)
+
+
+def _sorted_unique(items: list[str]) -> list[str]:
+    return sorted(set(items))
+
+
+def _compute_z(a: float, b: float, sa: float, sb: float) -> float:
+    denom = math.sqrt((sa * sa) + (sb * sb))
+    return abs(b - a) / denom
+
+
+def oracle_v1_plateau_report(windows: list[WindowMetrics], chi2_coh_max: float | None = None) -> dict[str, Any]:
+    ordered = sorted(windows, key=lambda item: item.t0)
+    n_windows = len(ordered)
+
+    scores: list[float | None] = []
+    for idx in range(n_windows):
+        if idx == n_windows - 1:
+            scores.append(None)
+            continue
+        left = ordered[idx]
+        right = ordered[idx + 1]
+        z_f = _compute_z(left.f_median, right.f_median, left.f_sigma, right.f_sigma)
+        z_tau = _compute_z(left.tau_median, right.tau_median, left.tau_sigma, right.tau_sigma)
+        scores.append(max(z_f, z_tau))
+
+    windows_summary: list[dict[str, Any]] = []
+    fail_counts: dict[str, int] = {}
+    any_pass = False
+
+    for idx, item in enumerate(ordered):
+        fail_reasons: list[str] = []
+        warnings: list[str] = []
+
+        if item.cond_number is None:
+            fail_reasons.append(FAIL_COV_MISSING)
+        elif item.cond_number > COND_MAX:
+            fail_reasons.append(FAIL_COND_MAX)
+
+        if item.delta_bic is None:
+            fail_reasons.append(FAIL_LOW_INFO_MISSING)
+        elif item.delta_bic < DELTA_BIC_MIN:
+            fail_reasons.append(FAIL_LOW_INFO)
+
+        if item.n_samples > N_LOW:
+            if item.p_ljungbox is None:
+                fail_reasons.append(FAIL_WHITE_MISSING)
+            elif item.p_ljungbox < P_WHITE_MIN:
+                fail_reasons.append(FAIL_WHITE)
+        else:
+            warnings.append(WARN_WHITE_NOT_EVALUATED_LOW_POWER)
+
+        if chi2_coh_max is not None:
+            if item.chi2_coh is None:
+                fail_reasons.append(FAIL_COH_MISSING)
+            elif item.chi2_coh > chi2_coh_max:
+                fail_reasons.append(FAIL_COH)
+
+        fail_reasons = _sorted_unique(fail_reasons)
+        warnings = _sorted_unique(warnings)
+        verdict = "PASS" if not fail_reasons else "FAIL"
+        any_pass = any_pass or verdict == "PASS"
+        for code in fail_reasons:
+            fail_counts[code] = fail_counts.get(code, 0) + 1
+
+        windows_summary.append(
+            {
+                "index": idx,
+                "t0": item.t0,
+                "T": item.T,
+                "verdict": verdict,
+                "fail_reasons": fail_reasons,
+                "warnings": warnings,
+                "score_stab": scores[idx],
+                "in_plateau": False,
+                "plateau_start_index": None,
+            }
+        )
+
+    candidates: list[dict[str, Any]] = []
+    if n_windows >= K_PLATEAU:
+        for start in range(0, n_windows - K_PLATEAU + 1):
+            all_pass = all(windows_summary[pos]["verdict"] == "PASS" for pos in range(start, start + K_PLATEAU))
+            if not all_pass:
+                continue
+            stable = all((scores[j] is not None and scores[j] <= Z_MAX) for j in range(start, start + K_PLATEAU - 1))
+            if not stable:
+                continue
+            candidates.append({"start_index": start, "plateau_indices": list(range(start, start + K_PLATEAU))})
+
+    chosen_t0: float | None = None
+    chosen_t: float | None = None
+    fail_global_reason: str | None = None
+    final_verdict = "FAIL"
+
+    if n_windows < K_PLATEAU:
+        fail_global_reason = "NO_PLATEAU_INSUFFICIENT_WINDOWS"
+    elif candidates:
+        winner = candidates[0]
+        start = winner["start_index"]
+        chosen_t0 = ordered[start].t0
+        chosen_t = ordered[start].T
+        final_verdict = "PASS"
+        for pos in winner["plateau_indices"]:
+            windows_summary[pos]["in_plateau"] = True
+            windows_summary[pos]["plateau_start_index"] = start
+    elif not any_pass:
+        fail_global_reason = "NO_VALID_WINDOW"
+    else:
+        fail_global_reason = "NO_PLATEAU"
+
+    fail_counts_sorted = {key: fail_counts[key] for key in sorted(fail_counts)}
+    warnings_global = _sorted_unique([w for row in windows_summary for w in row["warnings"]])
+
+    return {
+        "thresholds": {
+            "z_max": Z_MAX,
+            "k_plateau": K_PLATEAU,
+            "cond_max": COND_MAX,
+            "delta_bic_min": DELTA_BIC_MIN,
+            "p_white_min": P_WHITE_MIN,
+            "n_low": N_LOW,
+            "chi2_coh_max": chi2_coh_max,
+        },
+        "windows_summary": windows_summary,
+        "fail_counts": fail_counts_sorted,
+        "candidates": candidates,
+        "chosen_t0": chosen_t0,
+        "chosen_T": chosen_t,
+        "final_verdict": final_verdict,
+        "fail_global_reason": fail_global_reason,
+        "warnings_global": warnings_global,
+    }
