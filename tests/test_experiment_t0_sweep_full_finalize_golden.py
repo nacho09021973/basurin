@@ -63,7 +63,8 @@ def test_finalize_regression_golden_manifest_and_oracle(tmp_path: Path) -> None:
 
     _write_json(runs_root / run_id / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
 
-    for idx, t0_ms in enumerate((0, 2, 4, 6, 8)):
+    t0_grid_ms = (0, 2, 4, 6, 8)
+    for idx, t0_ms in enumerate(t0_grid_ms):
         _mk_subrun(scan_root, seed=101, t0_ms=t0_ms, f_hz=100.0 + (idx * 0.05), tau_s=0.80 + (idx * 0.01))
 
     args = SimpleNamespace(
@@ -71,7 +72,7 @@ def test_finalize_regression_golden_manifest_and_oracle(tmp_path: Path) -> None:
         runs_root=str(runs_root),
         scan_root=str(scan_root),
         inventory_seeds="101",
-        t0_grid_ms="0,2,4,6,8",
+        t0_grid_ms=",".join(str(x) for x in t0_grid_ms),
         t0_start_ms=0,
         t0_stop_ms=0,
         t0_step_ms=1,
@@ -102,9 +103,13 @@ def test_finalize_regression_golden_manifest_and_oracle(tmp_path: Path) -> None:
                 p_ljungbox=0.4,
                 n_samples=256,
             )
-            for idx, t0_ms in enumerate((0, 2, 4, 6, 8))
+            for idx, t0_ms in enumerate(t0_grid_ms)
         ]
     )
+    assert len(golden["windows_summary"]) == 5
+    assert golden["final_verdict"] == "PASS"
+    assert golden["fail_global_reason"] is None
+    assert golden["chosen_t0"] is not None
     assert _canonical_bytes(json.loads(oracle_report_path.read_text(encoding="utf-8"))) == _canonical_bytes(golden)
 
     manifest = json.loads((runs_root / run_id / "experiment" / "manifest.json").read_text(encoding="utf-8"))
