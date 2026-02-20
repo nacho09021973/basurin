@@ -1068,9 +1068,7 @@ def main():
 
     try:
         import h5py  # type: ignore
-        global np, gamma_func  # type: ignore
         import numpy as np  # type: ignore
-        from scipy.special import gamma as gamma_func  # type: ignore
 
         rng = np.random.default_rng(args.seed)
         # IO CONTRACT: output en 01_generate_sandbox_geometries/ Ãƒâ€šÃ‚Â§2: escribir en geometries/

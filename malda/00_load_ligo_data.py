@@ -208,13 +208,19 @@ def _load_npz(npz_path: Path) -> LigoSeries:
     if t_gps.ndim != 1 or strain.ndim != 1 or t_gps.size != strain.size:
         raise ValueError(f"t_gps/strain must be 1D and same length in {npz_path}")
 
+    fs_value = float(_scalar("fs"))
+    if fs_value <= 0:
+        raise ValueError(
+            f"fs must be > 0 in {npz_path}; got fs={fs_value}"
+        )
+
     return LigoSeries(
         ifo=str(_scalar("ifo")),
         event=str(_scalar("event")),
         gps=float(_scalar("gps")),
         start=float(_scalar("start")),
         end=float(_scalar("end")),
-        fs=float(_scalar("fs")),
+        fs=fs_value,
         t_gps=t_gps,
         strain=strain,
         source_url=str(_scalar("source_url")),

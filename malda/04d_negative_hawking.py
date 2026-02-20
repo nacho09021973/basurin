@@ -68,17 +68,16 @@ def generate_hawking_negative_data(
     - Entanglement entropy: ~ area (sum over boundaries).
     - Inspirado post-hoc en paper Sec. I: no threshold en confinement.
     """
-    if seed is not None:
-        np.random.seed(seed)
-    
+    rng = np.random.default_rng(seed)  # aislado del estado global de NumPy
+
     logger.info(f"Generando CONTROL NEGATIVO (confinement below Tc): L={lattice_size}, d={dim}, Tc={tc}")
-    
+
     shape = tuple([lattice_size] * dim)
     coords = np.indices(shape).reshape(dim, -1).T - lattice_size // 2
     r = np.linalg.norm(coords, axis=1).reshape(shape)
-    
+
     # Campo: exponential decay (area law) + noise
-    field = np.exp(-mass * r) + np.random.normal(0, noise_level, shape)
+    field = np.exp(-mass * r) + rng.normal(0, noise_level, shape)
     
     # Correlator: exp(-m r) (simula Wilson loops en confining, paper-inspired)
     correlator = np.exp(-mass * r)
@@ -179,9 +178,10 @@ def save_negative_hawking_data(data: Dict[str, np.ndarray], output_dir: Path, ru
         bulk.create_dataset('z_grid', data=z_grid)
         # En fase confining NO hay bulk AdS emergente
         # A, f, R son ruido - NO deben ser usados
-        bulk.create_dataset('A_truth', data=np.random.randn(n_z) * 0.1)
-        bulk.create_dataset('f_truth', data=np.random.rand(n_z))
-        bulk.create_dataset('R_truth', data=np.random.randn(n_z) * 10)
+        _rng = np.random.default_rng()
+        bulk.create_dataset('A_truth', data=_rng.standard_normal(n_z) * 0.1)
+        bulk.create_dataset('f_truth', data=_rng.random(n_z))
+        bulk.create_dataset('R_truth', data=_rng.standard_normal(n_z) * 10)
         bulk.attrs['z_h'] = 1.0
         bulk.attrs['family'] = 'negative_control_hawking'
         bulk.attrs['d'] = d

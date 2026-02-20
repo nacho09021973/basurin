@@ -41,6 +41,7 @@ import json
 import logging
 import os
 import sys
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
@@ -88,6 +89,12 @@ def generate_massive_scalar_flat_space(
     
     El parametro 'mass' se usa para pseudo-boundary pero NO afecta el campo.
     """
+    warnings.warn(
+        "El parámetro 'mass' no afecta el campo principal (siempre ruido blanco "
+        "gaussiano). Solo influye en datos auxiliares de pseudo-boundary.",
+        UserWarning,
+        stacklevel=2,
+    )
     if seed is not None:
         np.random.seed(seed)
     
@@ -562,10 +569,15 @@ Ejemplos:
         help='Directorio de salida'
     )
     parser.add_argument(
-        '--mass', 
-        type=float, 
+        '--mass',
+        type=float,
         default=1.0,
-        help='Masa del campo escalar (default: 1.0)'
+        help=(
+            '[ADVERTENCIA] Este parámetro NO afecta el campo principal, que es '
+            'siempre ruido blanco gaussiano. Solo influye en datos auxiliares de '
+            'pseudo-boundary. Ver docstring de generate_massive_scalar_flat_space. '
+            '(default: 1.0)'
+        ),
     )
     parser.add_argument(
         '--lattice_size', 
