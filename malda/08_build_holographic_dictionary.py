@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # 08_build_holographic_dictionary.py
-# CUERDAS â€” Bloque C: Atlas hologrÃ¡fico (diccionario geomÃ©trico)
+# CUERDAS — Bloque C: Atlas holográfico (diccionario geométrico)
 #
 # OBJETIVO
-#   Construir un atlas hologrÃ¡fico interno a partir de la informaciÃ³n de geometrÃ­a
-#   y operadores, organizado por sistema/familia/dimensiÃ³n:
-#     - Listar operadores relevantes por sistema (nombres, Î”, etiquetas).
-#     - Agregar metadatos de geometrÃ­a y clasificaciÃ³n (ads, lifshitz, hvlf, ...).
+#   Construir un atlas holográfico interno a partir de la información de geometría
+#   y operadores, organizado por sistema/familia/dimensión:
+#     - Listar operadores relevantes por sistema (nombres, Δ, etiquetas).
+#     - Agregar metadatos de geometría y clasificación (ads, lifshitz, hvlf, ...).
 #
 # ENTRADAS
 #   - runs/<experiment>/02_emergent_geometry_engine/geometry_emergent/*.h5
@@ -16,11 +16,11 @@
 #     holographic_dictionary_v3_summary.json
 #     stage_summary.json
 #
-# OPCIONAL: CHECKS DE mÂ²LÂ²
-#   - Con flags explÃ­citas, puede calcular mÂ²LÂ² = Î”(Î”-d) como diagnÃ³stico.
-#   - IMPORTANTE: estos cÃ¡lculos son post-hoc y no entran en entrenamiento.
+# OPCIONAL: CHECKS DE m²L²
+#   - Con flags explícitas, puede calcular m²L² = Δ(Δ-d) como diagnóstico.
+#   - IMPORTANTE: estos cálculos son post-hoc y no entran en entrenamiento.
 #
-# RELACIÃ“N CON OTROS SCRIPTS
+# RELACIÓN CON OTROS SCRIPTS
 #   - Proporciona el "atlas" interno que se cruza con:
 #       * 09_real_data_and_dictionary_contracts.py
 #
@@ -65,15 +65,15 @@ try:
 except ImportError:
     HAS_PYSR = False
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════
 # V3 INFRASTRUCTURE - PATCH: Probar stage_utils primero, luego tools.stage_utils
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════
 HAS_STAGE_UTILS = False
 StageContext = None
 add_standard_arguments = None
 infer_experiment = None
 
-# Intentar import desde raÃ­z primero (nuevo estÃ¡ndar)
+# Intentar import desde raíz primero (nuevo estándar)
 try:
     from stage_utils import StageContext, add_standard_arguments, infer_experiment
     HAS_STAGE_UTILS = True
@@ -100,13 +100,13 @@ except ImportError:
 
 
 # =============================================================================
-# ROUTING CONTRACT: ValidaciÃ³n y resoluciÃ³n de rutas
+# ROUTING CONTRACT: Validación y resolución de rutas
 # =============================================================================
 
 def validate_routing_args(args) -> Tuple[bool, str]:
     """
     Valida que no haya conflictos entre --experiment y --output-summary/--data-dir.
-    SegÃºn ROUTING_CONTRACT: --experiment es la fuente de verdad.
+    Según ROUTING_CONTRACT: --experiment es la fuente de verdad.
     """
     has_experiment = getattr(args, 'experiment', None) is not None
     has_output_summary = getattr(args, 'output_summary', None) is not None
@@ -116,20 +116,20 @@ def validate_routing_args(args) -> Tuple[bool, str]:
         return False, (
             "CONFLICTO: --experiment y --output-summary/--data-dir son mutuamente excluyentes.\n"
             "  --experiment es la fuente de verdad (ROUTING_CONTRACT).\n"
-            "  --output-summary y --data-dir estÃ¡n DEPRECATED.\n"
+            "  --output-summary y --data-dir están DEPRECATED.\n"
             "  Usa solo --experiment."
         )
     
     if has_output_summary:
         warnings.warn(
-            "--output-summary estÃ¡ DEPRECATED. Usa --experiment en su lugar.",
+            "--output-summary está DEPRECATED. Usa --experiment en su lugar.",
             DeprecationWarning,
             stacklevel=2
         )
     
     if has_data_dir:
         warnings.warn(
-            "--data-dir estÃ¡ DEPRECATED. Usa --experiment en su lugar.",
+            "--data-dir está DEPRECATED. Usa --experiment en su lugar.",
             DeprecationWarning,
             stacklevel=2
         )
@@ -139,19 +139,19 @@ def validate_routing_args(args) -> Tuple[bool, str]:
 
 def resolve_geometry_dir(args, ctx) -> Optional[Path]:
     """
-    Resuelve el directorio de geometrÃ­as segÃºn ROUTING_CONTRACT.
+    Resuelve el directorio de geometrías según ROUTING_CONTRACT.
     
     Prioridad:
-    1. --data-dir explÃ­cito (DEPRECATED)
-    2. --experiment â†’ buscar en stage 02
+    1. --data-dir explícito (DEPRECATED)
+    2. --experiment → buscar en stage 02
     3. --run-dir legacy con cuerdas_io
     """
-    # Prioridad 1: --data-dir explÃ­cito
+    # Prioridad 1: --data-dir explícito
     if args.data_dir:
         geometry_dir = Path(args.data_dir).resolve()
         if geometry_dir.exists():
             warnings.warn(
-                "--data-dir estÃ¡ DEPRECATED. Usa --experiment en su lugar.",
+                "--data-dir está DEPRECATED. Usa --experiment en su lugar.",
                 DeprecationWarning
             )
             return geometry_dir
@@ -172,7 +172,7 @@ def resolve_geometry_dir(args, ctx) -> Optional[Path]:
                 return candidate
         
         # No encontrado - dar error claro
-        print(f"[ERROR] No se encontrÃ³ geometry_emergent en:")
+        print(f"[ERROR] No se encontró geometry_emergent en:")
         for c in candidates:
             print(f"        - {c}")
         print(f"\n        Ejecuta primero: python 02_emergent_geometry_engine.py --experiment {ctx.experiment}")
@@ -192,11 +192,11 @@ def resolve_geometry_dir(args, ctx) -> Optional[Path]:
 
 def resolve_output_file(args, ctx) -> Optional[Path]:
     """
-    Resuelve el archivo de salida segÃºn ROUTING_CONTRACT.
+    Resuelve el archivo de salida según ROUTING_CONTRACT.
     
     Prioridad:
-    1. --experiment â†’ ctx.stage_dir (V3)
-    2. --output-summary explÃ­cito (DEPRECATED)
+    1. --experiment → ctx.stage_dir (V3)
+    2. --output-summary explícito (DEPRECATED)
     3. --run-dir / holographic_dictionary (legacy)
     """
     if ctx:
@@ -223,7 +223,7 @@ def safe_relpath(path: Path, base: Path) -> str:
 
 
 # =============================================================================
-# FUNCIONES DE ANÃLISIS
+# FUNCIONES DE ANÁLISIS
 # =============================================================================
 
 def extract_delta_from_correlator(x, G2):
@@ -305,12 +305,12 @@ def check_breitenlohner_freedman_bound(m2L2: float, d: int) -> dict:
 
 def discover_mass_dimension_relation(Deltas, m2L2, d, seed=42):
     """
-    Usa PySR para descubrir la relacion entre Delta y mÂ²LÂ².
+    Usa PySR para descubrir la relacion entre Delta y m²L².
     Devuelve un dict con:
         - discovered_equation (str)
         - r2 (float)
         - status
-        - holographic_r2 (ajuste si forzamos mÂ²LÂ² = Delta(Delta-d))
+        - holographic_r2 (ajuste si forzamos m²L² = Delta(Delta-d))
     """
     if not HAS_PYSR:
         return {"status": "pysr_not_available"}
@@ -350,7 +350,7 @@ def discover_mass_dimension_relation(Deltas, m2L2, d, seed=42):
     results["r2"] = float(r2)
     results["status"] = "ok"
 
-    # Comparacion con Delta(Delta-d) (chequeo teÃ³rico, no label)
+    # Comparacion con Delta(Delta-d) (chequeo teórico, no label)
     Deltas_flat = Deltas.reshape(-1)
     m2L2_flat = m2L2.reshape(-1)
     valid = ~np.isnan(Deltas_flat) & ~np.isnan(m2L2_flat)
@@ -390,12 +390,12 @@ def discover_mass_dimension_relation(Deltas, m2L2, d, seed=42):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Fase XI: construir diccionario hologrÃ¡fico agrupando por (family, d)"
+        description="Fase XI: construir diccionario holográfico agrupando por (family, d)"
     )
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    # V3: Argumentos estÃ¡ndar
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
+    # V3: Argumentos estándar
+    # ═══════════════════════════════════════════════════════════════════════
     if HAS_STAGE_UTILS and add_standard_arguments:
         add_standard_arguments(parser)
     else:
@@ -409,7 +409,7 @@ def parse_args():
         "--data-dir",
         type=str,
         default=None,
-        help="[DEPRECATED] Directorio con los .h5 de geometrÃ­a. Usar --experiment.",
+        help="[DEPRECATED] Directorio con los .h5 de geometría. Usar --experiment.",
     )
     parser.add_argument(
         "--output-summary",
@@ -418,7 +418,7 @@ def parse_args():
         help="[DEPRECATED] Fichero JSON de salida. Usar --experiment.",
     )
     
-    # Argumentos especÃ­ficos del script
+    # Argumentos específicos del script
     parser.add_argument(
         "--mass-source",
         type=str,
@@ -429,7 +429,7 @@ def parse_args():
     parser.add_argument(
         "--compute-m2-from-delta",
         action="store_true",
-        help="(MODO CONTROL, solo con mass_source=hdf5) Si no hay m2L2 en HDF5, calcula mÂ²LÂ² = Delta(Delta-d)",
+        help="(MODO CONTROL, solo con mass_source=hdf5) Si no hay m2L2 en HDF5, calcula m²L² = Delta(Delta-d)",
     )
     parser.add_argument(
         "--seed",
@@ -447,17 +447,17 @@ def parse_args():
 def main() -> int:
     args = parse_args()
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     # ROUTING CONTRACT: Validar conflictos
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     is_valid, error_msg = validate_routing_args(args)
     if not is_valid:
         print(f"[ERROR] {error_msg}")
         return 1
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     # V3: Crear StageContext
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     ctx = None
     if HAS_STAGE_UTILS and StageContext:
         if not getattr(args, 'experiment', None):
@@ -473,9 +473,9 @@ def main() -> int:
             print(f"[V3] Experiment: {ctx.experiment}")
             print(f"[V3] Stage dir: {ctx.stage_dir}")
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     # RESOLVER INPUT (geometry_dir)
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     geometry_dir = resolve_geometry_dir(args, ctx)
     
     if geometry_dir is None:
@@ -485,27 +485,27 @@ def main() -> int:
         return 2
     
     if not geometry_dir.exists() or not geometry_dir.is_dir():
-        print(f"[ERROR] geometry_dir no es un directorio vÃ¡lido: {geometry_dir}")
+        print(f"[ERROR] geometry_dir no es un directorio válido: {geometry_dir}")
         if ctx:
             ctx.write_summary(status="INCOMPLETE", counts={"error": "geometry_dir_not_found"})
         return 2
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     # RESOLVER OUTPUT
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     output_file = resolve_output_file(args, ctx)
 
     print("=" * 70)
-    print("FASE XI - DICCIONARIO HOLOGRÃFICO v3.1 (FIX EMERGENT)")
+    print("FASE XI - DICCIONARIO HOLOGRÁFICO v3.1 (FIX EMERGENT)")
     print("=" * 70)
     print(f"Mass source: {args.mass_source.upper()}")
     if args.mass_source == "hdf5":
         print("   MODO CONTROL: Usando ground-truth de HDF5 (Delta_mass_dict)")
         if args.compute_m2_from_delta:
-            print("   -> [CONTROL] Si falta m2L2, se calcula mÂ²LÂ² = Delta(Delta-d)")
+            print("   -> [CONTROL] Si falta m2L2, se calcula m²L² = Delta(Delta-d)")
     else:
         print("   MODO EMERGENTE: Extrayendo Delta de correladores")
-        print("   -> NO se calcula mÂ²LÂ² en esta fase (solo atlas de Î”)")
+        print("   -> NO se calcula m²L² en esta fase (solo atlas de Δ)")
     print("=" * 70)
 
     data_by_family_d = defaultdict(
@@ -521,7 +521,7 @@ def main() -> int:
 
     geometry_results = []
 
-    # Recorremos todos los .h5 de la carpeta de geometrÃ­a
+    # Recorremos todos los .h5 de la carpeta de geometría
     h5_files = sorted(geometry_dir.glob("*.h5"))
     if not h5_files:
         print(f"[WARN] No se encontraron .h5 en {geometry_dir}")
@@ -587,7 +587,7 @@ def main() -> int:
                         m2L2_method = "not_available"
 
                     print(
-                        f"   {name}/{op_name}: Î”={Delta:.3f}, mÂ²LÂ²={m2L2 if m2L2 else 'N/A'} "
+                        f"   {name}/{op_name}: Δ={Delta:.3f}, m²L²={m2L2 if m2L2 else 'N/A'} "
                         f"[{m2L2_method}]"
                     )
 
@@ -648,7 +648,7 @@ def main() -> int:
 
                     print(
                         f"   {name}/{op_name}: Delta={Delta:.3f} "
-                        f"[emergent, mÂ²LÂ² NO calculado en esta fase]"
+                        f"[emergent, m²L² NO calculado en esta fase]"
                     )
 
                     geo_result["operators_extracted"].append(
@@ -694,7 +694,7 @@ def main() -> int:
         }
         print(
             f"   {key}: {n} puntos con m2L2, "
-            f"d={fdata['d']}, {len(fdata['geometries'])} geometrÃ­as"
+            f"d={fdata['d']}, {len(fdata['geometries'])} geometrías"
         )
 
     # Descubrir relaciones masa-dimension donde sea posible
@@ -714,10 +714,10 @@ def main() -> int:
         )
         discovery_results[key] = result
         if result["status"] == "ok":
-            print(f"   Mejor ecuaciÃ³n: {result['discovered_equation']}")
-            print(f"   RÂ²(PySR): {result['r2']:.4f}")
+            print(f"   Mejor ecuación: {result['discovered_equation']}")
+            print(f"   R²(PySR): {result['r2']:.4f}")
             if result.get("holographic_r2") is not None:
-                print(f"   RÂ²(mÂ²LÂ²=Delta(Delta-d)): {result['holographic_r2']:.4f}")
+                print(f"   R²(m²L²=Delta(Delta-d)): {result['holographic_r2']:.4f}")
         else:
             print(f"   Status: {result['status']}")
 
@@ -729,9 +729,9 @@ def main() -> int:
         "compute_m2_from_delta": args.compute_m2_from_delta,
         "version": "v3.1_routing_contract",
         "notes": [
-            "v3.1: FIX MODO EMERGENT (no mezcla d ni masas entre geometrÃ­as)",
-            "rev.honestidad: en modo emergent no se calcula mÂ²LÂ² en este script; "
-            "las masas deben venir de datos externos (HDF5 u otros mÃ³dulos).",
+            "v3.1: FIX MODO EMERGENT (no mezcla d ni masas entre geometrías)",
+            "rev.honestidad: en modo emergent no se calcula m²L² en este script; "
+            "las masas deben venir de datos externos (HDF5 u otros módulos).",
         ],
     }
 
@@ -739,9 +739,9 @@ def main() -> int:
     output_file.write_text(json.dumps(summary, indent=2))
     print(f"\nResumen guardado en: {output_file}")
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     # V3: Registrar artefactos y escribir summary
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     if ctx:
         ctx.record_artifact("holographic_dictionary_summary", output_file)
         ctx.record_artifact("geometry_dir_input", geometry_dir)

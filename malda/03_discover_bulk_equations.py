@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # 03_discover_bulk_equations.py
-# CUERDAS ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Bloque A: GeometrÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­a emergente (descubrimiento de ecuaciones de bulk)
+# CUERDAS — Bloque A: Geometría emergente (descubrimiento de ecuaciones de bulk)
 #
 # Objective:
-#   Aplicar regresiÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³n simbÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³lica (PySR u otro SR) sobre la geometrÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­a emergente
+#   Aplicar regresión simbólica (PySR u otro SR) sobre la geometría emergente
 #   para descubrir ecuaciones de campo en el bulk (para A, f, R, etc.).
 #
 # Inputs: (IO CONTRACT V3)
-#   Usa io_contract_resolver para encontrar geometrÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­as:
+#   Usa io_contract_resolver para encontrar geometrías:
 #   - Prioridad 1: runs/<exp>/02_emergent_geometry_engine/geometry_emergent/*.h5
 #   - Prioridad 2: runs/<exp>/01_generate_sandbox_geometries/*.h5
 #
@@ -17,11 +17,11 @@
 #     <geometry_name>/einstein_discovery.json
 #
 # HONESTIDAD
-#   - No se usan ecuaciones teÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³ricas conocidas como features ni como tÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rminos forzados.
-#   - Las comparaciones con ecuaciones de Einstein o variantes se realizan mÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡s tarde,
-#     y se etiquetan explÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­citamente como "post-hoc".
+#   - No se usan ecuaciones teóricas conocidas como features ni como términos forzados.
+#   - Las comparaciones con ecuaciones de Einstein o variantes se realizan más tarde,
+#     y se etiquetan explícitamente como "post-hoc".
 #
-# Version: 2024-12-29 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Con io_contract_resolver + fix Ricci
+# Version: 2024-12-29 — Con io_contract_resolver + fix Ricci
 
 import argparse
 import json
@@ -83,12 +83,12 @@ if not HAS_STAGE_UTILS:
 
 
 # ============================================================
-# CARGA DE GEOMETRÃƒÆ’Ã†â€™Ãƒâ€šÃ‚ÂAS (H5 + NPZ)
+# CARGA DE GEOMETRÍAS (H5 + NPZ)
 # ============================================================
 
 def load_geometry_file(file_path: Path) -> Dict[str, Any]:
     """
-    Carga un file de geometrÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­a (.h5 o .npz).
+    Carga un file de geometría (.h5 o .npz).
     Devuelve dict con keys: z, A, f, category, name
     """
     name = file_path.stem.replace("_geometry", "").replace("_emergent", "")
@@ -324,7 +324,7 @@ def discover_geometric_relations(
     }
     
     print(f"     Discovered: R = {best_R['equation']}")
-    print(f"     RÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€š²: {r2:.4f}")
+    print(f"     R²: {r2:.4f}")
     print(f"     Complexity: {best_R['complexity']}")
     
     return results
@@ -336,10 +336,10 @@ def discover_geometric_relations(
 
 def validate_einstein_posterior(results: Dict[str, Any], d: int) -> Dict[str, Any]:
     """
-    Validacion post-hoc: Ã‚Â¿la ecuacion descubierta es compatible con Einstein?
+    Validacion post-hoc: ¿la ecuacion descubierta es compatible con Einstein?
     
-    Para AdS_d+1 con constante cosmologica ÃŽâ€º < 0:
-        R = 2D/(D-2) * ÃŽâ€º = -d(d+1)/L²  (constante y NEGATIVO)
+    Para AdS_d+1 con constante cosmologica Λ < 0:
+        R = 2D/(D-2) * Λ = -d(d+1)/L²  (constante y NEGATIVO)
     
     Criterios:
         1. R debe ser aproximadamente constante (cv < 0.15)
@@ -367,7 +367,7 @@ def validate_einstein_posterior(results: Dict[str, Any], d: int) -> Dict[str, An
     # Test 1: R constante (baja variacion)
     validation["R_constant"] = cv < 0.15
     
-    # Test 2: R negativo (requisito para AdS con ÃŽâ€º < 0)
+    # Test 2: R negativo (requisito para AdS con Λ < 0)
     validation["R_negative"] = R_mean < -0.1  # Threshold para evitar R~0
     
     # Test 3: R significativo (no flat space donde R=0)
@@ -438,15 +438,15 @@ def validate_einstein_posterior(results: Dict[str, Any], d: int) -> Dict[str, An
 
 
 # ============================================================
-# RESOLUCIÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œN DE RUTAS (CON CONTRATO)
+# RESOLUCIÓN DE RUTAS (CON CONTRATO)
 # ============================================================
 
 def resolve_geometries_dir(args, run_dir: Optional[Path] = None) -> Path:
     """
-    Resuelve el directory de geometrÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­as usando el contrato IO.
-    Fallback a lÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³gica legacy si el contrato no estÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ disponible.
+    Resuelve el directory de geometrías usando el contrato IO.
+    Fallback a lógica legacy si el contrato no está disponible.
     """
-    # Prioridad 1: --geometry-dir explÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­cito
+    # Prioridad 1: --geometry-dir explícito
     if args.geometry_dir:
         geo_dir = Path(args.geometry_dir)
         if geo_dir.exists():
@@ -484,7 +484,7 @@ def resolve_geometries_dir(args, run_dir: Optional[Path] = None) -> Path:
     
     raise FileNotFoundError(
         f"No geometries found.\n"
-        f"Usa --geometry-dir o asegÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âºrate de que existen en:\n"
+        f"Usa --geometry-dir o asegúrate de que existen en:\n"
         f"  - <run_dir>/02_emergent_geometry_engine/geometry_emergent/\n"
         f"  - <run_dir>/01_generate_sandbox_geometries/"
     )
@@ -500,19 +500,19 @@ def main() -> int:
     )
     
     parser.add_argument("--geometry-dir", type=str, default=None,
-                        help="directory con *.h5 o *.npz de geometrÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­as")
+                        help="directory con *.h5 o *.npz de geometrías")
     parser.add_argument("--run-dir", type=str, default=None,
-                        help="Run dir (busca geometrÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­as automÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ticamente)")
+                        help="Run dir (busca geometrías automáticamente)")
     parser.add_argument("--output-dir", type=str, default=None,
                         help="directory de salida")
     parser.add_argument("--niterations", type=int, default=100,
                         help="Iteraciones PySR")
     parser.add_argument("--maxsize", type=int, default=15,
-                        help="TamaÃƒÆ’Ã†â€™Ãƒâ€š±o mÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ximo de expresiones")
+                        help="Tamaño máximo de expresiones")
     parser.add_argument("--seed", type=int, default=42,
                         help="Semilla para reproducibilidad")
     parser.add_argument("--d", type=int, default=3,
-                        help="DimensiÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³n del boundary CFT")
+                        help="Dimensión del boundary CFT")
     
     if HAS_STAGE_UTILS:
         add_standard_arguments(parser)
@@ -538,7 +538,7 @@ def main() -> int:
     error_message: Optional[str] = None
 
     try:
-        # === RESOLVER GEOMETRÃƒÆ’Ã†â€™Ãƒâ€šÃ‚ÂAS ===
+        # === RESOLVER GEOMETRÍAS ===
         geometries_dir = resolve_geometries_dir(args, run_dir)
         
         # === RESOLVER OUTPUT ===
@@ -564,7 +564,7 @@ def main() -> int:
         
         all_results = {"geometries": []}
         
-        # Buscar files de geometrÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­a
+        # Buscar files de geometría
         geometry_files = sorted(geometries_dir.glob("*.h5"))
         if not geometry_files:
             geometry_files = sorted(geometries_dir.glob("*.npz"))
@@ -572,7 +572,7 @@ def main() -> int:
         if not geometry_files:
             raise FileNotFoundError(f"No se encontraron files .h5 ni .npz en {geometries_dir}")
         
-        print(f"\nEncontrados {len(geometry_files)} files de geometrÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­a")
+        print(f"\nEncontrados {len(geometry_files)} files de geometría")
         
         for geo_path in geometry_files:
             try:
@@ -612,7 +612,7 @@ def main() -> int:
             print(f"     Einstein score:           {validation['einstein_score']:.2f}")
             print(f"     Verdict:                {validation['verdict']}")
             if 'implied_Lambda' in validation:
-                print(f"     Lambda implÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­cita:         {validation['implied_Lambda']:.4f}")
+                print(f"     Lambda implícita:         {validation['implied_Lambda']:.4f}")
             
             geo_results = {
                 "name": name,

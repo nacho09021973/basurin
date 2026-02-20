@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-00_validate_io_contracts.py â€” Validador de Contratos IO v1 para CUERDAS-Maldacena
+00_validate_io_contracts.py — Validador de Contratos IO v1 para CUERDAS-Maldacena
 
 Este script valida que los archivos en runs/ cumplan con el contrato IO v1
 definido en IO_CONTRACTS_V1.md.
@@ -14,7 +14,7 @@ El validador produce:
     - Exit code 0 si todo pasa, 1 si hay fallos (en modo --strict)
 
 Autor: CUERDAS-Maldacena Team
-VersiÃ³n: 1.0 (2025-12)
+Versión: 1.0 (2025-12)
 Contrato: IO_CONTRACTS_V1.md
 """
 
@@ -39,16 +39,16 @@ import pandas as pd
 
 @dataclass
 class ValidationIssue:
-    """Un problema encontrado durante la validaciÃ³n."""
+    """Un problema encontrado durante la validación."""
     level: str  # "ERROR", "WARN", "INFO"
-    code: str   # CÃ³digo Ãºnico del problema
+    code: str   # Código único del problema
     message: str
     field: Optional[str] = None
 
 
 @dataclass
 class FileValidation:
-    """Resultado de validaciÃ³n de un archivo."""
+    """Resultado de validación de un archivo."""
     filepath: str
     filetype: str  # "sandbox_h5", "emergent_h5", "modes_csv", "json"
     status: str    # "PASS", "FAIL", "WARN"
@@ -58,7 +58,7 @@ class FileValidation:
 
 @dataclass
 class ValidationReport:
-    """Reporte completo de validaciÃ³n."""
+    """Reporte completo de validación."""
     timestamp: str
     contract_version: str
     runs_dir: str
@@ -92,11 +92,11 @@ MODES_CSV_REQUIRED_COLS = {"system_name", "family", "d", "mode_id", "lambda_sl",
 
 
 # =============================================================================
-# Funciones de validaciÃ³n
+# Funciones de validación
 # =============================================================================
 
 def extract_d_from_name(name: str) -> Optional[int]:
-    """Extrae dimensiÃ³n d del nombre si contiene _d<k>_."""
+    """Extrae dimensión d del nombre si contiene _d<k>_."""
     match = re.search(r"_d(\d+)_", name)
     if match:
         return int(match.group(1))
@@ -149,7 +149,7 @@ def validate_sandbox_h5(filepath: str) -> FileValidation:
     
     try:
         with h5py.File(filepath, "r") as f:
-            # --- Atributos raÃ­z obligatorios ---
+            # --- Atributos raíz obligatorios ---
             root_attrs = dict(f.attrs)
             result.metadata_extracted["root_attrs"] = {k: str(v) for k, v in root_attrs.items()}
             
@@ -159,7 +159,7 @@ def validate_sandbox_h5(filepath: str) -> FileValidation:
                 result.issues.append(ValidationIssue(
                     level="ERROR",
                     code="MISSING_ATTR",
-                    message="Falta atributo 'name' o 'system_name' en raÃ­z",
+                    message="Falta atributo 'name' o 'system_name' en raíz",
                     field="name"
                 ))
             
@@ -169,14 +169,14 @@ def validate_sandbox_h5(filepath: str) -> FileValidation:
                 result.issues.append(ValidationIssue(
                     level="ERROR",
                     code="MISSING_ATTR",
-                    message="Falta atributo 'family' en raÃ­z",
+                    message="Falta atributo 'family' en raíz",
                     field="family"
                 ))
             elif str(family).lower() not in VALID_FAMILIES:
                 result.issues.append(ValidationIssue(
                     level="WARN",
                     code="UNKNOWN_FAMILY",
-                    message=f"Familia '{family}' no estÃ¡ en la lista conocida",
+                    message=f"Familia '{family}' no está en la lista conocida",
                     field="family"
                 ))
             
@@ -186,7 +186,7 @@ def validate_sandbox_h5(filepath: str) -> FileValidation:
                 result.issues.append(ValidationIssue(
                     level="ERROR",
                     code="MISSING_ATTR",
-                    message="Falta atributo 'd' en raÃ­z",
+                    message="Falta atributo 'd' en raíz",
                     field="d"
                 ))
             else:
@@ -206,14 +206,14 @@ def validate_sandbox_h5(filepath: str) -> FileValidation:
                 result.issues.append(ValidationIssue(
                     level="ERROR",
                     code="MISSING_ATTR",
-                    message="Falta atributo 'category' en raÃ­z",
+                    message="Falta atributo 'category' en raíz",
                     field="category"
                 ))
             elif str(category).lower() not in VALID_CATEGORIES:
                 result.issues.append(ValidationIssue(
                     level="ERROR",
                     code="UNKNOWN_CATEGORY",
-                    message=f"CategorÃ­a '{category}' no estÃ¡ en la lista conocida",
+                    message=f"Categoría '{category}' no está en la lista conocida",
                     field="category"
                 ))
             
@@ -316,7 +316,7 @@ def validate_sandbox_h5(filepath: str) -> FileValidation:
 
 
 def validate_emergent_h5(filepath: str) -> FileValidation:
-    """Valida un archivo HDF5 de geometrÃ­a emergente."""
+    """Valida un archivo HDF5 de geometría emergente."""
     result = FileValidation(
         filepath=filepath,
         filetype="emergent_h5",
@@ -338,14 +338,14 @@ def validate_emergent_h5(filepath: str) -> FileValidation:
                     field="system_name"
                 ))
 
-            # family: canÃ³nico. family_pred es solo auxiliar.
+            # family: canónico. family_pred es solo auxiliar.
             family = root_attrs.get("family")
             if not family:
                 if root_attrs.get("family_pred"):
                     result.issues.append(ValidationIssue(
                         level="ERROR",
                         code="MISSING_CANONICAL_ATTR",
-                        message="Falta 'family'. No se acepta solo 'family_pred' segÃºn IO_CONTRACTS_V1.",
+                        message="Falta 'family'. No se acepta solo 'family_pred' según IO_CONTRACTS_V1.",
                         field="family"
                     ))
                 else:
@@ -356,7 +356,7 @@ def validate_emergent_h5(filepath: str) -> FileValidation:
                         field="family"
                     ))
 
-            # d: canÃ³nico. d_pred es solo auxiliar.
+            # d: canónico. d_pred es solo auxiliar.
             d = root_attrs.get("d")
             if d is None:
                 if root_attrs.get("d_pred") is not None:
@@ -380,11 +380,11 @@ def validate_emergent_h5(filepath: str) -> FileValidation:
                 result.issues.append(ValidationIssue(
                     level="ERROR",
                     code="MISSING_ATTR",
-                    message="Falta atributo 'provenance' (obligatorio en geometrÃ­a emergente)",
+                    message="Falta atributo 'provenance' (obligatorio en geometría emergente)",
                     field="provenance"
                 ))
 
-            # --- Datasets canÃ³nicos ---
+            # --- Datasets canónicos ---
             datasets = {}
 
             # z_grid (obligatorio)
@@ -406,7 +406,7 @@ def validate_emergent_h5(filepath: str) -> FileValidation:
                 result.issues.append(ValidationIssue(
                     level="WARN",
                     code="LEGACY_DATASET",
-                    message="Usando alias legacy 'A_emergent' (deberÃ­a ser 'A_of_z')",
+                    message="Usando alias legacy 'A_emergent' (debería ser 'A_of_z')",
                     field="A_emergent"
                 ))
             else:
@@ -425,7 +425,7 @@ def validate_emergent_h5(filepath: str) -> FileValidation:
                 result.issues.append(ValidationIssue(
                     level="WARN",
                     code="LEGACY_DATASET",
-                    message="Usando alias legacy 'f_emergent' (deberÃ­a ser 'f_of_z')",
+                    message="Usando alias legacy 'f_emergent' (debería ser 'f_of_z')",
                     field="f_emergent"
                 ))
             else:
@@ -444,7 +444,7 @@ def validate_emergent_h5(filepath: str) -> FileValidation:
                 result.issues.append(ValidationIssue(
                     level="INFO",
                     code="LEGACY_DATASET",
-                    message="Usando alias legacy 'R_emergent' (deberÃ­a ser 'R_of_z')",
+                    message="Usando alias legacy 'R_emergent' (debería ser 'R_of_z')",
                     field="R_emergent"
                 ))
 
@@ -512,11 +512,11 @@ def validate_modes_csv(filepath: str) -> FileValidation:
             result.issues.append(ValidationIssue(
                 level="ERROR",
                 code="WRONG_NOMENCLATURE",
-                message="Columna 'm2L2' sin 'lambda_sl'. Usar 'lambda_sl' como canÃ³nico.",
+                message="Columna 'm2L2' sin 'lambda_sl'. Usar 'lambda_sl' como canónico.",
                 field="m2L2"
             ))
         
-        # Verificar valores vÃ¡lidos
+        # Verificar valores válidos
         if "lambda_sl" in df.columns:
             n_nan = df["lambda_sl"].isna().sum()
             n_inf = np.isinf(df["lambda_sl"]).sum()
@@ -676,7 +676,7 @@ def discover_files(runs_dir: str) -> dict:
                     "emergent_geometry/*.h5"]:
         for p in runs_path.glob(pattern):
             if p.is_file() and str(p) not in files["emergent_h5"]:
-                # Excluir si ya estÃ¡ en sandbox
+                # Excluir si ya está en sandbox
                 if str(p) not in files["sandbox_h5"]:
                     files["emergent_h5"].append(str(p))
     
@@ -713,7 +713,7 @@ def discover_files(runs_dir: str) -> dict:
 # =============================================================================
 
 def run_validation(runs_dir: str, verbose: bool = True) -> ValidationReport:
-    """Ejecuta validaciÃ³n completa."""
+    """Ejecuta validación completa."""
     report = ValidationReport(
         timestamp=datetime.now().isoformat(),
         contract_version="v1.0",
@@ -749,7 +749,7 @@ def run_validation(runs_dir: str, verbose: bool = True) -> ValidationReport:
             report.warnings += 1
         
         if verbose:
-            status_icon = "âœ“" if result.status == "PASS" else ("âœ—" if result.status == "FAIL" else "âš ")
+            status_icon = "✓" if result.status == "PASS" else ("✗" if result.status == "FAIL" else "⚠")
             print(f"  {status_icon} {os.path.basename(filepath)}: {result.status}")
             for issue in result.issues:
                 if issue.level in ["ERROR", "WARN"]:
@@ -770,7 +770,7 @@ def run_validation(runs_dir: str, verbose: bool = True) -> ValidationReport:
             report.warnings += 1
         
         if verbose:
-            status_icon = "âœ“" if result.status == "PASS" else ("âœ—" if result.status == "FAIL" else "âš ")
+            status_icon = "✓" if result.status == "PASS" else ("✗" if result.status == "FAIL" else "⚠")
             print(f"  {status_icon} {os.path.basename(filepath)}: {result.status}")
             for issue in result.issues:
                 if issue.level in ["ERROR", "WARN"]:
@@ -791,7 +791,7 @@ def run_validation(runs_dir: str, verbose: bool = True) -> ValidationReport:
             report.warnings += 1
         
         if verbose:
-            status_icon = "âœ“" if result.status == "PASS" else ("âœ—" if result.status == "FAIL" else "âš ")
+            status_icon = "✓" if result.status == "PASS" else ("✗" if result.status == "FAIL" else "⚠")
             print(f"  {status_icon} {os.path.basename(filepath)}: {result.status}")
             for issue in result.issues:
                 if issue.level in ["ERROR", "WARN"]:
@@ -812,7 +812,7 @@ def run_validation(runs_dir: str, verbose: bool = True) -> ValidationReport:
             report.warnings += 1
         
         if verbose:
-            status_icon = "âœ“" if result.status == "PASS" else ("âœ—" if result.status == "FAIL" else "âš ")
+            status_icon = "✓" if result.status == "PASS" else ("✗" if result.status == "FAIL" else "⚠")
             print(f"  {status_icon} {os.path.basename(filepath)}: {result.status}")
             for issue in result.issues:
                 if issue.level in ["ERROR", "WARN"]:
@@ -824,13 +824,13 @@ def run_validation(runs_dir: str, verbose: bool = True) -> ValidationReport:
         print(f"RESUMEN")
         print(f"{'='*60}")
         print(f"Total archivos: {report.total_files}")
-        print(f"  âœ“ PASS: {report.passed}")
-        print(f"  âš  WARN: {report.warnings}")
-        print(f"  âœ— FAIL: {report.failed}")
+        print(f"  ✓ PASS: {report.passed}")
+        print(f"  ⚠ WARN: {report.warnings}")
+        print(f"  ✗ FAIL: {report.failed}")
         
         if report.total_files == 0:
-            print(f"\nâš  No se encontraron archivos para validar en {runs_dir}")
-            print(f"  AsegÃºrate de que exista la estructura:")
+            print(f"\n⚠ No se encontraron archivos para validar en {runs_dir}")
+            print(f"  Asegúrate de que exista la estructura:")
             print(f"    - runs/sandbox_geometries/*.h5")
             print(f"    - runs/emergent_geometry/geometry_emergent/*.h5")
             print(f"    - runs/bulk_eigenmodes/*.csv")
@@ -854,7 +854,7 @@ Ejemplos:
         "--runs-dir",
         type=str,
         default="runs/",
-        help="Directorio raÃ­z de runs (default: runs/)"
+        help="Directorio raíz de runs (default: runs/)"
     )
     parser.add_argument(
         "--output",
