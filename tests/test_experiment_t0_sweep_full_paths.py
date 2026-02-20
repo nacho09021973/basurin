@@ -346,8 +346,10 @@ class TestExperimentT0SweepFullPaths(unittest.TestCase):
             (expected_out_root / run_id / "s1_fetch_strain" / "outputs" / "strain.npz").write_bytes(b"npz-placeholder")
 
             seen_envs: list[dict[str, str]] = []
+            seen_cmds: list[list[str]] = []
 
             def _fake_run_cmd(cmd: list[str], env: dict[str, str], timeout: int) -> SimpleNamespace:
+                seen_cmds.append(list(cmd))
                 seen_envs.append(dict(env))
                 if Path(cmd[1]).stem == "s2_ringdown_window":
                     run_id_arg = cmd[cmd.index("--run") + 1]
@@ -370,6 +372,11 @@ class TestExperimentT0SweepFullPaths(unittest.TestCase):
                 exp.run_t0_sweep_full(args, run_cmd_fn=_fake_run_cmd)
 
             self.assertTrue(seen_envs)
+            self.assertTrue(seen_cmds)
+            self.assertTrue(all("--runs-root" in cmd for cmd in seen_cmds))
+            self.assertTrue(
+                all(cmd[cmd.index("--runs-root") + 1] == str(expected_subruns_root) for cmd in seen_cmds)
+            )
             self.assertTrue(all(e.get("BASURIN_RUNS_ROOT") == str(expected_subruns_root) for e in seen_envs))
             os.environ.pop("BASURIN_RUNS_ROOT", None)
 
