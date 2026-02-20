@@ -10,7 +10,8 @@ Framework MVP para análisis de *ringdown* (ondas gravitacionales) con ejecució
 2. **Consulta el mapa de rutas**: [`docs/readme_rutas.md`](docs/readme_rutas.md) (crítico para `RUNS_ROOT`, subruns y experimentos anidados).
 3. Ejecuta con `python mvp/pipeline.py ...` y asume semántica *fail-fast* (si una etapa falla, el pipeline aborta).
 4. No escribas fuera de `runs/<run_id>/...` (o del `BASURIN_RUNS_ROOT` efectivo).
-5. Antes de proponer cambios, revisa tests en `tests/` y contratos en `mvp/contracts.py`.
+5. HDF5 externos (GWOSC/LOSC) viven en `data/losc/<EVENT_ID>/` y se leen desde ahí (sin fabricarlos en el run).
+6. Antes de proponer cambios, revisa tests en `tests/` y contratos en `mvp/contracts.py`.
 
 ---
 
@@ -135,36 +136,31 @@ Artefactos agregados a vigilar:
 
 Nota sobre subruns por seed: el experimento crea árboles por semilla para aislar trazabilidad y reintentos. Por eso, los agregados deben escanearse desde `scan_root` (global o por seed) y no por prefijos de nombre; además, se excluyen ancestros symlink para evitar duplicados/alias.
 
-## Evitar descargas repetidas de GW150914/GW150904 (modo offline recomendado)
+## Convención canónica de HDF5 externos (LOSC/GWOSC)
 
-Si ya tienes los HDF5 completos en local (caso típico: repetir experimentos con el mismo evento),
-**no hace falta volver a descargar desde GWOSC** en cada corrida.
+**Single source de ubicación:** BASURIN espera datasets externos en:
 
-Usa `s1_fetch_strain` en modo local:
+- `data/losc/<EVENT_ID>/`
+- Convención de nombres (plana, sin subdirectorios por detector): los archivos deben incluir `H1` o `L1` en el nombre.
 
-```bash
-python mvp/s1_fetch_strain.py \
-  --run <run_id> \
-  --event-id GW150914 \
-  --detectors H1,L1 \
-  --duration-s 32 \
-  --local-hdf5 H1=/ruta/local/H-H1_GWOSC_*.h5 \
-  --local-hdf5 L1=/ruta/local/L-L1_GWOSC_*.h5 \
-  --reuse-if-present
+Ejemplo recomendado:
+
+```text
+data/losc/GW150914/
+  H-H1_GWOSC_4KHZ_R1-1126257415-4096.hdf5
+  L-L1_GWOSC_4KHZ_R1-1126257415-4096.hdf5
 ```
 
-Notas prácticas:
+Quickstart local (sin descarga):
 
-- `--local-hdf5` evita la descarga remota y fuerza lectura desde tus `.h5/.hdf5`.
-- `--reuse-if-present` evita repetir trabajo si `outputs/strain.npz` + `provenance.json`
-  ya coinciden con `event_id`, detectores y hashes.
-- Al ejecutar en modo local, BASURIN deja copia auditable de los HDF5 usados en:
-  - `runs/<run_id>/s1_fetch_strain/inputs/*.h5`
-  y la referencia en:
-  - `runs/<run_id>/s1_fetch_strain/outputs/provenance.json` (`local_inputs`, `local_input_sha256`).
+```bash
+python mvp/s1_fetch_strain.py   --run <run_id>   --event-id GW150914   --detectors H1,L1   --hdf5-root data/losc   --reuse-if-present
+```
 
-En resumen: para experimentación iterativa con GW150914/GW150904, apunta siempre a tus
-HDF5 locales y reutiliza artefactos para no saturar red ni perder tiempo.
+- Si no pasas `--local-hdf5`, `s1_fetch_strain` intenta auto-resolver en `data/losc/<EVENT_ID>/` con patrones `*H1*.hdf5|*.h5` y `*L1*.hdf5|*.h5`.
+- Si falta algún archivo, falla rápido con la ruta exacta esperada + comando `find` + ejemplo de invocación con `--local-hdf5`.
+- `data/losc/...` es **external inputs (solo lectura)**: el run no “fabrica” HDF5 ahí ni duplica megas por defecto.
+- Para auditoría, s1 copia los HDF5 usados a `runs/<run_id>/s1_fetch_strain/inputs/*.h5` y guarda hashes en `provenance.json`.
 
 ## Semántica operacional importante
 

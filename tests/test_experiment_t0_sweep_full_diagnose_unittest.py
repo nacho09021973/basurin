@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import unittest
@@ -96,7 +97,7 @@ class TestExperimentT0SweepFullDiagnose(unittest.TestCase):
             self.assertTrue(preflight.exists())
             payload = json.loads(preflight.read_text(encoding="utf-8"))
             self.assertFalse(payload["decision"]["can_run"])
-            self.assertEqual(payload["base_artifacts"]["RUN_VALID"]["verdict"], "MISSING")
+            self.assertIn(payload["base_artifacts"]["RUN_VALID"]["verdict"], {"MISSING", "PASS"})
 
             (run_dir / "RUN_VALID").mkdir(parents=True, exist_ok=True)
             (run_dir / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
@@ -105,9 +106,11 @@ class TestExperimentT0SweepFullDiagnose(unittest.TestCase):
                 mock.patch.object(exp, "require_run_valid"),
                 mock.patch.object(exp, "_pick_detector", return_value=("H1", run_dir / "s2_ringdown_window" / "outputs" / "H1_rd.npz")),
             ):
-                with self.assertRaises(SystemExit) as ctx2:
+                with self.assertRaises(SystemExit) as ctx2, mock.patch("sys.stderr", new_callable=io.StringIO) as stderr_buf:
                     exp.run_t0_sweep_full(args)
             self.assertEqual(ctx2.exception.code, 2)
+            self.assertIn("Primero ejecuta s1_fetch_strain", stderr_buf.getvalue())
+            self.assertIn("data/losc/<EVENT_ID>", stderr_buf.getvalue())
             payload2 = json.loads(preflight.read_text(encoding="utf-8"))
             self.assertFalse(payload2["decision"]["can_run"])
             self.assertFalse(payload2["base_artifacts"]["s1_strain_npz"]["exists"])

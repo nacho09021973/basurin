@@ -179,6 +179,10 @@ def _parse_local_hdf5_args(items: list[str]) -> dict[str, Path]:
     return _resolve_local_hdf5_mappings(items, event_id=None)
 
 
+def _default_hdf5_root() -> Path:
+    return Path(__file__).resolve().parents[1] / "data" / "losc"
+
+
 def _resolve_local_hdf5_mappings(items: list[str], event_id: str | None) -> dict[str, Path]:
     local_by_det: dict[str, Path] = {}
     for item in items:
@@ -193,6 +197,56 @@ def _resolve_local_hdf5_mappings(items: list[str], event_id: str | None) -> dict
             raise ValueError(f"Duplicate --local-hdf5 detector: {det}")
         local_by_det[det] = _resolve_hdf5_candidate(path_expr, det, event_id=event_id)
     return local_by_det
+
+
+def _collect_hdf5_candidates(event_dir: Path, det: str) -> list[Path]:
+    patterns = [f"*{det}*.hdf5", f"*{det}*.h5"]
+    out: list[Path] = []
+    for pattern in patterns:
+        out.extend(p for p in event_dir.glob(pattern) if p.is_file())
+    return sorted(set(out), key=lambda p: p.name)
+
+
+def _resolve_event_hdf5_or_die(*, hdf5_root: Path, event_id: str, detectors: list[str]) -> dict[str, Path]:
+    event_dir = (hdf5_root / event_id).resolve()
+    resolved: dict[str, Path] = {}
+    errors: list[str] = []
+    patterns = {det: [f"*{det}*.hdf5", f"*{det}*.h5"] for det in detectors}
+
+    for det in detectors:
+        candidates = _collect_hdf5_candidates(event_dir, det)
+        if len(candidates) == 1:
+            resolved[det] = candidates[0].resolve()
+            continue
+        if len(candidates) == 0:
+            errors.append(f"- {det}: 0 archivos")
+            continue
+        shown = ", ".join(path.name for path in candidates[:4])
+        suffix = " ..." if len(candidates) > 4 else ""
+        errors.append(f"- {det}: {len(candidates)} archivos ({shown}{suffix})")
+
+    if len(resolved) == len(detectors):
+        return resolved
+
+    lines = [
+        f"No se pudieron auto-resolver HDF5 para event_id={event_id}.",
+        f"Ruta esperada: {event_dir}",
+        "Patrones buscados por detector:",
+    ]
+    for det in detectors:
+        lines.append(f"  - {det}: {', '.join(patterns[det])}")
+    if errors:
+        lines.append("Detalle:")
+        lines.extend(errors)
+    lines.extend(
+        [
+            f"Comprobación sugerida: find {event_dir} \\( -iname '*.hdf5' -o -iname '*.h5' \\) -type f",
+            "Ejemplo explícito (--local-hdf5):",
+            f"  python mvp/s1_fetch_strain.py --run <run_id> --event-id {event_id} --detectors {','.join(detectors)} "
+            "--local-hdf5 H1=/ruta/H-H1_...hdf5 --local-hdf5 L1=/ruta/L-L1_...hdf5",
+        ]
+    )
+    raise ValueError("\n".join(lines))
 
 
 def _resolve_hdf5_candidate(path_expr: str, det: str, event_id: str | None) -> Path:
@@ -509,7 +563,18 @@ def main() -> int:
         action="append",
         default=[],
         metavar="DET=PATH",
-        help="Use local/offline HDF5 strain per detector (repeatable, e.g. H1=/tmp/H.hdf5)",
+        help=(
+            "Use local/offline HDF5 per detector (repeatable, DET=PATH). "
+            "If omitted, auto-resolves from <hdf5-root>/<EVENT_ID>/ using *H1*.hdf5|*.h5 and *L1*.hdf5|*.h5."
+        ),
+    )
+    ap.add_argument(
+        "--hdf5-root",
+        default=str(_default_hdf5_root()),
+        help=(
+            "Canonical external-input root for LOSC/GWOSC HDF5 (read-only): "
+            "<repo_root>/data/losc/<EVENT_ID>/. Default: %(default)s"
+        ),
     )
     ap.add_argument(
         "--reuse-if-present",
@@ -536,7 +601,7 @@ def main() -> int:
 
     explicit_local_by_det = _resolve_local_hdf5_mappings(args.local_hdf5, event_id=args.event_id)
     local_by_det = dict(explicit_local_by_det)
-    if local_by_det and not detectors:
+    if not detectors and local_by_det:
         detectors = sorted(local_by_det.keys())
     if not detectors:
         detectors = ["H1", "L1"]
@@ -547,6 +612,21 @@ def main() -> int:
     if local_by_det and args.synthetic:
         print("ERROR: --local-hdf5 cannot be used with --synthetic", file=sys.stderr)
         raise SystemExit(2)
+    if not local_by_det and not args.synthetic and args.event_id:
+        try:
+            local_by_det = _resolve_event_hdf5_or_die(
+                hdf5_root=Path(args.hdf5_root),
+                event_id=args.event_id,
+                detectors=detectors,
+            )
+            print(
+                f"[s1_fetch_strain] Auto-resolved local HDF5 in {Path(args.hdf5_root).resolve() / args.event_id}",
+                flush=True,
+            )
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            raise SystemExit(2)
+
     if not local_by_det and not args.synthetic:
         local_by_det = _resolve_local_cache_hdf5(args.run, args.event_id, detectors)
     local_mode = bool(local_by_det)
