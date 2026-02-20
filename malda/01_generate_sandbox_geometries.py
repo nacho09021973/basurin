@@ -9,7 +9,7 @@ from __future__ import annotations
 #       - boundary/: datos CFT en el borde (entrada del learner)
 #       - bulk_truth/: geometria de referencia (solo para validacion/contratos)
 #
-# PRINCIPALES CARACTERÃƒÆ’Ã†â€™Ãƒâ€šÃ‚ÂSTICAS
+# PRINCIPALES CARACTERÍSTICAS
 #   - Generacion de multiples universes por geometria base (jitter de parametros).
 #   - Jitter de parametros fisicos (z_h, d, theta, z_dyn, deformation, ...).
 #   - CLI escalable: p.ej. --n-known, --n-test, --n-unknown.
@@ -17,7 +17,7 @@ from __future__ import annotations
 #
 # Inputs: (tipicas)
 #   - Parametros de familys por CLI o fichero de configuracion:
-#       * family ÃƒÆ’Ã‚Â¢Ãƒâ€¹Ã¢â‚¬Â Ãƒâ€¹Ã¢â‚¬Â  {ads, lifshitz, hyperscaling, deformed, ...}
+#       * family ∈ {ads, lifshitz, hyperscaling, deformed, ...}
 #       * d, z_dyn, theta, etc.
 #
 # Outputs: (estructura esperada)
@@ -32,7 +32,7 @@ from __future__ import annotations
 #     manifest.json
 #       - Lista de "geometries" generadas y metadatos basicos.
 #
-# RELACIÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œN CON OTROS SCRIPTS
+# RELACIÓN CON OTROS SCRIPTS
 #   - Entrada directa para:
 #       * 02_emergent_geometry_engine.py       (reconstruye geometria a partir de boundary/)
 #       * 04_geometry_physics_contracts.py    (usa bulk_truth/ para contratos fisicos)
@@ -94,47 +94,47 @@ except ImportError:
 
 
 # ============================================================
-#  NOTA SOBRE familyS, GAUGES Y FUENTES TEÃƒâ€œRICAS
+#  NOTA SOBRE familyS, GAUGES Y FUENTES TEÓRICAS
 # ============================================================
 #
 # familyS IMPLEMENTADAS:
 #   - ads: AdS puro, conforme a AGMOO Sec. 2
-#   - lifshitz: ExtensiÃƒÂ³n con exponente dinÃƒÂ¡mico z (Kachru et al. 2008)
-#   - hyperscaling: ViolaciÃƒÂ³n de hyperscaling ÃŽÂ¸ (Huijse et al. 2011)
-#   - dpbrane: MÃƒÂ©tricas near-horizon de Dp-branas (AGMOO Sec. 6.1.3)
-#   - deformed: AdS con deformaciÃƒÂ³n suave fenomenolÃƒÂ³gica
-#   - unknown: family de test sin garantÃƒÂ­a hologrÃƒÂ¡fica
+#   - lifshitz: Extensión con exponente dinámico z (Kachru et al. 2008)
+#   - hyperscaling: Violación de hyperscaling θ (Huijse et al. 2011)
+#   - dpbrane: Métricas near-horizon de Dp-branas (AGMOO Sec. 6.1.3)
+#   - deformed: AdS con deformación suave fenomenológica
+#   - unknown: family de test sin garantía holográfica
 #
-# NOTA HISTÃƒâ€œRICA:
+# NOTA HISTÓRICA:
 #   Las familys Lifshitz y Hyperscaling son extensiones post-1999 del
 #   paradigma AdS/CFT. El AGMOO (1999) cubre principalmente AdS puro y
 #   Dp-branas. Usamos estas extensiones como familys de TEST para
-#   evaluar la capacidad del pipeline de detectar/distinguir geometrÃƒÂ­as.
+#   evaluar la capacidad del pipeline de detectar/distinguir geometrías.
 #
-# GAUGE DE LA MÃƒâ€°TRICA:
+# GAUGE DE LA MÉTRICA:
 #   Usamos el gauge conformal (Domain Wall):
-#       dsÃ‚Â² = e^{2A(z)} [ -f(z) dtÃ‚Â² + dxÃ‚Â² ] + dzÃ‚Â²/f(z)
+#       ds² = e^{2A(z)} [ -f(z) dt² + dx² ] + dz²/f(z)
 #   
-#   NO el gauge de PoincarÃƒÂ© estÃƒÂ¡ndar:
-#       dsÃ‚Â² = (L/z)Ã‚Â² [ dzÃ‚Â²/f + dxÃ‚Â² - f dtÃ‚Â² ]
+#   NO el gauge de Poincaré estándar:
+#       ds² = (L/z)² [ dz²/f + dx² - f dt² ]
 #
 #   En gauge conformal: A(z) = -log(z/L) para AdS puro
-#   Esto afecta la forma funcional pero NO las relaciones fÃƒÂ­sicas.
+#   Esto afecta la forma funcional pero NO las relaciones físicas.
 #
 # CORRELADORES:
-#   Los correladores de 2 puntos GÃ¢â€šâ€š(x) son TOY MODELS fenomenolÃƒÂ³gicos:
-#       T=0: GÃ¢â€šâ€š ~ 1/|x|^{2ÃŽâ€}
-#       T>0: GÃ¢â€šâ€š ~ (Ãâ‚¬T/sinh(Ãâ‚¬Tx))^{2ÃŽâ€}
+#   Los correladores de 2 puntos G₂(x) son TOY MODELS fenomenológicos:
+#       T=0: G₂ ~ 1/|x|^{2Δ}
+#       T>0: G₂ ~ (πT/sinh(πTx))^{2Δ}
 #   
 #   Esto captura el comportamiento CUALITATIVO (power-law UV, exponencial IR)
-#   pero NO es la predicciÃƒÂ³n exacta de AdS/CFT. Esto es DELIBERADO:
+#   pero NO es la predicción exacta de AdS/CFT. Esto es DELIBERADO:
 #   el pipeline debe descubrir relaciones desde datos imperfectos.
 #
 # ============================================================
 
 
 # ============================================================
-#  GEOMETRÃƒÆ’Ã†â€™Ãƒâ€šÃ‚ÂA OCULTA
+#  GEOMETRÍA OCULTA
 # ============================================================
 
 @dataclass
@@ -159,7 +159,7 @@ class HiddenGeometry:
     def warp_factor(self, z: np.ndarray) -> np.ndarray:
         """
         A(z) tal que:
-            dsÃƒÆ’Ã¢â‚¬Å¡Â² = e^{2A(z)} [ -f(z) dtÃƒÆ’Ã¢â‚¬Å¡Â² + dx_iÃƒÆ’Ã¢â‚¬Å¡Â² ] + dzÃƒÆ’Ã¢â‚¬Å¡Â² / f(z)
+            ds² = e^{2A(z)} [ -f(z) dt² + dx_i² ] + dz² / f(z)
         Implementacion toy distinta por family.
         """
         eps = 1e-6
@@ -174,7 +174,7 @@ class HiddenGeometry:
             return -np.log(z / self.L)
 
         elif self.family == "hyperscaling":
-            # HV: dsÃƒÆ’Ã¢â‚¬Å¡Â² ~ z^{-2(d-ÃƒÆ’Ã…Â½Ãƒâ€šÃ‚Â¸)/d}(...)
+            # HV: ds² ~ z^{-2(d-θ)/d}(...)
             return -(1.0 - self.theta / self.d) * np.log(z / self.L)
 
         elif self.family == "deformed":
@@ -184,12 +184,12 @@ class HiddenGeometry:
 
         elif self.family == "dpbrane":
             # Dp-brane near-horizon (AGMOO Sec. 6.1.3)
-            # La mÃƒÂ©trica near-horizon tiene la forma:
-            #   dsÃ‚Â² = H^{-1/2} dx_Ã¢Ë†Â¥Ã‚Â² + H^{1/2} (drÃ‚Â² + rÃ‚Â²dÃŽÂ©Ã‚Â²)
-            # donde H ~ (L/r)^{7-p} para p Ã¢â€°Â  3
+            # La métrica near-horizon tiene la forma:
+            #   ds² = H^{-1/2} dx_∥² + H^{1/2} (dr² + r²dΩ²)
+            # donde H ~ (L/r)^{7-p} para p ≠ 3
             # En nuestra coordenada z ~ 1/r, y usando z_dyn como (7-p)/2:
             #   A(z) ~ -z_dyn * log(z/L)
-            # Para D3-branas (p=3): z_dyn=2 recupera AdSÃ¢â€šâ€¦
+            # Para D3-branas (p=3): z_dyn=2 recupera AdS₅
             # Para D2-branas (p=2): z_dyn=5/2
             # Para D4-branas (p=4): z_dyn=3/2
             effective_exp = self.z_dyn  # z_dyn codifica (7-p)/2
@@ -266,7 +266,7 @@ class HiddenGeometry:
         Observable de borde tipo "central charge" toy.
 
         Definimos un escalar
-            c_eff ÃƒÆ’Ã‚Â¢Ãƒâ€¹Ã¢â‚¬Â Ãƒâ€šÃ‚Â¼ ÃƒÆ’Ã‚Â¢Ãƒâ€¹Ã¢â‚¬Â Ãƒâ€šÃ‚Â« e^{(d-1) A(z)} dz
+            c_eff ∼ ∫ e^{(d-1) A(z)} dz
 
         integrado desde el UV hasta el horizonte (si existe) o hasta una
         escala IR tipica ~ L en geometrias sin horizonte.
@@ -291,7 +291,7 @@ class HiddenGeometry:
         return c_eff
 
 # ============================================================
-#  GEOMETRÃƒÆ’Ã†â€™Ãƒâ€šÃ‚ÂA BASE
+#  GEOMETRÍA BASE
 # ============================================================
 
 def get_phase11_geometries() -> List[Tuple[HiddenGeometry, str]]:
@@ -395,7 +395,7 @@ def get_phase11_geometries() -> List[Tuple[HiddenGeometry, str]]:
             z_dyn=1.5,
             deformation=0.15,
             L=1.0,
-            metadata={"description": "Lifshitz deformado, zÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â°Ãƒâ€¹Ã¢â‚¬Â 1.5"}
+            metadata={"description": "Lifshitz deformado, z≈1.5"}
         ),
         "test",
     ))
@@ -450,7 +450,7 @@ def get_phase11_geometries() -> List[Tuple[HiddenGeometry, str]]:
     ))
 
     # --- Dp-branas (AGMOO Sec. 6.1.3) ---
-    # D3-brana: z_dyn=2 (recupera AdSÃ¢â€šâ€¦)
+    # D3-brana: z_dyn=2 (recupera AdS₅)
     geos.append((
         HiddenGeometry(
             name="d3brane_d4",
@@ -459,11 +459,11 @@ def get_phase11_geometries() -> List[Tuple[HiddenGeometry, str]]:
             d=4,
             z_h=1.0,
             theta=0.0,
-            z_dyn=1.0,  # Corregido: A = -ln(z) para AdSÃ¢â€šâ€¦
+            z_dyn=1.0,  # Corregido: A = -ln(z) para AdS₅
             deformation=0.0,
             L=1.0,
             metadata={
-                "description": "D3-brane near-horizon (AdSÃ¢â€šâ€¦Ãƒâ€”SÃ¢ÂÂµ)",
+                "description": "D3-brane near-horizon (AdS₅×S⁵)",
                 "p": 3,
                 "theory_ref": "AGMOO Sec. 6.1.3"
             }
@@ -559,7 +559,7 @@ def generate_operators_for_geometry(
     ops: List[Dict] = []
 
     for i, Delta in enumerate(deltas):
-        # Relacion masa-dimension AdS_{d+1}: mÃƒÆ’Ã¢â‚¬Å¡Â²LÃƒÆ’Ã¢â‚¬Å¡Â² = ÃƒÆ’Ã…Â½ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â(ÃƒÆ’Ã…Â½ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â-d)
+        # Relacion masa-dimension AdS_{d+1}: m²L² = Δ(Δ-d)
         m2L2 = float(Delta * (Delta - geo.d))
         ops.append(
             {
@@ -581,8 +581,8 @@ def correlator_2pt_thermal(
 ) -> np.ndarray:
     """
     <O(x)O(0)> a temperatura T:
-        T = 0: G2 ~ 1/|x|^{2ÃƒÆ’Ã…Â½ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â}
-        T > 0: G2 ~ (ÃƒÆ’Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬T / sinh(ÃƒÆ’Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬T x))^{2ÃƒÆ’Ã…Â½ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â}
+        T = 0: G2 ~ 1/|x|^{2Δ}
+        T > 0: G2 ~ (πT / sinh(πT x))^{2Δ}
     """
     x = np.asarray(x)
     x_safe = np.maximum(np.abs(x), 1e-8)
@@ -726,7 +726,7 @@ def generate_boundary_data(
     rng: np.random.Generator,
 ) -> Dict[str, np.ndarray]:
     """
-    Genera datos del boundary (LO ÃƒÆ’Ã†â€™Ãƒâ€¦Ã‚Â¡NICO visible al learner).
+    Genera datos del boundary (LO ÚNICO visible al learner).
 
     Devuelve un dict con:
         - x_grid
@@ -766,7 +766,7 @@ def generate_boundary_data(
         G2 = correlator_2pt_geodesic(x_grid, Delta, geo)
         data[f"G2_{name}"] = G2.astype(np.float32)
 
-    # Respuesta lineal toy G_R(ÃƒÆ’Ã‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã‚Â°, k)
+    # Respuesta lineal toy G_R(ω, k)
     omega_grid = np.linspace(0.1, 10.0, 50)
     k_grid = np.linspace(0.0, 5.0, 30)
 
@@ -831,19 +831,19 @@ def generate_lifshitz_from_emd(
     sol = solver.solve(phi_h=phi_h, r_uv=r_uv)
 
     if sol is None or getattr(sol, "success", True) is False:
-        raise ValueError(f"EMD solver failed for d={d}, z={z_dyn}, ÃƒÆ’Ã…Â½Ãƒâ€šÃ‚Â¸={theta}")
+        raise ValueError(f"EMD solver failed for d={d}, z={z_dyn}, θ={theta}")
 
     r_grid = np.asarray(sol.t)
     f_r = np.asarray(sol.y[0])
 
-    # z = 1/r (boundary en zÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢0)
+    # z = 1/r (boundary en z→0)
     z_grid = 1.0 / r_grid
     order = np.argsort(z_grid)
     z_grid = z_grid[order]
     f_z = f_r[order]
 
     # Warp factor compatible con Lifshitz/HV:
-    # g_xx ~ z^{2ÃƒÆ’Ã…Â½Ãƒâ€šÃ‚Â¸/d} y g_tt ~ z^{-2z_dyn}, asi que:
+    # g_xx ~ z^{2θ/d} y g_tt ~ z^{-2z_dyn}, asi que:
     with np.errstate(divide="ignore"):
         A_z = (theta / d - z_dyn) * np.log(z_grid)
 
@@ -859,7 +859,7 @@ def generate_bulk_truth(
     Genera la "verdad" del bulk para validacion.
     El learner NO tiene acceso a esto durante el entrenamiento.
 
-    Si use_emd=True y HAS_EMD=True y family ÃƒÆ’Ã‚Â¢Ãƒâ€¹Ã¢â‚¬Â Ãƒâ€¹Ã¢â‚¬Â  {lifshitz,hyperscaling},
+    Si use_emd=True y HAS_EMD=True y family ∈ {lifshitz,hyperscaling},
     se usa EMDLifshitzSolver como backend. En caso de fallo, hay fallback
     silencioso (con warning) al modo toy analitico.
     """
@@ -925,9 +925,9 @@ def make_geometry_instance(
     # --- CONTROL EINSTEIN PURO (sin jitter) -----------------------------
     # Para las geometrias AdS puras conocidas (ads5_pure, ads4_pure)
     # queremos al menos una instancia EXACTAMENTE igual al prototipo:
-    #   - z_h = None  ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ T = 0
+    #   - z_h = None  → T = 0
     #   - family = "ads"
-    #   - R(z) constante = -D(D-1)/LÃƒÆ’Ã¢â‚¬Å¡Â² (ver HiddenGeometry.ricci_scalar)
+    #   - R(z) constante = -D(D-1)/L² (ver HiddenGeometry.ricci_scalar)
     if (
         base.family == "ads"
         and base.name in ("ads5_pure", "ads4_pure")
@@ -939,7 +939,7 @@ def make_geometry_instance(
         params["name"] = f"{base.name}_{category}_{idx:03d}"
         return HiddenGeometry(**params)
 
-    # --- CÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œDIGO ORIGINAL DE JITTER -------------------------------------
+    # --- CÓDIGO ORIGINAL DE JITTER -------------------------------------
     params = asdict(base)
 
     # Nombre unico: base_category_idx
@@ -1071,7 +1071,7 @@ def main():
         import numpy as np  # type: ignore
 
         rng = np.random.default_rng(args.seed)
-        # IO CONTRACT: output en 01_generate_sandbox_geometries/ Ãƒâ€šÃ‚Â§2: escribir en geometries/
+        # IO CONTRACT: output en 01_generate_sandbox_geometries/ §2: escribir en geometries/
         output_dir = ctx.run_root / "01_generate_sandbox_geometries"
         output_dir.mkdir(parents=True, exist_ok=True)
         print(f"[ROUTING] writing geometrias en: {output_dir}")
@@ -1152,8 +1152,8 @@ def main():
             operators = generate_operators_for_geometry(geo, args.n_operators, rng)
             deltas_str = ", ".join(f"{op['Delta']:.2f}" for op in operators)
             zh_display = geo.z_h if geo.z_h is not None else 0.0
-            print(f"   d={geo.d}, z_h={zh_display:.3f}, ÃƒÆ’Ã…Â½Ãƒâ€šÃ‚Â¸={geo.theta:.2f}, z_dyn={geo.z_dyn:.2f}")
-            print(f"   ÃƒÆ’Ã…Â½ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â: [{deltas_str}]")
+            print(f"   d={geo.d}, z_h={zh_display:.3f}, θ={geo.theta:.2f}, z_dyn={geo.z_dyn:.2f}")
+            print(f"   Δ: [{deltas_str}]")
 
             # ============================================================
             # FIX 2025-12-21: Guardrail IO v1 ANTES de generar datos
@@ -1257,7 +1257,7 @@ def main():
             )
 
         print("\n" + "=" * 70)
-        print("ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ SANDBOX GEOMETRY GENERATION v3 COMPLETADA")
+        print("✓ SANDBOX GEOMETRY GENERATION v3 COMPLETADA")
         print(f"  Manifest: {manifest_path}")
         print(f"  Total:    {len(geometries)} universes")
         print("=" * 70)

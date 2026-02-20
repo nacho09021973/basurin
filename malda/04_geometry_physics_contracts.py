@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # 04_geometry_physics_contracts.py
-# CUERDAS -Â Bloque A: Geometria emergente (contratos fisicos)
+# CUERDAS - Bloque A: Geometria emergente (contratos fisicos)
 #
 # Objective:
 #   Evaluar la calidad fisica y la honestidad del bloque de geometria y ecuaciones:
@@ -17,11 +17,11 @@
 #     geometry_contracts_summary.json
 #       - Clasificacion por sistema:
 #           * Einstein-like / non-Einstein / incierto
-#           * Umbrales de RÂ², estabilidad en rollouts, etc.
+#           * Umbrales de R², estabilidad en rollouts, etc.
 #       - Flags de honestidad (uso indebido de bulk, mezcla incorrecta de d, ...).
 #
 # TIPOS DE CONTRATO (EJEMPLOS)
-#   - RÂ² minimo en test, estabilidad en evoluciones numericas.
+#   - R² minimo en test, estabilidad en evoluciones numericas.
 #   - No mezcla de dimensiones d entre sistemas incompatibles.
 #   - No uso de variables de "verdad" en la construccion de la loss.
 #   - Coherencia entre family asignada (ads/lifshitz/hvlf/deformed) y patrones geometricos.
@@ -41,7 +41,7 @@
 # MODOS SOPORTADOS (V2.1):
 #   - Modo A (sandbox/train): bulk_truth disponible, A_truth/f_truth en NPZ
 #   - Modo B (inference/real): No bulk_truth, solo predicciones
-#     En este modo, metricas RÂ² se marcan como null y generic contracts se evaluan
+#     En este modo, metricas R² se marcan como null y generic contracts se evaluan
 
 import argparse
 import json
@@ -240,7 +240,7 @@ class CorrelatorStructureContract:
 
 @dataclass
 class AdSEinsteinContract:
-    """Verifica ecuaciones de Einstein en vacio con ÃƒÅ½Ã¢â‚¬Âº (SOLO para AdS)."""
+    """Verifica ecuaciones de Einstein en vacio con Λ (SOLO para AdS)."""
     R_is_constant: bool
     R_matches_ads: bool
     Lambda_matches_ads: bool
@@ -256,7 +256,7 @@ class AdSEinsteinContract:
 class AdSAsymptoticContract:
     """Verifica comportamiento asintotico tipo AdS."""
     A_logarithmic_uv: bool  # A(z) ~ -log(z) cerca de z=0
-    f_to_one_uv: bool  # f ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ 1 cuando z ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ 0
+    f_to_one_uv: bool  # f → 1 cuando z → 0
     A_monotone: bool  # dA/dz < 0
     
     @property
@@ -930,8 +930,8 @@ def process_geometry(
     Procesa una geometria y genera su contrato v2.
     
     Soporta dos modos:
-    - sandbox: con bulk_truth y *_truth (metricas RÂ² calculadas)
-    - inference: without truth (metricas RÂ² = None, generic contracts evaluados)
+    - sandbox: con bulk_truth y *_truth (metricas R² calculadas)
+    - inference: without truth (metricas R² = None, generic contracts evaluados)
     """
     errors = []
     warnings = []
@@ -1010,7 +1010,7 @@ def process_geometry(
     else:
         R_pred = np.zeros_like(A_pred)
     
-    # === MÃƒÆ’Ã¢â‚¬Â°TRICAS RÂ² (solo en sandbox) ===
+    # === MÉTRICAS R² (solo en sandbox) ===
     def r2(y_true, y_pred):
         if y_true is None or y_pred is None:
             return None
@@ -1041,7 +1041,7 @@ def process_geometry(
         R_r2 = None
         family_match = None
         if mode == "inference":
-            warnings.append("inference mode: metricas RÂ² no disponibles")
+            warnings.append("inference mode: metricas R² no disponibles")
     
     # === CARGAR RESULTADOS EINSTEIN ===
     einstein_results = {}
@@ -1273,9 +1273,9 @@ def main():
                 print(f"   AdS-specific:  N/A (no es family='ads')")
             
             if contract.A_r2 is not None:
-                print(f"   RÂ²: A={contract.A_r2:.3f}, f={contract.f_r2:.3f}")
+                print(f"   R²: A={contract.A_r2:.3f}, f={contract.f_r2:.3f}")
             else:
-                print(f"   RÂ²: (no disponible en inference)")
+                print(f"   R²: (no disponible en inference)")
             
             print(f"   Score: {contract.contract_score:.2f}")
         
@@ -1346,16 +1346,16 @@ def main():
     phase_passed = (n_with_errors == 0) and (n_generic == n_total) and (avg_score > 0.5 or n_total == 0)
     
     if n_total == 0:
-        print("ÃƒÂ¢Ã…Â¡Ã‚Â  NO HAY GEOMETRÃƒÆ’Ã‚ÂAS PARA EVALUAR")
+        print("⚠ NO HAY GEOMETRÍAS PARA EVALUAR")
     elif phase_passed:
-        print("ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“ VALIDATION COMPLETED SUCCESSFULLY")
+        print("✓ VALIDATION COMPLETED SUCCESSFULLY")
         print("=" * 90)
         print(f"\n  El sistema CUERDAS ha logrado:")
         print(f"     All geometries pass generic contracts")
         if n_inference > 0:
             print(f"     {n_inference} geometries processed en inference mode")
     else:
-        print("ÃƒÂ¢Ã…â€œÃ¢â‚¬â€ VALIDATION REQUIRES REFINEMENT")
+        print("✗ VALIDATION REQUIRES REFINEMENT")
         print("=" * 90)
         if n_with_errors > 0:
             print(f"\n  {n_with_errors} geometries with errors")

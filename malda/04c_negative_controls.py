@@ -59,7 +59,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ==============================================================================
-# SECCIÃƒâ€œN 1: GENERACIÃƒâ€œN DE DATOS ANTI-HOLOGRÃƒÂFICOS
+# SECCIÓN 1: GENERACIÓN DE DATOS ANTI-HOLOGRÁFICOS
 # ==============================================================================
 
 def generate_massive_scalar_flat_space(
@@ -343,7 +343,7 @@ def save_negative_control_data(
 
 
 # ==============================================================================
-# SECCIÃƒâ€œN 3: EJECUTAR PIPELINE Y VERIFICAR FALLOS
+# SECCIÓN 3: EJECUTAR PIPELINE Y VERIFICAR FALLOS
 # ==============================================================================
 
 def run_pipeline_on_negative_control(
@@ -353,7 +353,7 @@ def run_pipeline_on_negative_control(
     """
     Ejecuta el pipeline sobre los datos del control negativo.
     
-    NOTA: Esta funciÃƒÂ³n es un placeholder - la integraciÃƒÂ³n real
+    NOTA: Esta función es un placeholder - la integración real
     depende de la estructura exacta del pipeline.
     
     Retorna dict con resultados de cada etapa.
@@ -374,13 +374,13 @@ def run_pipeline_on_negative_control(
     # Por ahora, documentamos la estructura esperada
     
     expected_stages = [
-        ('02_emergent_geometry_engine.py', 'GeometrÃƒÂ­a emergente'),
-        ('04_geometry_physics_contracts.py', 'Contratos fÃƒÂ­sicos'),
+        ('02_emergent_geometry_engine.py', 'Geometría emergente'),
+        ('04_geometry_physics_contracts.py', 'Contratos físicos'),
         ('05_scalar_field_solver.py', 'Solver escalar'),
-        ('06_discover_symbolic_equations.py', 'Ecuaciones simbÃƒÂ³licas'),
+        ('06_discover_symbolic_equations.py', 'Ecuaciones simbólicas'),
     ]
     
-    logger.warning("Pipeline no ejecutado - implementar integraciÃƒÂ³n")
+    logger.warning("Pipeline no ejecutado - implementar integración")
     
     return results
 
@@ -390,10 +390,10 @@ def check_contracts_failure(
     expected_pass_rate: float = 0.2
 ) -> Dict[str, any]:
     """
-    Verifica que los contratos fallen como se espera para datos no-hologrÃƒÂ¡ficos.
+    Verifica que los contratos fallen como se espera para datos no-holográficos.
     
     Criterios:
-    - pass_rate < 0.2: Ãƒâ€°XITO (sistema detecta no-holografÃƒÂ­a)
+    - pass_rate < 0.2: ÉXITO (sistema detecta no-holografía)
     - pass_rate 0.2-0.5: ADVERTENCIA (investigar)
     - pass_rate > 0.5: FALLO (posible falso positivo)
     """
@@ -412,10 +412,10 @@ def check_contracts_failure(
     
     if pass_rate < expected_pass_rate:
         status = 'SUCCESS'
-        message = f'Sistema detectÃƒÂ³ correctamente ausencia de holografÃƒÂ­a (pass_rate={pass_rate:.2%})'
+        message = f'Sistema detectó correctamente ausencia de holografía (pass_rate={pass_rate:.2%})'
     elif pass_rate < 0.5:
         status = 'WARNING'
-        message = f'Pass rate moderado ({pass_rate:.2%}) - investigar contratos especÃƒÂ­ficos'
+        message = f'Pass rate moderado ({pass_rate:.2%}) - investigar contratos específicos'
     else:
         status = 'ALERT'
         message = f'POSIBLE FALSO POSITIVO: pass_rate={pass_rate:.2%} > 50%'
@@ -431,7 +431,7 @@ def check_contracts_failure(
 
 
 # ==============================================================================
-# SECCIÃƒâ€œN 4: GENERAR REPORTE
+# SECCIÓN 4: GENERAR REPORTE
 # ==============================================================================
 
 def generate_negative_control_report(
@@ -454,25 +454,25 @@ def generate_negative_control_report(
 
 ---
 
-## 1. DescripciÃƒÂ³n del Input
+## 1. Descripción del Input
 
 **Tipo:** Campo escalar masivo en espacio plano (flat space)
 
-| ParÃƒÂ¡metro | Valor |
+| Parámetro | Valor |
 |-----------|-------|
 | Masa (m) | {data['metadata'].get('mass', 'N/A')} |
-| TamaÃƒÂ±o lattice | {data['metadata'].get('lattice_size', 'N/A')} |
-| DimensiÃƒÂ³n | {data['metadata'].get('dimension', 'N/A')} |
+| Tamaño lattice | {data['metadata'].get('lattice_size', 'N/A')} |
+| Dimensión | {data['metadata'].get('dimension', 'N/A')} |
 | Seed | {data['metadata'].get('seed', 'N/A')} |
 | Conforme | **NO** |
-| HologrÃƒÂ¡fico esperado | **NO** |
+| Holográfico esperado | **NO** |
 
-### Por quÃƒÂ© este sistema NO es hologrÃƒÂ¡fico
+### Por qué este sistema NO es holográfico
 
-1. **Sin simetrÃƒÂ­a conforme**: El tÃƒÂ©rmino de masa mÃ‚Â²Ãâ€ Ã‚Â² rompe la invariancia de escala
+1. **Sin simetría conforme**: El término de masa m²φ² rompe la invariancia de escala
 2. **Espacio plano**: No hay curvatura AdS que emerja naturalmente
 3. **Correladores exponenciales**: G(r) ~ exp(-mr), no potencias como en CFT
-4. **Dimensiones invÃƒÂ¡lidas**: Los "operadores" tienen ÃŽâ€ que violan unitaridad
+4. **Dimensiones inválidas**: Los "operadores" tienen Δ que violan unitaridad
 
 ---
 
@@ -486,16 +486,16 @@ def generate_negative_control_report(
 
 ---
 
-## 3. VerificaciÃƒÂ³n de Contratos
+## 3. Verificación de Contratos
 
-| MÃƒÂ©trica | Valor |
+| Métrica | Valor |
 |---------|-------|
 | Contratos evaluados | {contract_check.get('n_total', 'N/A')} |
 | Contratos pasados | {contract_check.get('n_passed', 'N/A')} |
 | Contratos fallidos | {contract_check.get('n_failed', 'N/A')} |
 | **Pass rate** | **{contract_check.get('pass_rate', 'N/A'):.2%}** |
 
-### Contratos pasados (deberÃƒÂ­an ser pocos)
+### Contratos pasados (deberían ser pocos)
 {_format_list(results.get('contracts_passed', ['(ninguno)']))}
 
 ### Contratos fallidos (esperados)
@@ -503,15 +503,15 @@ def generate_negative_control_report(
 
 ---
 
-## 4. ConclusiÃƒÂ³n
+## 4. Conclusión
 
-**{contract_check.get('message', 'AnÃƒÂ¡lisis incompleto')}**
+**{contract_check.get('message', 'Análisis incompleto')}**
 
-### InterpretaciÃƒÂ³n
+### Interpretación
 
-{'Ã¢Å“â€œ El sistema detecta correctamente que los datos anti-hologrÃƒÂ¡ficos NO producen holografÃƒÂ­a vÃƒÂ¡lida. Esto es evidencia de honestidad cientÃƒÂ­fica del pipeline.' if contract_check.get('status') == 'SUCCESS' else ''}
-{'Ã¢Å¡Â  Pass rate moderado. Revisar quÃƒÂ© contratos pasaron y por quÃƒÂ©.' if contract_check.get('status') == 'WARNING' else ''}
-{'Ã°Å¸Å¡Â¨ ALERTA: El sistema puede estar produciendo falsos positivos. InvestigaciÃƒÂ³n urgente necesaria.' if contract_check.get('status') == 'ALERT' else ''}
+{'✓ El sistema detecta correctamente que los datos anti-holográficos NO producen holografía válida. Esto es evidencia de honestidad científica del pipeline.' if contract_check.get('status') == 'SUCCESS' else ''}
+{'⚠ Pass rate moderado. Revisar qué contratos pasaron y por qué.' if contract_check.get('status') == 'WARNING' else ''}
+{'🚨 ALERTA: El sistema puede estar produciendo falsos positivos. Investigación urgente necesaria.' if contract_check.get('status') == 'ALERT' else ''}
 
 ---
 
@@ -522,7 +522,7 @@ def generate_negative_control_report(
 
 ---
 
-*Generado automÃƒÂ¡ticamente por 04c_negative_controls.py*
+*Generado automáticamente por 04c_negative_controls.py*
 *Proyecto CUERDAS-Maldacena*
 """
     
@@ -542,19 +542,19 @@ def _format_list(items: List[str]) -> str:
 
 
 # ==============================================================================
-# SECCIÃƒâ€œN 5: CLI
+# SECCIÓN 5: CLI
 # ==============================================================================
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Control negativo para validaciÃƒÂ³n del pipeline CUERDAS-Maldacena',
+        description='Control negativo para validación del pipeline CUERDAS-Maldacena',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Ejemplos:
-  # Generar control negativo con parÃƒÂ¡metros por defecto
+  # Generar control negativo con parámetros por defecto
   python 04c_negative_controls.py --output_dir runs/negative_control
   
-  # Especificar parÃƒÂ¡metros fÃƒÂ­sicos
+  # Especificar parámetros físicos
   python 04c_negative_controls.py --mass 1.0 --lattice_size 100 --seed 42
   
   # Solo generar datos (sin ejecutar pipeline)
@@ -583,7 +583,7 @@ Ejemplos:
         '--lattice_size', 
         type=int, 
         default=100,
-        help='TamaÃƒÂ±o del lattice (default: 100)'
+        help='Tamaño del lattice (default: 100)'
     )
     parser.add_argument(
         '--dim', 
@@ -618,7 +618,7 @@ Ejemplos:
     
     args = parser.parse_args()
     
-    # Run ID ÃƒÂºnico
+    # Run ID único
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     if args.seed is not None:
         run_id += f"_seed{args.seed}"
@@ -629,8 +629,8 @@ Ejemplos:
     logger.info(f"Run ID: {run_id}")
     logger.info(f"Output: {args.output_dir}")
     
-    # 1. Generar datos anti-hologrÃƒÂ¡ficos
-    logger.info("\n[PASO 1] Generando datos anti-hologrÃƒÂ¡ficos...")
+    # 1. Generar datos anti-holográficos
+    logger.info("\n[PASO 1] Generando datos anti-holográficos...")
     data = generate_massive_scalar_flat_space(
         mass=args.mass,
         lattice_size=args.lattice_size,
@@ -670,7 +670,7 @@ Ejemplos:
     logger.info(f"Reporte: {report_path}")
     logger.info("="*60)
     
-    # Exit code segÃƒÂºn resultado
+    # Exit code según resultado
     if contract_check.get('status') == 'SUCCESS':
         sys.exit(0)
     elif contract_check.get('status') == 'WARNING':

@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 # 09_real_data_and_dictionary_contracts.py
-# CUERDAS â€” Bloque C: Contratos con datos reales y diccionario emergente
+# CUERDAS — Bloque C: Contratos con datos reales y diccionario emergente
 #
 # CONTROL NEGATIVO (v3)
-#   MÃ©trica corregida: False Positive Rate (FPR) sobre seÃ±ales hologrÃ¡ficas.
-#   NO mezcla "contratos que deben fallar" con "seÃ±ales de autoengaÃ±o".
+#   Métrica corregida: False Positive Rate (FPR) sobre señales holográficas.
+#   NO mezcla "contratos que deben fallar" con "señales de autoengaño".
 #
-#   FPR = (seÃ±ales hologrÃ¡ficas disparadas) / (seÃ±ales evaluables)
+#   FPR = (señales holográficas disparadas) / (señales evaluables)
 #   
-#   Esto mide: "Â¿El pipeline cree que esto es hologrÃ¡fico cuando NO deberÃ­a?"
+#   Esto mide: "¿El pipeline cree que esto es holográfico cuando NO debería?"
 #
 # MIGRADO A V3: 2024-12-23
 #
 # MEJORAS CFT v2 (2024-12-26):
-#   - IntegraciÃ³n de contratos extendidos desde extended_physics_contracts.py
-#   - ValidaciÃ³n de operadores especiales (T_Î¼Î½, J_Î¼, identidad)
-#   - ValidaciÃ³n de limitaciÃ³n de spin
-#   - Contratos OPE preparados para extracciÃ³n futura
+#   - Integración de contratos extendidos desde extended_physics_contracts.py
+#   - Validación de operadores especiales (T_μν, J_μ, identidad)
+#   - Validación de limitación de spin
+#   - Contratos OPE preparados para extracción futura
 #
 # ============================================================================
 # REFERENCIAS Y FUENTES (actualizado 2024-12-29)
@@ -65,9 +65,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════
 # V3 INFRASTRUCTURE
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════
 HAS_STAGE_UTILS = False
 StageContext = None
 add_standard_arguments = None
@@ -99,9 +99,9 @@ try:
 except ImportError:
     HAS_H5PY = False
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# IMPORTACIÃ“N DE CONTRATOS CFT EXTENDIDOS
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════
+# IMPORTACIÓN DE CONTRATOS CFT EXTENDIDOS
+# ═══════════════════════════════════════════════════════════════════════════
 try:
     from extended_physics_contracts import (
         ExtendedContractsFase12,
@@ -121,23 +121,23 @@ except ImportError:
 
 
 # ============================================================
-# SEÃ‘ALES HOLOGRÃFICAS (para control negativo)
+# SEÑALES HOLOGRÁFICAS (para control negativo)
 # ============================================================
 
 class SignalStatus(Enum):
-    """Estado de una seÃ±al hologrÃ¡fica."""
-    TRIGGERED = "triggered"      # SeÃ±al indica holografÃ­a (falso positivo)
-    NOT_TRIGGERED = "not_triggered"  # SeÃ±al NO indica holografÃ­a (correcto)
+    """Estado de una señal holográfica."""
+    TRIGGERED = "triggered"      # Señal indica holografía (falso positivo)
+    NOT_TRIGGERED = "not_triggered"  # Señal NO indica holografía (correcto)
     NOT_EVALUABLE = "not_evaluable"  # No hay artefactos para evaluar
 
 
 @dataclass
 class HolographicSignal:
     """
-    Una seÃ±al hologrÃ¡fica es un check binario que responde:
-    "Â¿El pipeline estÃ¡ actuando COMO SI esto fuera hologrÃ¡fico?"
+    Una señal holográfica es un check binario que responde:
+    "¿El pipeline está actuando COMO SI esto fuera holográfico?"
     
-    En un control negativo, queremos que estas seÃ±ales NO se disparen.
+    En un control negativo, queremos que estas señales NO se disparen.
     Si se disparan, es un falso positivo.
     """
     name: str
@@ -172,7 +172,7 @@ class HolographicSignal:
 class ExpectedFailContract:
     """
     Un contrato que DEBE fallar en control negativo.
-    No entra en el cÃ¡lculo de FPR - es informacional.
+    No entra en el cálculo de FPR - es informacional.
     """
     name: str
     passed: bool
@@ -188,20 +188,20 @@ class ExpectedFailContract:
 
 def evaluate_holographic_signals(artifacts: Dict[str, Any]) -> List[HolographicSignal]:
     """
-    EvalÃºa todas las seÃ±ales hologrÃ¡ficas a partir de los artefactos del pipeline.
+    Evalúa todas las señales holográficas a partir de los artefactos del pipeline.
     
-    Cada seÃ±al responde: "Â¿El pipeline cree que esto es hologrÃ¡fico?"
+    Cada señal responde: "¿El pipeline cree que esto es holográfico?"
     
     En control negativo, lo correcto es que NO se disparen.
     """
     signals = []
     
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # SEÃ‘AL 1: Familia geomÃ©trica es AdS-like
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    # SEÑAL 1: Familia geométrica es AdS-like
+    # ─────────────────────────────────────────────────────────────────
     signal_family = HolographicSignal(
         name="family_ads_like",
-        description="La familia geomÃ©trica clasificada es AdS o AdS-like"
+        description="La familia geométrica clasificada es AdS o AdS-like"
     )
     
     geometry = artifacts.get("geometry", {})
@@ -214,13 +214,13 @@ def evaluate_holographic_signals(artifacts: Dict[str, Any]) -> List[HolographicS
         signal_family.evidence = f"Familia clasificada: '{family}'"
     else:
         signal_family.status = SignalStatus.NOT_EVALUABLE
-        signal_family.evidence = "No se encontraron artefactos de geometrÃ­a"
+        signal_family.evidence = "No se encontraron artefactos de geometría"
     
     signals.append(signal_family)
     
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # SEÃ‘AL 2: Einstein score alto
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    # SEÑAL 2: Einstein score alto
+    # ─────────────────────────────────────────────────────────────────
     signal_einstein = HolographicSignal(
         name="einstein_score_high",
         description="El score de Einstein equations discovery es alto (>=0.5)",
@@ -237,16 +237,16 @@ def evaluate_holographic_signals(artifacts: Dict[str, Any]) -> List[HolographicS
         signal_einstein.evidence = f"Einstein score: {score:.3f}"
     else:
         signal_einstein.status = SignalStatus.NOT_EVALUABLE
-        signal_einstein.evidence = "No se encontrÃ³ einstein_score en artefactos"
+        signal_einstein.evidence = "No se encontró einstein_score en artefactos"
     
     signals.append(signal_einstein)
     
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # SEÃ‘AL 3: Diccionario Î»_SL â†’ Î” convergiÃ³
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    # SEÑAL 3: Diccionario λ_SL → Δ convergió
+    # ─────────────────────────────────────────────────────────────────
     signal_dict = HolographicSignal(
         name="dictionary_converged",
-        description="El diccionario hologrÃ¡fico Î»_SL â†’ Î” convergiÃ³"
+        description="El diccionario holográfico λ_SL → Δ convergió"
     )
     
     dictionary = artifacts.get("dictionary", {})
@@ -258,17 +258,17 @@ def evaluate_holographic_signals(artifacts: Dict[str, Any]) -> List[HolographicS
         signal_dict.evidence = f"Convergencia: {converged}"
     else:
         signal_dict.status = SignalStatus.NOT_EVALUABLE
-        signal_dict.evidence = "No se encontrÃ³ estado de convergencia"
+        signal_dict.evidence = "No se encontró estado de convergencia"
     
     signals.append(signal_dict)
     
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # SEÃ‘AL 4: Î” predichos en rango fÃ­sicamente plausible
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    # SEÑAL 4: Δ predichos en rango físicamente plausible
+    # ─────────────────────────────────────────────────────────────────
     signal_deltas = HolographicSignal(
         name="deltas_in_physical_range",
-        description="MayorÃ­a de Î” predichos estÃ¡n en rango CFT plausible (0.3-4.0)",
-        threshold=0.5  # >50% en rango = seÃ±al de holografÃ­a
+        description="Mayoría de Δ predichos están en rango CFT plausible (0.3-4.0)",
+        threshold=0.5  # >50% en rango = señal de holografía
     )
     
     predicted_deltas = dictionary.get("predicted_Deltas", [])
@@ -280,16 +280,16 @@ def evaluate_holographic_signals(artifacts: Dict[str, Any]) -> List[HolographicS
         in_range = ratio > signal_deltas.threshold
         signal_deltas.status = SignalStatus.TRIGGERED if in_range else SignalStatus.NOT_TRIGGERED
         signal_deltas.value = ratio
-        signal_deltas.evidence = f"{n_physical}/{len(predicted_deltas)} Deltas en rango fÃ­sico"
+        signal_deltas.evidence = f"{n_physical}/{len(predicted_deltas)} Deltas en rango físico"
     else:
         signal_deltas.status = SignalStatus.NOT_EVALUABLE
         signal_deltas.evidence = "No hay Deltas predichos"
     
     signals.append(signal_deltas)
     
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # SEÃ‘AL 5: Bulk equations limpias (symbolic regression exitosa)
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    # SEÑAL 5: Bulk equations limpias (symbolic regression exitosa)
+    # ─────────────────────────────────────────────────────────────────
     signal_bulk = HolographicSignal(
         name="bulk_equations_clean",
         description="Se encontraron ecuaciones bulk limpias (n_equations > 0 con score alto)"
@@ -304,13 +304,13 @@ def evaluate_holographic_signals(artifacts: Dict[str, Any]) -> List[HolographicS
         signal_bulk.evidence = f"{n_equations} ecuaciones encontradas"
     else:
         signal_bulk.status = SignalStatus.NOT_EVALUABLE
-        signal_bulk.evidence = "No hay informaciÃ³n de bulk equations"
+        signal_bulk.evidence = "No hay información de bulk equations"
     
     signals.append(signal_bulk)
     
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # SEÃ‘AL 6: Match con operadores conocidos (Î”Ïƒ â‰ˆ 0.518)
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    # SEÑAL 6: Match con operadores conocidos (Δσ ≈ 0.518)
+    # ─────────────────────────────────────────────────────────────────
     # =========================================================================
     # SENAL 6: Match con operadores Ising 3D
     # =========================================================================
@@ -320,7 +320,7 @@ def evaluate_holographic_signals(artifacts: Dict[str, Any]) -> List[HolographicS
     # =========================================================================
     signal_sigma = HolographicSignal(
         name="delta_sigma_match",
-        description="AlgÃºn Î” predicho estÃ¡ cerca de Î”Ïƒ=0.518 (Ising 3D)",
+        description="Algún Δ predicho está cerca de Δσ=0.518 (Ising 3D)",
         threshold=0.1  # tolerancia
     )
     
@@ -331,16 +331,16 @@ def evaluate_holographic_signals(artifacts: Dict[str, Any]) -> List[HolographicS
         has_match = len(matches) > 0
         signal_sigma.status = SignalStatus.TRIGGERED if has_match else SignalStatus.NOT_TRIGGERED
         signal_sigma.value = matches[0] if matches else None
-        signal_sigma.evidence = f"Matches con Î”Ïƒ: {matches}" if matches else "Sin match"
+        signal_sigma.evidence = f"Matches con Δσ: {matches}" if matches else "Sin match"
     else:
         signal_sigma.status = SignalStatus.NOT_EVALUABLE
         signal_sigma.evidence = "No hay Deltas predichos"
     
     signals.append(signal_sigma)
     
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # SEÃ‘AL 7: Match con operador Îµ (Î”Îµ â‰ˆ 1.41)
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─────────────────────────────────────────────────────────────────
+    # SEÑAL 7: Match con operador ε (Δε ≈ 1.41)
+    # ─────────────────────────────────────────────────────────────────
     # =========================================================================
     # SENAL 7: Match con operador epsilon Ising 3D
     # =========================================================================
@@ -349,7 +349,7 @@ def evaluate_holographic_signals(artifacts: Dict[str, Any]) -> List[HolographicS
     # =========================================================================
     signal_epsilon = HolographicSignal(
         name="delta_epsilon_match",
-        description="AlgÃºn Î” predicho estÃ¡ cerca de Î”Îµ=1.41 (Ising 3D)",
+        description="Algún Δ predicho está cerca de Δε=1.41 (Ising 3D)",
         threshold=0.15
     )
     
@@ -360,7 +360,7 @@ def evaluate_holographic_signals(artifacts: Dict[str, Any]) -> List[HolographicS
         has_match = len(matches) > 0
         signal_epsilon.status = SignalStatus.TRIGGERED if has_match else SignalStatus.NOT_TRIGGERED
         signal_epsilon.value = matches[0] if matches else None
-        signal_epsilon.evidence = f"Matches con Î”Îµ: {matches}" if matches else "Sin match"
+        signal_epsilon.evidence = f"Matches con Δε: {matches}" if matches else "Sin match"
     else:
         signal_epsilon.status = SignalStatus.NOT_EVALUABLE
         signal_epsilon.evidence = "No hay Deltas predichos"
@@ -372,9 +372,9 @@ def evaluate_holographic_signals(artifacts: Dict[str, Any]) -> List[HolographicS
 
 def compute_false_positive_rate(signals: List[HolographicSignal]) -> Tuple[float, float, int, int]:
     """
-    Calcula el False Positive Rate sobre seÃ±ales hologrÃ¡ficas.
+    Calcula el False Positive Rate sobre señales holográficas.
     
-    FPR = (seÃ±ales disparadas) / (seÃ±ales evaluables)
+    FPR = (señales disparadas) / (señales evaluables)
     
     Retorna: (fpr, coverage, n_triggered, n_evaluable)
     """
@@ -393,7 +393,7 @@ def compute_false_positive_rate(signals: List[HolographicSignal]) -> Tuple[float
 
 def evaluate_expected_fail_contracts(artifacts: Dict[str, Any]) -> List[ExpectedFailContract]:
     """
-    EvalÃºa contratos que DEBEN fallar en control negativo.
+    Evalúa contratos que DEBEN fallar en control negativo.
     Estos son informativos, no entran en el FPR.
     """
     contracts = []
@@ -487,7 +487,7 @@ def load_negative_control_artifacts(run_dir: Path) -> Dict[str, Any]:
         "errors": []
     }
     
-    # Buscar geometrÃ­a
+    # Buscar geometría
     for gdir in [run_dir / "geometry_emergent", run_dir / "predictions", run_dir / "geometry",
                  run_dir / "02_emergent_geometry_engine" / "geometry_emergent"]:
         if gdir.exists() and gdir.is_dir():
@@ -584,14 +584,14 @@ def run_negative_control_check(
     fpr_threshold: float = 0.2
 ) -> Dict[str, Any]:
     """
-    Ejecuta verificaciÃ³n de control negativo usando FPR sobre seÃ±ales hologrÃ¡ficas.
+    Ejecuta verificación de control negativo usando FPR sobre señales holográficas.
     
-    FPR = (seÃ±ales hologrÃ¡ficas disparadas) / (seÃ±ales evaluables)
+    FPR = (señales holográficas disparadas) / (señales evaluables)
     
-    Esto mide: "Â¿El pipeline se autoengaÃ±a creyendo que hay holografÃ­a?"
+    Esto mide: "¿El pipeline se autoengaña creyendo que hay holografía?"
     """
     logger.info("=" * 60)
-    logger.info("CONTROL NEGATIVO - False Positive Rate sobre seÃ±ales hologrÃ¡ficas")
+    logger.info("CONTROL NEGATIVO - False Positive Rate sobre señales holográficas")
     logger.info("=" * 60)
     
     result = {
@@ -615,15 +615,15 @@ def run_negative_control_check(
         h5_path = find_negative_control_h5(run_dir)
     
     if h5_path is None:
-        result["errors"].append("No se encontrÃ³ HDF5 de control negativo")
-        result["rationale"] = "VerificaciÃ³n incompleta: no se encontrÃ³ el archivo HDF5."
+        result["errors"].append("No se encontró HDF5 de control negativo")
+        result["rationale"] = "Verificación incompleta: no se encontró el archivo HDF5."
         return result
     
     result["h5_path"] = str(h5_path)
     
     is_valid, h5_meta = verify_negative_control_h5(h5_path)
     if not is_valid:
-        result["errors"].append(f"HDF5 invÃ¡lido: {h5_meta.get('error', 'unknown')}")
+        result["errors"].append(f"HDF5 inválido: {h5_meta.get('error', 'unknown')}")
         result["rationale"] = f"El HDF5 no tiene atributos correctos: {h5_meta}"
         return result
     
@@ -638,11 +638,11 @@ def run_negative_control_check(
     
     if not artifacts["found"]:
         result["errors"].append("No se encontraron artefactos del pipeline")
-        result["rationale"] = "No hay artefactos. Â¿Se ejecutÃ³ el pipeline sobre el control negativo?"
+        result["rationale"] = "No hay artefactos. ¿Se ejecutó el pipeline sobre el control negativo?"
         return result
     
-    # Paso 3: Evaluar seÃ±ales hologrÃ¡ficas
-    logger.info("  Evaluando seÃ±ales hologrÃ¡ficas...")
+    # Paso 3: Evaluar señales holográficas
+    logger.info("  Evaluando señales holográficas...")
     signals = evaluate_holographic_signals(artifacts)
     
     # Paso 4: Calcular FPR
@@ -655,8 +655,8 @@ def run_negative_control_check(
     result["n_signals_total"] = len(signals)
     result["signals"] = [s.to_dict() for s in signals]
     
-    logger.info(f"    SeÃ±ales evaluables: {n_evaluable}/{len(signals)}")
-    logger.info(f"    SeÃ±ales disparadas (falsos positivos): {n_triggered}")
+    logger.info(f"    Señales evaluables: {n_evaluable}/{len(signals)}")
+    logger.info(f"    Señales disparadas (falsos positivos): {n_triggered}")
     logger.info(f"    FPR: {fpr:.1%}")
     logger.info(f"    Coverage: {coverage:.1%}")
     
@@ -667,29 +667,29 @@ def run_negative_control_check(
     # Paso 6: Determinar status
     if n_evaluable == 0:
         result["status"] = "INCOMPLETE"
-        result["rationale"] = "No hay seÃ±ales evaluables. Coverage insuficiente."
+        result["rationale"] = "No hay señales evaluables. Coverage insuficiente."
     elif fpr < fpr_threshold:
         result["status"] = "SUCCESS"
         result["rationale"] = (
             f"FPR={fpr:.1%} < {fpr_threshold:.0%}. "
-            f"El pipeline NO se autoengaÃ±a: {n_triggered}/{n_evaluable} seÃ±ales disparadas. "
-            f"Esto es evidencia de honestidad cientÃ­fica."
+            f"El pipeline NO se autoengaña: {n_triggered}/{n_evaluable} señales disparadas. "
+            f"Esto es evidencia de honestidad científica."
         )
     elif fpr < 0.5:
         result["status"] = "WARNING"
         triggered_names = [s.name for s in signals if s.triggered]
         result["rationale"] = (
             f"FPR={fpr:.1%} (moderado). "
-            f"SeÃ±ales disparadas: {triggered_names}. "
-            f"Investigar por quÃ© el pipeline detecta holografÃ­a espuria."
+            f"Señales disparadas: {triggered_names}. "
+            f"Investigar por qué el pipeline detecta holografía espuria."
         )
     else:
         result["status"] = "ALERT"
         triggered_names = [s.name for s in signals if s.triggered]
         result["rationale"] = (
-            f"POSIBLE FALSO POSITIVO SISTEMÃTICO: FPR={fpr:.1%} >= 50%. "
-            f"SeÃ±ales disparadas: {triggered_names}. "
-            f"AuditorÃ­a urgente necesaria."
+            f"POSIBLE FALSO POSITIVO SISTEMÁTICO: FPR={fpr:.1%} >= 50%. "
+            f"Señales disparadas: {triggered_names}. "
+            f"Auditoría urgente necesaria."
         )
     
     logger.info(f"\n  Status: {result['status']}")
@@ -782,7 +782,7 @@ class ContractsFase12:
         }
         
         if "manual" in dictionary_source:
-            result["note"] = "Diccionario v0 (manual): check tÃ©cnico, no confirmaciÃ³n fÃ­sica."
+            result["note"] = "Diccionario v0 (manual): check técnico, no confirmación física."
         
         if not predicted_Deltas:
             result["checks"].append({"name": "has_predicted_Deltas", "passed": False})
@@ -959,11 +959,11 @@ class ContractsFase13:
 
 
 # ============================================================
-# FUNCIONES DE ORQUESTACIÃ“N
+# FUNCIONES DE ORQUESTACIÓN
 # ============================================================
 
 def run_contracts_fase12(report_path: Path) -> Dict:
-    """Ejecuta contratos Fase XII bÃ¡sicos."""
+    """Ejecuta contratos Fase XII básicos."""
     if report_path.is_dir():
         for c in [
             report_path / "holographic_dictionary" / "holographic_dictionary_v3_summary.json",
@@ -1018,17 +1018,17 @@ def run_extended_contracts_fase12(
     Ejecuta contratos Fase XII EXTENDIDOS (CFT mejorados).
     
     MEJORAS CFT v2:
-      - Operadores especiales (T_Î¼Î½, J_Î¼, identidad)
-      - ValidaciÃ³n de limitaciÃ³n de spin
-      - Coeficientes OPE (opcional, requiere extracciÃ³n)
+      - Operadores especiales (T_μν, J_μ, identidad)
+      - Validación de limitación de spin
+      - Coeficientes OPE (opcional, requiere extracción)
     
-    Referencia: Maldacena Chunk 04, pÃ¡ginas 30-35
+    Referencia: Maldacena Chunk 04, páginas 30-35
     """
     if not HAS_EXTENDED_CONTRACTS:
         return {
             "error": "extended_physics_contracts.py no disponible",
             "skipped": True,
-            "note": "Instalar o verificar importaciÃ³n del mÃ³dulo"
+            "note": "Instalar o verificar importación del módulo"
         }
     
     if report_path.is_dir():
@@ -1070,9 +1070,9 @@ def run_extended_contracts_fase12(
         
         predicted_Deltas = [op["Delta"] for op in operators]
         
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─────────────────────────────────────────────────────────────
         # Contrato: Operator Tower
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─────────────────────────────────────────────────────────────
         if predicted_Deltas and len(predicted_Deltas) >= 2:
             ext_contracts.contract_operator_tower(
                 predicted_Deltas=predicted_Deltas,
@@ -1080,9 +1080,9 @@ def run_extended_contracts_fase12(
                 d=d
             )
         
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─────────────────────────────────────────────────────────────
         # Contrato: Spectral Gap
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─────────────────────────────────────────────────────────────
         system_type = system.get("system_type", "critical")
         if "ising" in name.lower():
             system_type = "critical"
@@ -1095,9 +1095,9 @@ def run_extended_contracts_fase12(
                 system_name=name
             )
         
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        # MEJORA 1: Operadores especiales (T_Î¼Î½, J_Î¼, identidad)
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─────────────────────────────────────────────────────────────
+        # MEJORA 1: Operadores especiales (T_μν, J_μ, identidad)
+        # ─────────────────────────────────────────────────────────────
         if run_cft_special_ops and operators:
             ext_contracts.contract_special_operators(
                 operators=operators,
@@ -1105,15 +1105,15 @@ def run_extended_contracts_fase12(
                 system_name=name
             )
         
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        # MEJORA 2: LimitaciÃ³n de spin
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─────────────────────────────────────────────────────────────
+        # MEJORA 2: Limitación de spin
+        # ─────────────────────────────────────────────────────────────
         if run_spin_limitation and operators:
             ext_contracts.contract_spin_limitation(operators)
         
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─────────────────────────────────────────────────────────────
         # MEJORA 3: Coeficientes OPE (si hay datos)
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─────────────────────────────────────────────────────────────
         if run_ope_coefficients:
             extracted_ope = system.get("ope_coefficients")
             ext_contracts.contract_ope_coefficients(
@@ -1162,16 +1162,16 @@ def main() -> int:
         description="Contratos Fases XII/XIII + Control Negativo (FPR) + CFT Enhanced"
     )
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    # V3: Argumentos estÃ¡ndar
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
+    # V3: Argumentos estándar
+    # ═══════════════════════════════════════════════════════════════════════
     if HAS_STAGE_UTILS:
         add_standard_arguments(parser)
     else:
         parser.add_argument("--experiment", type=str, default=None)
         parser.add_argument("--run-dir", type=str, default=None)
     
-    # Argumentos especÃ­ficos del script
+    # Argumentos específicos del script
     parser.add_argument("--phase", type=str, required=True, choices=["12", "13", "both"])
     parser.add_argument("--fase12-report", type=str, default="")
     parser.add_argument("--fase13-analysis", type=str, default="")
@@ -1180,31 +1180,31 @@ def main() -> int:
     
     # Control negativo
     parser.add_argument("--negative-control-run-dir", type=str, default=None,
-                        help="Directorio del run sobre datos anti-hologrÃ¡ficos")
+                        help="Directorio del run sobre datos anti-holográficos")
     parser.add_argument("--negative-control-h5", type=str, default=None,
                         help="HDF5 del control negativo")
     parser.add_argument("--require-negative-control", action="store_true",
-                        help="Si ALERT â†’ exit 1")
+                        help="Si ALERT → exit 1")
     parser.add_argument("--negative-control-fpr-threshold", type=float, default=0.2,
                         help="Umbral FPR para SUCCESS (default: 0.2)")
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     # NUEVOS: Contratos CFT extendidos
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     parser.add_argument("--run-extended-contracts", action="store_true",
-                        help="Ejecutar contratos CFT extendidos (T_Î¼Î½, J_Î¼, spin, OPE)")
+                        help="Ejecutar contratos CFT extendidos (T_μν, J_μ, spin, OPE)")
     parser.add_argument("--skip-cft-special-ops", action="store_true",
-                        help="Omitir validaciÃ³n de operadores especiales")
+                        help="Omitir validación de operadores especiales")
     parser.add_argument("--skip-spin-limitation", action="store_true",
-                        help="Omitir validaciÃ³n de limitaciÃ³n de spin")
+                        help="Omitir validación de limitación de spin")
     parser.add_argument("--run-ope-coefficients", action="store_true",
-                        help="Ejecutar validaciÃ³n de coeficientes OPE (requiere extracciÃ³n)")
+                        help="Ejecutar validación de coeficientes OPE (requiere extracción)")
     
     args = parser.parse_args()
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     # V3: Crear StageContext
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     ctx = None
     if HAS_STAGE_UTILS:
         if not getattr(args, 'experiment', None):
@@ -1218,9 +1218,9 @@ def main() -> int:
         print(f"[V3] Experiment: {ctx.experiment}")
         print(f"[V3] Stage dir: {ctx.stage_dir}")
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     # RESOLVER RUTAS
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     fase12_report = args.fase12_report or ""
     fase13_analysis = args.fase13_analysis or ""
     fase13_atlas = args.fase13_atlas or ""
@@ -1269,25 +1269,25 @@ def main() -> int:
     print("=" * 70)
     
     if HAS_EXTENDED_CONTRACTS:
-        print("  [âœ“] Contratos CFT extendidos disponibles")
+        print("  [✓] Contratos CFT extendidos disponibles")
     else:
-        print("  [âœ—] Contratos CFT extendidos NO disponibles")
+        print("  [✗] Contratos CFT extendidos NO disponibles")
     
     results = {}
     negative_control_alert = False
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    # Fase XII (bÃ¡sicos)
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
+    # Fase XII (básicos)
+    # ═══════════════════════════════════════════════════════════════════════
     if args.phase in ["12", "both"] and fase12_report:
-        print(f"\n>> Validando Fase XII (bÃ¡sicos) desde {fase12_report}")
+        print(f"\n>> Validando Fase XII (básicos) desde {fase12_report}")
         results["fase12"] = run_contracts_fase12(Path(fase12_report))
         summary = results["fase12"]
         print(f"   Contratos: {summary.get('n_passed', 0)}/{summary.get('n_contracts', 0)}")
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     # Fase XII EXTENDIDA (CFT mejorados)
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     if args.run_extended_contracts and args.phase in ["12", "both"] and fase12_report:
         print(f"\n>> Validando Fase XII EXTENDIDA (CFT) desde {fase12_report}")
         results["fase12_extended"] = run_extended_contracts_fase12(
@@ -1304,9 +1304,9 @@ def main() -> int:
         else:
             print(f"   [WARN] {summary_ext['error']}")
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     # Fase XIII
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     if args.phase in ["13", "both"] and fase13_analysis:
         print(f"\n>> Validando Fase XIII desde {fase13_analysis}")
         results["fase13"] = run_contracts_fase13(
@@ -1316,9 +1316,9 @@ def main() -> int:
         summary = results["fase13"]
         print(f"   Contratos: {summary.get('n_passed', 0)}/{summary.get('n_contracts', 0)}")
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     # Control negativo
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     if args.negative_control_run_dir:
         print(f"\n>> Control negativo desde {args.negative_control_run_dir}")
         
@@ -1333,14 +1333,14 @@ def main() -> int:
         if nc["false_positive_rate"] is not None:
             print(f"   FPR: {nc['false_positive_rate']:.1%} (threshold: {nc['fpr_threshold']:.0%})")
             print(f"   Coverage: {nc['coverage']:.1%}")
-            print(f"   SeÃ±ales: {nc['n_signals_triggered']}/{nc['n_signals_evaluable']} disparadas")
+            print(f"   Señales: {nc['n_signals_triggered']}/{nc['n_signals_evaluable']} disparadas")
         
         if nc["status"] == "ALERT":
             negative_control_alert = True
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     # Guardar
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(results, indent=2))
@@ -1371,9 +1371,9 @@ def main() -> int:
     print(f"\n  Output: {output_path}")
     print("=" * 70)
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     # V3: Registrar artefactos y escribir summary
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════
     if ctx:
         ctx.record_artifact("contracts_json", output_path)
         if fase12_report:
@@ -1394,7 +1394,7 @@ def main() -> int:
             "all_passed": all_passed,
         }
         
-        # AÃ±adir counts de contratos extendidos
+        # Añadir counts de contratos extendidos
         if "fase12_extended" in results and "error" not in results["fase12_extended"]:
             counts["fase12_extended_passed"] = results["fase12_extended"].get("n_passed", 0)
             counts["fase12_extended_total"] = results["fase12_extended"].get("n_contracts", 0)
@@ -1404,7 +1404,7 @@ def main() -> int:
         print(f"[V3] stage_summary.json escrito")
     
     if args.require_negative_control and negative_control_alert:
-        print("\nâš  Exit 1: --require-negative-control activo y status=ALERT")
+        print("\n⚠ Exit 1: --require-negative-control activo y status=ALERT")
         return 1
     
     return 0 if all_passed else 1

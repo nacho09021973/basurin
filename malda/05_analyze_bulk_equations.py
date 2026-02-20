@@ -63,9 +63,9 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 from collections import defaultdict
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
 # V3 INFRASTRUCTURE
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ═══════════════════════════════════════════════════════════════════════════════
 HAS_STAGE_UTILS = False
 StageContext = None
 add_standard_arguments = None
@@ -100,7 +100,7 @@ def parse_equation_coefficients(eq_str: str) -> Dict[str, float]:
     Extrae coeficientes numericos de una ecuacion de PySR.
     
     Ejemplo: "((-20.000029 * square(x2)) - (9.999996 * x3))"
-    â†’ {"square_x2": -20.0, "x3": -10.0}
+    → {"square_x2": -20.0, "x3": -10.0}
     """
     coefficients = {}
     
@@ -307,7 +307,7 @@ def generate_report(results: Dict, patterns: Dict) -> str:
     
     lines = []
     lines.append("=" * 70)
-    lines.append("ANÃLISIS DE ECUACIONES DESCUBIERTAS POR PySR")
+    lines.append("ANÁLISIS DE ECUACIONES DESCUBIERTAS POR PySR")
     lines.append("=" * 70)
     
     # Resumen por familia
@@ -320,7 +320,7 @@ def generate_report(results: Dict, patterns: Dict) -> str:
             lines.append("-" * 50)
             
             for g in geos[:3]:  # Mostrar maximo 3
-                lines.append(f"\n  {g['name']} (z={g['z_dyn']}, Î¸={g['theta']})")
+                lines.append(f"\n  {g['name']} (z={g['z_dyn']}, θ={g['theta']})")
                 lines.append(f"  R = {g['R_equation'][:60]}...")
                 lines.append(f"  R^2 = {g['R_r2']:.6f}")
     
@@ -331,10 +331,10 @@ def generate_report(results: Dict, patterns: Dict) -> str:
     if patterns["universal_terms"]:
         lines.append("\nTerminos presentes en TODAS las geometrias:")
         for term in patterns["universal_terms"]:
-            lines.append(f"  âœ“ {term}")
+            lines.append(f"  ✓ {term}")
     
     # Terminos especificos por familia
-    lines.append("\n\n## TÃ‰RMINOS ESPECÃFICOS POR FAMILIA")
+    lines.append("\n\n## TÉRMINOS ESPECÍFICOS POR FAMILIA")
     lines.append("-" * 50)
     
     for family, terms in patterns["family_specific_terms"].items():
@@ -369,20 +369,20 @@ def generate_report(results: Dict, patterns: Dict) -> str:
         lif_struct = lifshitz_geos[0]["structure"] if lifshitz_geos else {}
         
         if ads_struct != lif_struct:
-            lines.append("\nâœ“ Las ecuaciones para Lifshitz son DIFERENTES a AdS")
+            lines.append("\n✓ Las ecuaciones para Lifshitz son DIFERENTES a AdS")
             lines.append("  Esto indica fisica genuinamente distinta")
     
     if hvlf_geos:
         hvlf_with_cross = [g for g in hvlf_geos if g["structure"].get("has_cross_terms")]
         if hvlf_with_cross:
-            lines.append(f"\nâ€¢ {len(hvlf_with_cross)} geometrias hyperscaling tienen terminos cruzados")
+            lines.append(f"\n• {len(hvlf_with_cross)} geometrias hyperscaling tienen terminos cruzados")
             lines.append("  Esto indica acoplamiento materia-geometria no trivial")
     
     # R^2 promedio
     all_r2 = [g["R_r2"] for g in results["by_geometry"].values()]
     if all_r2:
         avg_r2 = np.mean(all_r2)
-        lines.append(f"\nâ€¢ R^2 promedio: {avg_r2:.6f}")
+        lines.append(f"\n• R^2 promedio: {avg_r2:.6f}")
         if avg_r2 > 0.999:
             lines.append("  Las ecuaciones descubiertas son muy precisas")
     
@@ -396,9 +396,9 @@ def main():
     
     parser = argparse.ArgumentParser(description="Analiza ecuaciones descubiertas")
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════════
     # V3: Argumentos estandar
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════════
     if HAS_STAGE_UTILS:
         add_standard_arguments(parser)
     else:
@@ -413,9 +413,9 @@ def main():
     
     args = parser.parse_args()
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════════
     # V3: Crear StageContext
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════════
     ctx = None
     if HAS_STAGE_UTILS:
         # Inferir experiment si no se proporciona
@@ -430,9 +430,9 @@ def main():
         print(f"[V3] Experiment: {ctx.experiment}")
         print(f"[V3] Stage dir: {ctx.stage_dir}")
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════════
     # RESOLVER INPUT
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════════
     input_path = None
     
     # Prioridad 1: --input explicito
@@ -467,9 +467,9 @@ def main():
     
     print(f"Analizando: {input_path}")
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    # ANÃLISIS
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ANÁLISIS
+    # ═══════════════════════════════════════════════════════════════════════════
     try:
         results = load_and_analyze(input_path)
         patterns = find_universal_structure(results)
@@ -482,9 +482,9 @@ def main():
     
     print(report)
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════════
     # RESOLVER OUTPUT
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════════
     if args.output:
         output_path = Path(args.output).resolve()
     elif ctx:
@@ -521,9 +521,9 @@ def main():
     json_path.write_text(json.dumps(json_output, indent=2, default=str))
     print(f"-> Guardado: {json_path}")
     
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════════
     # V3: Registrar artefactos y escribir summary
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ═══════════════════════════════════════════════════════════════════════════
     if ctx:
         ctx.record_artifact("bulk_equations_report_txt", output_path)
         ctx.record_artifact("bulk_equations_report_json", json_path)
