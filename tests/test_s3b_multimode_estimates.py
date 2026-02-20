@@ -432,6 +432,22 @@ def _write_minimal_s2_inputs(run_root: Path, run_id: str) -> None:
         encoding="utf-8",
     )
 
+    s3_outputs = run_dir / "s3_ringdown_estimates" / "outputs"
+    s3_outputs.mkdir(parents=True, exist_ok=True)
+    (s3_outputs / "estimates.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "ringdown_estimates_v1",
+                "results": {
+                    "best_detector": "H1",
+                    "bandpass_hz": [150.0, 400.0],
+                    "detectors": {"H1": {"f0_hz": 220.0, "tau_s": 0.04}},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
 
 def test_cli_runs_root_writes_under_explicit_root_only(tmp_path: Path) -> None:
     run_id = "subrun_001"
