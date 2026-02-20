@@ -1407,9 +1407,11 @@ def run_inventory_phase(args: argparse.Namespace) -> dict[str, Any]:
 
 def _set_experiment_run_valid(runs_root_abs: Path, run_id: str, verdict: str, reason: str) -> None:
     rv_path = runs_root_abs / run_id / "RUN_VALID" / "verdict.json"
+    timestamp_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
     rv_payload = {
         "verdict": verdict,
-        "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "created": timestamp_utc,
+        "timestamp_utc": timestamp_utc,
         "reason": reason,
         "stage": "experiment/t0_sweep_full/finalize",
     }
@@ -1446,9 +1448,7 @@ def run_finalize_phase(args: argparse.Namespace) -> dict[str, Any]:
     base_run_dir = runs_root_abs / base_run
     scan_root_abs = Path(args.scan_root).expanduser().resolve() if getattr(args, "scan_root", None) else (base_run_dir / "experiment").resolve()
 
-    run_valid_path = base_run_dir / "RUN_VALID" / "verdict.json"
-    if run_valid_path.exists():
-        require_run_valid(runs_root_abs, base_run)
+    require_run_valid(runs_root_abs, base_run)
 
     inventory_args = copy.copy(args)
     inventory_args.phase = "inventory"
@@ -1509,6 +1509,7 @@ def run_finalize_phase(args: argparse.Namespace) -> dict[str, Any]:
         best_path.unlink()
 
     oracle_pass = oracle_report.get("final_verdict") == "PASS"
+    oracle_fail_reason = oracle_report.get("fail_global_reason")
     final_fail = bool(inventory_fail or not oracle_pass)
 
     if oracle_pass:
@@ -1568,7 +1569,16 @@ def run_finalize_phase(args: argparse.Namespace) -> dict[str, Any]:
         "results": {
             "inventory_status": inventory_payload.get("status"),
             "oracle_final_verdict": oracle_report.get("final_verdict"),
-            "oracle_fail_global_reason": oracle_report.get("fail_global_reason"),
+            "oracle_fail_global_reason": oracle_fail_reason,
+            "reasons": [
+                reason
+                for reason in [
+                    "INVENTORY_FAIL" if inventory_fail else None,
+                    oracle_fail_reason,
+                ]
+                if reason is not None
+            ],
+            "best_window_convention": "best_window.json is generated only when RUN_VALID=PASS",
             "n_subruns_scanned": len(rows),
             "n_windows_loaded": len(windows_only),
         },
@@ -1577,7 +1587,15 @@ def run_finalize_phase(args: argparse.Namespace) -> dict[str, Any]:
     _atomic_json_dump(summary_path, summary_payload)
 
     if final_fail:
-        _set_experiment_run_valid(runs_root_abs, base_run, "FAIL", "t0_sweep_full finalize oracle/inventory gating")
+        _set_experiment_run_valid(
+            runs_root_abs,
+            base_run,
+            "FAIL",
+            (
+                "t0_sweep_full finalize oracle/inventory gating "
+                f"inventory_fail={inventory_fail} oracle_fail_reason={oracle_fail_reason}"
+            ),
+        )
         raise SystemExit(2)
 
     return {
