@@ -64,6 +64,17 @@ def _create_run_valid(out_root: Path, run_id: str) -> None:
     print(f"[pipeline] RUN_VALID created for {run_id}")
 
 
+def _set_run_valid_verdict(out_root: Path, run_id: str, verdict: str, reason: str) -> None:
+    rv_dir = out_root / run_id / "RUN_VALID"
+    rv_dir.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(rv_dir / "verdict.json", {
+        "verdict": verdict,
+        "created": datetime.now(timezone.utc).isoformat(),
+        "reason": reason,
+        "stage": "pipeline",
+    })
+
+
 def _write_timeline(out_root: Path, run_id: str, timeline: dict[str, Any]) -> None:
     write_json_atomic(out_root / run_id / "pipeline_timeline.json", timeline)
 
@@ -311,6 +322,19 @@ def run_single_event(
     }
     _write_timeline(out_root, run_id, timeline)
 
+    # Stage 0: Oracle precheck (deterministic/offline-first)
+    s0_args = ["--run", run_id, "--event-id", event_id]
+    if offline:
+        s0_args.append("--require-offline")
+    for mapping in (local_hdf5 or []):
+        s0_args.extend(["--local-hdf5", mapping])
+    rc = _run_stage("s0_oracle_mvp.py", s0_args, "s0_oracle_mvp", out_root, run_id, timeline, stage_timeout_s)
+    if rc != 0:
+        _set_run_valid_verdict(out_root, run_id, "FAIL", "s0_oracle_mvp precheck failed")
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return rc, run_id
+
     # Stage 1: Fetch strain
     s1_args = ["--run", run_id, "--event-id", event_id, "--duration-s", str(duration_s)]
     if synthetic:
@@ -412,6 +436,18 @@ def run_multimode_event(
         },
     }
     _write_timeline(out_root, run_id, timeline)
+
+    s0_args = ["--run", run_id, "--event-id", event_id]
+    if offline:
+        s0_args.append("--require-offline")
+    for mapping in (local_hdf5 or []):
+        s0_args.extend(["--local-hdf5", mapping])
+    rc = _run_stage("s0_oracle_mvp.py", s0_args, "s0_oracle_mvp", out_root, run_id, timeline, stage_timeout_s)
+    if rc != 0:
+        _set_run_valid_verdict(out_root, run_id, "FAIL", "s0_oracle_mvp precheck failed")
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return rc, run_id
 
     s1_args = ["--run", run_id, "--event-id", event_id, "--duration-s", str(duration_s)]
     if synthetic:

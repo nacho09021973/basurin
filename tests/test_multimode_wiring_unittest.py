@@ -156,7 +156,7 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
             self.assertEqual(rc, 0)
             timeline = json.loads((runs_root / run_id / "pipeline_timeline.json").read_text(encoding="utf-8"))
             self.assertEqual([s["stage"] for s in timeline["stages"]], [
-                "s1_fetch_strain", "s2_ringdown_window", "s3_ringdown_estimates",
+                "s0_oracle_mvp", "s1_fetch_strain", "s2_ringdown_window", "s3_ringdown_estimates",
                 "s3b_multimode_estimates", "s4_geometry_filter", "s4c_kerr_consistency",
             ])
             self.assertEqual(timeline["multimode_results"]["extraction_quality"], "INSUFFICIENT_DATA")

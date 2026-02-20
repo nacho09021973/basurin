@@ -69,6 +69,15 @@ class StageContract:
 
 
 CONTRACTS: dict[str, StageContract] = {
+    "s0_oracle_mvp": StageContract(
+        name="s0_oracle_mvp",
+        required_inputs=[],
+        produced_outputs=[
+            "outputs/oracle_metrics.json",
+        ],
+        upstream_stages=[],
+        check_run_valid=False,
+    ),
     "s1_fetch_strain": StageContract(
         name="s1_fetch_strain",
         required_inputs=[],

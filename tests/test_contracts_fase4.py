@@ -43,12 +43,11 @@ class TestS3bMultimodeContract:
 
     def test_upstream_stages(self):
         c = CONTRACTS["s3b_multimode_estimates"]
-        assert c.upstream_stages == ["s2_ringdown_window"]
+        assert c.upstream_stages == ["s2_ringdown_window", "s3_ringdown_estimates"]
 
     def test_required_inputs_empty_dynamic(self):
-        """s3b discovers detector files at runtime (like s3)."""
         c = CONTRACTS["s3b_multimode_estimates"]
-        assert c.required_inputs == []
+        assert c.required_inputs == ["s3_ringdown_estimates/outputs/estimates.json"]
 
     def test_check_run_valid_default(self):
         """s3b checks RUN_VALID (default=True)."""
@@ -147,9 +146,9 @@ class TestAntiRegression:
 
 
 class TestContractCount:
-    def test_total_contracts_is_9(self):
-        """7 prior stages + 2 new FASE 4 stages = 9."""
-        assert len(CONTRACTS) == 9
+    def test_total_contracts_is_10(self):
+        """Registry includes oracle precheck + FASE 4 additions."""
+        assert len(CONTRACTS) == 10
 
 
 # ── Test 4: DAG integrity with new stages ────────────────────────────────
@@ -187,9 +186,5 @@ class TestDAGIntegrity:
         """s4c_kerr_consistency depends on s3b_multimode_estimates."""
         assert "s3b_multimode_estimates" in CONTRACTS["s4c_kerr_consistency"].upstream_stages
 
-    def test_s3b_parallel_to_s3(self):
-        """s3b_multimode_estimates shares the same upstream as s3."""
-        assert (
-            CONTRACTS["s3b_multimode_estimates"].upstream_stages
-            == CONTRACTS["s3_ringdown_estimates"].upstream_stages
-        )
+    def test_s3b_depends_on_s3_output(self):
+        assert "s3_ringdown_estimates" in CONTRACTS["s3b_multimode_estimates"].upstream_stages

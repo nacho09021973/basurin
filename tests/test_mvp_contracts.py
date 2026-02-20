@@ -37,7 +37,7 @@ from mvp.contracts import (
 # ── Test 1: Registry completeness ─────────────────────────────────────────
 
 class TestContractRegistry:
-    EXPECTED_STAGES = {"s1_fetch_strain", "s2_ringdown_window", "s3_ringdown_estimates",
+    EXPECTED_STAGES = {"s0_oracle_mvp", "s1_fetch_strain", "s2_ringdown_window", "s3_ringdown_estimates",
                        "s3b_multimode_estimates",
                        "s4_geometry_filter", "s4b_spectral_curvature",
                        "s4c_kerr_consistency",
