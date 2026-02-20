@@ -309,10 +309,20 @@ def _write_preflight_report_or_abort(
     }
     write_json_atomic(preflight_path, report)
     if not can_run:
-        print(
-            f"[experiment_t0_sweep_full] preflight failed: reason={reason} path={missing_path}",
-            file=sys.stderr,
-        )
+        msg = f"[experiment_t0_sweep_full] preflight failed: reason={reason} path={missing_path}"
+        if reason == "missing base s1 strain NPZ":
+            repo_root = Path(__file__).resolve().parents[1]
+            s1_cmd = (
+                f"python mvp/s1_fetch_strain.py --run {run_id} --event-id <EVENT_ID> --detectors H1,L1 "
+                f"--hdf5-root {repo_root / 'data' / 'losc'}"
+            )
+            msg += (
+                "\nPrimero ejecuta s1_fetch_strain; los HDF5 externos deben estar en "
+                f"{repo_root / 'data' / 'losc' / '<EVENT_ID>'}/ ..."
+                f"\nEjemplo: {s1_cmd}"
+                f"\nComprobación: find {repo_root / 'data' / 'losc' / '<EVENT_ID>'} \( -iname '*.hdf5' -o -iname '*.h5' \) -type f"
+            )
+        print(msg, file=sys.stderr)
         raise SystemExit(2)
     return report
 
@@ -1654,7 +1664,7 @@ def _update_retry_state(
 
 def main() -> int:
     raw_argv = sys.argv[1:]
-    ap = argparse.ArgumentParser(description="Experiment: full deterministic t0 sweep with subruns")
+    ap = argparse.ArgumentParser(description="Experiment: full deterministic t0 sweep with subruns (requires s1 outputs; external HDF5 live in data/losc/<EVENT_ID>/)")
     ap.add_argument("--run-id", "--run", dest="run_id", required=True)
     ap.add_argument("--base-runs-root", type=Path, default=Path.cwd() / "runs")
     ap.add_argument("--runs-root", default=None)

@@ -7,6 +7,53 @@ Este documento describe **dónde vive cada artefacto** en BASURIN cuando se ejec
 
 ---
 
+## 0) Single source of truth: rutas canónicas
+
+### External inputs (solo lectura)
+
+Los HDF5 externos de strain (GWOSC/LOSC) se almacenan **una sola vez** en:
+
+```text
+data/losc/<EVENT_ID>/
+```
+
+Convención elegida (plana):
+
+- Sin subdirectorios por detector.
+- Cada archivo debe incluir `H1` o `L1` en el nombre.
+- Patrones esperados por BASURIN:
+  - `*H1*.hdf5` o `*H1*.h5`
+  - `*L1*.hdf5` o `*L1*.h5`
+
+Ejemplos copy/paste:
+
+```bash
+# GW150914 (H1/L1)
+mkdir -p data/losc/GW150914
+cp /origen/H-H1_GWOSC_*.hdf5 data/losc/GW150914/
+cp /origen/L-L1_GWOSC_*.hdf5 data/losc/GW150914/
+
+# Evento genérico (GW170104)
+mkdir -p data/losc/GW170104
+cp /origen/*GW170104*H1*.hdf5 data/losc/GW170104/
+cp /origen/*GW170104*L1*.hdf5 data/losc/GW170104/
+
+# Comprobación antes de correr s1
+find data/losc/GW150914 \( -iname '*.hdf5' -o -iname '*.h5' \) -type f
+```
+
+### Runs root (solo escritura)
+
+Todo output del pipeline se escribe bajo:
+
+```text
+runs/<run_id>/...
+```
+
+Incluye manifests, summaries y `outputs/` por stage. Los external inputs (`data/losc/...`) son de lectura/reuso y no sustituyen el árbol de auditoría del run.
+
+---
+
 ## 1) Resolución del `RUNS_ROOT` (crítico)
 
 Un stage resuelve el root de runs así:
