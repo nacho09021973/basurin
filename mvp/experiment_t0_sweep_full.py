@@ -405,7 +405,7 @@ def build_subrun_stage_cmds(
     strain_npz: str,
     n_bootstrap: int,
     s3b_seed: int,
-    atlas_path: str,
+    atlas_path: str | None,
 ) -> list[list[str]]:
     """
     Pure helper: build the per-subrun stage command lists.
@@ -414,7 +414,7 @@ def build_subrun_stage_cmds(
     Seed propagation to s3b is explicit via --seed <s3b_seed>.
     """
     s3_estimates = f"runs/{subrun_id}/s3_ringdown_estimates/outputs/estimates.json"
-    return [
+    cmds = [
         [
             python,
             s2_script,
@@ -448,8 +448,19 @@ def build_subrun_stage_cmds(
             "--seed",
             str(int(s3b_seed)),
         ],
-        [python, s4c_script, "--run-id", subrun_id, "--runs-root", subrun_runs_root, "--atlas-path", atlas_path],
     ]
+
+    atlas_stage = [python, s4c_script, "--run-id", subrun_id, "--runs-root", subrun_runs_root]
+    cmds.append(atlas_stage)
+
+    needs_atlas = any(len(cmd) > 1 and Path(cmd[1]).stem == "s4c_kerr_consistency" for cmd in cmds)
+    if needs_atlas:
+        if not atlas_path:
+            print("stage=s4c_kerr_consistency requiere --atlas-path", file=sys.stderr)
+            raise SystemExit(2)
+        atlas_stage.extend(["--atlas-path", atlas_path])
+
+    return cmds
 
 
 def build_subrun_execution_plan(
@@ -1255,10 +1266,6 @@ def _flag_present(argv: list[str], *flags: str) -> bool:
 
 
 def _validate_phase_contracts(args: argparse.Namespace, argv: list[str]) -> None:
-    if args.phase == "run" and not args.atlas_path:
-        print("phase=run requiere --atlas-path", file=sys.stderr)
-        raise SystemExit(2)
-
     if args.phase not in {"inventory", "finalize"}:
         return
 
