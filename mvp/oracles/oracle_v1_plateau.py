@@ -343,3 +343,8 @@ def oracle_v1_plateau_report(windows: list[WindowMetrics], chi2_coh_max: float |
         "fail_global_reason": fail_global_reason,
         "warnings_global": warnings_global,
     }
+
+
+def run_oracle_v1(windows: list[WindowMetrics], chi2_coh_max: float | None = None) -> dict[str, Any]:
+    """Compatibility wrapper for the v1 oracle entrypoint."""
+    return oracle_v1_plateau_report(windows, chi2_coh_max=chi2_coh_max)

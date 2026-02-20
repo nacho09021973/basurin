@@ -17,6 +17,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
+from mvp.oracles.oracle_v1_plateau import load_window_metrics_from_subrun, run_oracle_v1
+
 _here = Path(__file__).resolve()
 for _cand in (_here.parents[0], _here.parents[1]):
     if (_cand / "basurin_io.py").exists() and str(_cand) not in sys.path:
@@ -1011,6 +1013,18 @@ def _inventory_path(runs_root_abs: Path, base_run: str) -> Path:
     return runs_root_abs / base_run / "experiment" / "derived" / "sweep_inventory.json"
 
 
+def _oracle_inventory_path(runs_root_abs: Path, base_run: str) -> Path:
+    return runs_root_abs / base_run / "experiment" / "derived" / "t0_sweep_inventory.json"
+
+
+def _oracle_report_path(runs_root_abs: Path, base_run: str) -> Path:
+    return runs_root_abs / base_run / "experiment" / "derived" / "oracle_report.json"
+
+
+def _best_window_path(runs_root_abs: Path, base_run: str) -> Path:
+    return runs_root_abs / base_run / "experiment" / "derived" / "best_window.json"
+
+
 def _diagnose_path(runs_root_abs: Path, base_run: str) -> Path:
     return runs_root_abs / base_run / "experiment" / "derived" / "diagnose_report.json"
 
@@ -1391,6 +1405,188 @@ def run_inventory_phase(args: argparse.Namespace) -> dict[str, Any]:
     return payload
 
 
+def _set_experiment_run_valid(runs_root_abs: Path, run_id: str, verdict: str, reason: str) -> None:
+    rv_path = runs_root_abs / run_id / "RUN_VALID" / "verdict.json"
+    rv_payload = {
+        "verdict": verdict,
+        "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "reason": reason,
+        "stage": "experiment/t0_sweep_full/finalize",
+    }
+    write_json_atomic(rv_path, rv_payload)
+
+
+def _finalize_inventory_decision(payload: dict[str, Any], args: argparse.Namespace) -> bool:
+    missing_abs = int(payload.get("missing_abs", 0))
+    missing_frac = float(payload.get("missing_frac", 0.0))
+    max_abs = int(getattr(args, "max_missing_abs", 0))
+    max_frac = float(getattr(args, "max_missing_frac", 0.0))
+    blocked_pairs = payload.get("blocked_pairs", [])
+    fail = (missing_abs > max_abs) or (missing_frac > max_frac)
+    payload["status"] = "FAIL" if fail else "PASS"
+    if fail:
+        reason = "blocked_pairs exhausted retries" if blocked_pairs else "missing_pairs exceed acceptance thresholds"
+    else:
+        reason = "missing within acceptance thresholds"
+    payload["decision"] = {
+        "fail": bool(fail),
+        "reason": reason,
+        "missing_abs": missing_abs,
+        "missing_frac": missing_frac,
+        "blocked_pairs": len(blocked_pairs),
+    }
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    payload["sha256"] = hashlib.sha256(canonical).hexdigest()
+    return fail
+
+
+def run_finalize_phase(args: argparse.Namespace) -> dict[str, Any]:
+    runs_root_abs = _resolve_runs_root_arg(getattr(args, "runs_root", None))
+    base_run = args.run_id
+    base_run_dir = runs_root_abs / base_run
+    scan_root_abs = Path(args.scan_root).expanduser().resolve() if getattr(args, "scan_root", None) else (base_run_dir / "experiment").resolve()
+
+    run_valid_path = base_run_dir / "RUN_VALID" / "verdict.json"
+    if run_valid_path.exists():
+        require_run_valid(runs_root_abs, base_run)
+
+    inventory_args = copy.copy(args)
+    inventory_args.phase = "inventory"
+    inventory_payload = run_inventory_phase(inventory_args)
+    inventory_fail = _finalize_inventory_decision(inventory_payload, args)
+    _atomic_json_dump(_inventory_path(runs_root_abs, base_run), inventory_payload)
+
+    rows: list[dict[str, Any]] = []
+    windows = []
+    for subrun_dir in _discover_subrun_dirs(scan_root_abs):
+        subrun_id = subrun_dir.name
+        row: dict[str, Any] = {
+            "subrun_id": subrun_id,
+            "subrun_root": str(subrun_dir),
+            "t0_ms": _parse_t0_offset_ms_from_subrun(subrun_dir),
+            "paths": {},
+            "hashes": {},
+        }
+        for stage in ("s2_ringdown_window", "s3_ringdown_estimates", "s3b_multimode_estimates", "s4c_kerr_consistency"):
+            st_path = subrun_dir / stage / "stage_summary.json"
+            mf_path = subrun_dir / stage / "manifest.json"
+            row["paths"][f"{stage}.stage_summary"] = str(st_path)
+            row["paths"][f"{stage}.manifest"] = str(mf_path)
+            row["hashes"][f"{stage}.stage_summary"] = sha256_file(st_path) if st_path.exists() else None
+            row["hashes"][f"{stage}.manifest"] = sha256_file(mf_path) if mf_path.exists() else None
+
+        try:
+            metrics = load_window_metrics_from_subrun(subrun_dir)
+            windows.append((subrun_dir, metrics))
+            row["window"] = {
+                "t0": metrics.t0,
+                "T": metrics.T,
+                "f_median": metrics.f_median,
+                "tau_median": metrics.tau_median,
+            }
+            row["metrics_loaded"] = True
+        except Exception as exc:
+            row["metrics_loaded"] = False
+            row["metrics_error"] = str(exc)
+        rows.append(row)
+
+    windows_only = [item[1] for item in windows]
+    oracle_report = run_oracle_v1(windows_only, chi2_coh_max=None)
+
+    inv_payload = {
+        "schema_version": "t0_sweep_inventory_v1",
+        "run_id": base_run,
+        "scan_root_abs": str(scan_root_abs),
+        "n_subruns_scanned": len(rows),
+        "n_windows_loaded": len(windows_only),
+        "windows": rows,
+    }
+    _atomic_json_dump(_oracle_inventory_path(runs_root_abs, base_run), inv_payload)
+    _atomic_json_dump(_oracle_report_path(runs_root_abs, base_run), oracle_report)
+
+    best_path = _best_window_path(runs_root_abs, base_run)
+    if best_path.exists():
+        best_path.unlink()
+
+    oracle_pass = oracle_report.get("final_verdict") == "PASS"
+    final_fail = bool(inventory_fail or not oracle_pass)
+
+    if oracle_pass:
+        chosen_t0 = oracle_report.get("chosen_t0")
+        chosen_T = oracle_report.get("chosen_T")
+        selected = None
+        for subrun_dir, metrics in windows:
+            if float(metrics.t0) == float(chosen_t0) and float(metrics.T) == float(chosen_T):
+                selected = (subrun_dir, metrics)
+                break
+        if selected is not None and not final_fail:
+            subrun_dir, _metrics = selected
+            s2_stage_summary = subrun_dir / "s2_ringdown_window" / "stage_summary.json"
+            s2_manifest = subrun_dir / "s2_ringdown_window" / "manifest.json"
+            best_payload = {
+                "chosen_t0": chosen_t0,
+                "chosen_T": chosen_T,
+                "subrun_id": subrun_dir.name,
+                "paths": {
+                    "subrun_root": str(subrun_dir),
+                    "stage_summary_path": str(s2_stage_summary),
+                    "manifest_path": str(s2_manifest),
+                },
+                "hashes": {
+                    "sha256(stage_summary)": sha256_file(s2_stage_summary) if s2_stage_summary.exists() else None,
+                    "sha256(manifest)": sha256_file(s2_manifest) if s2_manifest.exists() else None,
+                },
+            }
+            _atomic_json_dump(best_path, best_payload)
+
+    derived_dir = runs_root_abs / base_run / "experiment" / "derived"
+    experiment_dir = runs_root_abs / base_run / "experiment"
+    manifest_path = experiment_dir / "manifest.json"
+    summary_path = experiment_dir / "stage_summary.json"
+
+    artifacts = {
+        "oracle_report": _oracle_report_path(runs_root_abs, base_run),
+        "t0_sweep_inventory": _oracle_inventory_path(runs_root_abs, base_run),
+        "sweep_inventory": _inventory_path(runs_root_abs, base_run),
+    }
+    if best_path.exists():
+        artifacts["best_window"] = best_path
+
+    manifest_payload = {
+        "schema_version": "mvp_manifest_v1",
+        "stage": "experiment/t0_sweep_full/finalize",
+        "derived_root": str(derived_dir),
+        "artifacts": {k: str(v) for k, v in artifacts.items()},
+        "hashes": {k: sha256_file(v) for k, v in artifacts.items()},
+    }
+    _atomic_json_dump(manifest_path, manifest_payload)
+
+    summary_payload = {
+        "stage": "experiment/t0_sweep_full/finalize",
+        "run_id": base_run,
+        "verdict": "FAIL" if final_fail else "PASS",
+        "results": {
+            "inventory_status": inventory_payload.get("status"),
+            "oracle_final_verdict": oracle_report.get("final_verdict"),
+            "oracle_fail_global_reason": oracle_report.get("fail_global_reason"),
+            "n_subruns_scanned": len(rows),
+            "n_windows_loaded": len(windows_only),
+        },
+        "outputs": [{"path": str(v), "sha256": sha256_file(v)} for v in artifacts.values()],
+    }
+    _atomic_json_dump(summary_path, summary_payload)
+
+    if final_fail:
+        _set_experiment_run_valid(runs_root_abs, base_run, "FAIL", "t0_sweep_full finalize oracle/inventory gating")
+        raise SystemExit(2)
+
+    return {
+        "inventory": inventory_payload,
+        "oracle_report": oracle_report,
+        "oracle_inventory": inv_payload,
+    }
+
+
 def _update_retry_state(
     args: argparse.Namespace,
     attempted_pairs: list[dict[str, int]],
@@ -1448,7 +1644,7 @@ def main() -> int:
             return 0
 
         if args.phase == "finalize":
-            run_inventory_phase(args)
+            run_finalize_phase(args)
             return 0
 
         if args.phase == "diagnose":
