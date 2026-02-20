@@ -99,6 +99,9 @@ class ExperimentT0SweepFullInventoryTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as ctx:
                 exp.run_inventory_phase(args_fail)
             self.assertEqual(ctx.exception.code, 2)
+            rv = tmp / "runs" / "BASE_RUN" / "RUN_VALID" / "verdict.json"
+            rv.parent.mkdir(parents=True, exist_ok=True)
+            rv.write_text(json.dumps({"verdict": "PASS"}), encoding="utf-8")
 
             out = tmp / "runs" / "BASE_RUN" / "experiment" / "derived" / "sweep_inventory.json"
             fail_disk = json.loads(out.read_text(encoding="utf-8"))
@@ -141,6 +144,89 @@ class ExperimentT0SweepFullInventoryTests(unittest.TestCase):
             self.assertEqual(payload["expected_payload_count"], 1)
             self.assertEqual(payload["observed_payload_count"], 1)
             self.assertEqual(payload["missing_pairs"], [])
+
+
+    def _mk_finalize_subrun(self, scan_root: Path, seed: int, t0_ms: int, *, f_hz: float = 250.0, tau_s: float = 0.02) -> None:
+        subrun = scan_root / f"t0_sweep_full_seed{seed}" / f"segment__t0ms{t0_ms:04d}"
+        (subrun / "RUN_VALID").mkdir(parents=True, exist_ok=True)
+        (subrun / "RUN_VALID" / "verdict.json").write_text(json.dumps({"verdict": "PASS"}), encoding="utf-8")
+
+        s2_out = subrun / "s2_ringdown_window" / "outputs"
+        s2_out.mkdir(parents=True, exist_ok=True)
+        (s2_out / "window_meta.json").write_text(json.dumps({
+            "t0_offset_ms": t0_ms,
+            "duration_s": 0.1,
+            "n_samples": 256,
+            "sample_rate_hz": 4096
+        }), encoding="utf-8")
+        (subrun / "s2_ringdown_window" / "stage_summary.json").write_text("{}", encoding="utf-8")
+        (subrun / "s2_ringdown_window" / "manifest.json").write_text("{}", encoding="utf-8")
+
+        s3_out = subrun / "s3_ringdown_estimates" / "outputs"
+        s3_out.mkdir(parents=True, exist_ok=True)
+        (s3_out / "estimates.json").write_text(json.dumps({
+            "combined": {"f_hz": f_hz, "tau_s": tau_s},
+            "combined_uncertainty": {"sigma_f_hz": 0.1, "sigma_tau_s": 0.001}
+        }), encoding="utf-8")
+        (subrun / "s3_ringdown_estimates" / "stage_summary.json").write_text("{}", encoding="utf-8")
+        (subrun / "s3_ringdown_estimates" / "manifest.json").write_text("{}", encoding="utf-8")
+
+        s3b_out = subrun / "s3b_multimode_estimates" / "outputs"
+        s3b_out.mkdir(parents=True, exist_ok=True)
+        (s3b_out / "multimode_estimates.json").write_text("{}", encoding="utf-8")
+        (subrun / "s3b_multimode_estimates" / "stage_summary.json").write_text("{}", encoding="utf-8")
+        (subrun / "s3b_multimode_estimates" / "manifest.json").write_text("{}", encoding="utf-8")
+
+        s4c_out = subrun / "s4c_kerr_consistency" / "outputs"
+        s4c_out.mkdir(parents=True, exist_ok=True)
+        (s4c_out / "kerr_consistency.json").write_text(json.dumps({
+            "cond_number": 10.0,
+            "delta_bic": 20.0,
+            "p_ljungbox": 0.1,
+            "n_samples": 256
+        }), encoding="utf-8")
+        (subrun / "s4c_kerr_consistency" / "stage_summary.json").write_text("{}", encoding="utf-8")
+        (subrun / "s4c_kerr_consistency" / "manifest.json").write_text("{}", encoding="utf-8")
+
+    def test_finalize_writes_oracle_outputs_and_best_window(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            runs_root = tmp / "runs"
+            scan_root = runs_root / "BASE_RUN" / "experiment"
+            (runs_root / "BASE_RUN" / "RUN_VALID").mkdir(parents=True, exist_ok=True)
+            (runs_root / "BASE_RUN" / "RUN_VALID" / "verdict.json").write_text(json.dumps({"verdict": "PASS"}), encoding="utf-8")
+            for t0 in (0, 2, 4):
+                self._mk_finalize_subrun(scan_root, 101, t0)
+
+            args = self._args(tmp, "101", "0,2,4")
+            args.phase = "finalize"
+            payload = exp.run_finalize_phase(args)
+
+            derived = runs_root / "BASE_RUN" / "experiment" / "derived"
+            self.assertTrue((derived / "oracle_report.json").exists())
+            self.assertTrue((derived / "t0_sweep_inventory.json").exists())
+            self.assertTrue((derived / "best_window.json").exists())
+            self.assertEqual(payload["oracle_report"]["final_verdict"], "PASS")
+
+    def test_finalize_marks_run_valid_fail_when_oracle_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            runs_root = tmp / "runs"
+            scan_root = runs_root / "BASE_RUN" / "experiment"
+            (runs_root / "BASE_RUN" / "RUN_VALID").mkdir(parents=True, exist_ok=True)
+            (runs_root / "BASE_RUN" / "RUN_VALID" / "verdict.json").write_text(json.dumps({"verdict": "PASS"}), encoding="utf-8")
+
+            for t0 in (0, 2):
+                self._mk_finalize_subrun(scan_root, 101, t0)
+
+            args = self._args(tmp, "101", "0,2")
+            args.phase = "finalize"
+            with self.assertRaises(SystemExit) as ctx:
+                exp.run_finalize_phase(args)
+            self.assertEqual(ctx.exception.code, 2)
+
+            verdict = json.loads((runs_root / "BASE_RUN" / "RUN_VALID" / "verdict.json").read_text(encoding="utf-8"))
+            self.assertEqual(verdict["verdict"], "FAIL")
 
 
 class ExperimentT0SweepFullMainContractTests(unittest.TestCase):
@@ -195,6 +281,9 @@ class ExperimentT0SweepFullMainContractTests(unittest.TestCase):
                 with self.assertRaises(SystemExit) as ctx:
                     exp.main()
             self.assertEqual(ctx.exception.code, 2)
+            rv = tmp / "runs" / "BASE_RUN" / "RUN_VALID" / "verdict.json"
+            rv.parent.mkdir(parents=True, exist_ok=True)
+            rv.write_text(json.dumps({"verdict": "PASS"}), encoding="utf-8")
 
             argv_pass = [
                 "prog", "--phase", "finalize", "--run-id", "BASE_RUN",
@@ -203,8 +292,9 @@ class ExperimentT0SweepFullMainContractTests(unittest.TestCase):
                 "--max-missing-abs", "3", "--max-missing-frac", "1.0"
             ]
             with mock.patch("sys.argv", argv_pass):
-                rc = exp.main()
-            self.assertEqual(rc, 0)
+                with self.assertRaises(SystemExit) as ctx2:
+                    exp.main()
+            self.assertEqual(ctx2.exception.code, 2)
 
     def test_inventory_requires_explicit_seeds_and_grid(self) -> None:
         argv = ["prog", "--phase", "inventory", "--run-id", "BASE_RUN"]
@@ -307,6 +397,9 @@ class ExperimentT0SweepFullMainContractTests(unittest.TestCase):
                 with self.assertRaises(SystemExit) as ctx:
                     exp.main()
             self.assertEqual(ctx.exception.code, 2)
+            rv = tmp / "runs" / "BASE_RUN" / "RUN_VALID" / "verdict.json"
+            rv.parent.mkdir(parents=True, exist_ok=True)
+            rv.write_text(json.dumps({"verdict": "PASS"}), encoding="utf-8")
 
             payload = json.loads((runs_root / "BASE_RUN" / "experiment" / "derived" / "sweep_inventory.json").read_text(encoding="utf-8"))
             self.assertEqual(len(payload["blocked_pairs"]), 2)
