@@ -46,7 +46,7 @@ SCRIPT_VERSION = "02R_build_ringdown_boundary_dataset.py v1.0 (2026-01-12)"
 # Path resolution (root-relative, no '..', no escape)
 # ----------------------------
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent  # repo root (basurin/)
 
 
 def _reject_dotdot(p: Path) -> None:

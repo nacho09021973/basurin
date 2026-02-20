@@ -547,7 +547,7 @@ def build_argparser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_argparser().parse_args()
-    project_root = Path(__file__).resolve().parent
+    project_root = Path(__file__).resolve().parent.parent  # repo root (basurin/)
 
     run_dir = _resolve_root_relative(project_root, args.run_dir)
     if not run_dir.exists():

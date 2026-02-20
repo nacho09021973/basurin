@@ -305,7 +305,7 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    project_root = Path(__file__).resolve().parent
+    project_root = Path(__file__).resolve().parent.parent  # repo root (basurin/)
 
     h1_npz = _resolve_root_relative(project_root, args.h1_npz)
     l1_npz = _resolve_root_relative(project_root, args.l1_npz) if args.l1_npz else None
