@@ -84,6 +84,7 @@ class TestExperimentT0SweepFullDiagnose(unittest.TestCase):
             )
 
             with (
+                mock.patch.object(exp, "enforce_isolated_runsroot"),
                 mock.patch.object(exp, "require_run_valid"),
                 mock.patch.object(exp, "_pick_detector", return_value=("H1", run_dir / "s2_ringdown_window" / "outputs" / "H1_rd.npz")),
             ):
@@ -100,6 +101,7 @@ class TestExperimentT0SweepFullDiagnose(unittest.TestCase):
             (run_dir / "RUN_VALID").mkdir(parents=True, exist_ok=True)
             (run_dir / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
             with (
+                mock.patch.object(exp, "enforce_isolated_runsroot"),
                 mock.patch.object(exp, "require_run_valid"),
                 mock.patch.object(exp, "_pick_detector", return_value=("H1", run_dir / "s2_ringdown_window" / "outputs" / "H1_rd.npz")),
             ):

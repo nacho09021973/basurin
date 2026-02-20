@@ -1448,13 +1448,16 @@ def run_finalize_phase(args: argparse.Namespace) -> dict[str, Any]:
     base_run_dir = runs_root_abs / base_run
     scan_root_abs = Path(args.scan_root).expanduser().resolve() if getattr(args, "scan_root", None) else (base_run_dir / "experiment").resolve()
 
-    require_run_valid(runs_root_abs, base_run)
-
     inventory_args = copy.copy(args)
     inventory_args.phase = "inventory"
     inventory_payload = run_inventory_phase(inventory_args)
     inventory_fail = _finalize_inventory_decision(inventory_payload, args)
     _atomic_json_dump(_inventory_path(runs_root_abs, base_run), inventory_payload)
+
+    try:
+        require_run_valid(runs_root_abs, base_run)
+    except FileNotFoundError as exc:
+        raise SystemExit(2) from exc
 
     rows: list[dict[str, Any]] = []
     windows = []
@@ -1711,6 +1714,8 @@ def main() -> int:
                 args.inventory_seeds = str(int(args.seed))
             run_inventory_phase(args)
         return 0
+    except SystemExit:
+        raise
     except Exception as exc:
         print(f"[experiment_t0_sweep_full] ERROR: {exc}", file=sys.stderr)
         return 2
