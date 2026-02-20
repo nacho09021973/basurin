@@ -227,6 +227,14 @@ class ExperimentT0SweepFullInventoryTests(unittest.TestCase):
 
             verdict = json.loads((runs_root / "BASE_RUN" / "RUN_VALID" / "verdict.json").read_text(encoding="utf-8"))
             self.assertEqual(verdict["verdict"], "FAIL")
+            self.assertIn("oracle_fail_reason=NO_PLATEAU_INSUFFICIENT_WINDOWS", verdict.get("reason", ""))
+            self.assertIn("timestamp_utc", verdict)
+
+            derived = runs_root / "BASE_RUN" / "experiment" / "derived"
+            self.assertFalse((derived / "best_window.json").exists())
+
+            stage_summary = json.loads((runs_root / "BASE_RUN" / "experiment" / "stage_summary.json").read_text(encoding="utf-8"))
+            self.assertIn("NO_PLATEAU_INSUFFICIENT_WINDOWS", stage_summary["results"].get("reasons", []))
 
 
 class ExperimentT0SweepFullMainContractTests(unittest.TestCase):
