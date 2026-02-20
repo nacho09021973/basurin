@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 try:
     import numpy as np
@@ -29,6 +28,11 @@ def _write_min_run(runs_root: Path, run_id: str) -> None:
     fs = 4096.0
     t = np.arange(0, 0.25, 1.0 / fs)
     strain = np.exp(-t / 0.05) * np.sin(2.0 * np.pi * 220.0 * t)
+
+    s1_out = run_dir / "s1_fetch_strain" / "outputs"
+    s1_out.mkdir(parents=True, exist_ok=True)
+    np.savez(s1_out / "strain.npz", H1=strain.astype(np.float64), sample_rate_hz=np.array([fs]))
+
     np.savez(s2_out / "H1_rd.npz", strain=strain.astype(np.float64), sample_rate_hz=np.array([fs]))
 
     (s2_out / "window_meta.json").write_text(
@@ -82,17 +86,15 @@ class TestExperimentT0SweepFullIntegration(unittest.TestCase):
             runs_root = Path(td) / "runs"
             run_id = "test_t0_sweep_full"
             _write_min_run(runs_root, run_id)
-            args = SimpleNamespace(run_id=run_id, base_runs_root=runs_root, atlas_path="docs/ringdown/atlas/atlas_berti_v2.json", t0_grid_ms="0,5,10", t0_start_ms=0, t0_stop_ms=10, t0_step_ms=5, n_bootstrap=50, seed=123, detector="auto", stage_timeout_s=30)
+            args = SimpleNamespace(run_id=run_id, runs_root=runs_root, base_runs_root=runs_root, atlas_path="docs/ringdown/atlas/atlas_berti_v2.json", t0_grid_ms="0,5,10", t0_start_ms=0, t0_stop_ms=10, t0_step_ms=5, n_bootstrap=50, seed=123, detector="auto", stage_timeout_s=30)
 
             observed_cmds: list[list[str]] = []
-            with patch("mvp.experiment_t0_sweep_full.resolve_out_root", return_value=runs_root):
-                exp.run_t0_sweep_full(args, run_cmd_fn=self._fake_runner_factory(runs_root / run_id / "experiment" / "t0_sweep_full" / "runs", observed_cmds))
+            exp.run_t0_sweep_full(args, run_cmd_fn=self._fake_runner_factory(runs_root / run_id / "experiment" / "t0_sweep_full_seed123" / "runs", observed_cmds))
 
-            out_json = runs_root / run_id / "experiment" / "t0_sweep_full" / "outputs" / "t0_sweep_full_results.json"
+            out_json = runs_root / run_id / "experiment" / "t0_sweep_full_seed123" / "outputs" / "t0_sweep_full_results.json"
             digest1 = self._sha(out_json)
             observed_cmds.clear()
-            with patch("mvp.experiment_t0_sweep_full.resolve_out_root", return_value=runs_root):
-                exp.run_t0_sweep_full(args, run_cmd_fn=self._fake_runner_factory(runs_root / run_id / "experiment" / "t0_sweep_full" / "runs", observed_cmds))
+            exp.run_t0_sweep_full(args, run_cmd_fn=self._fake_runner_factory(runs_root / run_id / "experiment" / "t0_sweep_full_seed123" / "runs", observed_cmds))
             self.assertEqual(self._sha(out_json), digest1)
 
     def test_build_subrun_stage_cmds_passes_seed_to_s3b(self) -> None:

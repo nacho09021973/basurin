@@ -41,7 +41,7 @@ def _sha(path: Path) -> str:
 
 
 def test_experiment_t0_sweep_deterministic(tmp_path: Path) -> None:
-    repo = Path(__file__).resolve().parents[1]
+    repo = Path(__file__).resolve().parents[2]
     runs_root = tmp_path / "runs"
     run_id = "test_t0_sweep"
     _write_min_run(runs_root, run_id)
@@ -83,7 +83,7 @@ def test_experiment_t0_sweep_deterministic(tmp_path: Path) -> None:
 
 
 def test_experiment_t0_sweep_quiet_has_no_stderr(tmp_path: Path) -> None:
-    repo = Path(__file__).resolve().parents[1]
+    repo = Path(__file__).resolve().parents[2]
     runs_root = tmp_path / "runs"
     run_id = "test_t0_sweep_quiet"
     _write_min_run(runs_root, run_id)
