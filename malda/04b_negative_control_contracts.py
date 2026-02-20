@@ -669,7 +669,23 @@ def process_negative_control(
 
 def main():
     import argparse
-    
+    import sys
+
+    # ── GUARD: bloquear ejecución en modo placeholder ─────────────────────────
+    if PLACEHOLDER_MODE:
+        print(
+            "[04b] ERROR: Este script está en MODO PLANTILLA (placeholder).\n"
+            "  Sus métricas son stubs ficticios y NO deben usarse para:\n"
+            "    - Claims físicos en artículos\n"
+            "    - Conclusiones sobre honestidad del pipeline\n"
+            "    - Validación final de resultados\n"
+            "  Para habilitar la ejecución real, conecta las métricas a salidas\n"
+            "  concretas de la geometría emergente y cambia PLACEHOLDER_MODE = False.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    # ─────────────────────────────────────────────────────────────────────────
+
     parser = argparse.ArgumentParser(
         description="Validación de controles negativos (detección de alucinación geométrica)"
     )
