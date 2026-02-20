@@ -50,9 +50,19 @@ class TestExperimentT0SweepFullIntegration(unittest.TestCase):
         def _run(cmd: list[str], env: dict[str, str], timeout: int):
             self.assertEqual(timeout, 30)
             observed_cmds.append(cmd)
+            self.assertIn("--runs-root", cmd)
+            self.assertEqual(env.get("BASURIN_RUNS_ROOT"), cmd[cmd.index("--runs-root") + 1])
             run_id = cmd[cmd.index("--run-id") + 1] if "--run-id" in cmd else cmd[cmd.index("--run") + 1]
             stage = Path(cmd[1]).stem
             run_dir = subruns_root / run_id
+
+            if stage == "s2_ringdown_window":
+                out = run_dir / "s2_ringdown_window" / "outputs"
+                out.mkdir(parents=True, exist_ok=True)
+                (out / "window_meta.json").write_text(
+                    json.dumps({"sample_rate_hz": 4096.0, "dt_start_s": 0.0, "duration_s": 0.06}, sort_keys=True),
+                    encoding="utf-8",
+                )
 
             if stage == "s3b_multimode_estimates":
                 out = run_dir / "s3b_multimode_estimates" / "outputs"
