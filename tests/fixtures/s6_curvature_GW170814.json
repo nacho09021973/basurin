@@ -1,0 +1,13 @@
+{
+  "schema_version": "mvp_curvature_v1",
+  "event_id": "GW170814",
+  "n_geometries_reranked": 6,
+  "reranked_geometries": [
+    {"geometry_id": "geo_00", "rank_conformal": 0, "rank_flat": 0},
+    {"geometry_id": "geo_01", "rank_conformal": 1, "rank_flat": 1},
+    {"geometry_id": "geo_02", "rank_conformal": 2, "rank_flat": 2},
+    {"geometry_id": "geo_03", "rank_conformal": 3, "rank_flat": 3},
+    {"geometry_id": "geo_04", "rank_conformal": 4, "rank_flat": 4},
+    {"geometry_id": "geo_05", "rank_conformal": 5, "rank_flat": 5}
+  ]
+}
