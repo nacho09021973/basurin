@@ -8,6 +8,7 @@ import datetime
 import hashlib
 import json
 import math
+import statistics
 import os
 import re
 import shutil
@@ -17,7 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
-from mvp.oracles.oracle_v1_plateau import load_window_metrics_from_subrun, run_oracle_v1
+from mvp.oracles.oracle_v1_plateau import WindowMetrics, load_window_metrics_from_subrun, run_oracle_v1
 
 _here = Path(__file__).resolve()
 for _cand in (_here.parents[0], _here.parents[1]):
@@ -1074,6 +1075,121 @@ def _parse_t0_offset_ms_from_subrun(subrun_dir: Path) -> int:
     return int(match.group(1))
 
 
+def _safe_float(value: Any) -> float | None:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(out):
+        return None
+    return out
+
+
+def _load_results_artifact(seed_dir: Path) -> dict[str, Any] | None:
+    outputs = seed_dir / "outputs" / RESULTS_NAME
+    if not outputs.exists():
+        return None
+    payload = json.loads(outputs.read_text(encoding="utf-8"))
+    stage_summary = _read_json_if_exists(seed_dir / "stage_summary.json") or {}
+    manifest = _read_json_if_exists(seed_dir / "manifest.json") or {}
+    return {
+        "seed_dir": seed_dir,
+        "results_path": outputs,
+        "results": payload,
+        "stage_summary": stage_summary,
+        "manifest": manifest,
+    }
+
+
+def _build_windows_from_sweep_results(
+    artifacts: list[dict[str, Any]],
+    *,
+    sigma_floor_f: float,
+    sigma_floor_tau: float,
+    scale_floor_f: float,
+    scale_floor_tau: float,
+    gate_221: bool,
+) -> tuple[list[tuple[Path, Any]], list[dict[str, Any]]]:
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    audit_rows: list[dict[str, Any]] = []
+    for art in artifacts:
+        seed_match = SEED_RE.search(art["seed_dir"].name)
+        seed = int(seed_match.group(1)) if seed_match else None
+        points = art["results"].get("points", [])
+        for point in points:
+            t0 = int(point.get("t0_ms", 0))
+            s3b = point.get("s3b", {})
+            ln_f_220 = _safe_float(s3b.get("ln_f_220"))
+            ln_q_220 = _safe_float(s3b.get("ln_Q_220"))
+            ln_f_221 = _safe_float(s3b.get("ln_f_221"))
+            ln_q_221 = _safe_float(s3b.get("ln_Q_221"))
+            status = str(point.get("status", ""))
+            if ln_f_220 is None or ln_q_220 is None:
+                continue
+            grouped.setdefault(t0, []).append(
+                {
+                    "seed": seed,
+                    "status": status,
+                    "ln_f_220": ln_f_220,
+                    "ln_q_220": ln_q_220,
+                    "ln_f_221": ln_f_221,
+                    "ln_q_221": ln_q_221,
+                    "has_221": bool(s3b.get("has_221")),
+                }
+            )
+
+    windows: list[tuple[Path, Any]] = []
+    for t0 in sorted(grouped):
+        rows = grouped[t0]
+        f_values = [math.exp(r["ln_f_220"]) for r in rows]
+        q_values = [math.exp(r["ln_q_220"]) for r in rows]
+        tau_values = [q_values[i] / (math.pi * f_values[i]) for i in range(len(rows))]
+        f_median = statistics.median(f_values)
+        tau_median = statistics.median(tau_values)
+        f_sigma = max(statistics.pstdev(f_values) if len(f_values) > 1 else 0.0, sigma_floor_f)
+        tau_sigma = max(statistics.pstdev(tau_values) if len(tau_values) > 1 else 0.0, sigma_floor_tau)
+        cv_f = f_sigma / max(abs(f_median), scale_floor_f)
+        cv_tau = tau_sigma / max(abs(tau_median), scale_floor_tau)
+        has_any_221 = any(r["has_221"] for r in rows)
+        warnings: list[str] = []
+        if not has_any_221:
+            warnings.append("WARN_221_MISSING")
+        if gate_221 and not has_any_221:
+            continue
+        windows.append(
+            (
+                artifacts[0]["seed_dir"] / f"aggregate__t0ms{t0:04d}",
+                WindowMetrics(
+                    t0=float(t0),
+                    T=1.0,
+                    f_median=f_median,
+                    f_sigma=f_sigma,
+                    tau_median=tau_median,
+                    tau_sigma=tau_sigma,
+                    cond_number=1.0,
+                    delta_bic=20.0,
+                    p_ljungbox=1.0,
+                    n_samples=256,
+                ),
+            )
+        )
+        audit_rows.append(
+            {
+                "t0_ms": t0,
+                "n_seeds": len(rows),
+                "f_median": f_median,
+                "tau_median": tau_median,
+                "f_sigma": f_sigma,
+                "tau_sigma": tau_sigma,
+                "cv_f": cv_f,
+                "cv_tau": cv_tau,
+                "warnings": warnings,
+            }
+        )
+
+    return windows, audit_rows
+
+
 def _build_backfilled_window_meta(subrun_dir: Path) -> dict[str, Any]:
     return {
         "event_id": "unknown",
@@ -1487,7 +1603,26 @@ def run_finalize_phase(args: argparse.Namespace) -> dict[str, Any]:
 
     rows: list[dict[str, Any]] = []
     windows = []
-    for subrun_dir in _discover_subrun_dirs(scan_root_abs):
+
+    seed_artifacts: list[dict[str, Any]] = []
+    seeds = _parse_int_csv(getattr(args, "inventory_seeds", None))
+    for seed in seeds:
+        seed_dir = scan_root_abs / f"t0_sweep_full_seed{seed}"
+        loaded = _load_results_artifact(seed_dir)
+        if loaded is not None:
+            seed_artifacts.append(loaded)
+
+    if seed_artifacts:
+        windows, rows = _build_windows_from_sweep_results(
+            seed_artifacts,
+            sigma_floor_f=float(getattr(args, "sigma_floor_f", 1e-12)),
+            sigma_floor_tau=float(getattr(args, "sigma_floor_tau", 1e-12)),
+            scale_floor_f=float(getattr(args, "scale_floor_f", 1e-12)),
+            scale_floor_tau=float(getattr(args, "scale_floor_tau", 1e-12)),
+            gate_221=bool(getattr(args, "gate_221", False)),
+        )
+
+    for subrun_dir in ([] if seed_artifacts else _discover_subrun_dirs(scan_root_abs)):
         subrun_id = subrun_dir.name
         row: dict[str, Any] = {
             "subrun_id": subrun_id,
@@ -1671,6 +1806,11 @@ def main() -> int:
     ap.add_argument("--scan-root", default=None)
     ap.add_argument("--inventory-seeds", default=None)
     ap.add_argument("--phase", choices=["run", "inventory", "finalize", "diagnose", "backfill_window_meta"], default="run")
+    ap.add_argument("--sigma-floor-f", type=float, default=1e-12)
+    ap.add_argument("--sigma-floor-tau", type=float, default=1e-12)
+    ap.add_argument("--scale-floor-f", type=float, default=1e-12)
+    ap.add_argument("--scale-floor-tau", type=float, default=1e-12)
+    ap.add_argument("--gate-221", action="store_true")
     ap.add_argument("--max-missing-abs", type=int, default=0)
     ap.add_argument("--max-missing-frac", type=float, default=0.0)
     ap.add_argument("--atlas-path", default=None)
