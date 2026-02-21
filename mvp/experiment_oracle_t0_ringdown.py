@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -23,12 +24,9 @@ RESULTS_NAME = "t0_sweep_full_results.json"
 
 
 def _seed_from_dir_name(seed_dir: Path) -> int:
-    name = seed_dir.name
-    prefix = "t0_sweep_full_seed"
-    if name.startswith(prefix):
-        suffix = name[len(prefix) :]
-        if suffix.isdigit():
-            return int(suffix)
+    match = re.search(r"seed(\d+)", seed_dir.name)
+    if match:
+        return int(match.group(1))
     return 101
 
 
@@ -46,6 +44,7 @@ def _build_sweep_command(run_id: str, seed: int) -> str:
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Canonical t0 oracle from t0_sweep_full seed results")
     p.add_argument("--run-id", required=True)
+    p.add_argument("--seed", type=int, default=None)
     p.add_argument("--seed-dir", default=None, help="Optional explicit seed dir (.../experiment/t0_sweep_full_seed<seed>)")
     p.add_argument("--runs-root", default=None, help="Optional runs root (else BASURIN_RUNS_ROOT or ./runs)")
     p.add_argument("--sigma-floor-f", type=float, default=1e-6)
@@ -57,32 +56,46 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def _find_seed_dir(base_run_dir: Path, seed_dir_arg: str | None) -> Path:
+def _find_seed_dir(base_run_dir: Path, seed_dir_arg: str | None, seed_arg: int | None) -> Path:
+    expected_parent = (base_run_dir / "experiment").resolve()
+
     if seed_dir_arg:
         seed_dir = Path(seed_dir_arg).expanduser().resolve()
-        if not seed_dir.exists():
-            seed = _seed_from_dir_name(seed_dir)
-            sweep_cmd = _build_sweep_command(base_run_dir.name, seed)
-            raise FileNotFoundError(
-                f"missing seed dir: {seed_dir}\n"
-                f"expected path: {seed_dir}\n"
-                f"generate sweep with: {sweep_cmd}"
-            )
+        expected_seed_dir = seed_dir
+    elif seed_arg is not None:
+        expected_seed_dir = (expected_parent / f"t0_sweep_full_seed{seed_arg}").resolve()
+        seed_dir = expected_seed_dir
     else:
-        candidates = sorted((base_run_dir / "experiment").glob("t0_sweep_full_seed*"))
+        candidates = sorted(expected_parent.glob("t0_sweep_full_seed*"))
         if len(candidates) != 1:
-            expected_seed_dir = (base_run_dir / "experiment" / "t0_sweep_full_seed101").resolve()
+            expected_seed_dir = (expected_parent / "t0_sweep_full_seed101").resolve()
             sweep_cmd = _build_sweep_command(base_run_dir.name, 101)
+            candidate_names = [str(path.resolve()) for path in candidates]
             raise RuntimeError(
-                f"expected exactly one seed dir under {base_run_dir / 'experiment'}, got {len(candidates)}; pass --seed-dir\n"
+                f"expected exactly one seed dir under {expected_parent}, got {len(candidates)}; pass --seed-dir or --seed\n"
                 f"expected path: {expected_seed_dir}\n"
+                f"expected_seed_dir: {expected_seed_dir}\n"
+                f"candidates: {candidate_names}\n"
                 f"generate sweep with: {sweep_cmd}"
             )
         seed_dir = candidates[0].resolve()
+        expected_seed_dir = seed_dir
 
-    expected_parent = (base_run_dir / "experiment").resolve()
     if seed_dir.parent != expected_parent:
-        raise RuntimeError(f"seed dir must be under {expected_parent}, got {seed_dir}")
+        raise RuntimeError(f"seed dir must be under {expected_parent}, got {seed_dir}; expected_seed_dir: {expected_seed_dir}")
+
+    if not seed_dir.exists():
+        seed = seed_arg if seed_arg is not None else _seed_from_dir_name(seed_dir)
+        sweep_cmd = _build_sweep_command(base_run_dir.name, seed)
+        candidates = sorted(expected_parent.glob("t0_sweep_full_seed*"))
+        candidate_names = [str(path.resolve()) for path in candidates]
+        raise FileNotFoundError(
+            f"missing seed dir: {seed_dir}\n"
+            f"expected path: {expected_seed_dir}\n"
+            f"expected_seed_dir: {expected_seed_dir}\n"
+            f"candidates: {candidate_names}\n"
+            f"generate sweep with: {sweep_cmd}"
+        )
     return seed_dir
 
 
@@ -133,12 +146,13 @@ def _window_metric_from_summary(summary: dict[str, Any], args: argparse.Namespac
 
 def run(argv: list[str] | None = None) -> dict[str, Any]:
     args = _parse_args(argv)
-    out_root = resolve_out_root() if args.runs_root is None else Path(args.runs_root).expanduser().resolve()
+    out_root = resolve_out_root("runs") if args.runs_root is None else Path(args.runs_root).expanduser().resolve()
     validate_run_id(args.run_id, out_root)
     require_run_valid(out_root, args.run_id)
 
     base_run_dir = out_root / args.run_id
-    seed_dir = _find_seed_dir(base_run_dir, args.seed_dir)
+    seed_dir = _find_seed_dir(base_run_dir, args.seed_dir, args.seed)
+    seed_tag = args.seed if args.seed is not None else _seed_from_dir_name(seed_dir)
     results_path = seed_dir / "outputs" / RESULTS_NAME
     if not results_path.exists():
         seed = _seed_from_dir_name(seed_dir)
@@ -180,13 +194,13 @@ def run(argv: list[str] | None = None) -> dict[str, Any]:
 
     stage_verdict = "PASS" if not reason_codes else "FAIL"
 
-    stage_dir = base_run_dir / STAGE
-    outputs_dir = stage_dir / "outputs"
+    oracle_dir = base_run_dir / "experiment" / f"oracle_t0_ringdown_seed{seed_tag}"
+    outputs_dir = oracle_dir / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
 
     oracle_path = outputs_dir / "oracle_report.json"
-    stage_summary_path = stage_dir / "stage_summary.json"
-    manifest_path = stage_dir / "manifest.json"
+    stage_summary_path = oracle_dir / "stage_summary.json"
+    manifest_path = oracle_dir / "manifest.json"
 
     write_json_atomic(oracle_path, oracle_report)
 
@@ -217,6 +231,9 @@ def run(argv: list[str] | None = None) -> dict[str, Any]:
         },
     }
     write_json_atomic(manifest_path, manifest)
+    print(f"ORACLE_DIR={oracle_dir.resolve()}")
+    print(f"ORACLE_REPORT={oracle_path.resolve()}")
+    print(f"STAGE_SUMMARY={stage_summary_path.resolve()}")
     return {"oracle_report": oracle_report, "stage_summary": stage_summary, "manifest": manifest}
 
 
