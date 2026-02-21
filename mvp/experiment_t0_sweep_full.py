@@ -1135,6 +1135,8 @@ def _build_windows_from_sweep_results(
             ln_f_221 = _safe_float(s3b.get("ln_f_221"))
             ln_q_221 = _safe_float(s3b.get("ln_Q_221"))
             status = str(point.get("status", ""))
+            flags_raw = s3b.get("quality_flags", point.get("quality_flags", []))
+            flags = [str(flag) for flag in flags_raw if isinstance(flag, (str, int, float))]
             if ln_f_220 is None or ln_q_220 is None:
                 continue
             grouped.setdefault(t0, []).append(
@@ -1146,6 +1148,7 @@ def _build_windows_from_sweep_results(
                     "ln_f_221": ln_f_221,
                     "ln_q_221": ln_q_221,
                     "has_221": bool(s3b.get("has_221")),
+                    "flags_221": [flag for flag in flags if "221" in flag],
                 }
             )
 
@@ -1162,6 +1165,7 @@ def _build_windows_from_sweep_results(
         cv_f = f_sigma / max(abs(f_median), scale_floor_f)
         cv_tau = tau_sigma / max(abs(tau_median), scale_floor_tau)
         has_any_221 = any(r["has_221"] for r in rows)
+        flags_221 = sorted({flag for r in rows for flag in r.get("flags_221", [])})
         warnings: list[str] = []
         if not has_any_221:
             warnings.append("WARN_221_MISSING")
@@ -1181,6 +1185,8 @@ def _build_windows_from_sweep_results(
                     delta_bic=20.0,
                     p_ljungbox=1.0,
                     n_samples=256,
+                    snr=30.0,
+                    flags_221=flags_221,
                 ),
             )
         )
