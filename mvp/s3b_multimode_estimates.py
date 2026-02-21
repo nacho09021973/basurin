@@ -165,16 +165,30 @@ def _resolve_s3_estimates(run_dir: Path, raw_path: str | None) -> Path:
     return run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
 
 
-def _load_s3_band(path: Path) -> tuple[float, float]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    band = payload.get("band_hz")
-    if not isinstance(band, list) or len(band) != 2:
-        raise RuntimeError("invalid s3 estimates: missing band_hz")
-    low = float(band[0])
-    high = float(band[1])
+def _coerce_band(raw: Any) -> tuple[float, float] | None:
+    if not isinstance(raw, list) or len(raw) != 2:
+        return None
+    low = float(raw[0])
+    high = float(raw[1])
     if not (math.isfinite(low) and math.isfinite(high) and low > 0 and high > low):
         raise RuntimeError("invalid s3 estimates: invalid band_hz values")
     return low, high
+
+
+def _load_s3_band(path: Path, *, window_meta: dict[str, Any] | None) -> tuple[float, float]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    for cand in (payload.get("band_hz"), payload.get("results", {}).get("bandpass_hz")):
+        band = _coerce_band(cand)
+        if band is not None:
+            return band
+
+    meta_band = _coerce_band(window_meta.get("band_hz") if isinstance(window_meta, dict) else None)
+    if meta_band is not None:
+        return meta_band
+
+    raise RuntimeError(
+        "invalid s3 estimates: missing band_hz (and no band_hz in s2 window_meta fallback)"
+    )
 
 
 def compute_robust_stability(samples: list[tuple[float, float]]) -> dict[str, float | None]:
@@ -545,14 +559,15 @@ def main() -> int:
     )
 
     try:
-        window_meta = None
+        window_meta: dict[str, Any] | None = None
         window_meta_path = _discover_s2_window_meta(ctx.run_dir)
-        s3_estimates_path = _resolve_s3_estimates(ctx.run_dir, args.s3_estimates)
-        band_low, band_high = _load_s3_band(s3_estimates_path)
-        global_flags: list[str] = []
         if window_meta_path is not None and window_meta_path.exists():
             window_meta = json.loads(window_meta_path.read_text(encoding="utf-8"))
-        else:
+
+        s3_estimates_path = _resolve_s3_estimates(ctx.run_dir, args.s3_estimates)
+        band_low, band_high = _load_s3_band(s3_estimates_path, window_meta=window_meta)
+        global_flags: list[str] = []
+        if window_meta is None:
             global_flags.append("missing_window_meta")
             window_meta_path = ctx.run_dir / "s2_ringdown_window" / "outputs" / "window_meta.json"
 
