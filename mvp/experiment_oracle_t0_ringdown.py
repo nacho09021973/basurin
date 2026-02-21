@@ -22,6 +22,27 @@ STAGE = "experiment/oracle_t0_ringdown"
 RESULTS_NAME = "t0_sweep_full_results.json"
 
 
+def _seed_from_dir_name(seed_dir: Path) -> int:
+    name = seed_dir.name
+    prefix = "t0_sweep_full_seed"
+    if name.startswith(prefix):
+        suffix = name[len(prefix) :]
+        if suffix.isdigit():
+            return int(suffix)
+    return 101
+
+
+def _build_sweep_command(run_id: str, seed: int) -> str:
+    return (
+        "python mvp/experiment_t0_sweep_full.py "
+        f"--run-id {run_id} "
+        "--phase run "
+        "--atlas-path <ATLAS_PATH> "
+        "--t0-grid-ms 0,2,4,6,8 "
+        f"--seed {seed}"
+    )
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Canonical t0 oracle from t0_sweep_full seed results")
     p.add_argument("--run-id", required=True)
@@ -39,11 +60,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _find_seed_dir(base_run_dir: Path, seed_dir_arg: str | None) -> Path:
     if seed_dir_arg:
         seed_dir = Path(seed_dir_arg).expanduser().resolve()
+        if not seed_dir.exists():
+            seed = _seed_from_dir_name(seed_dir)
+            sweep_cmd = _build_sweep_command(base_run_dir.name, seed)
+            raise FileNotFoundError(
+                f"missing seed dir: {seed_dir}\n"
+                f"expected path: {seed_dir}\n"
+                f"generate sweep with: {sweep_cmd}"
+            )
     else:
         candidates = sorted((base_run_dir / "experiment").glob("t0_sweep_full_seed*"))
         if len(candidates) != 1:
+            expected_seed_dir = (base_run_dir / "experiment" / "t0_sweep_full_seed101").resolve()
+            sweep_cmd = _build_sweep_command(base_run_dir.name, 101)
             raise RuntimeError(
-                f"expected exactly one seed dir under {base_run_dir / 'experiment'}, got {len(candidates)}; pass --seed-dir"
+                f"expected exactly one seed dir under {base_run_dir / 'experiment'}, got {len(candidates)}; pass --seed-dir\n"
+                f"expected path: {expected_seed_dir}\n"
+                f"generate sweep with: {sweep_cmd}"
             )
         seed_dir = candidates[0].resolve()
 
@@ -108,7 +141,13 @@ def run(argv: list[str] | None = None) -> dict[str, Any]:
     seed_dir = _find_seed_dir(base_run_dir, args.seed_dir)
     results_path = seed_dir / "outputs" / RESULTS_NAME
     if not results_path.exists():
-        raise FileNotFoundError(f"missing seed results: {results_path}")
+        seed = _seed_from_dir_name(seed_dir)
+        sweep_cmd = _build_sweep_command(args.run_id, seed)
+        raise FileNotFoundError(
+            f"missing seed results json: {results_path}\n"
+            f"expected path: {results_path}\n"
+            f"generate sweep with: {sweep_cmd}"
+        )
 
     sweep_payload = json.loads(results_path.read_text(encoding="utf-8"))
     points = sweep_payload.get("points", [])
