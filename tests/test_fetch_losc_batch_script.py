@@ -25,6 +25,10 @@ if [[ "$*" == *"%{http_code}"* ]]; then
     printf '200'
   elif [[ "$url" == *"GW170729-v2" ]]; then
     printf '200'
+  elif [[ "$url" == *"GW170823-v2" ]]; then
+    printf '200'
+  elif [[ "$url" == *"GW170823-v1" ]]; then
+    printf '200'
   elif [[ "$url" == *"GW170809-v2" ]]; then
     printf '404'
   elif [[ "$url" == *"GW170809-v1" ]]; then
@@ -70,7 +74,9 @@ JSON
 fi
 
 if [[ "$url" == *"GW170729-v2/strain-files?detector=H1" ]]; then
-  echo "not-json"
+  cat <<'JSON'
+{"results_count":1,"results":[{"download_url":"https://example/H-H1_170729.hdf5","file_format":"HDF5"}]}
+JSON
   exit 0
 fi
 if [[ "$url" == *"GW170729-v2/strain-files?detector=L1" ]]; then
@@ -83,6 +89,29 @@ if [[ "$url" == *"GW170729-v2/strain-files?detector=V1" ]]; then
   cat <<'JSON'
 {"results":[{"download_url":"https://example/V-V1_170729.txt"}]}
 JSON
+  exit 0
+fi
+
+if [[ "$url" == *"GW170823-v2/strain-files?detector=H1" ]]; then
+  cat <<'JSON'
+{"results_count":0,"results":[]}
+JSON
+  exit 0
+fi
+if [[ "$url" == *"GW170823-v1/strain-files?detector=H1" ]]; then
+  cat <<'JSON'
+{"results_count":2,"results":[{"download_url":"https://example/H-H1_170823.gwf","file_format":"GWF"},{"download_url":"https://example/H-H1_170823.hdf5","file_format":"HDF5"}]}
+JSON
+  exit 0
+fi
+if [[ "$url" == *"GW170823-v1/strain-files?detector=L1" ]]; then
+  cat <<'JSON'
+{"results":[{"download_url":"https://example/L-L1_170823.gwf","file_format":"GWF"}]}
+JSON
+  exit 0
+fi
+if [[ "$url" == *"GW170823-v1/strain-files?detector=V1" ]]; then
+  echo "not-json"
   exit 0
 fi
 
@@ -120,6 +149,7 @@ GW150914
 
 GW151226
 GW170729
+GW170823
 GW170809
 """,
         encoding="utf-8",
@@ -139,6 +169,7 @@ GW170809
     assert first.returncode == 0, first.stderr
     assert "shortName=GW150914-v2" in first.stdout
     assert "shortName=GW151226-v1" in first.stdout
+    assert "shortName=GW170823-v1" in first.stdout
     assert "GW170809" in first.stderr
 
     assert (tmp_path / "data" / "losc" / "GW150914" / "H-H1_pref.hdf5").exists()
@@ -146,6 +177,8 @@ GW170809
     assert not (tmp_path / "data" / "losc" / "GW150914" / "H-H1_bad_rate.hdf5").exists()
     assert (tmp_path / "data" / "losc" / "GW151226" / "H-H1_151226.hdf5").exists()
     assert (tmp_path / "data" / "losc" / "GW170729" / "L-L1_170729.hdf5").exists()
+    assert (tmp_path / "data" / "losc" / "GW170823" / "H-H1_170823.hdf5").exists()
+    assert not (tmp_path / "data" / "losc" / "GW170823" / "H-H1_170823.gwf").exists()
 
     sha_file = tmp_path / "data" / "losc" / "GW150914" / "SHA256SUMS.txt"
     assert sha_file.exists()
@@ -161,3 +194,4 @@ GW170809
     assert second.returncode == 0
     assert "GW150914 H1: SKIP H-H1_pref.hdf5" in second.stdout
     assert "GW151226 H1: SKIP H-H1_151226.hdf5" in second.stdout
+    assert "GW170823 H1: SKIP H-H1_170823.hdf5" in second.stdout
