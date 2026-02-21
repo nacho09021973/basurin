@@ -353,6 +353,8 @@ def main() -> int:
             compat = json.load(f)
 
         compatible_geometries = compat.get("compatible_geometries", [])
+        if not compatible_geometries:
+            compatible_geometries = compat.get("ranked_all", [])
 
         # Compute
         curvature_result, metric_diagnostics = compute_information_geometry(
