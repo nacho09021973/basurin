@@ -47,7 +47,7 @@ def _mk_subrun(scan_root: Path, *, seed: int, t0_ms: int, f_hz: float, tau_s: fl
         subrun / "s4c_kerr_consistency" / "stage_summary.json",
         {
             "stage": "s4c_kerr_consistency",
-            "results": {"cond_number": 10.0, "delta_bic": 20.0, "p_ljungbox": 0.4, "n_samples": 256},
+            "results": {"cond_number": 10.0, "delta_bic": 20.0, "p_ljungbox": 0.4, "n_samples": 256, "snr": 10.0},
         },
     )
 
@@ -102,6 +102,7 @@ def test_finalize_regression_golden_manifest_and_oracle(tmp_path: Path) -> None:
                 delta_bic=20.0,
                 p_ljungbox=0.4,
                 n_samples=256,
+                snr=10.0,
             )
             for idx, t0_ms in enumerate(t0_grid_ms)
         ]

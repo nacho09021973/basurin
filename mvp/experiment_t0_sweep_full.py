@@ -713,7 +713,7 @@ def run_t0_sweep_full(
     *,
     run_cmd_fn: Callable[[list[str], dict[str, str], int], Any] = run_cmd,
 ) -> tuple[dict[str, Any], Path]:
-    out_root = resolve_out_root("runs").resolve()
+    out_root = _resolve_runs_root_arg(getattr(args, "runs_root", None)).resolve()
     base_root = Path(args.base_runs_root).expanduser().resolve()
     base_run_dir = out_root / args.run_id
     scan_root_abs = (
