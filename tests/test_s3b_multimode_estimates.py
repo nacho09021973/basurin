@@ -67,6 +67,41 @@ def test_mode_keeps_point_estimate_when_gates_fail() -> None:
     assert mode["ln_Q"] is not None
 
 
+def test_220_default_lnq_span_allows_realistic_robust_span() -> None:
+    signal = np.linspace(-1.0, 1.0, 4096)
+
+    def estimator(_signal: np.ndarray, _fs: float) -> dict[str, float]:
+        return {"f_hz": 220.0, "Q": 12.0, "tau_s": 12.0 / (np.pi * 220.0)}
+
+    robust_samples = np.array(
+        [[np.log(220.0), x] for x in np.linspace(np.log(8.0), np.log(108.0), 120)],
+        dtype=float,
+    )
+
+    original = _MODULE._bootstrap_mode_log_samples
+    _MODULE._bootstrap_mode_log_samples = lambda *_args, **_kwargs: (robust_samples, 0)
+    try:
+        mode, flags, ok = evaluate_mode(
+            signal,
+            4096.0,
+            label="220",
+            mode=[2, 2, 0],
+            estimator=estimator,
+            n_bootstrap=120,
+            seed=10,
+            min_valid_fraction=0.95,
+            max_lnq_span=3.0,
+            min_point_samples=50,
+            min_point_valid_fraction=0.5,
+        )
+    finally:
+        _MODULE._bootstrap_mode_log_samples = original
+
+    assert np.isclose(mode["fit"]["stability"]["lnQ_span"], np.log(108.0) - np.log(8.0), atol=1e-9)
+    assert ok
+    assert "220_lnQ_span_explosive" not in flags
+
+
 def test_discover_s2_window_meta_from_manifest(tmp_path: Path) -> None:
     run_dir = tmp_path / "run_x"
     stage_dir = run_dir / "s2_ringdown_window"
