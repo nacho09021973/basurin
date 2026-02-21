@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from mvp.oracles.oracle_v1_plateau import WindowMetrics, load_window_metrics_from_subrun, run_oracle_v1
+from mvp.oracles.t0_input_schema import WindowSummaryV1Error, map_sweep_point_to_window_summary_v1
 
 _here = Path(__file__).resolve()
 for _cand in (_here.parents[0], _here.parents[1]):
@@ -923,6 +924,16 @@ def run_t0_sweep_full(
             if s3b_payload:
                 point["quality_flags"].extend(s3b_payload.get("results", {}).get("quality_flags", []))
                 point["messages"].extend(s3b_payload.get("results", {}).get("messages", []))
+
+            # Optional backward-compatible postprocess payload for the t0 oracle input contract.
+            try:
+                point["window_summary_v1"] = map_sweep_point_to_window_summary_v1(
+                    {"subruns_root": str(subruns_root)},
+                    point,
+                )
+            except WindowSummaryV1Error as exc:
+                point["window_summary_v1"] = None
+                point["messages"].append(str(exc))
 
             points.append(point)
 
