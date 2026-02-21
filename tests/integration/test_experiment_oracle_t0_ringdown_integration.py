@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 from mvp import experiment_oracle_t0_ringdown as oracle_exp
@@ -74,7 +76,7 @@ def test_integration_lite_generates_artifacts(tmp_path: Path) -> None:
 
     oracle_exp.run(["--run-id", run_id, "--runs-root", str(runs_root), "--seed-dir", str(seed_dir)])
 
-    stage_dir = run_root / "experiment" / "oracle_t0_ringdown"
+    stage_dir = run_root / "experiment" / "oracle_t0_ringdown_seed101"
     assert (stage_dir / "outputs" / "oracle_report.json").exists()
     assert (stage_dir / "stage_summary.json").exists()
     assert (stage_dir / "manifest.json").exists()
@@ -99,4 +101,37 @@ def test_pathing_supports_batch_root_env(tmp_path: Path) -> None:
         else:
             os.environ["BASURIN_RUNS_ROOT"] = prev
 
-    assert (run_root / "experiment" / "oracle_t0_ringdown" / "outputs" / "oracle_report.json").exists()
+    assert (run_root / "experiment" / "oracle_t0_ringdown_seed101" / "outputs" / "oracle_report.json").exists()
+
+
+def test_module_cli_writes_deterministic_paths_and_logs(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "BASE_RUN"
+    run_root = runs_root / run_id
+    _write_json(run_root / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    seed_dir = run_root / "experiment" / "t0_sweep_full_seed202"
+    subruns_root = run_root / "experiment" / "subruns"
+    _mk_seed_results(seed_dir, subruns_root)
+
+    env = os.environ.copy()
+    env["BASURIN_RUNS_ROOT"] = str(runs_root)
+    proc = subprocess.run(
+        [sys.executable, "-m", "mvp.experiment_oracle_t0_ringdown", "--run-id", run_id, "--seed", "202"],
+        cwd=Path(__file__).resolve().parents[2],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    oracle_dir = run_root / "experiment" / "oracle_t0_ringdown_seed202"
+    oracle_report = oracle_dir / "outputs" / "oracle_report.json"
+    stage_summary = oracle_dir / "stage_summary.json"
+
+    assert (oracle_dir / "manifest.json").exists()
+    assert stage_summary.exists()
+    assert oracle_report.exists()
+
+    assert f"ORACLE_DIR={oracle_dir.resolve()}" in proc.stdout
+    assert f"ORACLE_REPORT={oracle_report.resolve()}" in proc.stdout
+    assert f"STAGE_SUMMARY={stage_summary.resolve()}" in proc.stdout
