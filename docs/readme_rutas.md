@@ -183,6 +183,7 @@ ls -l "$BASE/manifest.json" "$BASE/stage_summary.json"
 
 Si este archivo se sigue, se eliminan casi todos los errores de “ruta equivocada”.
 
+
 ## 10) Oráculo t0 v1.2: rutas de outputs
 
 Una vez ejecutado:
@@ -206,4 +207,7 @@ runs/<RUN_ID>/experiment/t0_sweep_full_seed<seed>/outputs/t0_sweep_full_results.
 ```
 
 Si falta ese directorio/JSON, el oráculo imprime la ruta esperada exacta y el comando para regenerar el sweep (`phase=run`).
+
+=======
+## Codex
 
