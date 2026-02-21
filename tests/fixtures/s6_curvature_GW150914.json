@@ -1,0 +1,19 @@
+{
+  "schema_version": "mvp_curvature_v1",
+  "event_id": "GW150914",
+  "n_geometries_reranked": 12,
+  "reranked_geometries": [
+    {"geometry_id": "geo_00", "rank_conformal": 0, "rank_flat": 11},
+    {"geometry_id": "geo_01", "rank_conformal": 1, "rank_flat": 1},
+    {"geometry_id": "geo_02", "rank_conformal": 2, "rank_flat": 2},
+    {"geometry_id": "geo_03", "rank_conformal": 3, "rank_flat": 3},
+    {"geometry_id": "geo_04", "rank_conformal": 4, "rank_flat": 4},
+    {"geometry_id": "geo_05", "rank_conformal": 5, "rank_flat": 5},
+    {"geometry_id": "geo_06", "rank_conformal": 6, "rank_flat": 6},
+    {"geometry_id": "geo_07", "rank_conformal": 7, "rank_flat": 7},
+    {"geometry_id": "geo_08", "rank_conformal": 8, "rank_flat": 8},
+    {"geometry_id": "geo_09", "rank_conformal": 9, "rank_flat": 9},
+    {"geometry_id": "geo_10", "rank_conformal": 10, "rank_flat": 10},
+    {"geometry_id": "geo_11", "rank_conformal": 11, "rank_flat": 0}
+  ]
+}
