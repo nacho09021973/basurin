@@ -12,7 +12,7 @@ if str(REPO_ROOT) not in sys.path:
 from mvp.oracles.oracle_v1_plateau import WindowMetrics, oracle_v1_plateau_report
 
 
-def _wm(*, t0: float, f: float, tau: float, cond: float, bic: float, p: float, n: int = 128) -> WindowMetrics:
+def _wm(*, t0: float, f: float, tau: float, cond: float, bic: float, p: float | None, n: int = 128, snr: float = 20.0) -> WindowMetrics:
     return WindowMetrics(
         t0=t0,
         T=0.1,
@@ -24,7 +24,8 @@ def _wm(*, t0: float, f: float, tau: float, cond: float, bic: float, p: float, n
         delta_bic=bic,
         p_ljungbox=p,
         n_samples=n,
-        chi2_coh=None,
+        snr=snr,
+        chi2_coh=1.0,
     )
 
 
