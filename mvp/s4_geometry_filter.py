@@ -469,15 +469,30 @@ def main() -> int:
     ap.add_argument("--atlas-path", required=True)
     ap.add_argument("--epsilon", type=float, default=None)
     ap.add_argument("--metric", choices=["euclidean_log", "mahalanobis_log"], default=None)
+    ap.add_argument(
+        "--estimates-path", default=None,
+        help="Override path to estimates JSON (default: s3_ringdown_estimates/outputs/estimates.json). "
+             "Use to consume spectral or other estimator outputs.",
+    )
     args = ap.parse_args()
 
     atlas_path = Path(args.atlas_path)
     if not atlas_path.is_absolute():
         atlas_path = (Path.cwd() / atlas_path).resolve()
 
-    ctx = init_stage(args.run, STAGE, params={"atlas_path": str(atlas_path), "epsilon_cli": args.epsilon})
+    ctx = init_stage(args.run, STAGE, params={
+        "atlas_path": str(atlas_path),
+        "epsilon_cli": args.epsilon,
+        "estimates_path_override": args.estimates_path,
+    })
 
-    estimates_path = ctx.run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+    if args.estimates_path is not None:
+        ep = Path(args.estimates_path)
+        if not ep.is_absolute():
+            ep = (ctx.run_dir / ep).resolve()
+        estimates_path = ep
+    else:
+        estimates_path = ctx.run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
     if not atlas_path.exists():
         abort(ctx, f"Atlas not found: {atlas_path}")
     check_inputs(ctx, {"estimates": estimates_path, "atlas": atlas_path})

@@ -175,6 +175,16 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         upstream_stages=["s3_ringdown_estimates", "s3b_multimode_estimates"],
     ),
+    "s3_spectral_estimates": StageContract(
+        name="s3_spectral_estimates",
+        required_inputs=[
+            # Dynamic: discovers {H1,L1,V1}_rd.npz at runtime (same as s3)
+        ],
+        produced_outputs=[
+            "outputs/spectral_estimates.json",
+        ],
+        upstream_stages=["s2_ringdown_window"],
+    ),
 }
 
 
