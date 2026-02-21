@@ -205,7 +205,7 @@ def test_determinism_seed_on_bootstrap() -> None:
     assert canonicalize(payload_a) == canonicalize(payload_b)
 
 
-def test_verdict_insufficient_when_missing_221() -> None:
+def test_s3b_allows_220_only_ok_when_221_insufficient() -> None:
     signal = np.ones(2048)
     mode_220, flags_220, ok_220 = evaluate_mode(
         signal,
@@ -238,10 +238,11 @@ def test_verdict_insufficient_when_missing_221() -> None:
         flags=flags_220 + flags_221,
     )
 
-    assert payload["results"]["verdict"] == "INSUFFICIENT_DATA"
+    assert payload["results"]["verdict"] == "OK"
     assert payload["modes"][1]["label"] == "221"
     assert payload["modes"][1]["ln_f"] is None
-    assert "221_Sigma_invalid" in payload["results"]["quality_flags"]
+    assert any(flag.startswith("221_") for flag in payload["results"]["quality_flags"])
+    assert any("proceeding with 220-only" in message for message in payload["results"]["messages"])
 
 
 def test_discover_s2_npz_prefers_h1_then_l1(tmp_path: Path) -> None:
