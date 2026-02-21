@@ -1,0 +1,120 @@
+{
+  "chosen_block_indices": [
+    8,
+    9,
+    10
+  ],
+  "chosen_index": 8,
+  "chosen_t0": 16,
+  "fail_global_reason": null,
+  "final_verdict": "PASS",
+  "n_windows": 12,
+  "quality": "GOLD",
+  "thresholds": {
+    "K_consec": 3,
+    "cv_gold": 0.05,
+    "cv_thr": 0.1,
+    "z_grad_max": 2.45
+  },
+  "windows_summary": [
+    {
+      "candidate": false,
+      "cv_max": 0.10589855,
+      "gate_pass": true,
+      "index": 0,
+      "t0": 0,
+      "z_grad": null
+    },
+    {
+      "candidate": false,
+      "cv_max": 0.10108498,
+      "gate_pass": true,
+      "index": 1,
+      "t0": 2,
+      "z_grad": 3.33333333
+    },
+    {
+      "candidate": false,
+      "cv_max": 0.06607149,
+      "gate_pass": true,
+      "index": 2,
+      "t0": 4,
+      "z_grad": 8.49836586
+    },
+    {
+      "candidate": false,
+      "cv_max": 0.00321601,
+      "gate_pass": true,
+      "index": 3,
+      "t0": 6,
+      "z_grad": 8.66185764
+    },
+    {
+      "candidate": true,
+      "cv_max": 0.00321601,
+      "gate_pass": true,
+      "index": 4,
+      "t0": 8,
+      "z_grad": 0.33333333
+    },
+    {
+      "candidate": false,
+      "cv_max": 0.00224633,
+      "gate_pass": true,
+      "index": 5,
+      "t0": 10,
+      "z_grad": 12.36145443
+    },
+    {
+      "candidate": true,
+      "cv_max": 0.00096188,
+      "gate_pass": true,
+      "index": 6,
+      "t0": 12,
+      "z_grad": 0.06666667
+    },
+    {
+      "candidate": false,
+      "cv_max": 0.00064098,
+      "gate_pass": true,
+      "index": 7,
+      "t0": 14,
+      "z_grad": 12.09540776
+    },
+    {
+      "candidate": true,
+      "cv_max": 0.0006407,
+      "gate_pass": true,
+      "in_chosen_block": true,
+      "index": 8,
+      "t0": 16,
+      "z_grad": 0.06666667
+    },
+    {
+      "candidate": true,
+      "cv_max": 0.0006407,
+      "gate_pass": true,
+      "in_chosen_block": true,
+      "index": 9,
+      "t0": 18,
+      "z_grad": 0.06666667
+    },
+    {
+      "candidate": true,
+      "cv_max": 0.00048042,
+      "gate_pass": true,
+      "in_chosen_block": true,
+      "index": 10,
+      "t0": 20,
+      "z_grad": 0.06666667
+    },
+    {
+      "candidate": false,
+      "cv_max": 0.00032021,
+      "gate_pass": true,
+      "index": 11,
+      "t0": 22,
+      "z_grad": null
+    }
+  ]
+}
