@@ -296,6 +296,7 @@ def run_single_event(
     with_t0_sweep: bool = False,
     local_hdf5: list[str] | None = None,
     offline: bool = False,
+    estimator: str = "hilbert",
 ) -> tuple[int, str]:
     """Run full pipeline for a single event. Returns (exit_code, run_id)."""
     out_root = resolve_out_root("runs")
@@ -318,6 +319,7 @@ def run_single_event(
         "event_id": event_id,
         "atlas_path": atlas_path,
         "synthetic": synthetic,
+        "estimator": estimator,
         "stages": [],
     }
     _write_timeline(out_root, run_id, timeline)
@@ -363,19 +365,92 @@ def run_single_event(
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
 
-    # Stage 3: Ringdown estimates
+    # Stage 3: Ringdown estimates — select estimator
     s3_args = ["--run", run_id, "--band-low", str(band_low), "--band-high", str(band_high)]
-    rc = _run_stage("s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates", out_root, run_id, timeline, stage_timeout_s)
-    if rc != 0:
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
-        return rc, run_id
+    estimates_path_override = None
+
+    if estimator == "hilbert":
+        rc = _run_stage(
+            "s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates",
+            out_root, run_id, timeline, stage_timeout_s,
+        )
+        if rc != 0:
+            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+            _write_timeline(out_root, run_id, timeline)
+            return rc, run_id
+
+    elif estimator == "spectral":
+        rc = _run_stage(
+            "s3_spectral_estimates.py", s3_args, "s3_spectral_estimates",
+            out_root, run_id, timeline, stage_timeout_s,
+        )
+        if rc != 0:
+            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+            _write_timeline(out_root, run_id, timeline)
+            return rc, run_id
+        estimates_path_override = (
+            f"{run_id}/s3_spectral_estimates/outputs/spectral_estimates.json"
+        )
+
+    elif estimator == "dual":
+        # Run both Hilbert and spectral, then dual-method gate
+        rc = _run_stage(
+            "s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates",
+            out_root, run_id, timeline, stage_timeout_s,
+        )
+        if rc != 0:
+            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+            _write_timeline(out_root, run_id, timeline)
+            return rc, run_id
+
+        rc = _run_stage(
+            "s3_spectral_estimates.py", s3_args, "s3_spectral_estimates",
+            out_root, run_id, timeline, stage_timeout_s,
+        )
+        if rc != 0:
+            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+            _write_timeline(out_root, run_id, timeline)
+            return rc, run_id
+
+        rc = _run_stage(
+            "experiment_dual_method.py",
+            ["--run", run_id, "--band-low", str(band_low), "--band-high", str(band_high)],
+            "experiment_dual_method",
+            out_root, run_id, timeline, stage_timeout_s,
+        )
+        if rc != 0:
+            print(f"[pipeline] WARNING: dual method gate failed (exit={rc}), continuing",
+                  file=sys.stderr, flush=True)
+
+        # Determine which estimates to use based on dual method recommendation
+        dual_path = (out_root / run_id / "experiment" / "DUAL_METHOD_V1"
+                     / "dual_method_comparison.json")
+        recommendation = "spectral"
+        if dual_path.exists():
+            try:
+                with open(dual_path, "r", encoding="utf-8") as f:
+                    dual = json.load(f)
+                recommendation = dual.get("recommendation", "spectral")
+            except Exception:
+                pass
+
+        if recommendation == "spectral":
+            estimates_path_override = (
+                f"{run_id}/s3_spectral_estimates/outputs/spectral_estimates.json"
+            )
+        timeline["dual_method_recommendation"] = recommendation
+
+    else:
+        print(f"[pipeline] ERROR: unknown estimator '{estimator}'", file=sys.stderr)
+        return 2, run_id
 
     if with_t0_sweep:
         _run_optional_experiment_t0_sweep(out_root, run_id, timeline, stage_timeout_s)
 
     # Stage 4: Geometry filter
     s4_args = ["--run", run_id, "--atlas-path", atlas_path, "--epsilon", str(epsilon)]
+    if estimates_path_override is not None:
+        s4_args.extend(["--estimates-path", estimates_path_override])
     rc = _run_stage("s4_geometry_filter.py", s4_args, "s4_geometry_filter", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
@@ -522,17 +597,26 @@ def run_multi_event(
     atlas_path: str,
     agg_run_id: str | None = None,
     min_coverage: float = 1.0,
+    catalog_path: str | None = None,
+    abort_on_event_fail: bool = True,
     **kwargs: Any,
 ) -> tuple[int, str]:
-    """Run pipeline for multiple events, then aggregate."""
+    """Run pipeline for multiple events, then aggregate.
+
+    Args:
+        abort_on_event_fail: If False (batch mode), continue on event failure.
+        catalog_path: Optional path to GWTC catalog JSON for deviation analysis.
+    """
     if agg_run_id is None:
         agg_run_id = f"mvp_aggregate_{_ts()}"
 
     out_root = resolve_out_root("runs")
+    estimator = kwargs.get("estimator", "hilbert")
 
     print(f"\n[pipeline] Starting multi-event pipeline")
     print(f"[pipeline] events={events}")
     print(f"[pipeline] aggregate_run={agg_run_id}")
+    print(f"[pipeline] estimator={estimator}")
 
     _create_run_valid(out_root, agg_run_id)
 
@@ -545,20 +629,39 @@ def run_multi_event(
         "events": events,
         "atlas_path": atlas_path,
         "synthetic": bool(kwargs.get("synthetic", False)),
+        "estimator": estimator,
         "stages": [],
     }
     _write_timeline(out_root, agg_run_id, timeline)
 
     per_event_runs: list[str] = []
+    failed_events: list[str] = []
 
     for event_id in events:
         rc, run_id = run_single_event(event_id=event_id, atlas_path=atlas_path, **kwargs)
         if rc != 0:
-            print(f"[pipeline] ABORT: event {event_id} failed", file=sys.stderr)
-            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-            _write_timeline(out_root, agg_run_id, timeline)
-            return rc, agg_run_id
+            if abort_on_event_fail:
+                print(f"[pipeline] ABORT: event {event_id} failed", file=sys.stderr)
+                timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+                _write_timeline(out_root, agg_run_id, timeline)
+                return rc, agg_run_id
+            else:
+                print(f"[pipeline] WARNING: event {event_id} failed (exit={rc}), continuing",
+                      file=sys.stderr, flush=True)
+                failed_events.append(event_id)
+                continue
         per_event_runs.append(run_id)
+
+    if not per_event_runs:
+        print("[pipeline] ERROR: no events succeeded", file=sys.stderr)
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, agg_run_id, timeline)
+        return 2, agg_run_id
+
+    if failed_events:
+        print(f"[pipeline] WARNING: {len(failed_events)} events failed: {failed_events}",
+              flush=True)
+        timeline["failed_events"] = failed_events
 
     # Stage 5: Aggregate
     s5_args = [
@@ -566,6 +669,8 @@ def run_multi_event(
         "--source-runs", ",".join(per_event_runs),
         "--min-coverage", str(min_coverage),
     ]
+    if catalog_path:
+        s5_args.extend(["--catalog-path", catalog_path])
     rc = _run_stage("s5_aggregate.py", s5_args, "s5_aggregate", out_root, agg_run_id, timeline, kwargs.get("stage_timeout_s"))
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
@@ -633,6 +738,10 @@ def main() -> int:
         help="Forward local HDF5 detector mapping(s) to s1_fetch_strain (repeatable)",
     )
     sp_single.add_argument("--offline", action="store_true", default=False)
+    sp_single.add_argument(
+        "--estimator", choices=["hilbert", "spectral", "dual"], default="hilbert",
+        help="Estimator to use for s3: hilbert (default), spectral, or dual (both + gate)",
+    )
 
     # Multi event
     sp_multi = sub.add_parser("multi", help="Run pipeline for multiple events + aggregate")
@@ -665,6 +774,14 @@ def main() -> int:
         help="Forward local HDF5 detector mapping(s) to per-event s1_fetch_strain (repeatable)",
     )
     sp_multi.add_argument("--offline", action="store_true", default=False)
+    sp_multi.add_argument(
+        "--estimator", choices=["hilbert", "spectral", "dual"], default="hilbert",
+        help="Estimator for s3 (hilbert/spectral/dual)",
+    )
+    sp_multi.add_argument(
+        "--catalog-path", default=None,
+        help="Optional GWTC catalog JSON for deviation analysis in s5",
+    )
 
     # Single event multimode
     sp_multimode = sub.add_parser("multimode", help="Run single-event multimode pipeline")
@@ -699,6 +816,36 @@ def main() -> int:
     )
     sp_multimode.add_argument("--offline", action="store_true", default=False)
 
+    # Batch: multi-event GWTC pipeline (continue-on-failure mode)
+    sp_batch = sub.add_parser(
+        "batch",
+        help="Run pipeline for multiple events in batch mode (continue on failure)",
+    )
+    sp_batch.add_argument("--events", required=True,
+                          help="Comma-separated event IDs (e.g. GW150914,GW151226)")
+    sp_batch.add_argument("--atlas-path", default=None)
+    sp_batch.add_argument("--atlas-default", action="store_true", default=False)
+    sp_batch.add_argument("--agg-run-id", default=None)
+    sp_batch.add_argument("--min-coverage", type=float, default=1.0)
+    sp_batch.add_argument("--synthetic", action="store_true")
+    sp_batch.add_argument("--duration-s", type=float, default=32.0)
+    sp_batch.add_argument("--dt-start-s", type=float, default=0.003)
+    sp_batch.add_argument("--window-duration-s", type=float, default=0.06)
+    sp_batch.add_argument("--band-low", type=float, default=150.0)
+    sp_batch.add_argument("--band-high", type=float, default=400.0)
+    sp_batch.add_argument("--epsilon", type=float, default=0.3)
+    sp_batch.add_argument("--stage-timeout-s", type=float, default=None)
+    sp_batch.add_argument("--reuse-strain", action="store_true", default=False)
+    sp_batch.add_argument(
+        "--estimator", choices=["hilbert", "spectral", "dual"], default="hilbert",
+        help="Estimator for s3 (hilbert/spectral/dual)",
+    )
+    sp_batch.add_argument(
+        "--catalog-path", default=None,
+        help="Optional GWTC catalog JSON for deviation analysis in s5",
+    )
+    sp_batch.add_argument("--offline", action="store_true", default=False)
+
     args = parser.parse_args()
 
     if args.mode == "single":
@@ -719,6 +866,7 @@ def main() -> int:
             with_t0_sweep=args.with_t0_sweep,
             local_hdf5=args.local_hdf5,
             offline=args.offline,
+            estimator=args.estimator,
         )
         return rc
 
@@ -742,6 +890,32 @@ def main() -> int:
             with_t0_sweep=args.with_t0_sweep,
             local_hdf5=args.local_hdf5,
             offline=args.offline,
+            estimator=args.estimator,
+            catalog_path=args.catalog_path,
+        )
+        return rc
+
+    elif args.mode == "batch":
+        atlas_path = _resolve_atlas_path(args.atlas_path, args.atlas_default)
+        events = [e.strip() for e in args.events.split(",") if e.strip()]
+        rc, agg_run_id = run_multi_event(
+            events=events,
+            atlas_path=atlas_path,
+            agg_run_id=args.agg_run_id,
+            min_coverage=args.min_coverage,
+            synthetic=args.synthetic,
+            duration_s=args.duration_s,
+            dt_start_s=args.dt_start_s,
+            window_duration_s=args.window_duration_s,
+            band_low=args.band_low,
+            band_high=args.band_high,
+            epsilon=args.epsilon,
+            stage_timeout_s=args.stage_timeout_s,
+            reuse_strain=args.reuse_strain,
+            offline=args.offline,
+            estimator=args.estimator,
+            catalog_path=args.catalog_path,
+            abort_on_event_fail=False,
         )
         return rc
 

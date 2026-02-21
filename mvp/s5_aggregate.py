@@ -247,12 +247,198 @@ def aggregate_compatible_sets(
     }
 
 
+def compute_deviation_distribution(
+    source_data: list[dict[str, Any]],
+    catalog: dict[str, dict[str, float]] | None = None,
+) -> dict[str, Any] | None:
+    """Compute δf and δQ deviations from Kerr predictions per event.
+
+    For each event i with observed (f_i, Q_i, σ_f_i, σ_Q_i) and
+    catalog (M_i, χ_i), compute:
+        f_Kerr_i = kerr_qnm(M_i, χ_i).f_hz
+        δf_i = (f_i - f_Kerr_i) / f_Kerr_i
+        σ_δf_i = σ_f_i / f_Kerr_i
+
+    Then combine via inverse-variance weighting:
+        δf_combined = Σ(w_i · δf_i) / Σ(w_i)   where w_i = 1/σ_δf_i²
+
+    Also computes χ² test for GR consistency (δf=0, δQ=0).
+
+    Args:
+        source_data: List of per-event data dicts (from s5 main()).
+        catalog: Dict {event_id: {m_final_msun, chi_final}}.
+
+    Returns:
+        deviation_analysis dict to embed in aggregate.json,
+        or None if catalog is None or no events match.
+    """
+    if catalog is None or not catalog:
+        return None
+
+    from mvp.kerr_qnm_fits import kerr_qnm
+
+    per_event_rows: list[dict[str, Any]] = []
+    warnings_list: list[str] = []
+
+    for src in source_data:
+        event_id = src.get("event_id", "unknown")
+        cat_entry = catalog.get(event_id)
+        if cat_entry is None:
+            warnings_list.append(f"Event {event_id} not in catalog; skipped")
+            continue
+
+        m_final = float(cat_entry.get("m_final_msun", 0))
+        chi_final = float(cat_entry.get("chi_final", 0))
+        if m_final <= 0 or not (0 <= chi_final < 1):
+            warnings_list.append(
+                f"Event {event_id}: invalid catalog params M={m_final}, χ={chi_final}; skipped"
+            )
+            continue
+
+        obs = src.get("observables", {})
+        f_obs = obs.get("f_hz")
+        Q_obs = obs.get("Q")
+
+        # Fall back to ranked_all best entry if observables not stored
+        if f_obs is None:
+            ranked = src.get("ranked_all", [])
+            if ranked:
+                first = ranked[0]
+                f_obs = first.get("f_hz")
+                Q_obs = first.get("Q")
+
+        if f_obs is None or Q_obs is None:
+            warnings_list.append(f"Event {event_id}: missing observables; skipped")
+            continue
+
+        f_obs = float(f_obs)
+        Q_obs = float(Q_obs)
+
+        # Get uncertainties from source compatible_set metadata
+        sigma_f = src.get("sigma_f_hz")
+        sigma_Q = src.get("sigma_Q")
+
+        if sigma_f is None or not math.isfinite(sigma_f) or sigma_f <= 0:
+            # Use a conservative 10% uncertainty if not available
+            sigma_f = 0.10 * f_obs
+            warnings_list.append(
+                f"Event {event_id}: σ_f not available, using 10% relative"
+            )
+        if sigma_Q is None or not math.isfinite(sigma_Q) or sigma_Q <= 0:
+            sigma_Q = 0.30 * Q_obs
+            warnings_list.append(
+                f"Event {event_id}: σ_Q not available, using 30% relative"
+            )
+
+        # Kerr prediction
+        try:
+            kerr = kerr_qnm(m_final, chi_final)
+        except Exception as exc:
+            warnings_list.append(f"Event {event_id}: kerr_qnm failed: {exc}; skipped")
+            continue
+
+        f_kerr = kerr.f_hz
+        Q_kerr = kerr.Q
+
+        if f_kerr <= 0 or Q_kerr <= 0:
+            warnings_list.append(f"Event {event_id}: invalid Kerr prediction; skipped")
+            continue
+
+        delta_f_rel = (f_obs - f_kerr) / f_kerr
+        delta_Q_rel = (Q_obs - Q_kerr) / Q_kerr
+        sigma_delta_f_rel = float(sigma_f) / f_kerr
+        sigma_delta_Q_rel = float(sigma_Q) / Q_kerr
+
+        per_event_rows.append({
+            "event_id": event_id,
+            "f_obs": f_obs, "f_kerr": f_kerr,
+            "Q_obs": Q_obs, "Q_kerr": Q_kerr,
+            "m_final_msun": m_final, "chi_final": chi_final,
+            "delta_f_rel": delta_f_rel,
+            "sigma_delta_f_rel": sigma_delta_f_rel,
+            "delta_Q_rel": delta_Q_rel,
+            "sigma_delta_Q_rel": sigma_delta_Q_rel,
+        })
+
+    if not per_event_rows:
+        return {
+            "schema_version": "mvp_deviation_v1",
+            "parameter": "delta_f220_rel",
+            "n_events_in_analysis": 0,
+            "per_event": [],
+            "combined": None,
+            "warnings": warnings_list,
+            "note": "No events matched catalog entries",
+        }
+
+    # Inverse-variance weighted combination for f
+    w_f = [1.0 / r["sigma_delta_f_rel"] ** 2 for r in per_event_rows]
+    sum_w_f = sum(w_f)
+    delta_f_combined = sum(w * r["delta_f_rel"] for w, r in zip(w_f, per_event_rows)) / sum_w_f
+    sigma_delta_f_combined = 1.0 / math.sqrt(sum_w_f)
+
+    # Inverse-variance weighted combination for Q
+    w_Q = [1.0 / r["sigma_delta_Q_rel"] ** 2 for r in per_event_rows]
+    sum_w_Q = sum(w_Q)
+    delta_Q_combined = sum(w * r["delta_Q_rel"] for w, r in zip(w_Q, per_event_rows)) / sum_w_Q
+    sigma_delta_Q_combined = 1.0 / math.sqrt(sum_w_Q)
+
+    # χ² test under GR null hypothesis (δf=0 per event)
+    chi2_f = sum(r["delta_f_rel"] ** 2 / r["sigma_delta_f_rel"] ** 2
+                 for r in per_event_rows)
+    n_events = len(per_event_rows)
+
+    # p-value from chi2 distribution with n_events DOF
+    try:
+        from scipy.stats import chi2 as scipy_chi2
+        p_value_f = float(scipy_chi2.sf(chi2_f, df=n_events))
+    except Exception:
+        # Approximation without scipy: use simple lookup
+        # chi2 sf ≈ 1 - CDF; for large chi2: p < 0.05
+        p_value_f = float("nan")
+
+    consistent_gr_95 = (not math.isnan(p_value_f)) and (p_value_f > 0.05)
+
+    if math.isnan(p_value_f):
+        interpretation = "GR test inconclusive (scipy unavailable)"
+    elif p_value_f > 0.05:
+        interpretation = "GR consistent"
+    elif p_value_f > 0.003:
+        interpretation = "GR tension"
+    else:
+        interpretation = "GR excluded"
+
+    return {
+        "schema_version": "mvp_deviation_v1",
+        "parameter": "delta_f220_rel",
+        "catalog_source": "GWTC catalog (posterior medians)",
+        "n_events_in_analysis": n_events,
+        "per_event": per_event_rows,
+        "combined": {
+            "delta_f_rel": delta_f_combined,
+            "sigma_delta_f_rel": sigma_delta_f_combined,
+            "delta_Q_rel": delta_Q_combined,
+            "sigma_delta_Q_rel": sigma_delta_Q_combined,
+            "n_events": n_events,
+            "chi2_GR": chi2_f,
+            "p_value_GR": p_value_f,
+            "consistent_GR_95": consistent_gr_95,
+        },
+        "interpretation": interpretation,
+        "warnings": warnings_list,
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=f"MVP {STAGE}: aggregate events")
     ap.add_argument("--out-run", required=True)
     ap.add_argument("--source-runs", required=True)
     ap.add_argument("--min-coverage", type=float, default=1.0)
     ap.add_argument("--top-k", type=int, default=50)
+    ap.add_argument(
+        "--catalog-path", default=None,
+        help="Optional JSON catalog {event_id: {m_final_msun, chi_final}} for deviation analysis",
+    )
     args = ap.parse_args()
 
     source_runs = [r.strip() for r in args.source_runs.split(",") if r.strip()]
@@ -269,7 +455,28 @@ def main() -> int:
 
     ctx = init_stage(args.out_run, STAGE, params={
         "source_runs": source_runs, "min_coverage": args.min_coverage, "top_k": args.top_k,
+        "catalog_path": args.catalog_path,
     })
+
+    # Load optional catalog for deviation analysis
+    catalog: dict[str, Any] | None = None
+    if args.catalog_path:
+        try:
+            with open(args.catalog_path, "r", encoding="utf-8") as f:
+                catalog = json.load(f)
+            print(f"[s5] Loaded catalog with {len(catalog)} events from {args.catalog_path}",
+                  flush=True)
+        except Exception as exc:
+            print(f"[s5] WARNING: could not load catalog {args.catalog_path}: {exc}",
+                  file=sys.stderr, flush=True)
+    else:
+        # Try to use built-in GWTC_EVENTS as default catalog
+        try:
+            from mvp.gwtc_events import GWTC_EVENTS
+            catalog = GWTC_EVENTS
+            print(f"[s5] Using built-in GWTC catalog ({len(catalog)} events)", flush=True)
+        except Exception:
+            pass
 
     # Collect and validate source compatible_set.json files
     source_paths: dict[str, Path] = {}
@@ -295,24 +502,75 @@ def main() -> int:
             if not ranked_all:
                 ranked_all = [{"geometry_id": gid} for gid in sorted(extracted_ids)]
 
+            observables = cs.get("observables", {})
+
+            # Extract uncertainties from the estimates file if available
+            sigma_f_hz = None
+            sigma_Q = None
+            estimates_path_candidates = [
+                out_root / src / "s3_ringdown_estimates" / "outputs" / "estimates.json",
+                out_root / src / "s3_spectral_estimates" / "outputs" / "spectral_estimates.json",
+            ]
+            for est_path in estimates_path_candidates:
+                if est_path.exists():
+                    try:
+                        with open(est_path, "r", encoding="utf-8") as ef:
+                            est_data = json.load(ef)
+                        unc = est_data.get("combined_uncertainty", {})
+                        sigma_f_hz = unc.get("sigma_f_hz")
+                        sigma_Q = unc.get("sigma_Q")
+                        # Also get observables from here if not in compatible_set
+                        if not observables.get("f_hz") and est_data.get("combined"):
+                            combined = est_data["combined"]
+                            observables = {
+                                "f_hz": combined.get("f_hz"),
+                                "Q": combined.get("Q"),
+                            }
+                        break
+                    except Exception:
+                        pass
+
             source_data.append({
                 "run_id": src, "event_id": cs.get("event_id", "unknown"),
                 "metric": cs.get("metric"),
                 "threshold_d2": cs.get("threshold_d2"),
                 "ranked_all": ranked_all,
                 "compatible_ids": extracted_ids,
-                "observables": cs.get("observables", {}),
+                "observables": observables,
+                "sigma_f_hz": sigma_f_hz,
+                "sigma_Q": sigma_Q,
             })
 
         result = aggregate_compatible_sets(source_data, args.min_coverage, top_k=args.top_k)
+
+        # Compute deviation distribution if catalog available
+        deviation_analysis = compute_deviation_distribution(source_data, catalog)
+        if deviation_analysis is not None:
+            result["deviation_analysis"] = deviation_analysis
+            if deviation_analysis.get("combined"):
+                comb = deviation_analysis["combined"]
+                print(
+                    f"[s5] GR test: δf_rel={comb['delta_f_rel']:.4f}±{comb['sigma_delta_f_rel']:.4f}, "
+                    f"χ²={comb['chi2_GR']:.2f}, p={comb['p_value_GR']:.3f}, "
+                    f"consistent_GR_95={comb['consistent_GR_95']}",
+                    flush=True,
+                )
+
         agg_path = ctx.outputs_dir / "aggregate.json"
         write_json_atomic(agg_path, result)
 
-        finalize(ctx, artifacts={"aggregate": agg_path}, results={
+        summary_results: dict[str, Any] = {
             "n_events": result["n_events"],
             "n_common": result["n_common_geometries"],
             "n_unique": result["n_total_unique_geometries"],
-        })
+        }
+        if deviation_analysis and deviation_analysis.get("combined"):
+            comb = deviation_analysis["combined"]
+            summary_results["delta_f_rel"] = comb["delta_f_rel"]
+            summary_results["p_value_GR"] = comb["p_value_GR"]
+            summary_results["consistent_GR_95"] = comb["consistent_GR_95"]
+
+        finalize(ctx, artifacts={"aggregate": agg_path}, results=summary_results)
         return 0
 
     except SystemExit:

@@ -2,11 +2,13 @@
 """MVP Stage 6: Information geometry — conformal metric and curvature in observable space.
 
 CLI:
-    python mvp/s6_information_geometry.py --run <run_id> [--psd-model simplified_aligo]
+    python mvp/s6_information_geometry.py --run <run_id> \
+        [--psd-model simplified_aligo] [--psd-path /path/to/measured_psd.json]
 
 Inputs:
     runs/<run>/s3_ringdown_estimates/outputs/estimates.json
     runs/<run>/s4_geometry_filter/outputs/compatible_set.json
+    [optional] measured_psd.json or .npz (via --psd-path)
 
 Outputs:
     runs/<run>/s6_information_geometry/outputs/curvature.json
@@ -29,7 +31,7 @@ Caveats (v1):
     - snr_peak is a proxy, not the full Fisher information.
     - The Hilbert estimator is not MLE; covariance is incomplete.
     - Omega depends on f only (not Q) in this version.
-    - PSD model is analytic approximation, not measured.
+    - PSD model is analytic approximation, not measured (use --psd-path for measured).
 """
 from __future__ import annotations
 
@@ -39,6 +41,8 @@ import math
 import sys
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 _here = Path(__file__).resolve()
 for _cand in [_here.parents[0], _here.parents[1]]:
@@ -76,6 +80,89 @@ def _psd_simplified_aligo(f_hz: float) -> float:
 PSD_MODELS = {
     "simplified_aligo": _psd_simplified_aligo,
 }
+
+
+# ── Measured PSD loader ──────────────────────────────────────────────────
+
+
+def load_measured_psd(psd_path: str | Path) -> Any:
+    """Load a measured PSD from JSON or NPZ file and return a callable.
+
+    Supported formats:
+      - JSON: {"frequencies_hz": [...], "psd_values": [...]}
+      - NPZ:  arrays "freq" and "psd"
+
+    Returns a callable psd_fn(f_hz: float) -> float that interpolates
+    in log-log space. Extrapolates using boundary values.
+
+    Raises ValueError if the file cannot be parsed or arrays are invalid.
+    """
+    from scipy.interpolate import interp1d
+
+    psd_path = Path(psd_path)
+    if not psd_path.exists():
+        raise ValueError(f"PSD file not found: {psd_path}")
+
+    suffix = psd_path.suffix.lower()
+
+    if suffix == ".npz":
+        data = np.load(psd_path)
+        if "freq" not in data or "psd" not in data:
+            raise ValueError(f"NPZ must contain 'freq' and 'psd' arrays, got: {list(data.keys())}")
+        freqs = np.asarray(data["freq"], dtype=float)
+        psd_vals = np.asarray(data["psd"], dtype=float)
+    elif suffix in (".json",):
+        with open(psd_path, "r", encoding="utf-8") as f:
+            obj = json.load(f)
+        freqs = np.asarray(obj.get("frequencies_hz", []), dtype=float)
+        psd_vals = np.asarray(obj.get("psd_values", []), dtype=float)
+    else:
+        raise ValueError(f"Unsupported PSD file format: {suffix} (use .json or .npz)")
+
+    if freqs.size < 2 or psd_vals.size < 2:
+        raise ValueError("PSD arrays must have at least 2 points")
+    if freqs.size != psd_vals.size:
+        raise ValueError(f"freqs ({freqs.size}) and psd ({psd_vals.size}) length mismatch")
+
+    # Filter to positive frequencies and positive PSD values
+    valid = (freqs > 0) & (psd_vals > 0)
+    freqs = freqs[valid]
+    psd_vals = psd_vals[valid]
+    if freqs.size < 2:
+        raise ValueError("Too few valid (positive) PSD points after filtering")
+
+    # Sort by frequency
+    order = np.argsort(freqs)
+    freqs = freqs[order]
+    psd_vals = psd_vals[order]
+
+    # Build log-log interpolator
+    log_f = np.log10(freqs)
+    log_p = np.log10(psd_vals)
+
+    interp = interp1d(
+        log_f, log_p,
+        kind="linear",
+        bounds_error=False,
+        fill_value=(log_p[0], log_p[-1]),  # extrapolate with boundary values
+    )
+
+    f_min = float(freqs[0])
+    f_max = float(freqs[-1])
+
+    def psd_fn(f_hz: float) -> float:
+        if f_hz <= 0:
+            return float("inf")
+        if f_hz < f_min or f_hz > f_max:
+            import warnings
+            warnings.warn(
+                f"PSD queried at f={f_hz:.1f} Hz outside measured range "
+                f"[{f_min:.1f}, {f_max:.1f}] Hz; extrapolating boundary value.",
+                stacklevel=2,
+            )
+        return float(10.0 ** interp(math.log10(f_hz)))
+
+    return psd_fn
 
 
 # ── Conformal factor ────────────────────────────────────────────────────
@@ -199,12 +286,18 @@ def compute_information_geometry(
     compatible_geometries: list[dict[str, Any]],
     psd_model: str = "simplified_aligo",
     delta_log_f: float = 0.01,
+    psd_fn: Any = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Run the full s6 computation.
 
     Returns (curvature_result, metric_diagnostics).
+
+    Args:
+        psd_fn: Optional callable psd_fn(f_hz) -> float. If provided, overrides
+                psd_model. Use load_measured_psd() to create from file.
     """
-    psd_fn = PSD_MODELS[psd_model]
+    if psd_fn is None:
+        psd_fn = PSD_MODELS[psd_model]
 
     # Curvature at observed point
     curv = scalar_curvature_2d(f_obs, snr_peak, psd_fn, delta_log_f)
@@ -303,6 +396,12 @@ def main() -> int:
         help="Analytic PSD model for conformal factor (default: simplified_aligo)",
     )
     ap.add_argument(
+        "--psd-path",
+        default=None,
+        help="Path to measured PSD (JSON with frequencies_hz/psd_values, or .npz with freq/psd). "
+             "If provided, overrides --psd-model.",
+    )
+    ap.add_argument(
         "--delta-log-f",
         type=float,
         default=0.01,
@@ -312,6 +411,7 @@ def main() -> int:
 
     ctx = init_stage(args.run, STAGE, params={
         "psd_model": args.psd_model,
+        "psd_path": args.psd_path,
         "delta_log_f": args.delta_log_f,
     })
 
@@ -356,6 +456,18 @@ def main() -> int:
         if not compatible_geometries:
             compatible_geometries = compat.get("ranked_all", [])
 
+        # Resolve PSD function
+        measured_psd_fn = None
+        psd_label = args.psd_model
+        if args.psd_path:
+            try:
+                measured_psd_fn = load_measured_psd(args.psd_path)
+                psd_label = f"measured:{args.psd_path}"
+                print(f"[s6] Using measured PSD from: {args.psd_path}", flush=True)
+            except ValueError as exc:
+                print(f"[s6] WARNING: Could not load measured PSD ({exc}); "
+                      f"falling back to {args.psd_model}", flush=True)
+
         # Compute
         curvature_result, metric_diagnostics = compute_information_geometry(
             f_obs=f_obs,
@@ -364,7 +476,12 @@ def main() -> int:
             compatible_geometries=compatible_geometries,
             psd_model=args.psd_model,
             delta_log_f=args.delta_log_f,
+            psd_fn=measured_psd_fn,
         )
+
+        # Record PSD source in outputs
+        curvature_result["psd_source"] = psd_label
+        metric_diagnostics["psd_source"] = psd_label
 
         # Add provenance fields
         curvature_result["event_id"] = estimates.get("event_id", "unknown")
