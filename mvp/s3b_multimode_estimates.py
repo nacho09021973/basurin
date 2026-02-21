@@ -486,8 +486,10 @@ def build_results_payload(
     mode_221_ok: bool,
     flags: list[str],
 ) -> dict[str, Any]:
-    verdict = "OK" if (mode_220_ok and mode_221_ok) else "INSUFFICIENT_DATA"
+    verdict = "OK" if mode_220_ok else "INSUFFICIENT_DATA"
     messages: list[str] = []
+    if mode_220_ok and not mode_221_ok:
+        messages.append("Mode 221 insufficient/unstable; proceeding with 220-only result.")
     if verdict == "INSUFFICIENT_DATA":
         messages.append("Best-effort multimode fit: one or more modes unavailable or unstable.")
     return {
