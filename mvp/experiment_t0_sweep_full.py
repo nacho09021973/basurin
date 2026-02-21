@@ -713,7 +713,7 @@ def run_t0_sweep_full(
 ) -> tuple[dict[str, Any], Path]:
     out_root = _resolve_runs_root_arg(getattr(args, "runs_root", None))
     base_root = Path(args.base_runs_root).expanduser().resolve()
-    base_run_dir = base_root / args.run_id
+    base_run_dir = out_root / args.run_id
     scan_root_abs = (
         Path(args.scan_root).expanduser().resolve()
         if getattr(args, "scan_root", None)
@@ -750,7 +750,7 @@ def run_t0_sweep_full(
         validate_run_id(args.run_id, out_root)
         validate_run_id(args.run_id, base_root)
         _init_parent_run_valid(out_root, args.run_id)
-        require_run_valid(base_root, args.run_id)
+        require_run_valid(out_root, args.run_id)
         _write_preflight_report_or_abort(
             run_id=args.run_id,
             out_root=out_root,
