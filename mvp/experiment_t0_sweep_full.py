@@ -294,7 +294,7 @@ def _write_preflight_report_or_abort(
     report = {
         "run_id": run_id,
         "runs_root_abs": str(out_root),
-        "base_runs_root_abs": str(base_root),
+        "repo_root_abs": str(base_root),
         "scan_root_abs": str(scan_root_abs),
         "base_artifacts": checks,
         "tooling": {
@@ -711,7 +711,7 @@ def run_t0_sweep_full(
     *,
     run_cmd_fn: Callable[[list[str], dict[str, str], int], Any] = run_cmd,
 ) -> tuple[dict[str, Any], Path]:
-    out_root = _resolve_runs_root_arg(getattr(args, "runs_root", None))
+    out_root = resolve_out_root("runs").resolve()
     base_root = Path(args.base_runs_root).expanduser().resolve()
     base_run_dir = out_root / args.run_id
     scan_root_abs = (
@@ -727,7 +727,7 @@ def run_t0_sweep_full(
         "phase": "run",
         "run_id": args.run_id,
         "runs_root": str(out_root),
-        "base_runs_root": str(base_root),
+        "repo_root": str(base_root),
         "scan_root_abs": str(scan_root_abs),
         "seed": int(args.seed),
         "t0_grid_ms": str(args.t0_grid_ms) if args.t0_grid_ms is not None else None,
@@ -739,7 +739,7 @@ def run_t0_sweep_full(
     print(
         "[experiment_t0_sweep_full] "
         f"phase=run run_id={args.run_id} runs_root_abs={out_root} "
-        f"base_runs_root_abs={base_root} scan_root_abs={scan_root_abs} "
+        f"scan_root_abs={scan_root_abs} "
         f"seed={int(args.seed)} t0_grid_ms={trace_payload['t0_grid_ms']}",
         file=sys.stderr,
     )
@@ -1686,6 +1686,9 @@ def main() -> int:
     ap.add_argument("--max-retries-per-pair", type=int, default=2)
     ap.add_argument("--resume-batch-size", type=int, default=50)
     args = ap.parse_args()
+
+    if args.runs_root:
+        os.environ["BASURIN_RUNS_ROOT"] = str(Path(args.runs_root).expanduser().resolve())
 
     try:
         _validate_phase_contracts(args, raw_argv)

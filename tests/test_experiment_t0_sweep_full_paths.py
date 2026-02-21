@@ -24,19 +24,21 @@ class FakeStrain:
 
 
 class TestExperimentT0SweepFullPaths(unittest.TestCase):
-    def test_phase_run_uses_out_root_for_run_valid_and_default_scan_root(self) -> None:
+    def test_phase_run_uses_batch_root_env_for_run_valid_and_default_scan_root(self) -> None:
         exp = importlib.import_module("mvp.experiment_t0_sweep_full")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
             out_root = tmp_path / "batch" / "runs"
-            out_root.mkdir(parents=True, exist_ok=True)
             run_id = "batch_foo__GW150914"
+            run_root = out_root / run_id
+            (run_root / "RUN_VALID").mkdir(parents=True, exist_ok=True)
+            (run_root / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
             captured: dict[str, Path | str] = {}
 
             args = SimpleNamespace(
                 run_id=run_id,
-                runs_root=str(out_root),
+                runs_root=None,
                 base_runs_root=str(tmp_path / "legacy_runs_root"),
                 scan_root=None,
                 seed=101,
@@ -48,30 +50,27 @@ class TestExperimentT0SweepFullPaths(unittest.TestCase):
                 stage_timeout=300,
             )
 
-            def _capture_require_run_valid(root: Path, current_run_id: str) -> None:
-                captured["require_root"] = root
-                captured["require_run_id"] = current_run_id
-
             def _capture_preflight(**kwargs: Path | str) -> dict[str, str]:
                 captured["scan_root_abs"] = kwargs["scan_root_abs"]
                 captured["base_run_dir"] = kwargs["base_run_dir"]
                 raise SystemExit(0)
 
-            with mock.patch.object(exp, "enforce_isolated_runsroot", lambda *_args, **_kwargs: None), mock.patch.object(
-                exp, "ensure_seed_runsroot_layout", lambda *_args, **_kwargs: out_root / run_id
-            ), mock.patch.object(exp, "validate_run_id", lambda *_args, **_kwargs: None), mock.patch.object(
-                exp, "_init_parent_run_valid", lambda *_args, **_kwargs: None
-            ), mock.patch.object(exp, "require_run_valid", _capture_require_run_valid), mock.patch.object(
-                exp, "_write_preflight_report_or_abort", _capture_preflight
-            ):
+            with mock.patch.dict(os.environ, {"BASURIN_RUNS_ROOT": str(out_root)}), mock.patch.object(
+                exp, "enforce_isolated_runsroot", lambda *_args, **_kwargs: None
+            ), mock.patch.object(exp, "ensure_seed_runsroot_layout", lambda *_args, **_kwargs: out_root / run_id), mock.patch.object(
+                exp, "validate_run_id", lambda *_args, **_kwargs: None
+            ), mock.patch.object(exp, "_write_preflight_report_or_abort", _capture_preflight):
                 with self.assertRaises(SystemExit) as ctx:
                     exp.run_t0_sweep_full(args)
 
             self.assertEqual(ctx.exception.code, 0)
-            self.assertEqual(captured["require_root"], out_root.resolve())
-            self.assertEqual(captured["require_run_id"], run_id)
             self.assertEqual(captured["base_run_dir"], out_root.resolve() / run_id)
             self.assertEqual(captured["scan_root_abs"], (out_root.resolve() / run_id / "experiment").resolve())
+            self.assertTrue((out_root / run_id / "RUN_VALID" / "verdict.json").exists())
+            self.assertNotEqual(
+                captured["scan_root_abs"],
+                (Path.cwd() / "runs" / run_id / "experiment").resolve(),
+            )
 
     def test_build_subrun_stage_cmds_wires_s2_to_subrun_id_and_subrun_runs_root(self) -> None:
         exp = importlib.import_module("mvp.experiment_t0_sweep_full")
