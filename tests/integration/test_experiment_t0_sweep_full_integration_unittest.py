@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 try:
     import numpy as np
@@ -98,13 +99,18 @@ class TestExperimentT0SweepFullIntegration(unittest.TestCase):
             _write_min_run(runs_root, run_id)
             args = SimpleNamespace(run_id=run_id, runs_root=runs_root, base_runs_root=runs_root, atlas_path="docs/ringdown/atlas/atlas_berti_v2.json", t0_grid_ms="0,5,10", t0_start_ms=0, t0_stop_ms=10, t0_step_ms=5, n_bootstrap=50, seed=123, detector="auto", stage_timeout_s=30)
 
+            # Isolate from ambient BASURIN_RUNS_ROOT so enforce_isolated_runsroot
+            # does not compare the temp dir against an unrelated global root.
+            env_patch = mock.patch.dict("os.environ", {"BASURIN_RUNS_ROOT": str(runs_root)})
             observed_cmds: list[list[str]] = []
-            exp.run_t0_sweep_full(args, run_cmd_fn=self._fake_runner_factory(runs_root / run_id / "experiment" / "t0_sweep_full_seed123" / "runs", observed_cmds))
+            with env_patch:
+                exp.run_t0_sweep_full(args, run_cmd_fn=self._fake_runner_factory(runs_root / run_id / "experiment" / "t0_sweep_full_seed123" / "runs", observed_cmds))
 
             out_json = runs_root / run_id / "experiment" / "t0_sweep_full_seed123" / "outputs" / "t0_sweep_full_results.json"
             digest1 = self._sha(out_json)
             observed_cmds.clear()
-            exp.run_t0_sweep_full(args, run_cmd_fn=self._fake_runner_factory(runs_root / run_id / "experiment" / "t0_sweep_full_seed123" / "runs", observed_cmds))
+            with env_patch:
+                exp.run_t0_sweep_full(args, run_cmd_fn=self._fake_runner_factory(runs_root / run_id / "experiment" / "t0_sweep_full_seed123" / "runs", observed_cmds))
             self.assertEqual(self._sha(out_json), digest1)
 
     def test_build_subrun_stage_cmds_passes_seed_to_s3b(self) -> None:

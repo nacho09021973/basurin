@@ -185,7 +185,8 @@ class ExperimentT0SweepFullInventoryTests(unittest.TestCase):
             "cond_number": 10.0,
             "delta_bic": 20.0,
             "p_ljungbox": 0.1,
-            "n_samples": 256
+            "n_samples": 256,
+            "snr": 10.0,
         }), encoding="utf-8")
         (subrun / "s4c_kerr_consistency" / "stage_summary.json").write_text("{}", encoding="utf-8")
         (subrun / "s4c_kerr_consistency" / "manifest.json").write_text("{}", encoding="utf-8")

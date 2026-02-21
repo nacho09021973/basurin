@@ -73,10 +73,12 @@ def test_220_default_lnq_span_allows_realistic_robust_span() -> None:
     def estimator(_signal: np.ndarray, _fs: float) -> dict[str, float]:
         return {"f_hz": 220.0, "Q": 12.0, "tau_s": 12.0 / (np.pi * 220.0)}
 
-    robust_samples = np.array(
-        [[np.log(220.0), x] for x in np.linspace(np.log(8.0), np.log(108.0), 120)],
-        dtype=float,
-    )
+    # lnf is jittered slightly so covariance is non-singular (required for ok=True).
+    # lnQ spans ln(8)..ln(108) so lnQ_span = P90-P10 ≈ 0.80*(ln108-ln8).
+    _rng_fix = np.random.default_rng(7)
+    lnq_vals = np.linspace(np.log(8.0), np.log(108.0), 120)
+    lnf_vals = np.log(220.0) + _rng_fix.normal(0, 0.001, 120)
+    robust_samples = np.column_stack([lnf_vals, lnq_vals])
 
     original = _MODULE._bootstrap_mode_log_samples
     _MODULE._bootstrap_mode_log_samples = lambda *_args, **_kwargs: (robust_samples, 0)
@@ -97,7 +99,10 @@ def test_220_default_lnq_span_allows_realistic_robust_span() -> None:
     finally:
         _MODULE._bootstrap_mode_log_samples = original
 
-    assert np.isclose(mode["fit"]["stability"]["lnQ_span"], np.log(108.0) - np.log(8.0), atol=1e-9)
+    # lnQ_span is computed as P90 - P10 (not max - min).
+    # For 120 uniformly-spaced samples the expected value is 0.80 * (ln108 - ln8).
+    expected_lnQ_span = 0.80 * (np.log(108.0) - np.log(8.0))
+    assert np.isclose(mode["fit"]["stability"]["lnQ_span"], expected_lnQ_span, rtol=1e-3)
     assert ok
     assert "220_lnQ_span_explosive" not in flags
 
@@ -242,26 +247,48 @@ def test_determinism_seed_on_bootstrap() -> None:
 
 def test_s3b_allows_220_only_ok_when_221_insufficient() -> None:
     signal = np.ones(2048)
-    mode_220, flags_220, ok_220 = evaluate_mode(
-        signal,
-        4096.0,
-        label="220",
-        mode=[2, 2, 0],
-        estimator=_stable_estimator,
-        n_bootstrap=20,
-        seed=12345,
-    )
-    mode_221, flags_221, ok_221 = evaluate_mode(
-        signal,
-        4096.0,
-        label="221",
-        mode=[2, 2, 1],
-        estimator=_sometimes_failing_estimator,
-        n_bootstrap=20,
-        seed=12346,
-        min_valid_fraction=0.8,
-        cv_threshold=1.0,
-    )
+    _n = 20
+    # Non-degenerate samples for mode 220: independent noise in lnf and lnQ
+    # so covariance is non-singular and evaluate_mode returns ok=True.
+    _rng = np.random.default_rng(42)
+    _220_samples = np.column_stack([
+        np.log(250.0) + _rng.normal(0, 0.05, _n),
+        np.log(12.0) + _rng.normal(0, 0.05, _n),
+    ])
+    _calls = [0]
+    _original_bootstrap = _MODULE._bootstrap_mode_log_samples
+
+    def _patched_bootstrap(sig, fs, estimator, n_bootstrap, rng):  # type: ignore[override]
+        _calls[0] += 1
+        if _calls[0] == 1:  # first call → mode 220: return stable non-degenerate samples
+            return _220_samples, 0
+        # second call → mode 221: use real bootstrap (will fail with np.ones signal)
+        return _original_bootstrap(sig, fs, estimator, n_bootstrap=n_bootstrap, rng=rng)
+
+    _MODULE._bootstrap_mode_log_samples = _patched_bootstrap
+    try:
+        mode_220, flags_220, ok_220 = evaluate_mode(
+            signal,
+            4096.0,
+            label="220",
+            mode=[2, 2, 0],
+            estimator=_stable_estimator,
+            n_bootstrap=_n,
+            seed=12345,
+        )
+        mode_221, flags_221, ok_221 = evaluate_mode(
+            signal,
+            4096.0,
+            label="221",
+            mode=[2, 2, 1],
+            estimator=_sometimes_failing_estimator,
+            n_bootstrap=_n,
+            seed=12346,
+            min_valid_fraction=0.8,
+            cv_threshold=1.0,
+        )
+    finally:
+        _MODULE._bootstrap_mode_log_samples = _original_bootstrap
 
     payload = build_results_payload(
         run_id="run_x",
@@ -273,6 +300,7 @@ def test_s3b_allows_220_only_ok_when_221_insufficient() -> None:
         flags=flags_220 + flags_221,
     )
 
+    assert ok_220, f"expected ok_220=True, flags_220={flags_220}"
     assert payload["results"]["verdict"] == "OK"
     assert payload["modes"][1]["label"] == "221"
     assert payload["modes"][1]["ln_f"] is None

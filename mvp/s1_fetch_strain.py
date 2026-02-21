@@ -612,7 +612,10 @@ def main() -> int:
     if local_by_det and args.synthetic:
         print("ERROR: --local-hdf5 cannot be used with --synthetic", file=sys.stderr)
         raise SystemExit(2)
-    if not local_by_det and not args.synthetic and args.event_id:
+    # Skip auto-resolve when --reuse-if-present: reuse check runs first and
+    # may succeed without local HDF5 files. If reuse fails, HDF5 is resolved
+    # below after the reuse check returns False.
+    if not local_by_det and not args.synthetic and args.event_id and not args.reuse_if_present:
         try:
             local_by_det = _resolve_event_hdf5_or_die(
                 hdf5_root=Path(args.hdf5_root),
