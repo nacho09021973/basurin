@@ -12,3 +12,6 @@ external/
 
 # Local datasets (do not commit)
 data/
+
+# local scratch / backups
+local_backup/
