@@ -174,7 +174,8 @@ def main() -> int:
         _run_cmd(
             [
                 sys.executable,
-                "mvp/experiment_t0_sweep_full.py",
+                "-m",
+                "mvp.experiment_t0_sweep_full",
                 "--run-id",
                 run_id,
                 "--phase",
