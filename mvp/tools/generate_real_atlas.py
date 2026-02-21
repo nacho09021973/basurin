@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import math
+import argparse
 import sys
 from pathlib import Path
 
@@ -36,6 +37,24 @@ MSUN_S = G_SI * MSUN_SI / C_SI**3   # M_sun in seconds ≈ 4.9255e-6 s
 M_REMNANT_MSUN = 62.0    # Final mass in solar masses
 CHI_REMNANT = 0.67       # Final dimensionless spin
 M_REMNANT_S = M_REMNANT_MSUN * MSUN_S  # Final mass in seconds
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments."""
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--out",
+        required=True,
+        type=Path,
+        help="Output path for full atlas JSON.",
+    )
+    ap.add_argument(
+        "--out-s4",
+        type=Path,
+        default=None,
+        help="Optional output path for s4-compatible JSON (default: <out>_s4.json).",
+    )
+    return ap.parse_args(argv)
 
 
 def omega_to_physical(omega_dimless: complex, M_s: float) -> dict:
@@ -175,7 +194,9 @@ def generate_beyond_kerr_entries(
     return entries
 
 
-def main():
+def main(argv: list[str] | None = None):
+    args = parse_args(argv)
+
     print("=" * 60)
     print("ATLAS REAL: QNM desde primeros principios")
     print("=" * 60)
@@ -257,7 +278,8 @@ def main():
         "entries": all_entries,
     }
     
-    out_path = Path("/home/claude/atlas_real_v1.json")
+    out_path = args.out
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(atlas, f, indent=2, ensure_ascii=False)
     
@@ -271,7 +293,11 @@ def main():
     print(f"Q range:    [{min(Q_vals):.4f}, {max(Q_vals):.4f}]")
     
     # Also write s4-compatible version (just the entries list)
-    s4_path = Path("/home/claude/atlas_real_v1_s4.json")
+    if args.out_s4 is not None:
+        s4_path = args.out_s4
+    else:
+        s4_path = out_path.with_name(f"{out_path.stem}_s4{out_path.suffix}")
+    s4_path.parent.mkdir(parents=True, exist_ok=True)
     with open(s4_path, "w", encoding="utf-8") as f:
         json.dump({"entries": all_entries}, f, indent=2, ensure_ascii=False)
     print(f"s4-compatible atlas: {s4_path}")
