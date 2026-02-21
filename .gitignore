@@ -15,3 +15,7 @@ data/
 
 # local scratch / backups
 local_backup/
+
+# local
+/docs/ringdown/window_catalog_v1.json
+events_6.txt
