@@ -24,6 +24,55 @@ class FakeStrain:
 
 
 class TestExperimentT0SweepFullPaths(unittest.TestCase):
+    def test_phase_run_uses_out_root_for_run_valid_and_default_scan_root(self) -> None:
+        exp = importlib.import_module("mvp.experiment_t0_sweep_full")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            out_root = tmp_path / "batch" / "runs"
+            out_root.mkdir(parents=True, exist_ok=True)
+            run_id = "batch_foo__GW150914"
+            captured: dict[str, Path | str] = {}
+
+            args = SimpleNamespace(
+                run_id=run_id,
+                runs_root=str(out_root),
+                base_runs_root=str(tmp_path / "legacy_runs_root"),
+                scan_root=None,
+                seed=101,
+                t0_grid_ms="0,5,10",
+                detector=None,
+                phase="run",
+                atlas_path="atlas.json",
+                n_bootstrap=200,
+                stage_timeout=300,
+            )
+
+            def _capture_require_run_valid(root: Path, current_run_id: str) -> None:
+                captured["require_root"] = root
+                captured["require_run_id"] = current_run_id
+
+            def _capture_preflight(**kwargs: Path | str) -> dict[str, str]:
+                captured["scan_root_abs"] = kwargs["scan_root_abs"]
+                captured["base_run_dir"] = kwargs["base_run_dir"]
+                raise SystemExit(0)
+
+            with mock.patch.object(exp, "enforce_isolated_runsroot", lambda *_args, **_kwargs: None), mock.patch.object(
+                exp, "ensure_seed_runsroot_layout", lambda *_args, **_kwargs: out_root / run_id
+            ), mock.patch.object(exp, "validate_run_id", lambda *_args, **_kwargs: None), mock.patch.object(
+                exp, "_init_parent_run_valid", lambda *_args, **_kwargs: None
+            ), mock.patch.object(exp, "require_run_valid", _capture_require_run_valid), mock.patch.object(
+                exp, "_write_preflight_report_or_abort", _capture_preflight
+            ):
+                with self.assertRaises(SystemExit) as ctx:
+                    exp.run_t0_sweep_full(args)
+
+            self.assertEqual(ctx.exception.code, 0)
+            self.assertEqual(captured["require_root"], out_root.resolve())
+            self.assertEqual(captured["require_run_id"], run_id)
+            self.assertEqual(captured["base_run_dir"], out_root.resolve() / run_id)
+            self.assertEqual(captured["scan_root_abs"], (out_root.resolve() / run_id / "experiment").resolve())
+
     def test_build_subrun_stage_cmds_wires_s2_to_subrun_id_and_subrun_runs_root(self) -> None:
         exp = importlib.import_module("mvp.experiment_t0_sweep_full")
 
@@ -264,7 +313,7 @@ class TestExperimentT0SweepFullPaths(unittest.TestCase):
             os.environ.pop("BASURIN_RUNS_ROOT", None)
 
 
-    def test_run_t0_sweep_full_precheck_reads_s2_manifest_from_base_runs_root(self) -> None:
+    def test_run_t0_sweep_full_precheck_reads_s2_manifest_from_out_runs_root(self) -> None:
         exp = importlib.import_module("mvp.experiment_t0_sweep_full")
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -273,15 +322,15 @@ class TestExperimentT0SweepFullPaths(unittest.TestCase):
             out_runs_root = base / "B"
             run_id = "BASE_RUN"
 
-            base_s2 = base_runs_root / run_id / "s2_ringdown_window"
-            base_s2_out = base_s2 / "outputs"
-            base_s2_out.mkdir(parents=True, exist_ok=True)
-            (base_s2 / "manifest.json").write_text("{}", encoding="utf-8")
-            (base_runs_root / run_id / "RUN_VALID").mkdir(parents=True, exist_ok=True)
-            (base_runs_root / run_id / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
-            (base_runs_root / run_id / "s1_fetch_strain" / "outputs").mkdir(parents=True, exist_ok=True)
-            (base_runs_root / run_id / "s1_fetch_strain" / "outputs" / "strain.npz").write_bytes(b"npz-placeholder")
-            fake_source_npz = base_s2_out / "H1_rd.npz"
+            out_s2 = out_runs_root / run_id / "s2_ringdown_window"
+            out_s2_out = out_s2 / "outputs"
+            out_s2_out.mkdir(parents=True, exist_ok=True)
+            (out_s2 / "manifest.json").write_text("{}", encoding="utf-8")
+            (out_runs_root / run_id / "RUN_VALID").mkdir(parents=True, exist_ok=True)
+            (out_runs_root / run_id / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
+            (out_runs_root / run_id / "s1_fetch_strain" / "outputs").mkdir(parents=True, exist_ok=True)
+            (out_runs_root / run_id / "s1_fetch_strain" / "outputs" / "strain.npz").write_bytes(b"npz-placeholder")
+            fake_source_npz = out_s2_out / "H1_rd.npz"
             fake_source_npz.write_bytes(b"npz-placeholder")
 
             args = SimpleNamespace(
