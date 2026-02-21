@@ -359,6 +359,8 @@ def compute_compatible_set(
                     "distance": dist,
                     "d2": d2,
                     "compatible": d2 <= epsilon,
+                    "f_hz": math.exp(lnf_atlas),
+                    "Q": math.exp(lnQ_atlas),
                     "metadata": entry.get("metadata"),
                 }
             )
@@ -368,6 +370,8 @@ def compute_compatible_set(
                     "geometry_id": gid,
                     "distance": dist,
                     "compatible": dist <= epsilon,
+                    "f_hz": math.exp(lnf_atlas),
+                    "Q": math.exp(lnQ_atlas),
                     "metadata": entry.get("metadata"),
                 }
             )
