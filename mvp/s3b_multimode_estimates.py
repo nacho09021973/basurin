@@ -528,7 +528,7 @@ def main() -> int:
     ap.add_argument("--n-bootstrap", type=int, default=200)
     ap.add_argument("--seed", type=int, default=12345)
     ap.add_argument("--max-lnf-span-220", type=float, default=1.0)
-    ap.add_argument("--max-lnq-span-220", type=float, default=1.0)
+    ap.add_argument("--max-lnq-span-220", type=float, default=3.0)
     ap.add_argument("--max-lnf-span-221", type=float, default=1.0)
     ap.add_argument("--max-lnq-span-221", type=float, default=1.0)
     ap.add_argument("--min-valid-fraction-221", type=float, default=0.8)
