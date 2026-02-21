@@ -134,6 +134,50 @@ Artefactos agregados a vigilar:
 - `runs/<RUN_ID>/experiment/derived/geometry_table.tsv` (agregado de `s6_geometry_table.py`).
 - `runs/<RUN_ID>/experiment/derived/sweep_inventory.json` (inventario/decisión de sweep).
 
+## Oráculo t0 v1.2 (selección canónica de ventana)
+
+El oráculo t0 v1.2 está implementado en `mvp/experiment_oracle_t0_ringdown.py` y consume el
+resultado previo de `t0_sweep_full` para emitir un veredicto reproducible PASS/FAIL.
+
+Qué hace:
+
+- Toma el JSON del sweep por seed: `.../experiment/t0_sweep_full_seed<seed>/outputs/t0_sweep_full_results.json`.
+- Mapea cada punto `t0_ms` a una ventana `WindowSummaryV1` validada.
+- Calcula métricas del oráculo (`oracle_v1_plateau`) y escribe un reporte auditable.
+
+Cómo se ejecuta:
+
+```bash
+RUN_ID="mvp_GW150914_20260219T120000Z"
+
+python mvp/experiment_oracle_t0_ringdown.py \
+  --run-id "$RUN_ID"
+```
+
+Si tienes más de un seed y quieres fijar uno explícitamente:
+
+```bash
+python mvp/experiment_oracle_t0_ringdown.py \
+  --run-id "$RUN_ID" \
+  --seed-dir "runs/$RUN_ID/experiment/t0_sweep_full_seed101"
+```
+
+Qué requiere (precondición obligatoria):
+
+- Haber ejecutado antes `t0_sweep_full` en `--phase run` para ese `RUN_ID`.
+- Que exista el directorio seed y el JSON del sweep en la ruta exacta esperada.
+
+Si falta el seed dir o falta el JSON del sweep, el comando falla con mensaje explícito que incluye:
+
+- ruta esperada exacta, y
+- comando exacto para regenerar el sweep (`python mvp/experiment_t0_sweep_full.py --phase run ...`).
+
+Salidas del oráculo:
+
+- `runs/<RUN_ID>/experiment/oracle_t0_ringdown/outputs/oracle_report.json`
+- `runs/<RUN_ID>/experiment/oracle_t0_ringdown/stage_summary.json`
+- `runs/<RUN_ID>/experiment/oracle_t0_ringdown/manifest.json`
+
 Nota sobre subruns por seed: el experimento crea árboles por semilla para aislar trazabilidad y reintentos. Por eso, los agregados deben escanearse desde `scan_root` (global o por seed) y no por prefijos de nombre; además, se excluyen ancestros symlink para evitar duplicados/alias.
 
 ## Convención canónica de HDF5 externos (LOSC/GWOSC)
