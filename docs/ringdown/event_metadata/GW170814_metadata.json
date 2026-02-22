@@ -1,0 +1,6 @@
+{
+  "schema_version": "event_metadata_v1",
+  "event_id": "GW170814",
+  "t_coalescence_gps": 1186741861.0,
+  "source": "GWOSC-compatible reference"
+}
