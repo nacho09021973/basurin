@@ -24,6 +24,7 @@ Abort semantics:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -43,6 +44,49 @@ from basurin_io import resolve_out_root, write_json_atomic
 
 MVP_DIR = Path(__file__).resolve().parent
 DEFAULT_ATLAS_PATH = Path("docs/ringdown/atlas/atlas_berti_v2.json")
+
+
+def _autodetect_losc_hdf5_mappings(event_id: str) -> list[str]:
+    """Return canonical local LOSC mappings when both detectors are present."""
+    losc_root = Path(os.environ.get("BASURIN_LOSC_ROOT", "data/losc"))
+    event_root = losc_root / event_id
+
+    def _pick(det: str) -> Path | None:
+        for ext in ("h5", "hdf5"):
+            candidate = event_root / f"{det}.{ext}"
+            if candidate.exists():
+                return candidate
+        return None
+
+    h1 = _pick("H1")
+    l1 = _pick("L1")
+    if h1 is None or l1 is None:
+        return []
+    return [f"H1={h1.as_posix()}", f"L1={l1.as_posix()}"]
+
+
+def _build_s1_fetch_args(
+    run_id: str,
+    event_id: str,
+    duration_s: float,
+    synthetic: bool,
+    reuse_strain: bool,
+    local_hdf5: list[str] | None,
+    offline: bool,
+) -> list[str]:
+    args = ["--run", run_id, "--event-id", event_id, "--duration-s", str(duration_s)]
+    if synthetic:
+        args.append("--synthetic")
+    if reuse_strain:
+        args.append("--reuse-if-present")
+    effective_local_hdf5 = list(local_hdf5 or [])
+    if not effective_local_hdf5:
+        effective_local_hdf5 = _autodetect_losc_hdf5_mappings(event_id)
+    for mapping in effective_local_hdf5:
+        args.extend(["--local-hdf5", mapping])
+    if offline:
+        args.append("--offline")
+    return args
 
 
 def _ts() -> str:
@@ -338,15 +382,15 @@ def run_single_event(
         return rc, run_id
 
     # Stage 1: Fetch strain
-    s1_args = ["--run", run_id, "--event-id", event_id, "--duration-s", str(duration_s)]
-    if synthetic:
-        s1_args.append("--synthetic")
-    if reuse_strain:
-        s1_args.append("--reuse-if-present")
-    for mapping in (local_hdf5 or []):
-        s1_args.extend(["--local-hdf5", mapping])
-    if offline:
-        s1_args.append("--offline")
+    s1_args = _build_s1_fetch_args(
+        run_id=run_id,
+        event_id=event_id,
+        duration_s=duration_s,
+        synthetic=synthetic,
+        reuse_strain=reuse_strain,
+        local_hdf5=local_hdf5,
+        offline=offline,
+    )
     rc = _run_stage("s1_fetch_strain.py", s1_args, "s1_fetch_strain", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
@@ -524,15 +568,15 @@ def run_multimode_event(
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
 
-    s1_args = ["--run", run_id, "--event-id", event_id, "--duration-s", str(duration_s)]
-    if synthetic:
-        s1_args.append("--synthetic")
-    if reuse_strain:
-        s1_args.append("--reuse-if-present")
-    for mapping in (local_hdf5 or []):
-        s1_args.extend(["--local-hdf5", mapping])
-    if offline:
-        s1_args.append("--offline")
+    s1_args = _build_s1_fetch_args(
+        run_id=run_id,
+        event_id=event_id,
+        duration_s=duration_s,
+        synthetic=synthetic,
+        reuse_strain=reuse_strain,
+        local_hdf5=local_hdf5,
+        offline=offline,
+    )
     rc = _run_stage("s1_fetch_strain.py", s1_args, "s1_fetch_strain", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
