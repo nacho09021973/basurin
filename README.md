@@ -74,6 +74,35 @@ python mvp/pipeline.py multi \
   --atlas-path atlas.json
 ```
 
+## Mantenimiento de ramas (dejar solo `main`)
+
+Si quieres limpiar el repositorio y mantener únicamente la rama `main`, verifica primero
+que `main` esté actualizada y luego elimina ramas locales y remotas distintas de `main`.
+
+```bash
+# 1) Trae refs remotas y cámbiate a main
+git fetch --all --prune
+git checkout main
+git pull origin main
+
+# 2) Borra ramas locales excepto main
+git branch | grep -v "main" | xargs -r git branch -D
+
+# 3) Borra ramas remotas excepto main (en origin)
+git branch -r \
+  | sed 's#origin/##' \
+  | grep -v '^main$' \
+  | grep -v '^HEAD$' \
+  | xargs -r -I{} git push origin --delete {}
+```
+
+Verificación final:
+
+```bash
+git branch
+git branch -r
+```
+
 ## Experimentos (`t0_sweep_full`) e inventario por fases
 
 - `mvp/experiment_t0_sweep_full.py`: **recomendado para escala/producción**, contract-first con fases `run`/`inventory`/`finalize`.
