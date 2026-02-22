@@ -31,6 +31,21 @@ CHI2_2DOF_997_AUDIT = 11.6183
 _UNSET = object()
 
 
+def _resolve_estimates_path(run_dir: Path, estimates_path_override: str | None) -> Path:
+    """Resolve estimates override under run_dir and block traversal/escape."""
+    run_dir_real = run_dir.resolve()
+    if estimates_path_override is None:
+        return run_dir_real / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+
+    resolved = (run_dir_real / Path(estimates_path_override)).resolve()
+    if not resolved.is_relative_to(run_dir_real):
+        raise ValueError(
+            "Invalid --estimates-path: resolved path escapes run directory "
+            f"({resolved} not under {run_dir_real})"
+        )
+    return resolved
+
+
 def _load_atlas(atlas_path: Path) -> list[dict[str, Any]]:
     with open(atlas_path, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -486,13 +501,10 @@ def main() -> int:
         "estimates_path_override": args.estimates_path,
     })
 
-    if args.estimates_path is not None:
-        ep = Path(args.estimates_path)
-        if not ep.is_absolute():
-            ep = (ctx.run_dir / ep).resolve()
-        estimates_path = ep
-    else:
-        estimates_path = ctx.run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+    try:
+        estimates_path = _resolve_estimates_path(ctx.run_dir, args.estimates_path)
+    except ValueError as exc:
+        abort(ctx, str(exc))
     if not atlas_path.exists():
         abort(ctx, f"Atlas not found: {atlas_path}")
     check_inputs(ctx, {"estimates": estimates_path, "atlas": atlas_path})
