@@ -4,6 +4,41 @@ Objetivo: que una IA (o humano) no pierda 5–6 horas diarias por confundir `RUN
 
 ---
 
+# HDF5 (LOSC/GWOSC) en 10 segundos (para que s1 no aborte)
+
+**Regla**: los HDF5 externos viven como input *solo lectura* en:
+
+`data/losc/<EVENT_ID>/`
+
+**1) Lista los H5 disponibles (H1/L1)**:
+
+```bash
+EVENT_ID=GW150914
+find "data/losc/$EVENT_ID" -type f \( -iname '*.hdf5' -o -iname '*.h5' \)
+```
+
+**2) Escoge uno de H1 y uno de L1** (típicamente contienen `H-H1_...` y `L-L1_...` en el nombre).
+
+**3) Ejecuta s1 con rutas explícitas (copy/paste)**:
+
+```bash
+RUN_ID="mvp_${EVENT_ID}_real_local_$(date -u +%Y%m%dT%H%M%SZ)"
+H1="/ruta/a/data/losc/$EVENT_ID/H-H1_...hdf5"
+L1="/ruta/a/data/losc/$EVENT_ID/L-L1_...hdf5"
+
+python mvp/s1_fetch_strain.py \
+  --run "$RUN_ID" \
+  --event-id "$EVENT_ID" \
+  --detectors H1,L1 \
+  --duration-s 32.0 \
+  --local-hdf5 "H1=$H1" \
+  --local-hdf5 "L1=$L1"
+```
+
+**Nota de gobernanza**: `data/losc/...` es input externo. El árbol auditable del run empieza en `runs/<RUN_ID>/...`.
+
+---
+
 ## 0) Regla de oro (léela primero)
 
 Un stage **siempre resuelve rutas como**:
@@ -154,6 +189,14 @@ Verificación:
 
 ```bash
 find data/losc/GW150914 \( -iname '*.hdf5' -o -iname '*.h5' \) -type f
+```
+
+Ejemplo mínimo (s1 exige rutas explícitas si no hay fetch/caché):
+
+```bash
+python mvp/s1_fetch_strain.py --run <run_id> --event-id GW150914 --detectors H1,L1 \
+  --local-hdf5 "H1=data/losc/GW150914/H-H1_...hdf5" \
+  --local-hdf5 "L1=data/losc/GW150914/L-L1_...hdf5"
 ```
 
 ---
