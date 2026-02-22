@@ -86,6 +86,40 @@ def test_s4_rejects_path_traversal(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert "escapes run directory" in verdict["error"]
 
 
+def test_s6_rejects_absolute_path_outside_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    out_root = tmp_path / "runs"
+    run_id = "run_s6_reject_absolute"
+    run_dir = out_root / run_id
+    _write_run_valid(run_dir)
+
+    write_json_atomic(run_dir / "s4_geometry_filter" / "outputs" / "compatible_set.json", {"compatible_geometries": []})
+    outside_path = tmp_path / "outside_estimates.json"
+    write_json_atomic(outside_path, {"combined": {"f_hz": 1.0, "Q": 1.0}})
+
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(out_root))
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "s6_information_geometry.py",
+            "--run",
+            run_id,
+            "--estimates-path",
+            str(outside_path),
+        ],
+    )
+
+    _install_numpy_stub(monkeypatch)
+    from mvp.s6_information_geometry import main as s6_main
+
+    with pytest.raises(SystemExit) as exc:
+        s6_main()
+
+    assert exc.value.code == 2
+    verdict = json.loads((run_dir / "s6_information_geometry" / "stage_summary.json").read_text(encoding="utf-8"))
+    assert verdict["verdict"] == "FAIL"
+    assert "escapes run directory" in verdict["error"]
+
+
 def test_s6_estimates_override_records_sha256(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     out_root = tmp_path / "runs"
     run_id = "run_s6_override_sha"
