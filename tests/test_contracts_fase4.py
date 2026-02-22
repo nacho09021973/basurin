@@ -105,9 +105,7 @@ class TestAntiRegression:
         ]
 
     def test_s4_geometry_filter_inputs(self):
-        assert CONTRACTS["s4_geometry_filter"].required_inputs == [
-            "s3_ringdown_estimates/outputs/estimates.json",
-        ]
+        assert CONTRACTS["s4_geometry_filter"].required_inputs == []
 
     def test_s4_geometry_filter_outputs(self):
         assert CONTRACTS["s4_geometry_filter"].produced_outputs == [

@@ -23,6 +23,7 @@ from mvp.distance_metrics import (
     mahalanobis_log,
 )
 from basurin_io import write_json_atomic
+from mvp.path_utils import resolve_run_scoped_input
 
 STAGE = "s4_geometry_filter"
 CHI2_2DOF_95 = 5.991
@@ -33,17 +34,13 @@ _UNSET = object()
 
 def _resolve_estimates_path(run_dir: Path, estimates_path_override: str | None) -> Path:
     """Resolve estimates override under run_dir and block traversal/escape."""
-    run_dir_real = run_dir.resolve()
-    if estimates_path_override is None:
-        return run_dir_real / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+    return resolve_run_scoped_input(
+        run_dir,
+        estimates_path_override,
+        default_rel="s3_ringdown_estimates/outputs/estimates.json",
+        arg_name="--estimates-path",
+    )
 
-    resolved = (run_dir_real / Path(estimates_path_override)).resolve()
-    if not resolved.is_relative_to(run_dir_real):
-        raise ValueError(
-            "Invalid --estimates-path: resolved path escapes run directory "
-            f"({resolved} not under {run_dir_real})"
-        )
-    return resolved
 
 
 def _load_atlas(atlas_path: Path) -> list[dict[str, Any]]:

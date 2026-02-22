@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("numpy")
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MVP_DIR = REPO_ROOT / "mvp"
 ATLAS_FIXTURE = MVP_DIR / "test_atlas_fixture.json"
