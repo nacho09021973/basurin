@@ -113,8 +113,8 @@ CONTRACTS: dict[str, StageContract] = {
     "s4_geometry_filter": StageContract(
         name="s4_geometry_filter",
         required_inputs=[
-            "s3_ringdown_estimates/outputs/estimates.json",
-            # atlas_path is external, checked separately
+            # Dynamic: estimates can be overridden via --estimates-path.
+            # Runtime validates and hashes the actual consumed file.
         ],
         produced_outputs=[
             "outputs/compatible_set.json",
@@ -133,8 +133,9 @@ CONTRACTS: dict[str, StageContract] = {
     "s6_information_geometry": StageContract(
         name="s6_information_geometry",
         required_inputs=[
-            "s3_ringdown_estimates/outputs/estimates.json",
             "s4_geometry_filter/outputs/compatible_set.json",
+            # Dynamic: estimates can be overridden via --estimates-path.
+            # Runtime validates and hashes the actual consumed file.
         ],
         produced_outputs=[
             "outputs/curvature.json",

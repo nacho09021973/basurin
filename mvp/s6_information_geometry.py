@@ -402,6 +402,11 @@ def main() -> int:
              "If provided, overrides --psd-model.",
     )
     ap.add_argument(
+        "--estimates-path",
+        default=None,
+        help="Override path to estimates JSON (default: s3_ringdown_estimates/outputs/estimates.json).",
+    )
+    ap.add_argument(
         "--delta-log-f",
         type=float,
         default=0.01,
@@ -412,11 +417,18 @@ def main() -> int:
     ctx = init_stage(args.run, STAGE, params={
         "psd_model": args.psd_model,
         "psd_path": args.psd_path,
+        "estimates_path_override": args.estimates_path,
         "delta_log_f": args.delta_log_f,
     })
 
     # Resolve inputs
-    estimates_path = ctx.run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+    if args.estimates_path is not None:
+        ep = Path(args.estimates_path)
+        if not ep.is_absolute():
+            ep = (ctx.run_dir / ep).resolve()
+        estimates_path = ep
+    else:
+        estimates_path = ctx.run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
     compatible_path = ctx.run_dir / "s4_geometry_filter" / "outputs" / "compatible_set.json"
 
     check_inputs(ctx, {
