@@ -3,8 +3,9 @@ from __future__ import annotations
 import io
 import json
 import sys
+from urllib.request import Request
 
-import scripts.fetch_losc_event as fetch_losc_event
+import tools.fetch_losc_event as fetch_losc_event
 
 
 class _FakeHTTPResponse:
@@ -21,6 +22,45 @@ class _FakeHTTPResponse:
         return False
 
 
+def test_http_get_json_adds_format_api_and_accept_header(monkeypatch):
+    calls: list[tuple[object, int]] = []
+
+    def fake_urlopen(req, timeout=60):
+        calls.append((req, timeout))
+        return _FakeHTTPResponse(b'{"ok": true}')
+
+    monkeypatch.setattr(fetch_losc_event, "urlopen", fake_urlopen)
+
+    payload = fetch_losc_event._http_get_json(
+        "https://gwosc.org/api/v2/event-versions/GW170814-v1/strain-files"
+    )
+
+    assert payload == {"ok": True}
+    assert len(calls) == 1
+
+    req, timeout = calls[0]
+    assert timeout == 60
+    assert isinstance(req, Request)
+    assert "format=api" in req.full_url
+    assert req.headers["Accept"] == "application/json"
+
+
+def test_select_h1_l1_files_selects_expected_rows():
+    payload = {
+        "strain_files": [
+            {"detector": "V1", "download_url": "https://example.org/V-V1_TEST-32.hdf5"},
+            {"detector": "H1", "download_url": "https://example.org/H-H1_TEST-32.hdf5"},
+            {"detector": "L1", "download_url": "https://example.org/L-L1_TEST-32.hdf5"},
+        ]
+    }
+
+    selected = fetch_losc_event._select_h1_l1_files(payload)
+
+    assert set(selected.keys()) == {"H1", "L1"}
+    assert selected["H1"]["download_url"].endswith("H-H1_TEST-32.hdf5")
+    assert selected["L1"]["download_url"].endswith("L-L1_TEST-32.hdf5")
+
+
 def test_fetch_losc_event_creates_aliases_and_inventory(tmp_path, monkeypatch):
     out_root = tmp_path / "data" / "losc"
     event_id = "GW170814"
@@ -32,7 +72,8 @@ def test_fetch_losc_event_creates_aliases_and_inventory(tmp_path, monkeypatch):
         ]
     }
 
-    def fake_urlopen(url, timeout=60):
+    def fake_urlopen(req, timeout=60):
+        url = req.full_url if isinstance(req, Request) else str(req)
         if "strain-files" in url:
             return _FakeHTTPResponse(json.dumps(payload).encode("utf-8"))
         if "H-H1" in url:

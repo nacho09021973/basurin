@@ -13,8 +13,8 @@ import json
 import os
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
-from urllib.request import urlopen
+from urllib.parse import parse_qsl, urlencode, urlparse
+from urllib.request import Request, urlopen
 
 GWOSC_EVENT_VERSIONS_API = "https://gwosc.org/api/v2/event-versions/{event_version}/strain-files"
 
@@ -38,7 +38,13 @@ def _safe_event_dir(out_root: Path, event_id: str) -> Path:
 
 
 def _http_get_json(url: str) -> dict:
-    with urlopen(url, timeout=60) as resp:
+    parsed = urlparse(url)
+    query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    if not any(k == "format" for k, _ in query_pairs):
+        query_pairs.append(("format", "api"))
+        parsed = parsed._replace(query=urlencode(query_pairs))
+    request = Request(parsed.geturl(), headers={"Accept": "application/json"})
+    with urlopen(request, timeout=60) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
