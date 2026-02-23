@@ -2,7 +2,7 @@
 """Fetch canonical LOSC/GWOSC HDF5 strain files for one event.
 
 Usage:
-    python scripts/fetch_losc_event.py --event-id GW170814 --out-root data/losc
+    python tools/fetch_losc_event.py --event-id GW170814 --out-root data/losc
 """
 
 from __future__ import annotations
