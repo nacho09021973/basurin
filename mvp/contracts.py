@@ -121,6 +121,17 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         upstream_stages=["s3_ringdown_estimates"],
     ),
+    "s4_spectral_geometry_filter": StageContract(
+        name="s4_spectral_geometry_filter",
+        required_inputs=[
+            # Dynamic: estimates can be overridden via --estimates-path.
+            # Runtime validates and hashes the actual consumed file.
+        ],
+        produced_outputs=[
+            "outputs/compatible_set.json",
+        ],
+        upstream_stages=["s3_ringdown_estimates"],
+    ),
     "s5_aggregate": StageContract(
         name="s5_aggregate",
         required_inputs=[],  # Dynamic: depends on source_runs list
