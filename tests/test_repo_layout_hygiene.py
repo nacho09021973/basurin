@@ -13,3 +13,6 @@ def test_no_top_level_experiment_package():
 def test_no_txt_outputs_in_repo_root():
     bad = sorted(p.name for p in ROOT.glob("*.txt") if p.name not in ALLOWED_ROOT_TXT)
     assert bad == [], f"Outputs .txt no permitidos en raíz: {bad}"
+
+def test_no_top_level_scripts_folder():
+    assert not (ROOT / "scripts").exists(), "No usar ./scripts; mover utilidades a tools/"
