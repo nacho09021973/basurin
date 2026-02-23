@@ -10,7 +10,7 @@ Framework MVP para análisis de *ringdown* (ondas gravitacionales) con ejecució
 2. **Consulta el mapa de rutas**: [`docs/readme_rutas.md`](docs/readme_rutas.md) (crítico para `RUNS_ROOT`, subruns y experimentos anidados).
 3. Ejecuta con `python mvp/pipeline.py ...` y asume semántica *fail-fast* (si una etapa falla, el pipeline aborta).
 4. No escribas fuera de `runs/<run_id>/...` (o del `BASURIN_RUNS_ROOT` efectivo).
-5. HDF5 externos (GWOSC/LOSC) viven en `data/losc/<EVENT_ID>/` y se leen desde ahí (sin fabricarlos en el run).
+5. HDF5 externos (GWOSC/LOSC) viven en `data/losc/<EVENT_ID>/` como input read-only; el run auditable guarda copia inmutable + hashes en `s1_fetch_strain/inputs` y `provenance.json`.
 6. Antes de proponer cambios, revisa tests en `tests/` y contratos en `mvp/contracts.py`.
 
 ---
@@ -23,6 +23,37 @@ BASURIN implementa un pipeline reproducible para análisis de ringdown con estas
 - **Artefactos explícitos por stage** (`manifest.json`, `stage_summary.json`, `outputs/...`).
 - **Gobernanza por run** con `RUN_VALID/verdict.json`.
 - **Modo evento único y multi-evento** desde un orquestador central.
+
+## Dónde están los datos y cómo encontrarlos (anti-pérdida de tiempo)
+
+Regla base: un run solo “existe” para downstream si existe:
+
+`runs/<RUN_ID>/RUN_VALID/verdict.json`
+
+Copy/paste rápido:
+
+```bash
+# (i) leer verdict de un run
+RUN_ID="mvp_GW150914_..."
+cat "runs/$RUN_ID/RUN_VALID/verdict.json"
+
+# (ii) listar runs PASS (comando real verificado)
+grep -R --line-number '"verdict"\s*:\s*"PASS"' runs/*/RUN_VALID/verdict.json \
+  | sed -E 's@runs/([^/]+)/.*@\1@' | sort -u
+
+# (iii) localizar H5 usados por s1 + trazabilidad
+ls -l "runs/$RUN_ID/s1_fetch_strain/inputs/H1.h5" \
+      "runs/$RUN_ID/s1_fetch_strain/inputs/L1.h5"
+cat "runs/$RUN_ID/s1_fetch_strain/outputs/provenance.json"
+
+# (iv) localizar estimates clave de s3
+ls -l "runs/$RUN_ID/s3_ringdown_estimates/outputs/estimates.json"
+```
+
+Nota Bash importante:
+
+- ✅ Correcto: `RUN_ID="..."`
+- ❌ Incorrecto: `.RUN_ID="..."` (eso produce `command not found`).
 
 ## Arquitectura de alto nivel
 
@@ -232,7 +263,7 @@ python mvp/s1_fetch_strain.py   --run <run_id>   --event-id GW150914   --detecto
 
 - Si no pasas `--local-hdf5`, `s1_fetch_strain` intenta auto-resolver en `data/losc/<EVENT_ID>/` con patrones `*H1*.hdf5|*.h5` y `*L1*.hdf5|*.h5`.
 - Si falta algún archivo, falla rápido con la ruta exacta esperada + comando `find` + ejemplo de invocación con `--local-hdf5`.
-- `data/losc/...` es **external inputs (solo lectura)**: el run no “fabrica” HDF5 ahí ni duplica megas por defecto.
+- `data/losc/...` es **input externo read-only**; el run auditable guarda copia inmutable de los HDF5 efectivamente usados en `runs/<run_id>/s1_fetch_strain/inputs/{H1,L1}.h5` y hashes/trazabilidad en `runs/<run_id>/s1_fetch_strain/outputs/provenance.json`.
 - Para auditoría, s1 copia los HDF5 usados a `runs/<run_id>/s1_fetch_strain/inputs/*.h5` y guarda hashes en `provenance.json`.
 
 ## Semántica operacional importante

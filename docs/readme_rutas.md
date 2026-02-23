@@ -2,6 +2,41 @@
 
 Objetivo: que una IA (o humano) no pierda 5–6 horas diarias por confundir `RUN_ID`, `SUBRUN_ID`, `RUNS_ROOT` y árboles de experimentos.
 
+## Índice: qué busco → ruta exacta (30 segundos)
+
+- **Gating canónico (run válido para downstream):**
+  - `runs/<RUN_ID>/RUN_VALID/verdict.json`
+- **H5 efectivamente usados por s1 + trazabilidad:**
+  - `runs/<RUN_ID>/s1_fetch_strain/inputs/H1.h5`
+  - `runs/<RUN_ID>/s1_fetch_strain/inputs/L1.h5`
+  - `runs/<RUN_ID>/s1_fetch_strain/outputs/provenance.json`
+- **Ventana ringdown (s2):**
+  - `runs/<RUN_ID>/s2_ringdown_window/outputs/`
+  - `runs/<RUN_ID>/s2_ringdown_window/outputs/window_meta.json` (si existe)
+- **Estimaciones clave (s3):**
+  - `runs/<RUN_ID>/s3_ringdown_estimates/outputs/estimates.json`
+- **Multimode (s3b):**
+  - `runs/<RUN_ID>/s3b_multimode_estimates/outputs/`
+- **Filtro geométrico (s4):**
+  - `runs/<RUN_ID>/s4_geometry_filter/outputs/`
+- **Curvatura/diagnóstico (s6/s6b):**
+  - `runs/<RUN_ID>/s6*/outputs/curvature*.json`
+  - `runs/<RUN_ID>/s6*/outputs/metric_diagnostics*.json`
+
+### Comando universal para encontrar outputs sin pensar
+
+```bash
+RUN_ID="mvp_GW150914_..."
+find "runs/$RUN_ID" -type f \
+  \( -name 'verdict.json' \
+  -o -name 'H1.h5' -o -name 'L1.h5' \
+  -o -name 'provenance.json' \
+  -o -name 'window_meta.json' \
+  -o -name 'estimates.json' \
+  -o -name 'curvature*.json' \
+  -o -name 'metric_diagnostics*.json' \)
+```
+
 ---
 
 # HDF5 (LOSC/GWOSC) en 10 segundos (para que s1 no aborte)
@@ -253,4 +288,3 @@ Si falta ese directorio/JSON, el oráculo imprime la ruta esperada exacta y el c
 
 =======
 ## Codex
-
