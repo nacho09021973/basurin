@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from experiment.analyze_geometry_support import analyze_geometry_support
+from mvp.experiment.legacy_top_level.analyze_geometry_support import analyze_geometry_support
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -109,7 +109,7 @@ def test_report_completeness_and_worst_events_target(tmp_path: Path, monkeypatch
 def test_report_json_is_deterministic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     runs_root = tmp_path / "runs_root"
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
-    monkeypatch.setattr("experiment.analyze_geometry_support.utc_now_iso", lambda: "2026-01-01T00:00:00Z")
+    monkeypatch.setattr("mvp.experiment.legacy_top_level.analyze_geometry_support.utc_now_iso", lambda: "2026-01-01T00:00:00Z")
 
     src_runs = ["r1", "r2", "r3"]
     runs_list = tmp_path / "runs_50_ids.txt"

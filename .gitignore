@@ -19,3 +19,6 @@ local_backup/
 # local
 /docs/ringdown/window_catalog_v1.json
 events_6.txt
+
+# Scratch local (no canónico)
+scratch/
