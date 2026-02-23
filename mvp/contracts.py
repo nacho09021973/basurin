@@ -186,6 +186,18 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         upstream_stages=["s2_ringdown_window"],
     ),
+    "experiment_geometry_evidence_vs_gr": StageContract(
+        name="experiment_geometry_evidence_vs_gr",
+        required_inputs=[
+            "s4_geometry_filter/outputs/compatible_set.json",
+            "s6_information_geometry/outputs/curvature.json",
+        ],
+        produced_outputs=[
+            "outputs/evidence_vs_gr.json",
+        ],
+        upstream_stages=["s4_geometry_filter", "s6_information_geometry"],
+        check_run_valid=True,
+    ),
 }
 
 
