@@ -1,2 +1,3 @@
 # Dependencias base para ejecutar stages/tests MVP en entorno estándar BASURIN.
 numpy>=1.24
+scipy>=1.10
