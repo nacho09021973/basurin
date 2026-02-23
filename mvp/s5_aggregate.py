@@ -32,6 +32,14 @@ from basurin_io import sha256_file, utc_now_iso, write_json_atomic
 STAGE = "s5_aggregate"
 
 
+def _relpath_under(root: Path, p: Path) -> str:
+    """Return POSIX path relative to root when possible, else absolute POSIX path."""
+    try:
+        return p.relative_to(root).as_posix()
+    except ValueError:
+        return p.as_posix()
+
+
 def _extract_compatible_geometry_ids(payload: dict[str, Any]) -> set[str]:
     """Extract compatible geometry IDs from legacy and newer compatible_set schemas."""
     compatible_geometries = payload.get("compatible_geometries")
@@ -484,6 +492,12 @@ def main() -> int:
         p = out_root / src / "s4_geometry_filter" / "outputs" / "compatible_set.json"
         source_paths[src] = p
     check_inputs(ctx, source_paths)
+    # Keep metadata portable/auditable: prefer paths relative to runs_root for upstream inputs.
+    for rec in ctx.inputs_record:
+        label = rec.get("label", "")
+        src_path = source_paths.get(label)
+        if src_path is not None:
+            rec["path"] = _relpath_under(out_root, src_path)
 
     try:
         source_data: list[dict[str, Any]] = []
