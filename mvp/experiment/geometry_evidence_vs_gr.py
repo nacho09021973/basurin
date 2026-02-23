@@ -13,7 +13,7 @@ for _cand in (_here.parents[1], _here.parents[2]):
     if (_cand / "basurin_io.py").exists() and str(_cand) not in sys.path:
         sys.path.insert(0, str(_cand))
 
-from basurin_io import utc_now_iso, write_json_atomic
+from basurin_io import write_json_atomic
 from mvp.contracts import abort, check_inputs, finalize, init_stage
 
 STAGE = "experiment_geometry_evidence_vs_gr"
@@ -140,7 +140,6 @@ def main(argv: list[str] | None = None) -> int:
     output_payload: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "run": args.run_id,
-        "created": utc_now_iso(),
         "inputs": {
             "compatible_set_path": str(compatible_set_path.relative_to(ctx.run_dir)),
             "curvature_2d_path": str(curvature_2d_path.relative_to(ctx.run_dir)),
