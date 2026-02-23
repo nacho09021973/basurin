@@ -154,6 +154,32 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         upstream_stages=["s3_ringdown_estimates", "s4_geometry_filter"],
     ),
+    "s6b_information_geometry_3d": StageContract(
+        name="s6b_information_geometry_3d",
+        required_inputs=[
+            "s3_ringdown_estimates/outputs/estimates.json",
+            "s3b_multimode_estimates/outputs/multimode_estimates.json",
+            "s4_geometry_filter/outputs/compatible_set.json",
+        ],
+        produced_outputs=[
+            "outputs/curvature_3d.json",
+            "outputs/metric_diagnostics_3d.json",
+            "outputs/coords_3d.json",
+        ],
+        upstream_stages=["s3_ringdown_estimates", "s3b_multimode_estimates", "s4_geometry_filter"],
+    ),
+    "s6c_population_geometry": StageContract(
+        name="s6c_population_geometry",
+        required_inputs=[
+            "s5_aggregate/outputs/aggregate.json",
+        ],
+        produced_outputs=[
+            "outputs/population_scalar_claim.json",
+            "outputs/population_diagnostics.json",
+        ],
+        upstream_stages=["s5_aggregate"],
+        check_run_valid=True,
+    ),
     "s4b_spectral_curvature": StageContract(
         name="s4b_spectral_curvature",
         required_inputs=[
