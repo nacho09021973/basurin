@@ -22,3 +22,6 @@ events_6.txt
 
 # Scratch local (no canónico)
 scratch/
+
+# Cache local LOSC (no canónica)
+data/losc/
