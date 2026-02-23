@@ -84,6 +84,16 @@ def _load_atlas_map(atlas_path: Path) -> dict[str, dict[str, Any]]:
     return {str(e.get("geometry_id")): e for e in entries if "geometry_id" in e}
 
 
+def _spin_family(geometry_id: str | None) -> str:
+    if not geometry_id:
+        return "unknown"
+    if "_a0.95_" in geometry_id:
+        return "a0.95"
+    if "_a0.80_" in geometry_id:
+        return "a0.80"
+    return "other"
+
+
 def analyze_geometry_support(
     out_root: Path,
     run_id: str,
@@ -150,12 +160,17 @@ def analyze_geometry_support(
 
     support_by_k: dict[str, dict[str, int]] = {}
     top_by_k: dict[str, list[dict[str, Any]]] = {}
+    in_topk_by_event: dict[str, dict[str, bool]] = {}
     for k in k_values:
         cnt: Counter[str] = Counter()
         for row in per_event:
             src_run = row["run_id"]
             ids = ranked_ids_by_run[src_run][:k]
             cnt.update(ids)
+            per_event_key = f"{src_run}::{row['event_id']}"
+            if per_event_key not in in_topk_by_event:
+                in_topk_by_event[per_event_key] = {}
+            in_topk_by_event[per_event_key][str(k)] = target_geometry_id in ids
         ordered = sorted(cnt.items(), key=lambda kv: (-kv[1], kv[0]))
         support_by_k[str(k)] = dict(ordered)
         top_by_k[str(k)] = [{"geometry_id": gid, "support": sup} for gid, sup in ordered[:10]]
@@ -174,6 +189,11 @@ def analyze_geometry_support(
     }
 
     outliers = sorted(per_event, key=lambda x: (-x["rank_target"], str(x["event_id"])))[:worst_n]
+
+    for row in outliers:
+        row["is_target_in_top3"] = row["rank_target"] <= 3
+        row["is_target_in_top5"] = row["rank_target"] <= 5
+        row["is_target_in_top10"] = row["rank_target"] <= 10
 
     # Correlations rank(target) vs observables/covariance
     corr_inputs: dict[str, list[float]] = {"f_hz": [], "Q": [], "sigma_logf": [], "sigma_logQ": [], "d2_min": []}
@@ -201,6 +221,44 @@ def analyze_geometry_support(
     atlas_focus_ids = [target_geometry_id, "bK_140_a0.95_df-0.20_dQ+0.10", "bK_107_a0.80_df-0.20_dQ+0.20"]
     atlas_focus = {gid: atlas_by_id.get(gid) for gid in atlas_focus_ids}
 
+    atlas_bk141 = atlas_by_id.get(target_geometry_id)
+    atlas_bk107_id = "bK_107_a0.80_df-0.20_dQ+0.20"
+    atlas_bk107 = atlas_by_id.get(atlas_bk107_id)
+    atlas_comparison = {
+        "target": {"geometry_id": target_geometry_id, "entry": atlas_bk141},
+        "comparison": {"geometry_id": atlas_bk107_id, "entry": atlas_bk107},
+    }
+
+    spin_family_counts = dict(
+        sorted(Counter(_spin_family(str(row.get("best_entry_id") or "")) for row in per_event).items(), key=lambda kv: kv[0])
+    )
+
+    transitions_3_5_10: list[dict[str, Any]] = []
+    has_3 = "3" in {str(k) for k in k_values}
+    has_5 = "5" in {str(k) for k in k_values}
+    has_10 = "10" in {str(k) for k in k_values}
+    if has_3 and has_5 and has_10:
+        for row in per_event:
+            per_event_key = f"{row['run_id']}::{row['event_id']}"
+            flags = in_topk_by_event.get(per_event_key, {})
+            in3 = bool(flags.get("3", False))
+            in5 = bool(flags.get("5", False))
+            in10 = bool(flags.get("10", False))
+            if len({in3, in5, in10}) > 1:
+                transitions_3_5_10.append(
+                    {
+                        "run_id": row["run_id"],
+                        "event_id": row["event_id"],
+                        "rank_target": row["rank_target"],
+                        "in_top3": in3,
+                        "in_top5": in5,
+                        "in_top10": in10,
+                        "best_entry_id": row["best_entry_id"],
+                        "top5_ids": row["top5_ids"],
+                    }
+                )
+    transitions_3_5_10.sort(key=lambda x: (x["rank_target"], str(x["event_id"])))
+
     # Compare top-1/2/3 by support at each K
     support_comp: dict[str, Any] = {}
     for k, top in top_by_k.items():
@@ -224,6 +282,9 @@ def analyze_geometry_support(
         "worst_events": outliers,
         "correlations_rank_target": correlations,
         "atlas_focus": atlas_focus,
+        "atlas_bk141_vs_bk107": atlas_comparison,
+        "best_entry_spin_family_counts": spin_family_counts,
+        "target_membership_transitions_3_5_10": transitions_3_5_10,
     }
 
     report_path = outputs_dir / "geometry_support_report.json"
