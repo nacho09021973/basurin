@@ -105,6 +105,59 @@ def _topk_ranked_sets(source_data: list[dict[str, Any]], top_k: int | None) -> l
     return ranked_sets
 
 
+
+
+def _extract_mode(multimode: dict[str, Any], label: str) -> dict[str, Any] | None:
+    for row in multimode.get("modes", []):
+        if isinstance(row, dict) and str(row.get("label")) == label:
+            return row
+    return None
+
+
+def _censoring_from_multimode(multimode: dict[str, Any]) -> dict[str, Any]:
+    flags = multimode.get("results", {}).get("quality_flags", [])
+    if not isinstance(flags, list):
+        flags = []
+    flags = [str(f) for f in flags]
+
+    mode220 = _extract_mode(multimode, "220")
+    mode221 = _extract_mode(multimode, "221")
+
+    has_220 = mode220 is not None and isinstance(mode220.get("ln_f"), (int, float))
+    has_221_coords = mode221 is not None and isinstance(mode221.get("ln_f"), (int, float)) and isinstance(mode221.get("ln_Q"), (int, float))
+    flagged_221 = [f for f in flags if "221" in f]
+
+    has_221 = bool(has_221_coords and not flagged_221)
+    reason = None if has_221 else (flagged_221[0] if flagged_221 else (flags[0] if flags else "mode_221_missing_or_degraded"))
+
+    return {
+        "has_220": has_220,
+        "has_221": has_221,
+        "reason": reason,
+        "weight_scalar": 1.0 if has_220 else 0.0,
+        "weight_vector4": 1.0 if has_221 else 0.0,
+    }
+
+
+def _first_number(mapping: dict[str, Any], keys: list[str]) -> float | None:
+    for key in keys:
+        val = mapping.get(key)
+        if isinstance(val, (int, float)) and math.isfinite(float(val)):
+            return float(val)
+    return None
+
+
+def _extract_vector4(s4c_payload: dict[str, Any]) -> dict[str, Any]:
+    deltas = s4c_payload.get("deltas", {})
+    if not isinstance(deltas, dict):
+        deltas = {}
+    return {
+        "delta_f_220": _first_number(deltas, ["delta_f_220", "delta_logfreq"]),
+        "delta_tau_220": _first_number(deltas, ["delta_tau_220", "delta_logtau"]),
+        "delta_f_221": _first_number(deltas, ["delta_f_221"]),
+        "delta_tau_221": _first_number(deltas, ["delta_tau_221"]),
+        "cov4": s4c_payload.get("cov4") if isinstance(s4c_payload.get("cov4"), list) else None,
+    }
 def aggregate_compatible_sets(
     source_data: list[dict[str, Any]], min_coverage: float = 1.0, top_k: int = 50,
 ) -> dict[str, Any]:
@@ -173,6 +226,19 @@ def aggregate_compatible_sets(
         else:
             ranked_rows = ranked_all[:max(0, top_k)]
         threshold_d2 = src.get("threshold_d2")
+        censoring = _censoring_from_multimode(src.get("multimode", {}) if isinstance(src.get("multimode"), dict) else {})
+        raw_vote = str((src.get("s4c", {}) if isinstance(src.get("s4c"), dict) else {}).get("verdict") or "INCONCLUSIVE").upper()
+        vote_kerr = raw_vote if censoring["has_221"] and raw_vote in {"PASS", "FAIL", "INCONCLUSIVE"} else "INCONCLUSIVE"
+        if not censoring["has_221"]:
+            vote_kerr = "INCONCLUSIVE"
+            censoring["weight_vector4"] = 0.0
+
+        scalar_obj = {
+            "kerr_tension": _first_number(src.get("s4c", {}) if isinstance(src.get("s4c"), dict) else {}, ["kerr_tension", "chi_best", "d2_min"]),
+            "kerr_tension_pvalue": _first_number(src.get("s4c", {}) if isinstance(src.get("s4c"), dict) else {}, ["kerr_tension_pvalue", "p_value", "pvalue"]),
+        }
+        vector4_obj = _extract_vector4(src.get("s4c", {}) if isinstance(src.get("s4c"), dict) else {})
+
         events.append(
             {
                 "run_id": src["run_id"],
@@ -180,6 +246,16 @@ def aggregate_compatible_sets(
                 "metric": metric,
                 "threshold_d2": threshold_d2,
                 "n_atlas": len(ranked_rows),
+                "censoring": {
+                    "has_221": censoring["has_221"],
+                    "vote_kerr": vote_kerr,
+                    "weight_scalar": float(censoring["weight_scalar"]),
+                    "weight_vector4": float(censoring["weight_vector4"]),
+                    "reason": censoring["reason"],
+                },
+                "quality": {"ringdown_snr": src.get("ringdown_snr")},
+                "scalar": scalar_obj,
+                "vector4": vector4_obj,
             }
         )
 
@@ -587,6 +663,28 @@ def main() -> int:
                     except Exception:
                         pass
 
+            multimode_payload: dict[str, Any] = {}
+            s4c_payload: dict[str, Any] = {}
+            ringdown_snr = None
+            for extra_path in [
+                out_root / src / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json",
+                out_root / src / "s4c_kerr_consistency" / "outputs" / "kerr_consistency.json",
+                out_root / src / "s3_ringdown_estimates" / "outputs" / "estimates.json",
+            ]:
+                if not extra_path.exists():
+                    continue
+                try:
+                    with open(extra_path, "r", encoding="utf-8") as ef:
+                        payload = json.load(ef)
+                    if extra_path.name == "multimode_estimates.json" and isinstance(payload, dict):
+                        multimode_payload = payload
+                    elif extra_path.name == "kerr_consistency.json" and isinstance(payload, dict):
+                        s4c_payload = payload
+                    elif extra_path.name == "estimates.json" and isinstance(payload, dict):
+                        ringdown_snr = _first_number(payload.get("combined", {}) if isinstance(payload.get("combined"), dict) else {}, ["snr_peak"])
+                except Exception:
+                    continue
+
             source_data.append({
                 "run_id": src, "event_id": cs.get("event_id", "unknown"),
                 "metric": cs.get("metric"),
@@ -596,6 +694,9 @@ def main() -> int:
                 "observables": observables,
                 "sigma_f_hz": sigma_f_hz,
                 "sigma_Q": sigma_Q,
+                "multimode": multimode_payload,
+                "s4c": s4c_payload,
+                "ringdown_snr": ringdown_snr,
             })
 
         result = aggregate_compatible_sets(source_data, args.min_coverage, top_k=args.top_k)
@@ -627,10 +728,19 @@ def main() -> int:
         agg_path = ctx.outputs_dir / "aggregate.json"
         write_json_atomic(agg_path, result)
 
+        scalar_missing = sum(
+            1 for ev in result.get("events", [])
+            if isinstance(ev, dict)
+            and isinstance(ev.get("scalar"), dict)
+            and ev["scalar"].get("kerr_tension") is None
+        )
         summary_results: dict[str, Any] = {
             "n_events": result["n_events"],
             "n_common": result["n_common_geometries"],
             "n_unique": result["n_total_unique_geometries"],
+            "diagnostics": {
+                "missing_scalar_kerr_tension": scalar_missing,
+            },
         }
         if deviation_analysis and deviation_analysis.get("combined"):
             comb = deviation_analysis["combined"]
@@ -639,6 +749,11 @@ def main() -> int:
             summary_results["consistent_GR_95"] = comb["consistent_GR_95"]
 
         finalize(ctx, artifacts={"aggregate": agg_path}, results=summary_results)
+        print(f"OUT_ROOT={ctx.out_root}")
+        print(f"STAGE_DIR={ctx.stage_dir}")
+        print(f"OUTPUTS_DIR={ctx.outputs_dir}")
+        print(f"STAGE_SUMMARY={ctx.stage_dir / 'stage_summary.json'}")
+        print(f"MANIFEST={ctx.stage_dir / 'manifest.json'}")
         return 0
 
     except SystemExit:
