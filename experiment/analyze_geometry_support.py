@@ -53,10 +53,10 @@ def _percentile(sorted_values: list[float], p: float) -> float | None:
 
 
 def _find_rank(ranked_ids: list[str], geometry_id: str) -> int:
-    for i, gid in enumerate(ranked_ids, start=1):
+    for i, gid in enumerate(ranked_ids):
         if gid == geometry_id:
             return i
-    return len(ranked_ids) + 1
+    return -1
 
 
 def _load_runs_list(path: Path) -> list[str]:
@@ -152,6 +152,9 @@ def analyze_geometry_support(
                 "sigma_logQ": cov.get("sigma_logQ"),
                 "cov_logf_logQ": cov.get("cov_logf_logQ"),
                 "d2_min": cs.get("d2_min"),
+                "epsilon": cs.get("epsilon"),
+                "metric": cs.get("metric"),
+                "best_geometry_id": ranked_ids[0] if ranked_ids else None,
                 "best_entry_id": (cs.get("atlas_posterior") or {}).get("best_entry_id"),
                 "n_compatible": len(cs.get("compatible_geometries", [])),
             }
@@ -188,12 +191,40 @@ def analyze_geometry_support(
         "histogram": dict(sorted(Counter(int(r) for r in ranks).items(), key=lambda kv: kv[0])),
     }
 
-    outliers = sorted(per_event, key=lambda x: (-x["rank_target"], str(x["event_id"])))[:worst_n]
+    def _is_in_top_k(rank: int, k: int) -> bool:
+        return rank >= 0 and rank < k
 
-    for row in outliers:
-        row["is_target_in_top3"] = row["rank_target"] <= 3
-        row["is_target_in_top5"] = row["rank_target"] <= 5
-        row["is_target_in_top10"] = row["rank_target"] <= 10
+    worst_events_target: list[dict[str, Any]] = []
+    for row in per_event:
+        rank_target = int(row["rank_target"])
+        top5_geometry_ids = list(row["top5_ids"])
+        worst_events_target.append(
+            {
+                "run_id": row["run_id"],
+                "event_id": row["event_id"],
+                "rank_target": rank_target,
+                "best_geometry_id": row.get("best_geometry_id"),
+                "in_top3": _is_in_top_k(rank_target, 3),
+                "in_top5": _is_in_top_k(rank_target, 5),
+                "in_top10": _is_in_top_k(rank_target, 10),
+                "observables": {"f_hz": row.get("f_hz"), "Q": row.get("Q")},
+                "covariance_logspace": {
+                    "sigma_logf": row.get("sigma_logf"),
+                    "sigma_logQ": row.get("sigma_logQ"),
+                },
+                "d2_min": row.get("d2_min"),
+                "epsilon": row.get("epsilon"),
+                "metric": row.get("metric"),
+                "top5_geometry_ids": top5_geometry_ids,
+            }
+        )
+
+    def _worst_event_key(row: dict[str, Any]) -> tuple[int, str]:
+        rank = int(row["rank_target"])
+        rank_sort = rank if rank >= 0 else 10**9
+        return (-rank_sort, str(row["run_id"]))
+
+    worst_events_target = sorted(worst_events_target, key=_worst_event_key)[:worst_n]
 
     # Correlations rank(target) vs observables/covariance
     corr_inputs: dict[str, list[float]] = {"f_hz": [], "Q": [], "sigma_logf": [], "sigma_logQ": [], "d2_min": []}
@@ -220,6 +251,12 @@ def analyze_geometry_support(
 
     atlas_focus_ids = [target_geometry_id, "bK_140_a0.95_df-0.20_dQ+0.10", "bK_107_a0.80_df-0.20_dQ+0.20"]
     atlas_focus = {gid: atlas_by_id.get(gid) for gid in atlas_focus_ids}
+
+    atlas_target = atlas_by_id.get(target_geometry_id)
+    atlas_comparisons: dict[str, Any] = {}
+    for comparison_id in ["bK_140_a0.95_df-0.20_dQ+0.10", "bK_107_a0.80_df-0.20_dQ+0.20"]:
+        if comparison_id in atlas_by_id:
+            atlas_comparisons[comparison_id] = atlas_by_id[comparison_id]
 
     atlas_bk141 = atlas_by_id.get(target_geometry_id)
     atlas_bk107_id = "bK_107_a0.80_df-0.20_dQ+0.20"
@@ -276,12 +313,19 @@ def analyze_geometry_support(
         "source_run_count": len(source_run_ids),
         "k_values": k_values,
         "support_by_k": support_by_k,
+        "support_definition": (
+            "support_by_k[K] counts events where geometry appears in ranked_all[:K]. "
+            "For K=1 this equals the top-1 count."
+        ),
         "top_by_k": top_by_k,
         "support_comparison": support_comp,
         "rank_summary": rank_summary,
-        "worst_events": outliers,
+        "worst_events": worst_events_target,
+        "worst_events_target": worst_events_target,
         "correlations_rank_target": correlations,
         "atlas_focus": atlas_focus,
+        "atlas_target": atlas_target,
+        "atlas_comparisons": atlas_comparisons,
         "atlas_bk141_vs_bk107": atlas_comparison,
         "best_entry_spin_family_counts": spin_family_counts,
         "target_membership_transitions_3_5_10": transitions_3_5_10,
