@@ -1,2 +1,3 @@
 1c065e283fb7f3ab9dea77b08b598ffe05792cf32ee2591a890f528701fb6f81  docs/ringdown/atlas/atlas_real_v1.json
 815e29338d15f0c303c3d24ab1ed293a86911bac4e72f0ec574a9888be7a9221  docs/ringdown/atlas/atlas_real_v1_s4.json
+f363903113c92bc0c85783cb0e285f6529719fe317374b6c022e9a393e17626c  docs/ringdown/atlas/atlas_real_v2_s4.json
