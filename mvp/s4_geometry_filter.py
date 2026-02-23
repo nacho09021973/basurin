@@ -26,6 +26,7 @@ from basurin_io import write_json_atomic
 from mvp.path_utils import resolve_run_scoped_input
 
 STAGE = "s4_geometry_filter"
+ALLOWED_STAGE_NAMES = {"s4_geometry_filter", "s4_spectral_geometry_filter"}
 CHI2_2DOF_95 = 5.991
 CHI2_2DOF_95_AUDIT = 5.9915
 CHI2_2DOF_997_AUDIT = 11.6183
@@ -478,6 +479,7 @@ def compute_compatible_set(
 def main() -> int:
     ap = argparse.ArgumentParser(description=f"MVP {STAGE}: filter compatible geometries")
     ap.add_argument("--run", required=True)
+    ap.add_argument("--stage-name", default=STAGE)
     ap.add_argument("--atlas-path", required=True)
     ap.add_argument("--epsilon", type=float, default=None)
     ap.add_argument("--metric", choices=["euclidean_log", "mahalanobis_log"], default=None)
@@ -488,11 +490,20 @@ def main() -> int:
     )
     args = ap.parse_args()
 
+    if args.stage_name not in ALLOWED_STAGE_NAMES:
+        print(
+            "ERROR: --stage-name must be one of "
+            f"{sorted(ALLOWED_STAGE_NAMES)}; got '{args.stage_name}'",
+            file=sys.stderr,
+        )
+        return 2
+
     atlas_path = Path(args.atlas_path)
     if not atlas_path.is_absolute():
         atlas_path = (Path.cwd() / atlas_path).resolve()
 
-    ctx = init_stage(args.run, STAGE, params={
+    ctx = init_stage(args.run, args.stage_name, params={
+        "stage_name": args.stage_name,
         "atlas_path": str(atlas_path),
         "epsilon_cli": args.epsilon,
         "estimates_path_override": args.estimates_path,
