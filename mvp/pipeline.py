@@ -97,6 +97,13 @@ def _generate_run_id(event_id: str) -> str:
     return f"mvp_{event_id}_{_ts()}"
 
 
+def _require_nonempty_event_id(event_id: str, arg_name: str = "--event-id") -> str:
+    normalized = (event_id or "").strip()
+    if not normalized:
+        raise SystemExit(f"ERROR: {arg_name} cannot be empty")
+    return normalized
+
+
 def _create_run_valid(out_root: Path, run_id: str) -> None:
     rv_dir = out_root / run_id / "RUN_VALID"
     rv_dir.mkdir(parents=True, exist_ok=True)
@@ -343,6 +350,7 @@ def run_single_event(
     estimator: str = "hilbert",
 ) -> tuple[int, str]:
     """Run full pipeline for a single event. Returns (exit_code, run_id)."""
+    event_id = _require_nonempty_event_id(event_id, "--event-id")
     out_root = resolve_out_root("runs")
 
     if run_id is None:
@@ -527,6 +535,7 @@ def run_multimode_event(
     s3b_seed: int = 12345,
     offline: bool = False,
 ) -> tuple[int, str]:
+    event_id = _require_nonempty_event_id(event_id, "--event-id")
     out_root = resolve_out_root("runs")
 
     if run_id is None:
@@ -656,6 +665,8 @@ def run_multi_event(
 
     out_root = resolve_out_root("runs")
     estimator = kwargs.get("estimator", "hilbert")
+
+    events = [_require_nonempty_event_id(e, "--events") for e in events]
 
     print(f"\n[pipeline] Starting multi-event pipeline")
     print(f"[pipeline] events={events}")
@@ -894,8 +905,9 @@ def main() -> int:
 
     if args.mode == "single":
         atlas_path = _resolve_atlas_path(args.atlas_path, args.atlas_default)
+        event_id = _require_nonempty_event_id(args.event_id, "--event-id")
         rc, run_id = run_single_event(
-            event_id=args.event_id,
+            event_id=event_id,
             atlas_path=atlas_path,
             run_id=args.run_id,
             synthetic=args.synthetic,
@@ -916,7 +928,7 @@ def main() -> int:
 
     elif args.mode == "multi":
         atlas_path = _resolve_atlas_path(args.atlas_path, args.atlas_default)
-        events = [e.strip() for e in args.events.split(",") if e.strip()]
+        events = [_require_nonempty_event_id(e, "--events") for e in args.events.split(",") if e.strip()]
         rc, agg_run_id = run_multi_event(
             events=events,
             atlas_path=atlas_path,
@@ -941,7 +953,7 @@ def main() -> int:
 
     elif args.mode == "batch":
         atlas_path = _resolve_atlas_path(args.atlas_path, args.atlas_default)
-        events = [e.strip() for e in args.events.split(",") if e.strip()]
+        events = [_require_nonempty_event_id(e, "--events") for e in args.events.split(",") if e.strip()]
         rc, agg_run_id = run_multi_event(
             events=events,
             atlas_path=atlas_path,
@@ -965,8 +977,9 @@ def main() -> int:
 
     elif args.mode == "multimode":
         atlas_path = _resolve_atlas_path(args.atlas_path, args.atlas_default)
+        event_id = _require_nonempty_event_id(args.event_id, "--event-id")
         rc, run_id = run_multimode_event(
-            event_id=args.event_id,
+            event_id=event_id,
             atlas_path=atlas_path,
             run_id=args.run_id,
             synthetic=args.synthetic,
