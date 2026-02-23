@@ -91,11 +91,25 @@ def aggregate_compatible_sets(
 ) -> dict[str, Any]:
     n_events = len(source_data)
     compatible_sets = [set(map(str, src.get("compatible_ids", set()))) for src in source_data]
-    if compatible_sets:
-        legacy_common_ids = sorted(set.intersection(*compatible_sets))
-    else:
-        legacy_common_ids = []
-    legacy_common_geometries = [{"geometry_id": gid} for gid in legacy_common_ids]
+
+    ranked_sets: list[set[str]] = []
+    for src in source_data:
+        ranked_all = src.get("ranked_all", [])
+        if top_k is None:
+            ranked_rows = ranked_all
+        else:
+            ranked_rows = ranked_all[:max(0, top_k)]
+        ranked_sets.append({
+            str(row.get("geometry_id"))
+            for row in ranked_rows
+            if isinstance(row, dict) and row.get("geometry_id") is not None
+        })
+
+    common_ranked_ids = sorted(set.intersection(*ranked_sets)) if ranked_sets else []
+    common_compatible_ids = sorted(set.intersection(*compatible_sets)) if compatible_sets else []
+
+    common_ranked_geometries = [{"geometry_id": gid} for gid in common_ranked_ids]
+    common_compatible_geometries = [{"geometry_id": gid} for gid in common_compatible_ids]
 
     if n_events == 0:
         return {
@@ -112,13 +126,21 @@ def aggregate_compatible_sets(
                 "d2_sum_min": None,
                 "log_likelihood_rel_best": None,
                 "common_geometries": [],
+                "common_ranked_geometries": [],
+                "common_compatible_geometries": [],
             },
+            "n_common_ranked": 0,
+            "common_ranked_geometries": [],
+            "n_common_compatible": 0,
+            "common_compatible_geometries": [],
             "common_geometries": [],
             "n_common_geometries": 0,
             "coverage_histogram": {},
+            "coverage_histogram_basis": "ranked_all",
             "n_total_unique_geometries": 0,
             "min_coverage": min_coverage,
             "min_count": 0,
+            "warnings": ["NO_EVENTS_TO_AGGREGATE"],
         }
 
     counter: Counter[str] = Counter()
@@ -237,7 +259,12 @@ def aggregate_compatible_sets(
         "schema_version": "mvp_aggregate_v2",
         "n_events": n_events, "min_coverage": min_coverage, "min_count": min_count,
         "n_total_unique_geometries": len(counter),
-        "n_common_geometries": len(legacy_common_geometries), "common_geometries": legacy_common_geometries,
+        # Backward-compatible alias: common_geometries === ranked intersection.
+        "n_common_geometries": len(common_ranked_geometries), "common_geometries": common_ranked_geometries,
+        "n_common_ranked": len(common_ranked_geometries),
+        "common_ranked_geometries": common_ranked_geometries,
+        "n_common_compatible": len(common_compatible_geometries),
+        "common_compatible_geometries": common_compatible_geometries,
         "joint_posterior": {
             "prior_type": "uniform_entries",
             "normalization": "relative_only",
@@ -247,10 +274,14 @@ def aggregate_compatible_sets(
             "best_entry_id": best_entry_id,
             "d2_sum_min": d2_sum_min,
             "log_likelihood_rel_best": log_likelihood_rel_best,
-            "common_geometries": legacy_common_geometries,
+            "common_geometries": common_ranked_geometries,
+            "common_ranked_geometries": common_ranked_geometries,
+            "common_compatible_geometries": common_compatible_geometries,
             "joint_ranked_all": ranked,
         },
         "coverage_histogram": coverage_hist,
+        "coverage_histogram_basis": "ranked_all",
+        "warnings": ["NO_COMMON_COMPATIBLE_GEOMETRIES"] if not common_compatible_geometries else [],
         "events": events,
     }
 
@@ -560,12 +591,23 @@ def main() -> int:
         # Compute deviation distribution if catalog available
         deviation_analysis = compute_deviation_distribution(source_data, catalog)
         if deviation_analysis is not None:
+            if result.get("n_common_compatible", 0) == 0:
+                warnings_list = deviation_analysis.setdefault("warnings", [])
+                if "NO_COMMON_COMPATIBLE_GEOMETRIES" not in warnings_list:
+                    warnings_list.append("NO_COMMON_COMPATIBLE_GEOMETRIES")
+                deviation_analysis["interpretation"] = "INSUFFICIENT_SUPPORT"
+                combined = deviation_analysis.get("combined")
+                if isinstance(combined, dict):
+                    combined["p_value_GR"] = None
+                    combined["consistent_GR_95"] = None
             result["deviation_analysis"] = deviation_analysis
             if deviation_analysis.get("combined"):
                 comb = deviation_analysis["combined"]
+                p_value = comb.get("p_value_GR")
+                p_text = "null" if p_value is None else f"{p_value:.3f}"
                 print(
                     f"[s5] GR test: δf_rel={comb['delta_f_rel']:.4f}±{comb['sigma_delta_f_rel']:.4f}, "
-                    f"χ²={comb['chi2_GR']:.2f}, p={comb['p_value_GR']:.3f}, "
+                    f"χ²={comb['chi2_GR']:.2f}, p={p_text}, "
                     f"consistent_GR_95={comb['consistent_GR_95']}",
                     flush=True,
                 )

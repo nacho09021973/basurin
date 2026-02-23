@@ -84,3 +84,74 @@ def test_support_count_respects_per_event_thresholds() -> None:
     assert by_id["C"]["support_fraction"] == pytest.approx(0.0)
 
     assert math.isclose(result["joint_posterior"]["log_likelihood_rel_best"], -1.0)
+
+
+def test_common_ranked_and_common_compatible_are_distinct() -> None:
+    source_data = [
+        {
+            "run_id": "run1",
+            "event_id": "GW150914",
+            "metric": "mahalanobis_log",
+            "threshold_d2": 5.9915,
+            "compatible_ids": {"A", "B", "C"},
+            "ranked_all": [
+                {"geometry_id": "A", "d2": 1.0},
+                {"geometry_id": "B", "d2": 2.0},
+                {"geometry_id": "C", "d2": 3.0},
+                {"geometry_id": "D", "d2": 4.0},
+            ],
+        },
+        {
+            "run_id": "run2",
+            "event_id": "GW170814",
+            "metric": "mahalanobis_log",
+            "threshold_d2": 5.9915,
+            "compatible_ids": {"A", "Z"},
+            "ranked_all": [
+                {"geometry_id": "A", "d2": 1.1},
+                {"geometry_id": "B", "d2": 2.1},
+                {"geometry_id": "C", "d2": 3.1},
+                {"geometry_id": "X", "d2": 9.0},
+            ],
+        },
+    ]
+
+    result = aggregate_compatible_sets(source_data, min_coverage=1.0, top_k=3)
+
+    assert result["n_common_ranked"] == 3
+    assert [g["geometry_id"] for g in result["common_ranked_geometries"]] == ["A", "B", "C"]
+    assert result["n_common_compatible"] == 1
+    assert [g["geometry_id"] for g in result["common_compatible_geometries"]] == ["A"]
+    assert result["n_common_geometries"] == result["n_common_ranked"]
+    assert result["common_geometries"] == result["common_ranked_geometries"]
+    assert len(result["common_ranked_geometries"]) == result["n_common_ranked"]
+    assert len(result["common_compatible_geometries"]) == result["n_common_compatible"]
+    assert result["coverage_histogram_basis"] == "ranked_all"
+    assert result["coverage_histogram"]["2"] >= result["n_common_ranked"]
+
+
+def test_no_common_compatible_adds_guardrail_warning() -> None:
+    source_data = [
+        {
+            "run_id": "run1",
+            "event_id": "GW150914",
+            "metric": "mahalanobis_log",
+            "threshold_d2": 5.9915,
+            "compatible_ids": {"A"},
+            "ranked_all": [{"geometry_id": "A", "d2": 1.0}, {"geometry_id": "B", "d2": 2.0}],
+        },
+        {
+            "run_id": "run2",
+            "event_id": "GW170814",
+            "metric": "mahalanobis_log",
+            "threshold_d2": 5.9915,
+            "compatible_ids": {"Z"},
+            "ranked_all": [{"geometry_id": "A", "d2": 1.1}, {"geometry_id": "B", "d2": 2.1}],
+        },
+    ]
+    result = aggregate_compatible_sets(source_data, min_coverage=1.0, top_k=2)
+
+    assert result["n_common_ranked"] == 2
+    assert result["n_common_compatible"] == 0
+    assert "NO_COMMON_COMPATIBLE_GEOMETRIES" in result["warnings"]
+    assert result["coverage_histogram"]["2"] >= result["n_common_ranked"]

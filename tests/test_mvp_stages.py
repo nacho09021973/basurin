@@ -406,6 +406,73 @@ class TestS5Aggregate:
         common_ids = {g["geometry_id"] for g in agg["common_geometries"]}
         assert common_ids == {"geo_005", "geo_007"}, f"Expected intersection, got {common_ids}"
 
+    def test_no_common_compatible_sets_insufficient_support(self, tmp_path):
+        """s5 marks deviation interpretation as insufficient support without common compatible IDs."""
+        runs_root = tmp_path / "runs"
+
+        event_rows = [
+            ("event_A", "GW150914", ["geo_001", "geo_002"], ["geo_001"]),
+            ("event_B", "GW170814", ["geo_001", "geo_002"], ["geo_999"]),
+        ]
+
+        for run_id, event_id, ranked_ids, compatible_ids in event_rows:
+            _create_run_valid(runs_root, run_id)
+            s4_dir = runs_root / run_id / "s4_geometry_filter"
+            s4_out = s4_dir / "outputs"
+            s4_out.mkdir(parents=True, exist_ok=True)
+            cs = {
+                "event_id": event_id,
+                "metric": "mahalanobis_log",
+                "threshold_d2": 5.9915,
+                "ranked_all": [
+                    {"geometry_id": g, "d2": 1.0 + idx, "f_hz": 250.0, "Q": 3.0}
+                    for idx, g in enumerate(ranked_ids)
+                ],
+                "compatible_geometries": [
+                    {"geometry_id": g, "distance": 0.1, "compatible": True}
+                    for g in compatible_ids
+                ],
+            }
+            (s4_out / "compatible_set.json").write_text(json.dumps(cs), encoding="utf-8")
+            (s4_dir / "stage_summary.json").write_text(
+                json.dumps({"verdict": "PASS"}), encoding="utf-8"
+            )
+
+        catalog_path = tmp_path / "catalog.json"
+        catalog_path.write_text(
+            json.dumps(
+                {
+                    "GW150914": {"m_final_msun": 62.0, "chi_final": 0.68},
+                    "GW170814": {"m_final_msun": 55.0, "chi_final": 0.70},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = _run_stage(
+            "s5_aggregate.py",
+            [
+                "--out-run", "agg_insufficient_support",
+                "--source-runs", "event_A,event_B",
+                "--catalog-path", str(catalog_path),
+                "--top-k", "2",
+            ],
+            env={"BASURIN_RUNS_ROOT": str(runs_root)},
+        )
+        assert result.returncode == 0, f"s5 failed: {result.stderr}"
+
+        agg_path = runs_root / "agg_insufficient_support" / "s5_aggregate" / "outputs" / "aggregate.json"
+        agg = json.loads(agg_path.read_text(encoding="utf-8"))
+        assert agg["n_common_ranked"] == 2
+        assert agg["n_common_compatible"] == 0
+        assert "NO_COMMON_COMPATIBLE_GEOMETRIES" in agg["warnings"]
+
+        dev = agg["deviation_analysis"]
+        assert dev["interpretation"] == "INSUFFICIENT_SUPPORT"
+        assert "NO_COMMON_COMPATIBLE_GEOMETRIES" in dev["warnings"]
+        assert dev["combined"]["p_value_GR"] is None
+        assert dev["combined"]["consistent_GR_95"] is None
+
 
 # ── Integration Test ──────────────────────────────────────────────────────
 
