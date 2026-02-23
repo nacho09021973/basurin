@@ -86,12 +86,8 @@ def _extract_compatible_geometry_ids(payload: dict[str, Any]) -> set[str]:
     return set()
 
 
-def aggregate_compatible_sets(
-    source_data: list[dict[str, Any]], min_coverage: float = 1.0, top_k: int = 50,
-) -> dict[str, Any]:
-    n_events = len(source_data)
-    compatible_sets = [set(map(str, src.get("compatible_ids", set()))) for src in source_data]
-
+def _topk_ranked_sets(source_data: list[dict[str, Any]], top_k: int | None) -> list[set[str]]:
+    """Build per-event geometry-id sets from ranked_all restricted by top_k."""
     ranked_sets: list[set[str]] = []
     for src in source_data:
         ranked_all = src.get("ranked_all", [])
@@ -99,11 +95,23 @@ def aggregate_compatible_sets(
             ranked_rows = ranked_all
         else:
             ranked_rows = ranked_all[:max(0, top_k)]
-        ranked_sets.append({
-            str(row.get("geometry_id"))
-            for row in ranked_rows
-            if isinstance(row, dict) and row.get("geometry_id") is not None
-        })
+        ranked_sets.append(
+            {
+                str(row.get("geometry_id"))
+                for row in ranked_rows
+                if isinstance(row, dict) and row.get("geometry_id") is not None
+            }
+        )
+    return ranked_sets
+
+
+def aggregate_compatible_sets(
+    source_data: list[dict[str, Any]], min_coverage: float = 1.0, top_k: int = 50,
+) -> dict[str, Any]:
+    n_events = len(source_data)
+    compatible_sets = [set(map(str, src.get("compatible_ids", set()))) for src in source_data]
+
+    ranked_sets = _topk_ranked_sets(source_data, top_k)
 
     common_ranked_ids = sorted(set.intersection(*ranked_sets)) if ranked_sets else []
     common_compatible_ids = sorted(set.intersection(*compatible_sets)) if compatible_sets else []
@@ -160,6 +168,10 @@ def aggregate_compatible_sets(
     for src in source_data:
         metric = str(src.get("metric", ""))
         ranked_all = src.get("ranked_all", [])
+        if top_k is None:
+            ranked_rows = ranked_all
+        else:
+            ranked_rows = ranked_all[:max(0, top_k)]
         threshold_d2 = src.get("threshold_d2")
         events.append(
             {
@@ -167,12 +179,12 @@ def aggregate_compatible_sets(
                 "event_id": src["event_id"],
                 "metric": metric,
                 "threshold_d2": threshold_d2,
-                "n_atlas": len(ranked_all),
+                "n_atlas": len(ranked_rows),
             }
         )
 
         current: dict[str, float | None] = {}
-        for row in ranked_all:
+        for row in ranked_rows:
             gid = row.get("geometry_id")
             if not gid:
                 continue
