@@ -509,6 +509,14 @@ def run_single_event(
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
 
+    s6_args: list[str] = []
+    rc = _run_stage("s6_information_geometry.py", s6_args, "s6_information_geometry", out_root, run_id, timeline, stage_timeout_s)
+    if rc != 0:
+        _set_run_valid_verdict(out_root, run_id, "FAIL", "s6_information_geometry failed")
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return rc, run_id
+
     timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
     _write_timeline(out_root, run_id, timeline)
 
