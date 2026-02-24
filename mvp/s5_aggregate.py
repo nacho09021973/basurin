@@ -154,20 +154,46 @@ def aggregate_compatible_sets(
 ) -> dict[str, Any]:
     n_events = len(source_data)
     s6b_ready = [src for src in source_data if src.get("s6b_present")]
-    ranked_sets = [set(src.get("ranked_indices", [])) for src in s6b_ready]
-    compatible_sets = [set(src.get("compatible_indices", [])) for src in s6b_ready]
+    use_s6b_mode = len(s6b_ready) > 0
 
-    common_ranked_ids = sorted(set.intersection(*ranked_sets)) if ranked_sets else []
-    common_compatible_ids = sorted(set.intersection(*compatible_sets)) if compatible_sets else []
-
-    common_ranked_geometries = [{"atlas_index": idx} for idx in common_ranked_ids]
-    common_compatible_geometries = [{"atlas_index": idx} for idx in common_compatible_ids]
     warnings: list[str] = []
-    for src in source_data:
-        if not src.get("s6b_present"):
-            warnings.append(f"MISSING_S6B_RANKED:{src['run_id']}")
-    if not warnings and not common_compatible_geometries:
-        warnings.append("NO_COMMON_COMPATIBLE_GEOMETRIES")
+    if use_s6b_mode:
+        ranked_sets = [set(src.get("ranked_indices", [])) for src in s6b_ready]
+        compatible_sets = [set(src.get("compatible_indices", [])) for src in s6b_ready]
+
+        common_ranked_ids = sorted(set.intersection(*ranked_sets)) if ranked_sets else []
+        common_compatible_ids = sorted(set.intersection(*compatible_sets)) if compatible_sets else []
+
+        common_ranked_geometries = [{"atlas_index": idx} for idx in common_ranked_ids]
+        common_compatible_geometries = [{"atlas_index": idx} for idx in common_compatible_ids]
+
+        for src in source_data:
+            if not src.get("s6b_present"):
+                warnings.append(f"MISSING_S6B_RANKED:{src['run_id']}")
+        if not warnings and not common_compatible_geometries:
+            warnings.append("NO_COMMON_COMPATIBLE_GEOMETRIES")
+    else:
+        compatible_sets = [set(map(str, src.get("compatible_ids", set()))) for src in source_data]
+
+        ranked_sets: list[set[str]] = []
+        for src in source_data:
+            ranked_all = src.get("ranked_all", [])
+            ranked_rows = ranked_all if top_k is None else ranked_all[:max(0, top_k)]
+            ranked_sets.append(
+                {
+                    str(row.get("geometry_id"))
+                    for row in ranked_rows
+                    if isinstance(row, dict) and row.get("geometry_id") is not None
+                }
+            )
+
+        common_ranked_ids = sorted(set.intersection(*ranked_sets)) if ranked_sets else []
+        common_compatible_ids = sorted(set.intersection(*compatible_sets)) if compatible_sets else []
+
+        common_ranked_geometries = [{"geometry_id": gid} for gid in common_ranked_ids]
+        common_compatible_geometries = [{"geometry_id": gid} for gid in common_compatible_ids]
+        if not common_compatible_geometries:
+            warnings.append("NO_COMMON_COMPATIBLE_GEOMETRIES")
 
     if n_events == 0:
         return {
