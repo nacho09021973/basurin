@@ -517,6 +517,21 @@ def run_single_event(
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
 
+    rc = _run_stage(
+        "s6b_information_geometry_ranked.py",
+        s6_args,
+        "s6b_information_geometry_ranked",
+        out_root,
+        run_id,
+        timeline,
+        stage_timeout_s,
+    )
+    if rc != 0:
+        _set_run_valid_verdict(out_root, run_id, "FAIL", "s6b_information_geometry_ranked failed")
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return rc, run_id
+
     timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
     _write_timeline(out_root, run_id, timeline)
 

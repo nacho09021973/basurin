@@ -86,23 +86,14 @@ def _extract_compatible_geometry_ids(payload: dict[str, Any]) -> set[str]:
     return set()
 
 
-def _topk_ranked_sets(source_data: list[dict[str, Any]], top_k: int | None) -> list[set[str]]:
-    """Build per-event geometry-id sets from ranked_all restricted by top_k."""
-    ranked_sets: list[set[str]] = []
-    for src in source_data:
-        ranked_all = src.get("ranked_all", [])
-        if top_k is None:
-            ranked_rows = ranked_all
-        else:
-            ranked_rows = ranked_all[:max(0, top_k)]
-        ranked_sets.append(
-            {
-                str(row.get("geometry_id"))
-                for row in ranked_rows
-                if isinstance(row, dict) and row.get("geometry_id") is not None
-            }
-        )
-    return ranked_sets
+def _parse_s6b_indices(rows: Any) -> list[int]:
+    out: list[int] = []
+    if not isinstance(rows, list):
+        return out
+    for row in rows:
+        if isinstance(row, dict) and isinstance(row.get("atlas_index"), int):
+            out.append(int(row["atlas_index"]))
+    return out
 
 
 
@@ -162,15 +153,21 @@ def aggregate_compatible_sets(
     source_data: list[dict[str, Any]], min_coverage: float = 1.0, top_k: int = 50,
 ) -> dict[str, Any]:
     n_events = len(source_data)
-    compatible_sets = [set(map(str, src.get("compatible_ids", set()))) for src in source_data]
-
-    ranked_sets = _topk_ranked_sets(source_data, top_k)
+    s6b_ready = [src for src in source_data if src.get("s6b_present")]
+    ranked_sets = [set(src.get("ranked_indices", [])) for src in s6b_ready]
+    compatible_sets = [set(src.get("compatible_indices", [])) for src in s6b_ready]
 
     common_ranked_ids = sorted(set.intersection(*ranked_sets)) if ranked_sets else []
     common_compatible_ids = sorted(set.intersection(*compatible_sets)) if compatible_sets else []
 
-    common_ranked_geometries = [{"geometry_id": gid} for gid in common_ranked_ids]
-    common_compatible_geometries = [{"geometry_id": gid} for gid in common_compatible_ids]
+    common_ranked_geometries = [{"atlas_index": idx} for idx in common_ranked_ids]
+    common_compatible_geometries = [{"atlas_index": idx} for idx in common_compatible_ids]
+    warnings: list[str] = []
+    for src in source_data:
+        if not src.get("s6b_present"):
+            warnings.append(f"MISSING_S6B_RANKED:{src['run_id']}")
+    if not warnings and not common_compatible_geometries:
+        warnings.append("NO_COMMON_COMPATIBLE_GEOMETRIES")
 
     if n_events == 0:
         return {
@@ -245,7 +242,9 @@ def aggregate_compatible_sets(
                 "event_id": src["event_id"],
                 "metric": metric,
                 "threshold_d2": threshold_d2,
-                "n_atlas": len(ranked_rows),
+                "n_atlas": int(src.get("n_atlas", len(ranked_rows))),
+                "ranked": list(src.get("ranked_indices", [])),
+                "compatible": list(src.get("compatible_indices", [])),
                 "censoring": {
                     "has_221": censoring["has_221"],
                     "vote_kerr": vote_kerr,
@@ -369,7 +368,7 @@ def aggregate_compatible_sets(
         },
         "coverage_histogram": coverage_hist,
         "coverage_histogram_basis": "ranked_all",
-        "warnings": ["NO_COMMON_COMPATIBLE_GEOMETRIES"] if not common_compatible_geometries else [],
+        "warnings": warnings,
         "events": events,
     }
 
@@ -605,12 +604,14 @@ def main() -> int:
         except Exception:
             pass
 
-    # Collect and validate source compatible_set.json files
+    # Collect and validate source files.
     source_paths: dict[str, Path] = {}
+    ranked_paths: dict[str, Path] = {}
     for src in source_runs:
         p = out_root / src / "s4_geometry_filter" / "outputs" / "compatible_set.json"
         source_paths[src] = p
-    check_inputs(ctx, source_paths)
+        ranked_paths[src] = out_root / src / "s6b_information_geometry_ranked" / "outputs" / "ranked_geometries.json"
+    check_inputs(ctx, source_paths, optional=ranked_paths)
     # Keep metadata portable/auditable: prefer paths relative to runs_root for upstream inputs.
     for rec in ctx.inputs_record:
         label = rec.get("label", "")
@@ -691,13 +692,27 @@ def main() -> int:
                 "threshold_d2": cs.get("threshold_d2"),
                 "ranked_all": ranked_all,
                 "compatible_ids": extracted_ids,
+                "n_atlas": cs.get("n_atlas", len(ranked_all)),
                 "observables": observables,
                 "sigma_f_hz": sigma_f_hz,
                 "sigma_Q": sigma_Q,
                 "multimode": multimode_payload,
                 "s4c": s4c_payload,
                 "ringdown_snr": ringdown_snr,
+                "s6b_present": False,
+                "ranked_indices": [],
+                "compatible_indices": [],
             })
+
+            ranked_path = ranked_paths[src]
+            if ranked_path.exists():
+                try:
+                    ranked_payload = json.loads(ranked_path.read_text(encoding="utf-8"))
+                    source_data[-1]["s6b_present"] = True
+                    source_data[-1]["ranked_indices"] = _parse_s6b_indices(ranked_payload.get("ranked"))
+                    source_data[-1]["compatible_indices"] = _parse_s6b_indices(ranked_payload.get("compatible"))
+                except Exception:
+                    pass
 
         result = aggregate_compatible_sets(source_data, args.min_coverage, top_k=args.top_k)
 
