@@ -69,7 +69,7 @@ def test_s5_aggregate_uses_s6b_and_warns_missing(tmp_path: Path) -> None:
     assert payload["n_common_geometries"] >= 0
     assert payload["n_common_compatible"] >= 0
     assert any(w.startswith("MISSING_S6B_RANKED:") for w in payload["warnings"])
-    assert "NO_COMMON_COMPATIBLE_GEOMETRIES" not in payload["warnings"]
+    assert "NO_COMMON_COMPATIBLE_GEOMETRIES" in payload["warnings"]
 
 
 def test_s5_aggregate_sets_no_common_warning_only_when_data_present(tmp_path: Path) -> None:
@@ -116,3 +116,26 @@ def test_s6b_common_geometries_match_common_compatible_when_events_match() -> No
 
     assert all(isinstance(x, int) for x in agg["common_geometries"])
     assert set(agg["common_compatible_geometries"]) == set(agg["common_geometries"])
+
+
+def test_s6b_common_compatible_uses_min_coverage_support() -> None:
+    source_data: list[dict[str, object]] = []
+    for i in range(22):
+        compatible = [0] if i < 19 else [1]
+        source_data.append(
+            {
+                "run_id": f"run_{i}",
+                "event_id": f"event_{i}",
+                "metric": "mahalanobis_log",
+                "s6b_present": True,
+                "ranked_indices": [0, 1],
+                "compatible_indices": compatible,
+                "ranked_all": [{"geometry_id": "g0", "d2": 1.0}],
+            }
+        )
+
+    agg = aggregate_compatible_sets(source_data, min_coverage=0.7, top_k=5)
+
+    assert 0 in agg["common_compatible_geometries"]
+    assert agg["n_common_compatible"] == 1
+    assert "NO_COMMON_COMPATIBLE_GEOMETRIES" not in agg["warnings"]
