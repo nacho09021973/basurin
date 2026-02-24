@@ -29,6 +29,7 @@ from mvp.contracts import init_stage, check_inputs, finalize, abort
 from basurin_io import sha256_file, write_json_atomic
 
 STAGE = "s2_ringdown_window"
+DEFAULT_WINDOW_CATALOG = Path(__file__).resolve().parent / "assets" / "window_catalog_v1.json"
 
 def _ensure_window_meta_contract(ctx: Any, artifacts: dict[str, Path], strain_path: Path) -> None:
     ctx.outputs_dir.mkdir(parents=True, exist_ok=True)
@@ -42,15 +43,49 @@ def _ensure_window_meta_contract(ctx: Any, artifacts: dict[str, Path], strain_pa
     if not artifacts or not meta_path.exists() or "window_meta" not in artifacts:
         abort(ctx, "PASS_WITHOUT_OUTPUTS")
 
+def _catalog_schema_info(catalog: Any, max_keys: int = 10) -> tuple[str, list[str]]:
+    if isinstance(catalog, dict):
+        keys = [str(k) for k in list(catalog.keys())[:max_keys]]
+        if "windows" in catalog and isinstance(catalog.get("windows"), list):
+            return "legacy_windows", keys
+        nested_dict_values = [v for v in catalog.values() if isinstance(v, dict)]
+        scalar_values = [v for v in catalog.values() if not isinstance(v, dict)]
+        if nested_dict_values and not scalar_values:
+            return "event_map_nested", keys
+        if scalar_values and not nested_dict_values:
+            return "event_map_scalar", keys
+        return "dict_mixed", keys
+    return type(catalog).__name__, []
+
+
 def _resolve_t0_gps(event_id: str, window_catalog_path: Path) -> tuple[float, str]:
     if window_catalog_path.exists():
         with open(window_catalog_path, "r", encoding="utf-8") as f:
             catalog = json.load(f)
-        for w in catalog.get("windows", []):
-            if isinstance(w, dict) and w.get("event_id") == event_id:
-                t0_ref = w.get("t0_ref", {})
-                if "value_gps" in t0_ref:
-                    return float(t0_ref["value_gps"]), str(window_catalog_path)
+        schema, keys = _catalog_schema_info(catalog)
+
+        if isinstance(catalog, dict):
+            # Legacy schema: {"windows": [{"event_id": ..., "t0_ref": {"value_gps": ...}}]}
+            for w in catalog.get("windows", []):
+                if isinstance(w, dict) and w.get("event_id") == event_id:
+                    t0_ref = w.get("t0_ref", {})
+                    if "value_gps" in t0_ref:
+                        return float(t0_ref["value_gps"]), str(window_catalog_path)
+
+            # Schema A: {"GW190521": {"t0_gps": 1242442967.4}}
+            if event_id in catalog and isinstance(catalog[event_id], dict) and "t0_gps" in catalog[event_id]:
+                return float(catalog[event_id]["t0_gps"]), str(window_catalog_path)
+
+            # Schema B: {"GW190521": 1242442967.4}
+            if event_id in catalog and isinstance(catalog[event_id], (int, float)):
+                return float(catalog[event_id]), str(window_catalog_path)
+
+        raise RuntimeError(
+            "Cannot resolve t0_gps from window catalog "
+            f"for event_id={event_id!r}; catalog_path={window_catalog_path}; "
+            f"detected_schema={schema}; available_keys(first {len(keys)}): {keys}"
+        )
+
     meta_path = Path("docs/ringdown/event_metadata") / f"{event_id}_metadata.json"
     if meta_path.exists():
         with open(meta_path, "r", encoding="utf-8") as f:
@@ -58,7 +93,10 @@ def _resolve_t0_gps(event_id: str, window_catalog_path: Path) -> tuple[float, st
         for key in ("t_coalescence_gps", "t0_ref_gps", "GPS"):
             if key in meta:
                 return float(meta[key]), str(meta_path)
-    raise RuntimeError(f"Cannot resolve t0_gps for {event_id}")
+    raise RuntimeError(
+        f"Cannot resolve t0_gps for event_id={event_id!r}; "
+        f"catalog_path={window_catalog_path}; detected_schema=missing_catalog; available_keys(first 0): []"
+    )
 
 
 def main() -> int:
@@ -69,7 +107,7 @@ def main() -> int:
     ap.add_argument("--event-id", default="GW150914")
     ap.add_argument("--dt-start-s", type=float, default=0.003)
     ap.add_argument("--duration-s", type=float, default=0.06)
-    ap.add_argument("--window-catalog", default="docs/ringdown/window_catalog_v1.json")
+    ap.add_argument("--window-catalog", default=str(DEFAULT_WINDOW_CATALOG))
     ap.add_argument(
         "--strain-npz",
         default=None,
