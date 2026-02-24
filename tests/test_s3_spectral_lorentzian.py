@@ -41,6 +41,7 @@ from mvp.s3_ringdown_estimates import (
     estimate_ringdown_observables,
     estimate_ringdown_spectral,
 )
+import mvp.s3_ringdown_estimates as s3_mod
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -504,3 +505,127 @@ class TestT0Scan:
         assert est["t0_scan"]["offsets_ms"] == [0.0, 5.0]
         assert len(est["t0_scan"]["results"]) == 2
         assert est["t0_selected"]["offset_ms"] == 5.0
+
+    def test_t0_scan_json_is_strict_without_nan_tokens(self, tmp_path):
+        runs_root = tmp_path / "runs"
+        run_id = "test_t0_scan_json_strict"
+        _create_run_valid(runs_root, run_id)
+        _create_s2_outputs(runs_root, run_id)
+
+        r = _run_s3(run_id, runs_root, extra_args=["--t0-scan-ms", "0,1.5,3"]) 
+        assert r.returncode == 0, f"s3 failed (rc={r.returncode}):\n{r.stderr}"
+
+        est_path = runs_root / run_id / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+        txt = est_path.read_text(encoding="utf-8")
+        assert "NaN" not in txt
+        assert "Infinity" not in txt
+        est = json.loads(txt)
+        assert "t0_scan" in est
+
+    def test_t0_scan_tie_breaker_prefers_smaller_offset(self, tmp_path, monkeypatch):
+        runs_root = tmp_path / "runs"
+        run_id = "test_t0_scan_tie"
+        _create_run_valid(runs_root, run_id)
+        _create_s2_outputs(runs_root, run_id)
+
+        def _stub_estimator(strain, sample_rate, band_hz, nperseg=None):
+            del strain, sample_rate, band_hz, nperseg
+            return {
+                "f_hz": 250.0,
+                "tau_s": 0.05,
+                "Q": math.pi * 250.0 * 0.05,
+                "sigma_f_hz": 1.0,
+                "sigma_tau_s": 1e-3,
+                "sigma_Q": 1.0,
+                "cov_logf_logQ": 0.0,
+                "fit_success": True,
+                "fit_residual": 0.0,
+                "rmse": 0.1,
+                "logL": -10.0,
+                "BIC": 42.0,
+                "fit": {"method": "spectral_lorentzian", "fit_success": True, "metrics": {"rmse": 0.1, "logL": -10.0, "bic": 42.0}, "metrics_debug": {"k_params": 3, "n_fit_bins": 12}},
+            }
+
+        monkeypatch.setattr(s3_mod, "estimate_ringdown_spectral", _stub_estimator)
+        monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+        old_argv = sys.argv[:]
+        try:
+            sys.argv = [
+                "s3_ringdown_estimates.py",
+                "--run", run_id,
+                "--method", "spectral_lorentzian",
+                "--t0-scan-ms", "5,0",
+                "--t0-scan-criterion", "bic",
+            ]
+            assert s3_mod.main() == 0
+        finally:
+            sys.argv = old_argv
+
+        est_path = runs_root / run_id / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+        est = json.loads(est_path.read_text(encoding="utf-8"))
+        assert est["t0_selected"]["offset_ms"] == 0.0
+        assert est["t0_selected"]["tie_breaker"] == "smaller_offset_ms"
+
+    def test_t0_scan_excludes_failed_detector_from_aggregate(self, tmp_path, monkeypatch):
+        runs_root = tmp_path / "runs"
+        run_id = "test_t0_scan_partial_fail"
+        _create_run_valid(runs_root, run_id)
+        _create_s2_outputs(runs_root, run_id)
+
+        calls = {"n": 0}
+
+        def _stub_estimator(strain, sample_rate, band_hz, nperseg=None):
+            del sample_rate, band_hz, nperseg
+            calls["n"] += 1
+            # Alternate success/failure so one detector is excluded in scan aggregation.
+            if calls["n"] % 2 == 1:
+                return {
+                    "f_hz": 250.0,
+                    "tau_s": 0.05,
+                    "Q": math.pi * 250.0 * 0.05,
+                    "sigma_f_hz": 1.0,
+                    "sigma_tau_s": 1e-3,
+                    "sigma_Q": 1.0,
+                    "cov_logf_logQ": 0.0,
+                    "fit_success": True,
+                    "fit_residual": 0.0,
+                    "rmse": 0.2,
+                    "logL": -3.0,
+                    "BIC": 8.0,
+                    "fit": {"method": "spectral_lorentzian", "fit_success": True, "metrics": {"rmse": 0.2, "logL": -3.0, "bic": 8.0}, "metrics_debug": {"k_params": 3, "n_fit_bins": 10}},
+                }
+            return {
+                "f_hz": 250.0,
+                "tau_s": 0.05,
+                "Q": math.pi * 250.0 * 0.05,
+                "sigma_f_hz": 1.0,
+                "sigma_tau_s": 1e-3,
+                "sigma_Q": 1.0,
+                "cov_logf_logQ": 0.0,
+                "fit_success": False,
+                "fit_residual": None,
+                "rmse": None,
+                "logL": None,
+                "BIC": None,
+                "fit": {"method": "hilbert_envelope_fallback", "fit_success": False, "metrics": {"rmse": None, "logL": None, "bic": None}, "metrics_debug": {"k_params": 3, "n_fit_bins": 10}},
+            }
+
+        monkeypatch.setattr(s3_mod, "estimate_ringdown_spectral", _stub_estimator)
+        monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+        old_argv = sys.argv[:]
+        try:
+            sys.argv = [
+                "s3_ringdown_estimates.py",
+                "--run", run_id,
+                "--method", "spectral_lorentzian",
+                "--t0-scan-ms", "0",
+            ]
+            assert s3_mod.main() == 0
+        finally:
+            sys.argv = old_argv
+
+        est_path = runs_root / run_id / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+        est = json.loads(est_path.read_text(encoding="utf-8"))
+        per0 = est["t0_scan"]["per_offset"]["0"]
+        assert len(per0["detectors_used"]) == 1
+        assert per0["BIC"] == 8.0
