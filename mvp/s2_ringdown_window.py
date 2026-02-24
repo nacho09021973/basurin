@@ -108,7 +108,6 @@ def main() -> int:
     ap.add_argument("--dt-start-s", type=float, default=0.003)
     ap.add_argument("--duration-s", type=float, default=0.06)
     ap.add_argument("--window-catalog", default=str(DEFAULT_WINDOW_CATALOG))
-    ap.add_argument("--window-catalog", default="mvp/assets/window_catalog_v1.json")
     ap.add_argument(
         "--strain-npz",
         default=None,
