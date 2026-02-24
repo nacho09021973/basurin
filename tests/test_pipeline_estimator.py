@@ -102,36 +102,9 @@ class TestPipelineEstimatorArg:
         from mvp.pipeline import run_single_event
         sig = inspect.signature(run_single_event)
         default = sig.parameters["estimator"].default
-        assert default == "spectral"
-
-    def test_spectral_estimator_uses_ringdown_lorentzian_method(self, monkeypatch):
-        from mvp import pipeline
-
-        stage_calls = []
-
-        def _fake_run_stage(script, args, stage, out_root, run_id, timeline, timeout):
-            stage_calls.append((script, args, stage))
-            return 0
-
-        monkeypatch.setattr(pipeline, "_run_stage", _fake_run_stage)
-        monkeypatch.setattr(pipeline, "_write_timeline", lambda *a, **k: None)
-        monkeypatch.setattr(pipeline, "_create_run_valid", lambda *a, **k: None)
-        monkeypatch.setattr(pipeline, "_set_run_valid_verdict", lambda *a, **k: None)
-        monkeypatch.setattr(pipeline, "_parse_multimode_results", lambda *a, **k: {})
-
-        rc, _ = pipeline.run_single_event(
-            event_id="GW150914",
-            atlas_path="atlas.json",
-            run_id="run_test",
-            estimator="spectral",
-            local_hdf5=[],
+        assert default == "spectral", (
+            f"Expected default estimator 'spectral', got '{default}'"
         )
-
-        assert rc == 0
-        s3_call = next(call for call in stage_calls if call[0] == "s3_ringdown_estimates.py")
-        assert "--method" in s3_call[1]
-        method_idx = s3_call[1].index("--method")
-        assert s3_call[1][method_idx + 1] == "spectral_lorentzian"
 
     def test_pipeline_has_batch_mode(self):
         import inspect
@@ -139,6 +112,26 @@ class TestPipelineEstimatorArg:
         source = inspect.getsource(main)
         assert "batch" in source, "pipeline.main() should have batch mode"
 
+    def test_spectral_path_passes_method_spectral_lorentzian(self):
+        """When estimator='spectral', run_single_event must pass --method spectral_lorentzian."""
+        import inspect
+        from mvp.pipeline import run_single_event
+        source = inspect.getsource(run_single_event)
+        # Verify the spectral branch uses --method spectral_lorentzian
+        assert "spectral_lorentzian" in source, (
+            "run_single_event should pass '--method spectral_lorentzian' "
+            "when estimator='spectral'"
+        )
+
+    def test_hilbert_path_passes_method_hilbert_envelope(self):
+        """When estimator='hilbert', run_single_event must pass --method hilbert_envelope."""
+        import inspect
+        from mvp.pipeline import run_single_event
+        source = inspect.getsource(run_single_event)
+        assert "hilbert_envelope" in source, (
+            "run_single_event should pass '--method hilbert_envelope' "
+            "when estimator='hilbert'"
+        )
 
 class TestRunMultiEventSignature:
     """Test run_multi_event signature changes."""

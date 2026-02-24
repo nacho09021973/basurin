@@ -424,7 +424,9 @@ def run_single_event(
     if estimator == "hilbert":
         s3_args = [*s3_args, "--method", "hilbert_envelope"]
         rc = _run_stage(
-            "s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates",
+            "s3_ringdown_estimates.py",
+            s3_args + ["--method", "hilbert_envelope"],
+            "s3_ringdown_estimates",
             out_root, run_id, timeline, stage_timeout_s,
         )
         if rc != 0:
@@ -435,18 +437,23 @@ def run_single_event(
     elif estimator == "spectral":
         s3_args = [*s3_args, "--method", "spectral_lorentzian"]
         rc = _run_stage(
-            "s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates",
+            "s3_ringdown_estimates.py",
+            s3_args + ["--method", "spectral_lorentzian"],
+            "s3_ringdown_estimates",
             out_root, run_id, timeline, stage_timeout_s,
         )
         if rc != 0:
             timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
             _write_timeline(out_root, run_id, timeline)
             return rc, run_id
+        # estimates_path_override remains None: canonical path is s3_ringdown_estimates
 
     elif estimator == "dual":
         # Run both Hilbert and spectral, then dual-method gate
         rc = _run_stage(
-            "s3_ringdown_estimates.py", [*s3_args, "--method", "hilbert_envelope"], "s3_ringdown_estimates",
+            "s3_ringdown_estimates.py",
+            s3_args + ["--method", "hilbert_envelope"],
+            "s3_ringdown_estimates",
             out_root, run_id, timeline, stage_timeout_s,
         )
         if rc != 0:
@@ -817,7 +824,9 @@ def main() -> int:
     sp_single.add_argument("--offline", action="store_true", default=False)
     sp_single.add_argument(
         "--estimator", choices=["hilbert", "spectral", "dual"], default="spectral",
-        help="Estimator to use for s3: spectral (default), hilbert, or dual (both + gate)",
+        
+        help="Estimator to use for s3: spectral (default), hilbert (legacy), or dual (both + gate)",
+
     )
 
     # Multi event
@@ -853,7 +862,7 @@ def main() -> int:
     sp_multi.add_argument("--offline", action="store_true", default=False)
     sp_multi.add_argument(
         "--estimator", choices=["hilbert", "spectral", "dual"], default="spectral",
-        help="Estimator for s3 (hilbert/spectral/dual)",
+        help="Estimator for s3 (spectral/hilbert/dual)",
     )
     sp_multi.add_argument(
         "--catalog-path", default=None,
@@ -915,7 +924,7 @@ def main() -> int:
     sp_batch.add_argument("--reuse-strain", action="store_true", default=False)
     sp_batch.add_argument(
         "--estimator", choices=["hilbert", "spectral", "dual"], default="spectral",
-        help="Estimator for s3 (hilbert/spectral/dual)",
+        help="Estimator for s3 (spectral/hilbert/dual)",
     )
     sp_batch.add_argument(
         "--catalog-path", default=None,
