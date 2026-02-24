@@ -166,6 +166,14 @@ def aggregate_compatible_sets(
 
         common_ranked_geometries = common_ranked_ids
         common_compatible_geometries = common_compatible_ids
+        # Coverage-based compatible set (>= min_count), aligned with --min-coverage
+        from collections import Counter
+        compat_counter = Counter()
+        for e in events:
+            for idx in e.get("compatible", []):
+                compat_counter[int(idx)] += 1
+        common_compatible_ids = sorted([idx for idx, c in compat_counter.items() if c >= min_count])
+        common_compatible_geometries = common_compatible_ids
 
         for src in source_data:
             if not src.get("s6b_present"):
