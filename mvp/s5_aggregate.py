@@ -170,8 +170,6 @@ def aggregate_compatible_sets(
         for src in source_data:
             if not src.get("s6b_present"):
                 warnings.append(f"MISSING_S6B_RANKED:{src['run_id']}")
-        if not warnings and not common_compatible_geometries:
-            warnings.append("NO_COMMON_COMPATIBLE_GEOMETRIES")
     else:
         compatible_sets = [set(map(str, src.get("compatible_ids", set()))) for src in source_data]
 
@@ -192,8 +190,6 @@ def aggregate_compatible_sets(
 
         common_ranked_geometries = common_ranked_ids
         common_compatible_geometries = common_compatible_ids
-        if not common_compatible_geometries:
-            warnings.append("NO_COMMON_COMPATIBLE_GEOMETRIES")
 
     if n_events == 0:
         return {
@@ -368,6 +364,18 @@ def aggregate_compatible_sets(
     for c in counter.values():
         coverage_hist[str(c)] = coverage_hist.get(str(c), 0) + 1
 
+    if use_s6b_mode:
+        compat_counter: Counter[int] = Counter()
+        for e in events:
+            for idx in e.get("compatible", []):
+                compat_counter[int(idx)] += 1
+        common_compatible_ids = sorted([idx for idx, c in compat_counter.items() if c >= min_count])
+        common_compatible_geometries = common_compatible_ids
+
+    n_common_compatible = len(common_compatible_geometries)
+    if n_common_compatible == 0 and "NO_COMMON_COMPATIBLE_GEOMETRIES" not in warnings:
+        warnings.append("NO_COMMON_COMPATIBLE_GEOMETRIES")
+
     return {
         "schema_version": "mvp_aggregate_v2",
         "n_events": n_events, "min_coverage": min_coverage, "min_count": min_count,
@@ -376,7 +384,7 @@ def aggregate_compatible_sets(
         "n_common_geometries": len(common_ranked_geometries), "common_geometries": common_ranked_geometries,
         "n_common_ranked": len(common_ranked_geometries),
         "common_ranked_geometries": common_ranked_geometries,
-        "n_common_compatible": len(common_compatible_geometries),
+        "n_common_compatible": n_common_compatible,
         "common_compatible_geometries": common_compatible_geometries,
         "joint_posterior": {
             "prior_type": "uniform_entries",
