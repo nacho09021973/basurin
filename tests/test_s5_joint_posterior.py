@@ -119,9 +119,9 @@ def test_common_ranked_and_common_compatible_are_distinct() -> None:
     result = aggregate_compatible_sets(source_data, min_coverage=1.0, top_k=3)
 
     assert result["n_common_ranked"] == 3
-    assert [g["geometry_id"] for g in result["common_ranked_geometries"]] == ["A", "B", "C"]
+    assert result["common_ranked_geometries"] == ["A", "B", "C"]
     assert result["n_common_compatible"] == 1
-    assert [g["geometry_id"] for g in result["common_compatible_geometries"]] == ["A"]
+    assert result["common_compatible_geometries"] == ["A"]
     assert result["n_common_geometries"] == result["n_common_ranked"]
     assert result["common_geometries"] == result["common_ranked_geometries"]
     assert len(result["common_ranked_geometries"]) == result["n_common_ranked"]

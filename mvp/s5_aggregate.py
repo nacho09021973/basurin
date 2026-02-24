@@ -164,8 +164,8 @@ def aggregate_compatible_sets(
         common_ranked_ids = sorted(set.intersection(*ranked_sets)) if ranked_sets else []
         common_compatible_ids = sorted(set.intersection(*compatible_sets)) if compatible_sets else []
 
-        common_ranked_geometries = [{"atlas_index": idx} for idx in common_ranked_ids]
-        common_compatible_geometries = [{"atlas_index": idx} for idx in common_compatible_ids]
+        common_ranked_geometries = common_ranked_ids
+        common_compatible_geometries = common_compatible_ids
 
         for src in source_data:
             if not src.get("s6b_present"):
@@ -190,8 +190,8 @@ def aggregate_compatible_sets(
         common_ranked_ids = sorted(set.intersection(*ranked_sets)) if ranked_sets else []
         common_compatible_ids = sorted(set.intersection(*compatible_sets)) if compatible_sets else []
 
-        common_ranked_geometries = [{"geometry_id": gid} for gid in common_ranked_ids]
-        common_compatible_geometries = [{"geometry_id": gid} for gid in common_compatible_ids]
+        common_ranked_geometries = common_ranked_ids
+        common_compatible_geometries = common_compatible_ids
         if not common_compatible_geometries:
             warnings.append("NO_COMMON_COMPATIBLE_GEOMETRIES")
 

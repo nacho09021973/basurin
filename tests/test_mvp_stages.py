@@ -403,7 +403,7 @@ class TestS5Aggregate:
         agg_path = runs_root / "agg_test" / "s5_aggregate" / "outputs" / "aggregate.json"
         agg = json.loads(agg_path.read_text(encoding="utf-8"))
         assert agg["n_events"] == 2
-        common_ids = {g["geometry_id"] for g in agg["common_geometries"]}
+        common_ids = set(agg["common_geometries"])
         assert common_ids == {"geo_005", "geo_007"}, f"Expected intersection, got {common_ids}"
 
     def test_no_common_compatible_sets_insufficient_support(self, tmp_path):
