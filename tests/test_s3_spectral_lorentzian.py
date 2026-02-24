@@ -504,9 +504,12 @@ class TestT0Scan:
         assert "t0_scan" in est
         assert est["t0_scan"]["offsets_ms"] == [0.0, 5.0]
         assert len(est["t0_scan"]["results"]) == 2
+        # Expected snippet in estimates.json:
+        # "t0_scan": {"criterion": "bic", "offsets_ms": [0.0, 5.0], ...},
+        # "t0_selected": {"offset_ms": 5.0, "tie_breaker": "smaller_offset_ms", ...}
         assert est["t0_selected"]["offset_ms"] == 5.0
 
-    def test_t0_scan_json_is_strict_without_nan_tokens(self, tmp_path):
+    def test_json_strictness_no_nan_tokens(self, tmp_path):
         runs_root = tmp_path / "runs"
         run_id = "test_t0_scan_json_strict"
         _create_run_valid(runs_root, run_id)
@@ -522,7 +525,7 @@ class TestT0Scan:
         est = json.loads(txt)
         assert "t0_scan" in est
 
-    def test_t0_scan_tie_breaker_prefers_smaller_offset(self, tmp_path, monkeypatch):
+    def test_tie_break_prefers_smaller_offset(self, tmp_path, monkeypatch):
         runs_root = tmp_path / "runs"
         run_id = "test_t0_scan_tie"
         _create_run_valid(runs_root, run_id)
@@ -566,7 +569,7 @@ class TestT0Scan:
         assert est["t0_selected"]["offset_ms"] == 0.0
         assert est["t0_selected"]["tie_breaker"] == "smaller_offset_ms"
 
-    def test_t0_scan_excludes_failed_detector_from_aggregate(self, tmp_path, monkeypatch):
+    def test_partial_detector_failure_excluded_from_aggregation(self, tmp_path, monkeypatch):
         runs_root = tmp_path / "runs"
         run_id = "test_t0_scan_partial_fail"
         _create_run_valid(runs_root, run_id)
