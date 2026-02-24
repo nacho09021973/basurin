@@ -42,6 +42,7 @@ class TestContractRegistry:
                        "s4_geometry_filter", "s4_spectral_geometry_filter", "s4b_spectral_curvature",
                        "s4c_kerr_consistency",
                        "s5_aggregate", "s6_information_geometry", "s6b_information_geometry_3d",
+                       "s6b_information_geometry_ranked",
                        "s6c_population_geometry", "s3_spectral_estimates", "experiment_geometry_evidence_vs_gr"}
 
     def test_all_stages_registered(self):

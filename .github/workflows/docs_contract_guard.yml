@@ -5,13 +5,13 @@ on:
     paths:
       - "docs/technical_note_theory.md"
       - "mvp/contracts.py"
-      - "scripts/ci/check_theory_doc.py"
+      - "tools/ci/check_theory_doc.py"
   push:
     branches: [ "main" ]
     paths:
       - "docs/technical_note_theory.md"
       - "mvp/contracts.py"
-      - "scripts/ci/check_theory_doc.py"
+      - "tools/ci/check_theory_doc.py"
 
 jobs:
   guard:
@@ -30,7 +30,7 @@ jobs:
 
       - name: Run doc-contract guard
         run: |
-          python3 scripts/ci/check_theory_doc.py
+          python3 tools/ci/check_theory_doc.py
 
       - name: Run unit tests
         run: |

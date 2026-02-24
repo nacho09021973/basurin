@@ -52,7 +52,7 @@ class TestAntiRegression:
 
     def test_total_contract_count(self):
         """Total must be 12 including s4_spectral_geometry_filter."""
-        assert len(CONTRACTS) == 15
+        assert len(CONTRACTS) == 16
 
     def test_s3_ringdown_estimates_unchanged(self):
         c = CONTRACTS["s3_ringdown_estimates"]
