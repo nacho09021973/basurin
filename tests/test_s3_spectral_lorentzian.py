@@ -465,3 +465,42 @@ class TestContractKeys:
         assert abs(c["Q"] - expected) < 1e-6, (
             f"Q={c['Q']:.6f} != pi*f*tau={expected:.6f}"
         )
+
+
+class TestT0Scan:
+    """t0 scan should produce stability outputs and avoid bad offsets."""
+
+    def test_t0_scan_selects_offset_with_better_bic(self, tmp_path):
+        runs_root = tmp_path / "runs"
+        run_id = "test_t0_scan"
+        _create_run_valid(runs_root, run_id)
+
+        out_dir = runs_root / run_id / "s2_ringdown_window" / "outputs"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        n = int(SAMPLE_RATE * DURATION)
+        t = np.arange(n) / SAMPLE_RATE
+        pure_ringdown = np.exp(-t / TAU_TRUE) * np.cos(2.0 * np.pi * F_TRUE * t)
+
+        # Contaminate first 5 ms with a strong transient to make offset=0 worse.
+        bad = pure_ringdown.copy()
+        n_bad = int(0.005 * SAMPLE_RATE)
+        bad[:n_bad] += 5.0 * np.sin(2.0 * np.pi * 1000.0 * t[:n_bad])
+
+        np.savez(out_dir / "H1_rd.npz", strain=bad.astype(np.float64), sample_rate_hz=np.float64(SAMPLE_RATE))
+        np.savez(out_dir / "L1_rd.npz", strain=bad.astype(np.float64), sample_rate_hz=np.float64(SAMPLE_RATE))
+        (out_dir / "window_meta.json").write_text(json.dumps({"event_id": "SYNTH_SCAN"}), encoding="utf-8")
+        (runs_root / run_id / "s2_ringdown_window" / "stage_summary.json").write_text(
+            json.dumps({"stage": "s2_ringdown_window", "verdict": "PASS"}),
+            encoding="utf-8",
+        )
+
+        r = _run_s3(run_id, runs_root, extra_args=["--t0-scan-ms", "0,5", "--t0-scan-criterion", "bic"])
+        assert r.returncode == 0, f"s3 failed (rc={r.returncode}):\n{r.stderr}"
+
+        est_path = runs_root / run_id / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+        est = json.loads(est_path.read_text(encoding="utf-8"))
+        assert "t0_scan" in est
+        assert est["t0_scan"]["offsets_ms"] == [0.0, 5.0]
+        assert len(est["t0_scan"]["results"]) == 2
+        assert est["t0_selected"]["offset_ms"] == 5.0

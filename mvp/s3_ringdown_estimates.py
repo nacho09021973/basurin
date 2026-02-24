@@ -252,6 +252,7 @@ def estimate_ringdown_spectral(
         "f_hz": float("nan"), "tau_s": float("nan"), "Q": float("nan"),
         "sigma_f_hz": float("nan"), "sigma_tau_s": float("nan"), "sigma_Q": float("nan"),
         "cov_logf_logQ": 0.0, "fit_success": False, "fit_residual": float("nan"),
+        "rmse": float("nan"), "logL": float("nan"), "BIC": float("nan"),
     }
 
     n = len(strain)
@@ -338,6 +339,9 @@ def estimate_ringdown_spectral(
     sigma_f = float("nan")
     sigma_tau = float("nan")
     fit_residual = float("nan")
+    rmse = float("nan")
+    log_l = float("nan")
+    bic = float("nan")
 
     try:
         with warnings.catch_warnings():
@@ -359,8 +363,21 @@ def estimate_ringdown_spectral(
             fit_success = True
 
             psd_model = lorentzian(f_fit, *popt)
+            resid = psd_fit - psd_model
             denom = float(np.mean(psd_fit) ** 2) + 1e-100
-            fit_residual = float(np.mean((psd_fit - psd_model) ** 2) / denom)
+            fit_residual = float(np.mean(resid ** 2) / denom)
+            rmse = float(np.sqrt(np.mean(resid ** 2)))
+
+            # Weighted Gaussian log-likelihood with per-bin sigma_i=PSD_i
+            # used in curve_fit weighting.
+            chi2 = float(np.sum((resid / sigma_fit) ** 2))
+            n_obs = int(f_fit.size)
+            sigma2 = sigma_fit ** 2
+            log_l = float(-0.5 * (
+                chi2 + n_obs * math.log(2.0 * math.pi) + float(np.sum(np.log(sigma2)))
+            ))
+            n_params = 3
+            bic = float(n_params * math.log(max(n_obs, 1)) - 2.0 * log_l)
     except RuntimeError:
         pass
 
@@ -372,6 +389,9 @@ def estimate_ringdown_spectral(
             )
             result["fit_success"] = False
             result["fit_residual"] = float("nan")
+            result["rmse"] = float("nan")
+            result["logL"] = float("nan")
+            result["BIC"] = float("nan")
             return result
         except Exception:
             return dict(_nan_result)
@@ -394,7 +414,22 @@ def estimate_ringdown_spectral(
         "cov_logf_logQ": 0.0,
         "fit_success":  True,
         "fit_residual": fit_residual,
+        "rmse": rmse,
+        "logL": log_l,
+        "BIC": bic,
     }
+
+
+def _parse_t0_scan_ms(raw: str | None) -> list[float]:
+    if raw is None:
+        return []
+    values: list[float] = []
+    for tok in raw.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        values.append(float(tok))
+    return values
 
 
 def main() -> int:
@@ -411,6 +446,11 @@ def main() -> int:
     ap.add_argument("--n-bootstrap", type=int, default=200,
                     help="Number of bootstrap resamples for uncertainty estimation (0=skip, "
                          "ignored when --method=spectral_lorentzian)")
+    ap.add_argument("--t0-scan-ms", default=None,
+                    help="Comma-separated t0 offsets in milliseconds (relative to t0_gps), "
+                         "e.g. '0,1,2,3'")
+    ap.add_argument("--t0-scan-criterion", default="bic", choices=["bic", "logl"],
+                    help="Criterion to select t0 offset: bic=min(BIC), logl=max(logL)")
     args = ap.parse_args()
 
     run_id = args.run_id or args.run
@@ -422,6 +462,8 @@ def main() -> int:
     ctx = init_stage(run_id, STAGE, params={
         "band_low_hz": args.band_low, "band_high_hz": args.band_high,
         "method": args.method, "n_bootstrap": args.n_bootstrap,
+        "t0_scan_ms": args.t0_scan_ms,
+        "t0_scan_criterion": args.t0_scan_criterion,
     })
 
     # Discover detector files
@@ -443,6 +485,10 @@ def main() -> int:
         with open(wm_path, "r", encoding="utf-8") as f:
             window_meta = json.load(f)
 
+    offsets_ms = _parse_t0_scan_ms(args.t0_scan_ms)
+    if offsets_ms and args.method != "spectral_lorentzian":
+        abort(ctx, "--t0-scan-ms requires --method=spectral_lorentzian")
+
     try:
         per_detector: dict[str, Any] = {}
         valid: list[dict[str, float]] = []
@@ -455,6 +501,13 @@ def main() -> int:
             if strain.ndim != 1 or not np.all(np.isfinite(strain)):
                 abort(ctx, f"{det}: invalid strain")
             try:
+                if offsets_ms:
+                    base = int(round((offsets_ms[0] / 1000.0) * fs))
+                    strain = strain[base:] if base > 0 else strain
+                    if strain.size < 16:
+                        raise ValueError(
+                            f"t0_scan first offset leaves too few samples ({strain.size})"
+                        )
                 if args.method == "spectral_lorentzian":
                     est = estimate_ringdown_spectral(
                         strain, fs, (args.band_low, args.band_high)
@@ -613,6 +666,68 @@ def main() -> int:
             "per_detector": per_detector,
             "n_detectors_valid": len(valid),
         }
+
+        if offsets_ms:
+            # Evaluate stability curve from combined score across detectors.
+            t0_scan_results: list[dict[str, Any]] = []
+            criterion = args.t0_scan_criterion
+            for offset_ms in offsets_ms:
+                off_per_det: list[dict[str, Any]] = []
+                for det, path in det_files.items():
+                    data = np.load(path)
+                    raw_strain = np.asarray(data["strain"], dtype=np.float64)
+                    fs_det = float(np.asarray(data["sample_rate_hz"]).flat[0])
+                    shift = int(round((offset_ms / 1000.0) * fs_det))
+                    if shift >= raw_strain.size - 16:
+                        off_per_det.append({"success": False})
+                        continue
+                    est_off = estimate_ringdown_spectral(
+                        raw_strain[shift:], fs_det, (args.band_low, args.band_high)
+                    )
+                    off_per_det.append(est_off)
+
+                good = [x for x in off_per_det if x.get("fit_success")]
+                if good:
+                    f0 = float(np.mean([x["f_hz"] for x in good]))
+                    tau = float(np.mean([x["tau_s"] for x in good]))
+                    q = float(np.mean([x["Q"] for x in good]))
+                    score_logl = float(np.sum([x.get("logL", float("nan")) for x in good]))
+                    score_bic = float(np.sum([x.get("BIC", float("nan")) for x in good]))
+                    rmse = float(np.mean([x.get("rmse", float("nan")) for x in good]))
+                    success = True
+                else:
+                    f0 = tau = q = score_logl = score_bic = rmse = float("nan")
+                    success = False
+
+                t0_scan_results.append({
+                    "offset_ms": offset_ms,
+                    "f0": f0,
+                    "tau": tau,
+                    "Q": q,
+                    "logL": score_logl,
+                    "BIC": score_bic,
+                    "rmse": rmse,
+                    "score": score_bic if criterion == "bic" else score_logl,
+                    "success": success,
+                })
+
+            ok = [r for r in t0_scan_results if r["success"]]
+            if ok:
+                if criterion == "bic":
+                    selected = min(ok, key=lambda r: r["BIC"])
+                else:
+                    selected = max(ok, key=lambda r: r["logL"])
+                estimates["t0_selected"] = {
+                    "offset_ms": selected["offset_ms"],
+                    "criterion": criterion,
+                }
+            else:
+                estimates["t0_selected"] = {"offset_ms": None, "criterion": criterion}
+
+            estimates["t0_scan"] = {
+                "offsets_ms": offsets_ms,
+                "results": t0_scan_results,
+            }
         if args.method == "hilbert_envelope" and args.n_bootstrap > 0:
             estimates["bootstrap"] = {
                 "n_requested": args.n_bootstrap,
