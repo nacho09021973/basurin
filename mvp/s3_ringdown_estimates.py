@@ -258,6 +258,7 @@ def estimate_ringdown_spectral(
             "fit_success": False,
             "metrics": {"rmse": float("nan"), "logL": float("nan"), "bic": float("nan")},
             "metrics_debug": {
+                "y_definition": "y_i is one-sided PSD bin value within fit band",
                 "logl_definition": "gaussian_weighted_residuals_sigma_eq_psd_bin",
                 "bic_definition": "k*ln(n)-2*logL with k=3 (A,f0,tau), n=fit-band bins",
                 "k_params": 3,
@@ -400,14 +401,15 @@ def estimate_ringdown_spectral(
             )
             result["fit_success"] = False
             result["fit_residual"] = float("nan")
-            result["rmse"] = float("nan")
-            result["logL"] = float("nan")
-            result["BIC"] = float("nan")
+            result["rmse"] = None
+            result["logL"] = None
+            result["BIC"] = None
             result["fit"] = {
                 "method": "hilbert_envelope_fallback",
                 "fit_success": False,
-                "metrics": {"rmse": float("nan"), "logL": float("nan"), "bic": float("nan")},
+                "metrics": {"rmse": None, "logL": None, "bic": None},
                 "metrics_debug": {
+                    "y_definition": "y_i is one-sided PSD bin value within fit band",
                     "logl_definition": "gaussian_weighted_residuals_sigma_eq_psd_bin",
                     "bic_definition": "k*ln(n)-2*logL with k=3 (A,f0,tau), n=fit-band bins",
                     "k_params": n_params,
@@ -444,6 +446,7 @@ def estimate_ringdown_spectral(
             "fit_success": True,
             "metrics": {"rmse": rmse, "logL": log_l, "bic": bic},
             "metrics_debug": {
+                "y_definition": "y_i is one-sided PSD bin value within fit band",
                 "logl_definition": "gaussian_weighted_residuals_sigma_eq_psd_bin",
                 "bic_definition": "k*ln(n)-2*logL with k=3 (A,f0,tau), n=fit-band bins",
                 "k_params": n_params,
