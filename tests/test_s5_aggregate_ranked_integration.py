@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from mvp.s5_aggregate import aggregate_compatible_sets
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MVP_DIR = REPO_ROOT / "mvp"
 
@@ -90,3 +92,27 @@ def test_s5_aggregate_sets_no_common_warning_only_when_data_present(tmp_path: Pa
     agg_path = runs_root / "agg_test_2" / "s5_aggregate" / "outputs" / "aggregate.json"
     payload = json.loads(agg_path.read_text(encoding="utf-8"))
     assert "NO_COMMON_COMPATIBLE_GEOMETRIES" in payload["warnings"]
+
+
+def test_s6b_common_geometries_match_common_compatible_when_events_match() -> None:
+    source_data = [
+        {
+            "run_id": "run_a",
+            "event_id": "event_a",
+            "s6b_present": True,
+            "ranked_indices": [0, 1, 2],
+            "compatible_indices": [0, 1, 2],
+        },
+        {
+            "run_id": "run_b",
+            "event_id": "event_b",
+            "s6b_present": True,
+            "ranked_indices": [0, 1, 2],
+            "compatible_indices": [0, 1, 2],
+        },
+    ]
+
+    agg = aggregate_compatible_sets(source_data, min_coverage=1.0, top_k=3)
+
+    assert all(isinstance(x, int) for x in agg["common_geometries"])
+    assert set(agg["common_compatible_geometries"]) == set(agg["common_geometries"])
