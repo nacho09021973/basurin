@@ -347,7 +347,7 @@ def run_single_event(
     with_t0_sweep: bool = False,
     local_hdf5: list[str] | None = None,
     offline: bool = False,
-    estimator: str = "hilbert",
+    estimator: str = "spectral",
 ) -> tuple[int, str]:
     """Run full pipeline for a single event. Returns (exit_code, run_id)."""
     event_id = _require_nonempty_event_id(event_id, "--event-id")
@@ -422,6 +422,7 @@ def run_single_event(
     estimates_path_override = None
 
     if estimator == "hilbert":
+        s3_args = [*s3_args, "--method", "hilbert_envelope"]
         rc = _run_stage(
             "s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates",
             out_root, run_id, timeline, stage_timeout_s,
@@ -432,22 +433,20 @@ def run_single_event(
             return rc, run_id
 
     elif estimator == "spectral":
+        s3_args = [*s3_args, "--method", "spectral_lorentzian"]
         rc = _run_stage(
-            "s3_spectral_estimates.py", s3_args, "s3_spectral_estimates",
+            "s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates",
             out_root, run_id, timeline, stage_timeout_s,
         )
         if rc != 0:
             timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
             _write_timeline(out_root, run_id, timeline)
             return rc, run_id
-        estimates_path_override = (
-            f"{run_id}/s3_spectral_estimates/outputs/spectral_estimates.json"
-        )
 
     elif estimator == "dual":
         # Run both Hilbert and spectral, then dual-method gate
         rc = _run_stage(
-            "s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates",
+            "s3_ringdown_estimates.py", [*s3_args, "--method", "hilbert_envelope"], "s3_ringdown_estimates",
             out_root, run_id, timeline, stage_timeout_s,
         )
         if rc != 0:
@@ -687,7 +686,7 @@ def run_multi_event(
         agg_run_id = f"mvp_aggregate_{_ts()}"
 
     out_root = resolve_out_root("runs")
-    estimator = kwargs.get("estimator", "hilbert")
+    estimator = kwargs.get("estimator", "spectral")
 
     events = [_require_nonempty_event_id(e, "--events") for e in events]
 
@@ -817,8 +816,8 @@ def main() -> int:
     )
     sp_single.add_argument("--offline", action="store_true", default=False)
     sp_single.add_argument(
-        "--estimator", choices=["hilbert", "spectral", "dual"], default="hilbert",
-        help="Estimator to use for s3: hilbert (default), spectral, or dual (both + gate)",
+        "--estimator", choices=["hilbert", "spectral", "dual"], default="spectral",
+        help="Estimator to use for s3: spectral (default), hilbert, or dual (both + gate)",
     )
 
     # Multi event
@@ -853,7 +852,7 @@ def main() -> int:
     )
     sp_multi.add_argument("--offline", action="store_true", default=False)
     sp_multi.add_argument(
-        "--estimator", choices=["hilbert", "spectral", "dual"], default="hilbert",
+        "--estimator", choices=["hilbert", "spectral", "dual"], default="spectral",
         help="Estimator for s3 (hilbert/spectral/dual)",
     )
     sp_multi.add_argument(
@@ -915,7 +914,7 @@ def main() -> int:
     sp_batch.add_argument("--stage-timeout-s", type=float, default=None)
     sp_batch.add_argument("--reuse-strain", action="store_true", default=False)
     sp_batch.add_argument(
-        "--estimator", choices=["hilbert", "spectral", "dual"], default="hilbert",
+        "--estimator", choices=["hilbert", "spectral", "dual"], default="spectral",
         help="Estimator for s3 (hilbert/spectral/dual)",
     )
     sp_batch.add_argument(

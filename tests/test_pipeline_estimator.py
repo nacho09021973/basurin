@@ -97,12 +97,41 @@ class TestPipelineEstimatorArg:
         assert "estimator" in sig.parameters, \
             "run_single_event should have an 'estimator' parameter"
 
-    def test_default_estimator_is_hilbert(self):
+    def test_default_estimator_is_spectral(self):
         import inspect
         from mvp.pipeline import run_single_event
         sig = inspect.signature(run_single_event)
         default = sig.parameters["estimator"].default
-        assert default == "hilbert"
+        assert default == "spectral"
+
+    def test_spectral_estimator_uses_ringdown_lorentzian_method(self, monkeypatch):
+        from mvp import pipeline
+
+        stage_calls = []
+
+        def _fake_run_stage(script, args, stage, out_root, run_id, timeline, timeout):
+            stage_calls.append((script, args, stage))
+            return 0
+
+        monkeypatch.setattr(pipeline, "_run_stage", _fake_run_stage)
+        monkeypatch.setattr(pipeline, "_write_timeline", lambda *a, **k: None)
+        monkeypatch.setattr(pipeline, "_create_run_valid", lambda *a, **k: None)
+        monkeypatch.setattr(pipeline, "_set_run_valid_verdict", lambda *a, **k: None)
+        monkeypatch.setattr(pipeline, "_parse_multimode_results", lambda *a, **k: {})
+
+        rc, _ = pipeline.run_single_event(
+            event_id="GW150914",
+            atlas_path="atlas.json",
+            run_id="run_test",
+            estimator="spectral",
+            local_hdf5=[],
+        )
+
+        assert rc == 0
+        s3_call = next(call for call in stage_calls if call[0] == "s3_ringdown_estimates.py")
+        assert "--method" in s3_call[1]
+        method_idx = s3_call[1].index("--method")
+        assert s3_call[1][method_idx + 1] == "spectral_lorentzian"
 
     def test_pipeline_has_batch_mode(self):
         import inspect
