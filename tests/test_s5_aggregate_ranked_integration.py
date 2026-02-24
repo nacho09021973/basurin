@@ -136,6 +136,8 @@ def test_s6b_common_compatible_uses_min_coverage_support() -> None:
 
     agg = aggregate_compatible_sets(source_data, min_coverage=0.7, top_k=5)
 
+    assert agg["min_count"] == 16
+    assert agg["common_compatible_geometries"] == [0]
     assert 0 in agg["common_compatible_geometries"]
     assert agg["n_common_compatible"] == 1
     assert "NO_COMMON_COMPATIBLE_GEOMETRIES" not in agg["warnings"]
