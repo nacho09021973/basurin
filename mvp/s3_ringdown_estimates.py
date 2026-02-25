@@ -73,10 +73,17 @@ def estimate_ringdown_observables(
         raise ValueError("Insufficient valid frequency samples")
     f_hz = float(np.median(inst_freq[valid_mask]))
 
-    # Robust frequency dispersion: MAD → sigma
+    # Robust frequency dispersion: MAD → sigma, with resolution floor.
+    # For a near-monochromatic ringdown MAD can be 0 (all inst-freq samples
+    # identical), which would make sigma_logf=0 and the downstream Mahalanobis
+    # distance undefined.  We apply a deterministic floor equal to the
+    # Heisenberg-limited frequency resolution of the window: 1/T = fs/n.
     freq_valid = inst_freq[valid_mask]
     mad_f = float(np.median(np.abs(freq_valid - np.median(freq_valid))))
-    sigma_f_hz = mad_f * 1.4826  # MAD-to-sigma conversion factor
+    sigma_f_hz_raw = mad_f * 1.4826  # MAD-to-sigma conversion factor
+    df_floor_hz = fs / n             # 1 / window_duration_s
+    sigma_f_hz = max(sigma_f_hz_raw, df_floor_hz)
+    sigma_floor_applied = sigma_f_hz_raw < df_floor_hz
 
     peak_idx = int(np.argmax(envelope))
     snr_peak = float(envelope[peak_idx] / (np.std(envelope[:max(1, peak_idx // 2)]) + 1e-30))
@@ -126,6 +133,10 @@ def estimate_ringdown_observables(
         "sigma_tau_s": sigma_tau_s,
         "sigma_Q": sigma_Q,
         "cov_logf_logQ": cov_logf_logQ,
+        # Floor traceability
+        "sigma_f_hz_raw": sigma_f_hz_raw,
+        "df_floor_hz": df_floor_hz,
+        "sigma_floor_applied": sigma_floor_applied,
     }
 
 
@@ -253,6 +264,8 @@ def estimate_ringdown_spectral(
         "sigma_f_hz": float("nan"), "sigma_tau_s": float("nan"), "sigma_Q": float("nan"),
         "cov_logf_logQ": 0.0, "fit_success": False, "fit_residual": float("nan"),
         "rmse": float("nan"), "logL": float("nan"), "BIC": float("nan"),
+        # Floor traceability (None = not applicable for degenerate/fallback paths)
+        "sigma_f_hz_raw": None, "df_floor_hz": None, "sigma_floor_applied": None,
         "fit": {
             "method": "spectral_lorentzian",
             "fit_success": False,
@@ -345,10 +358,13 @@ def estimate_ringdown_spectral(
     bounds_low  = [0.0,    band_low,  1e-4]
     bounds_high = [np.inf, band_high, 1.0]
 
+    df_floor_hz = sample_rate / n   # Heisenberg floor: 1 / window_duration_s
     fit_success = False
     f0_fit = float("nan")
     tau_fit = float("nan")
     sigma_f = float("nan")
+    sigma_f_raw = float("nan")
+    sigma_floor_applied = False
     sigma_tau = float("nan")
     fit_residual = float("nan")
     rmse = float("nan")
@@ -372,8 +388,10 @@ def estimate_ringdown_spectral(
         A_fit, f0_fit, tau_fit = popt
 
         if np.all(np.isfinite(pcov)):
-            sigma_f   = float(np.sqrt(pcov[1, 1]))
-            sigma_tau = float(np.sqrt(pcov[2, 2]))
+            sigma_f_raw = float(np.sqrt(pcov[1, 1]))
+            sigma_tau   = float(np.sqrt(pcov[2, 2]))
+            sigma_f = max(sigma_f_raw, df_floor_hz)
+            sigma_floor_applied = sigma_f_raw < df_floor_hz
             fit_success = True
 
             psd_model = lorentzian(f_fit, *popt)
@@ -441,6 +459,10 @@ def estimate_ringdown_spectral(
         "rmse": rmse,
         "logL": log_l,
         "BIC": bic,
+        # Floor traceability
+        "sigma_f_hz_raw": sigma_f_raw,
+        "df_floor_hz": df_floor_hz,
+        "sigma_floor_applied": sigma_floor_applied,
         "fit": {
             "method": "spectral_lorentzian",
             "fit_success": True,
@@ -643,6 +665,9 @@ def main() -> int:
         sigma_logf = sigma_f_comb / combined_f if combined_f > 0 else 0.0
         sigma_logQ = sigma_Q_comb / combined_Q if combined_Q > 0 else 0.0
         cov_logf_logQ = 0.0  # independence assumption
+        sigma_floor_applied_comb = any(
+            e.get("sigma_floor_applied") is True for e in valid
+        )
 
         # Canonical (modern) aliases expected by downstream contract-first audits.
         sigma_lnf = sigma_logf
@@ -723,6 +748,9 @@ def main() -> int:
                 "sigma_lnf": sigma_lnf,
                 "sigma_lnQ": sigma_lnQ,
                 "r": float(r),
+
+                # Floor traceability: True if any detector's sigma_f was floored
+                "sigma_floor_applied": sigma_floor_applied_comb,
             },
             "per_detector": per_detector,
             "n_detectors_valid": len(valid),
