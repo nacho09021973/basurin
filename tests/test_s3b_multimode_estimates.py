@@ -164,6 +164,54 @@ def test_main_populates_source_window_and_avoids_missing_flag(tmp_path: Path) ->
     assert "missing_window_meta" not in payload["results"]["quality_flags"]
 
 
+
+
+def test_spectral_two_pass_synthetic_orders_modes_and_has_finite_sigma() -> None:
+    fs = 4096.0
+    t = np.arange(0.0, 0.6, 1.0 / fs)
+    signal = (
+        1.0 * np.exp(-t / 0.08) * np.cos(2.0 * np.pi * 220.0 * t)
+        + 0.55 * np.exp(-t / 0.05) * np.cos(2.0 * np.pi * 332.0 * t + 0.2)
+    )
+
+    mode_220, flags_220, ok_220 = evaluate_mode(
+        signal,
+        fs,
+        label="220",
+        mode=[2, 2, 0],
+        estimator=lambda sig, sr: _MODULE._estimate_220_spectral(sig, sr, band_low=150.0, band_high=400.0),
+        n_bootstrap=60,
+        seed=123,
+        max_lnf_span=2.0,
+        max_lnq_span=2.5,
+        min_point_samples=20,
+        min_point_valid_fraction=0.2,
+        method="spectral_two_pass",
+    )
+    mode_221, flags_221, ok_221 = evaluate_mode(
+        signal,
+        fs,
+        label="221",
+        mode=[2, 2, 1],
+        estimator=lambda sig, sr: _MODULE._estimate_221_spectral_two_pass(sig, sr, band_low=150.0, band_high=400.0),
+        n_bootstrap=60,
+        seed=124,
+        max_lnf_span=2.0,
+        max_lnq_span=2.5,
+        min_point_samples=20,
+        min_point_valid_fraction=0.2,
+        method="spectral_two_pass",
+    )
+
+    assert mode_220["fit"]["method"] == "spectral_two_pass"
+    assert mode_221["fit"]["method"] == "spectral_two_pass"
+    assert np.exp(mode_221["ln_f"]) > np.exp(mode_220["ln_f"])
+    assert mode_220["Sigma"] is not None and np.isfinite(np.asarray(mode_220["Sigma"])).all()
+    assert mode_221["Sigma"] is not None and np.isfinite(np.asarray(mode_221["Sigma"])).all()
+    assert isinstance(ok_220, bool)
+    assert isinstance(ok_221, bool)
+    assert all(isinstance(flag, str) for flag in flags_220)
+    assert all(isinstance(flag, str) for flag in flags_221)
 def _stable_estimator(signal: np.ndarray, fs: float) -> dict[str, float]:
     _ = signal, fs
     return {"f_hz": 250.0, "Q": 12.0, "tau_s": 12.0 / (np.pi * 250.0)}

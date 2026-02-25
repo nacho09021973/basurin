@@ -50,6 +50,7 @@ class TestMultimodeWiring(unittest.TestCase):
                         synthetic=True,
                         band_low=180.0,
                         band_high=360.0,
+                        s3b_method="spectral_two_pass",
                     )
                     self.assertEqual(rc, 0)
 
@@ -63,11 +64,14 @@ class TestMultimodeWiring(unittest.TestCase):
         s3b_calls = [c for c in calls if c["label"] == "s3b_multimode_estimates"]
         self.assertEqual(len(s3b_calls), 2)
 
-        for call in s3b_calls:
+        for idx_call, call in enumerate(s3b_calls):
             args = call["args"]
             run_id = call["run_id"]
             idx = args.index("--s3-estimates")
             self.assertEqual(args[idx + 1], f"{run_id}/s3_ringdown_estimates/outputs/estimates.json")
+            m_idx = args.index("--method")
+            expected_method = "spectral_two_pass" if idx_call == 1 else "hilbert_peakband"
+            self.assertEqual(args[m_idx + 1], expected_method)
 
 
 class TestMultimodePipelineBehavior(unittest.TestCase):
