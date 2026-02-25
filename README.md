@@ -498,15 +498,20 @@ Un cambio canónico está “DONE” si:
 
 ## PRs auditables (claims de contrato)
 
-Cuando una descripción de PR afirme que un output ya está declarado en contrato (por ejemplo `outputs/model_comparison.json`), añade una línea de evidencia reproducible para evitar claims débiles.
+Cuando una descripción de PR afirme que un output ya está declarado en contrato (por ejemplo `outputs/model_comparison.json`), añade evidencia reproducible para evitar claims débiles.
 
-Ejemplo:
+Plantilla mínima recomendada:
+
+- **Claim:** “El stage X declara el output Y”.
+- **Evidence:** comando exacto (1-liner) + salida esperada + aserción explícita.
+
+Ejemplo (falla fuerte si la clave o el output cambian):
 
 ```bash
-python -c "import mvp.contracts as c; print(c.CONTRACTS['s3b_multimode_estimates'].produced_outputs)"
+python -c "import mvp.contracts as c; o=c.CONTRACTS['s3b_multimode_estimates'].produced_outputs; assert 'outputs/model_comparison.json' in o; print(o)"
 ```
 
-Si en el futuro cambia la estructura (`CONTRACTS` vs otra), ajusta el snippet para que siga siendo ejecutable en la rama del PR.
+Nota de mantenimiento (punto único): si en el futuro cambia el registro (`CONTRACTS` → `STAGE_CONTRACTS`), reemplaza el acceso en el snippet y actualiza `tests/test_mvp_contracts.py` en el mismo PR.
 
 ## Diagnóstico de crecimiento en tests (actualización de gobernanza)
 
