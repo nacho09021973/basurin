@@ -128,8 +128,17 @@ def test_model_comparison_schema_version_and_required_fields() -> None:
     assert isinstance(result["valid_1mode"], bool)
     assert isinstance(result["valid_2mode"], bool)
     assert "trace" in result
-    assert result["conventions"]["delta_bic_tie_eps"] == 1e-10
-    assert "tie_break_rule" in result["conventions"]
+    assert "conventions" in result
+    conventions = result["conventions"]
+    assert conventions["delta_bic_definition"] == "bic_2mode - bic_1mode"
+    assert conventions["bic_formula"] == "k*ln(n) + n*ln(rss/n)"
+    assert conventions["tie_break_rule"] == "|ΔBIC|<eps => ΔBIC=0.0 and prefer 1-mode"
+    assert conventions["delta_bic_tie_eps"] == 1e-10
+    assert "design_matrix_columns" in conventions
+    assert conventions["design_matrix_columns"] == ["220_cos", "220_sin", "221_cos", "221_sin"]
+    assert "k_definition" in conventions
+    assert conventions["k_definition"]["k_1mode"] == 4
+    assert conventions["k_definition"]["k_2mode"] == 8
     assert isinstance(result["trace"]["rss_floored_1mode"], bool)
     assert isinstance(result["trace"]["rss_floored_2mode"], bool)
 
@@ -255,6 +264,8 @@ def test_model_comparison_invalid_221_returns_null_delta_bic() -> None:
     assert result["bic_2mode"] is None
     assert result["decision"]["two_mode_preferred"] is False
     assert result["schema_version"] == "model_comparison_v1"
+    assert isinstance(result["trace"]["rss_floored_1mode"], bool)
+    assert isinstance(result["trace"]["rss_floored_2mode"], bool)
 
 
 def test_model_comparison_invalid_220_returns_all_null() -> None:
@@ -270,6 +281,8 @@ def test_model_comparison_invalid_220_returns_all_null() -> None:
     assert result["delta_bic"] is None
     assert result["bic_1mode"] is None
     assert result["decision"]["two_mode_preferred"] is False
+    assert isinstance(result["trace"]["rss_floored_1mode"], bool)
+    assert isinstance(result["trace"]["rss_floored_2mode"], bool)
 
 
 # ---------------------------------------------------------------------------
@@ -406,12 +419,16 @@ def test_model_comparison_rss_floor_finite_when_perfect_fit() -> None:
         )
 
     # No inf/nan must escape into JSON
-    serialized = json.dumps(result)  # must not raise
+    serialized = json.dumps(result, allow_nan=False)  # must not raise
     reloaded = json.loads(serialized)
     assert reloaded["schema_version"] == "model_comparison_v1"
     # conventions block must be present
     assert "conventions" in reloaded
     assert reloaded["conventions"]["delta_bic_definition"] == "bic_2mode - bic_1mode"
+    assert reloaded["conventions"]["bic_formula"] == "k*ln(n) + n*ln(rss/n)"
+    assert reloaded["conventions"]["tie_break_rule"] == "|ΔBIC|<eps => ΔBIC=0.0 and prefer 1-mode"
+    assert isinstance(reloaded["trace"]["rss_floored_1mode"], bool)
+    assert isinstance(reloaded["trace"]["rss_floored_2mode"], bool)
 
 
 def test_model_comparison_invalid_when_n_too_small_for_k() -> None:
@@ -437,5 +454,9 @@ def test_model_comparison_invalid_when_n_too_small_for_k() -> None:
     assert result["decision"]["two_mode_preferred"] is False
 
     # JSON-serialisable even in this degenerate case
-    serialized = json.dumps(result)  # must not raise
-    assert json.loads(serialized)["schema_version"] == "model_comparison_v1"
+    serialized = json.dumps(result, allow_nan=False)  # must not raise
+    reloaded = json.loads(serialized)
+    assert reloaded["schema_version"] == "model_comparison_v1"
+    assert reloaded["valid_bic_2mode"] is False
+    assert isinstance(reloaded["trace"]["rss_floored_1mode"], bool)
+    assert isinstance(reloaded["trace"]["rss_floored_2mode"], bool)

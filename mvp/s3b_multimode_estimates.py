@@ -566,24 +566,31 @@ def compute_model_comparison(
     from numpy.linalg import lstsq
 
     n = int(signal.size)
-    t = np.arange(n, dtype=float) / fs
     k_1mode = 4
     k_2mode = 8
 
     # Conventions block: all semantic choices documented for audit / reproducibility.
     conventions: dict[str, Any] = {
         "delta_bic_definition": "bic_2mode - bic_1mode",
-        "two_mode_threshold": delta_bic_threshold,
+        "two_mode_threshold": float(delta_bic_threshold),
         "design_matrix_columns": ["220_cos", "220_sin", "221_cos", "221_sin"],
         "k_definition": {
-            "k_1mode": "4 (Acos_220, Asin_220, f_220, tau_220)",
-            "k_2mode": "8 (Acos_220, Asin_220, f_220, tau_220, Acos_221, Asin_221, f_221, tau_221)",
+            "k_1mode": k_1mode,
+            "k_2mode": k_2mode,
+            "counts": {
+                "per_mode": ["Acos", "Asin", "f", "tau"],
+                "one_mode": ["Acos_220", "Asin_220", "f_220", "tau_220"],
+                "two_mode": [
+                    "Acos_220", "Asin_220", "f_220", "tau_220",
+                    "Acos_221", "Asin_221", "f_221", "tau_221",
+                ],
+            },
         },
         "bic_formula": "k*ln(n) + n*ln(rss/n)",
         "rss_floor": _RSS_FLOOR,
         "n_min_bic_margin": _N_MIN_BIC_MARGIN,
         "delta_bic_tie_eps": _DELTA_BIC_TIE_EPS,
-        "tie_break_rule": "if |delta_bic| < delta_bic_tie_eps then prefer 1mode",
+        "tie_break_rule": "|ΔBIC|<eps => ΔBIC=0.0 and prefer 1-mode",
     }
 
     trace_base: dict[str, Any] = {
@@ -616,6 +623,15 @@ def compute_model_comparison(
             "valid_bic_2mode": False,
             "trace": {**trace_base, **(trace_extra or {})},
         }
+
+    if n <= 0 or not math.isfinite(float(fs)) or float(fs) <= 0.0:
+        return _null_result(
+            valid_1mode=False,
+            valid_2mode=False,
+            trace_extra={"invalid_signal_or_fs": True},
+        )
+
+    t = np.arange(n, dtype=float) / fs
 
     # --- Validate 220 point estimates ---
     valid_1mode = (
@@ -813,6 +829,16 @@ def build_results_payload(
     }
 
 
+def _json_strictify(value: Any) -> Any:
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _json_strictify(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_strictify(v) for v in value]
+    return value
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="MVP s3b multimode estimates")
     ap.add_argument("--run-id", required=True)
@@ -932,10 +958,10 @@ def main() -> int:
         )
 
         out_path = ctx.outputs_dir / "multimode_estimates.json"
-        write_json_atomic(out_path, payload)
+        write_json_atomic(out_path, _json_strictify(payload))
 
         comparison_path = ctx.outputs_dir / "model_comparison.json"
-        write_json_atomic(comparison_path, model_comparison)
+        write_json_atomic(comparison_path, _json_strictify(model_comparison))
 
         finalize(
             ctx,
