@@ -39,7 +39,10 @@ class TestS3bMultimodeContract:
 
     def test_produced_outputs(self):
         c = CONTRACTS["s3b_multimode_estimates"]
-        assert c.produced_outputs == ["outputs/multimode_estimates.json"]
+        assert c.produced_outputs == [
+            "outputs/multimode_estimates.json",
+            "outputs/model_comparison.json",
+        ]
 
     def test_upstream_stages(self):
         c = CONTRACTS["s3b_multimode_estimates"]
