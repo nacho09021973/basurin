@@ -210,6 +210,7 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         produced_outputs=[
             "outputs/multimode_estimates.json",
+            "outputs/model_comparison.json",
         ],
         upstream_stages=["s2_ringdown_window", "s3_ringdown_estimates"],
     ),

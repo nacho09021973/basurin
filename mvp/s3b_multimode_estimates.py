@@ -535,6 +535,169 @@ def evaluate_mode(
     return mode_payload, sorted(set(flags)), ok
 
 
+def compute_model_comparison(
+    signal: np.ndarray,
+    fs: float,
+    mode_220: dict[str, Any],
+    mode_221: dict[str, Any],
+    ok_220: bool,
+    ok_221: bool,
+    *,
+    delta_bic_threshold: float = -10.0,
+) -> dict[str, Any]:
+    """BIC-based model comparison: 1-mode (220) vs 2-mode (220+221).
+
+    BIC formula (Gaussian i.i.d. noise, profiled variance):
+        BIC = k * ln(n) + n * ln(rss / n)
+
+    k convention: 4 per mode (Acos, Asin, f, tau). Documented in output.
+    delta_bic = bic_2mode - bic_1mode; two_mode_preferred iff delta_bic < threshold.
+    """
+    from numpy.linalg import lstsq
+
+    n = int(signal.size)
+    t = np.arange(n, dtype=float) / fs
+    k_1mode = 4
+    k_2mode = 8
+    trace_base: dict[str, Any] = {
+        "fit_method": "lstsq_amplitudes",
+        "bic_formula": "k*ln(n) + n*ln(rss/n)",
+        "k_convention": "k=4 per mode (Acos, Asin, f, tau)",
+        "mode_220_label": mode_220.get("label"),
+        "mode_221_label": mode_221.get("label"),
+    }
+
+    def _null_result(*, valid_1mode: bool, valid_2mode: bool, trace_extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            "schema_version": "model_comparison_v1",
+            "n_samples": n,
+            "k_1mode": k_1mode,
+            "k_2mode": k_2mode,
+            "rss_1mode": None,
+            "rss_2mode": None,
+            "bic_1mode": None,
+            "bic_2mode": None,
+            "delta_bic": None,
+            "thresholds": {"two_mode_preferred_delta_bic": delta_bic_threshold},
+            "decision": {"two_mode_preferred": False},
+            "valid_1mode": valid_1mode,
+            "valid_2mode": valid_2mode,
+            "trace": {**trace_base, **(trace_extra or {})},
+        }
+
+    # --- Validate 220 point estimates ---
+    valid_1mode = (
+        ok_220
+        and mode_220.get("ln_f") is not None
+        and mode_220.get("ln_Q") is not None
+        and math.isfinite(float(mode_220["ln_f"]))
+        and math.isfinite(float(mode_220["ln_Q"]))
+    )
+    if not valid_1mode:
+        return _null_result(valid_1mode=False, valid_2mode=False)
+
+    ln_f220 = float(mode_220["ln_f"])
+    ln_q220 = float(mode_220["ln_Q"])
+    f220 = math.exp(ln_f220)
+    q220 = math.exp(ln_q220)
+    tau220 = q220 / (math.pi * f220)
+    w220 = 2.0 * math.pi * f220
+    env220 = np.exp(-t / tau220)
+    col_220c = env220 * np.cos(w220 * t)
+    col_220s = env220 * np.sin(w220 * t)
+    X1 = np.vstack([col_220c, col_220s]).T
+
+    coeffs1, *_ = lstsq(X1, signal, rcond=None)
+    residual1 = signal - X1 @ coeffs1
+    rss_1mode = float(np.dot(residual1, residual1))
+
+    if not math.isfinite(rss_1mode) or rss_1mode < 0.0:
+        return _null_result(valid_1mode=False, valid_2mode=False, trace_extra={"rss_1mode_invalid": True})
+
+    bic_1mode = float(k_1mode * math.log(n) + n * math.log(max(rss_1mode / n, 1e-300)))
+    trace_1mode: dict[str, Any] = {**trace_base, "ln_f220": ln_f220, "ln_Q220": ln_q220}
+
+    # --- Validate 221 point estimates ---
+    valid_2mode = (
+        ok_221
+        and mode_221.get("ln_f") is not None
+        and mode_221.get("ln_Q") is not None
+        and math.isfinite(float(mode_221["ln_f"]))
+        and math.isfinite(float(mode_221["ln_Q"]))
+    )
+    if not valid_2mode:
+        return {
+            "schema_version": "model_comparison_v1",
+            "n_samples": n,
+            "k_1mode": k_1mode,
+            "k_2mode": k_2mode,
+            "rss_1mode": rss_1mode,
+            "rss_2mode": None,
+            "bic_1mode": bic_1mode,
+            "bic_2mode": None,
+            "delta_bic": None,
+            "thresholds": {"two_mode_preferred_delta_bic": delta_bic_threshold},
+            "decision": {"two_mode_preferred": False},
+            "valid_1mode": True,
+            "valid_2mode": False,
+            "trace": trace_1mode,
+        }
+
+    ln_f221 = float(mode_221["ln_f"])
+    ln_q221 = float(mode_221["ln_Q"])
+    f221 = math.exp(ln_f221)
+    q221 = math.exp(ln_q221)
+    tau221 = q221 / (math.pi * f221)
+    w221 = 2.0 * math.pi * f221
+    env221 = np.exp(-t / tau221)
+    col_221c = env221 * np.cos(w221 * t)
+    col_221s = env221 * np.sin(w221 * t)
+    X2 = np.vstack([col_220c, col_220s, col_221c, col_221s]).T
+
+    coeffs2, *_ = lstsq(X2, signal, rcond=None)
+    residual2 = signal - X2 @ coeffs2
+    rss_2mode = float(np.dot(residual2, residual2))
+
+    if not math.isfinite(rss_2mode) or rss_2mode < 0.0:
+        return {
+            "schema_version": "model_comparison_v1",
+            "n_samples": n,
+            "k_1mode": k_1mode,
+            "k_2mode": k_2mode,
+            "rss_1mode": rss_1mode,
+            "rss_2mode": None,
+            "bic_1mode": bic_1mode,
+            "bic_2mode": None,
+            "delta_bic": None,
+            "thresholds": {"two_mode_preferred_delta_bic": delta_bic_threshold},
+            "decision": {"two_mode_preferred": False},
+            "valid_1mode": True,
+            "valid_2mode": False,
+            "trace": {**trace_1mode, "rss_2mode_invalid": True},
+        }
+
+    bic_2mode = float(k_2mode * math.log(n) + n * math.log(max(rss_2mode / n, 1e-300)))
+    delta_bic = bic_2mode - bic_1mode
+    two_mode_preferred = bool(delta_bic < delta_bic_threshold)
+
+    return {
+        "schema_version": "model_comparison_v1",
+        "n_samples": n,
+        "k_1mode": k_1mode,
+        "k_2mode": k_2mode,
+        "rss_1mode": rss_1mode,
+        "rss_2mode": rss_2mode,
+        "bic_1mode": bic_1mode,
+        "bic_2mode": bic_2mode,
+        "delta_bic": delta_bic,
+        "thresholds": {"two_mode_preferred_delta_bic": delta_bic_threshold},
+        "decision": {"two_mode_preferred": two_mode_preferred},
+        "valid_1mode": True,
+        "valid_2mode": True,
+        "trace": {**trace_1mode, "ln_f221": ln_f221, "ln_Q221": ln_q221},
+    }
+
+
 def build_results_payload(
     run_id: str,
     window_meta: dict[str, Any] | None,
@@ -543,6 +706,8 @@ def build_results_payload(
     mode_221: dict[str, Any],
     mode_221_ok: bool,
     flags: list[str],
+    *,
+    model_comparison: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     verdict = "OK" if mode_220_ok else "INSUFFICIENT_DATA"
     messages: list[str] = []
@@ -550,16 +715,24 @@ def build_results_payload(
         messages.append("Mode 221 insufficient/unstable; proceeding with 220-only result.")
     if verdict == "INSUFFICIENT_DATA":
         messages.append("Best-effort multimode fit: one or more modes unavailable or unstable.")
+
+    results: dict[str, Any] = {
+        "verdict": verdict,
+        "quality_flags": sorted(set(flags)),
+        "messages": sorted(messages),
+    }
+    if model_comparison is not None:
+        two_mode_preferred = bool(
+            (model_comparison.get("decision") or {}).get("two_mode_preferred", False)
+        )
+        results["quality_gates"] = {"two_mode_preferred": two_mode_preferred}
+
     return {
         "schema_version": "multimode_estimates_v1",
         "run_id": run_id,
         "source": {"stage": "s2_ringdown_window", "window": window_meta},
         "modes_target": TARGET_MODES,
-        "results": {
-            "verdict": verdict,
-            "quality_flags": sorted(set(flags)),
-            "messages": sorted(messages),
-        },
+        "results": results,
         "modes": [mode_220, mode_221],
     }
 
@@ -667,6 +840,10 @@ def main() -> int:
             method=args.method,
         )
 
+        model_comparison = compute_model_comparison(
+            signal, fs, mode_220, mode_221, ok_220, ok_221,
+        )
+
         payload = build_results_payload(
             args.run_id,
             window_meta,
@@ -675,11 +852,21 @@ def main() -> int:
             mode_221,
             ok_221,
             global_flags + flags_220 + flags_221,
+            model_comparison=model_comparison,
         )
 
         out_path = ctx.outputs_dir / "multimode_estimates.json"
         write_json_atomic(out_path, payload)
-        finalize(ctx, {"multimode_estimates": out_path}, verdict="PASS", results=payload["results"])
+
+        comparison_path = ctx.outputs_dir / "model_comparison.json"
+        write_json_atomic(comparison_path, model_comparison)
+
+        finalize(
+            ctx,
+            {"multimode_estimates": out_path, "model_comparison": comparison_path},
+            verdict="PASS",
+            results=payload["results"],
+        )
         return 0
     except SystemExit:
         raise
