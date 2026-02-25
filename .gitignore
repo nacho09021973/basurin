@@ -25,3 +25,8 @@ scratch/
 
 # Cache local LOSC (no canónica)
 data/losc/
+
+# pytest-cov coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
