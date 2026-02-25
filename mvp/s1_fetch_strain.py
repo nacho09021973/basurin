@@ -689,6 +689,8 @@ def main() -> int:
         sample_rate_hz: float | None = None
         library_version = "unknown"
 
+        local_inputs_rel: dict[str, str] = {}
+
         for i, det in enumerate(detectors, 1):
             print(
                 f"[s1_fetch_strain] Detector {i}/{len(detectors)}: {det}",
@@ -702,8 +704,11 @@ def main() -> int:
                 inputs_dir = ctx.stage_dir / "inputs"
                 inputs_dir.mkdir(parents=True, exist_ok=True)
                 src = local_by_det[det]
-                dst = inputs_dir / f"{det}.h5"
+                dst = inputs_dir / src.name
+                if dst.exists() and dst.resolve() != src.resolve():
+                    dst = inputs_dir / f"{det}_{src.name}"
                 shutil.copy2(src, dst)
+                local_inputs_rel[det] = str(dst.relative_to(ctx.stage_dir))
                 strain, sr, gps_start_local, library_version = _load_local_hdf5(dst)
                 if gps_start is None and gps_start_local is not None:
                     gps_start = gps_start_local
@@ -752,7 +757,7 @@ def main() -> int:
         }
         if local_mode:
             provenance["local_inputs"] = {
-                det: f"inputs/{det}.h5" for det in detectors if det in local_by_det
+                det: local_inputs_rel[det] for det in detectors if det in local_inputs_rel
             }
             provenance["local_input_sha256"] = {
                 det: sha256_file(ctx.stage_dir / provenance["local_inputs"][det]) for det in provenance["local_inputs"]
@@ -764,9 +769,8 @@ def main() -> int:
             check_inputs(
                 ctx,
                 {
-                    f"local_hdf5_{det}": ctx.stage_dir / f"inputs/{det}.h5"
-                    for det in detectors
-                    if (ctx.stage_dir / f"inputs/{det}.h5").exists()
+                    f"local_hdf5_{det}": ctx.stage_dir / relpath
+                    for det, relpath in local_inputs_rel.items()
                 },
             )
 
