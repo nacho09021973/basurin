@@ -562,6 +562,7 @@ def run_multimode_event(
     local_hdf5: list[str] | None = None,
     s3b_n_bootstrap: int = 200,
     s3b_seed: int = 12345,
+    s3b_method: str = "hilbert_peakband",
     offline: bool = False,
 ) -> tuple[int, str]:
     event_id = _require_nonempty_event_id(event_id, "--event-id")
@@ -647,6 +648,7 @@ def run_multimode_event(
         "--s3-estimates", f"{run_id}/s3_ringdown_estimates/outputs/estimates.json",
         "--n-bootstrap", str(s3b_n_bootstrap),
         "--seed", str(s3b_seed),
+        "--method", s3b_method,
     ]
     rc = _run_stage("s3b_multimode_estimates.py", s3b_args, "s3b_multimode_estimates", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
@@ -894,6 +896,11 @@ def main() -> int:
     sp_multimode.add_argument("--s3b-n-bootstrap", type=int, default=200)
     sp_multimode.add_argument("--s3b-seed", type=int, default=12345)
     sp_multimode.add_argument(
+        "--s3b-method",
+        choices=["hilbert_peakband", "spectral_two_pass"],
+        default="hilbert_peakband",
+    )
+    sp_multimode.add_argument(
         "--local-hdf5",
         action="append",
         default=[],
@@ -1025,6 +1032,7 @@ def main() -> int:
             with_t0_sweep=args.with_t0_sweep,
             s3b_n_bootstrap=args.s3b_n_bootstrap,
             s3b_seed=args.s3b_seed,
+            s3b_method=args.s3b_method,
             local_hdf5=args.local_hdf5,
             offline=args.offline,
         )

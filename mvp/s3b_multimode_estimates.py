@@ -19,7 +19,7 @@ for _cand in (_here.parents[0], _here.parents[1]):
 
 from basurin_io import write_json_atomic
 from mvp.contracts import abort, check_inputs, finalize, init_stage
-from mvp.s3_ringdown_estimates import estimate_ringdown_observables
+from mvp.s3_ringdown_estimates import estimate_ringdown_observables, estimate_ringdown_spectral
 
 STAGE = "s3b_multimode_estimates"
 TARGET_MODES = [
@@ -291,6 +291,28 @@ def _estimate_220(signal: np.ndarray, fs: float, *, band_low: float, band_high: 
     return estimate_ringdown_observables(signal, fs, band_low, band_high)
 
 
+def _estimate_spectral(signal: np.ndarray, fs: float, *, band_low: float, band_high: float) -> dict[str, float]:
+    est = estimate_ringdown_spectral(signal, fs, (band_low, band_high))
+    return {
+        "f_hz": float(est["f_hz"]),
+        "Q": float(est["Q"]),
+        "tau_s": float(est["tau_s"]),
+    }
+
+
+def _split_mode_bands(*, band_low: float, band_high: float) -> tuple[tuple[float, float], tuple[float, float]]:
+    mid = 0.5 * (band_low + band_high)
+    eps = 1e-6
+    band_220 = (band_low, max(mid - eps, band_low + eps))
+    band_221 = (min(mid + eps, band_high - eps), band_high)
+    return band_220, band_221
+
+
+def _estimate_220_spectral(signal: np.ndarray, fs: float, *, band_low: float, band_high: float) -> dict[str, float]:
+    band_220, _ = _split_mode_bands(band_low=band_low, band_high=band_high)
+    return _estimate_spectral(signal, fs, band_low=band_220[0], band_high=band_220[1])
+
+
 def _template_220(signal: np.ndarray, fs: float, est220: dict[str, float]) -> np.ndarray:
     from numpy.linalg import lstsq
 
@@ -312,7 +334,22 @@ def _estimate_221_from_signal(signal: np.ndarray, fs: float, *, band_low: float,
     return estimate_ringdown_observables(residual, fs, band_low, band_high)
 
 
-def _mode_null(label: str, mode: list[int], n_bootstrap: int, seed: int, stability: dict[str, Any]) -> dict[str, Any]:
+def _estimate_221_spectral_two_pass(signal: np.ndarray, fs: float, *, band_low: float, band_high: float) -> dict[str, float]:
+    est220 = _estimate_220_spectral(signal, fs, band_low=band_low, band_high=band_high)
+    residual = signal - _template_220(signal, fs, est220)
+    _, band_221 = _split_mode_bands(band_low=band_low, band_high=band_high)
+    return _estimate_spectral(residual, fs, band_low=band_221[0], band_high=band_221[1])
+
+
+def _mode_null(
+    label: str,
+    mode: list[int],
+    n_bootstrap: int,
+    seed: int,
+    stability: dict[str, Any],
+    *,
+    method: str,
+) -> dict[str, Any]:
     return {
         "mode": mode,
         "label": label,
@@ -320,7 +357,7 @@ def _mode_null(label: str, mode: list[int], n_bootstrap: int, seed: int, stabili
         "ln_Q": None,
         "Sigma": None,
         "fit": {
-            "method": "hilbert_peakband",
+            "method": method,
             "n_bootstrap": int(n_bootstrap),
             "bootstrap_seed": int(seed),
             "stability": stability,
@@ -343,6 +380,7 @@ def evaluate_mode(
     max_lnq_span: float = 1.0,
     min_point_samples: int = 2,
     min_point_valid_fraction: float = 0.0,
+    method: str = "hilbert_peakband",
 ) -> tuple[dict[str, Any], list[str], bool]:
     flags: list[str] = []
     stability = {
@@ -357,13 +395,13 @@ def evaluate_mode(
     if n_samples <= 0 or n_samples < MIN_BOOTSTRAP_SAMPLES:
         flags.append("bootstrap_high_nonpositive")
         stability["message"] = "window too short after offset"
-        return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
+        return _mode_null(label, mode, n_bootstrap, seed, stability, method=method), sorted(flags), False
 
     block_size = _bootstrap_block_size(n_samples)
     if block_size <= 0 or block_size >= n_samples:
         flags.append("bootstrap_block_invalid")
         stability["message"] = "window too short after offset"
-        return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
+        return _mode_null(label, mode, n_bootstrap, seed, stability, method=method), sorted(flags), False
 
     rng = np.random.default_rng(int(seed))
 
@@ -374,12 +412,12 @@ def evaluate_mode(
         if "high <= 0" in msg or "low >= high" in msg:
             flags.append("bootstrap_high_nonpositive")
             stability["message"] = "window too short after offset"
-            return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
+            return _mode_null(label, mode, n_bootstrap, seed, stability, method=method), sorted(flags), False
         raise
     sigma_invalid_flag = f"{label}_Sigma_invalid"
     if samples.ndim != 2 or samples.shape[1] != 2:
         flags.append(sigma_invalid_flag)
-        return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(set(flags)), False
+        return _mode_null(label, mode, n_bootstrap, seed, stability, method=method), sorted(set(flags)), False
 
     valid_mask = np.all(np.isfinite(samples), axis=1)
     dropped_invalid = int(samples.shape[0] - int(np.count_nonzero(valid_mask)))
@@ -411,7 +449,7 @@ def evaluate_mode(
     if samples.shape[0] < 2:
         flags.append(f"{label}_bootstrap_insufficient")
         flags.append(sigma_invalid_flag)
-        return _mode_null(label, mode, n_bootstrap, seed, stability), sorted(flags), False
+        return _mode_null(label, mode, n_bootstrap, seed, stability, method=method), sorted(flags), False
 
     sigma: np.ndarray | None = None
     if samples.ndim != 2 or samples.shape[1] != 2 or samples.shape[0] < int(min_point_samples):
@@ -470,7 +508,7 @@ def evaluate_mode(
         ok = False
 
     if sigma is None:
-        mode_payload = _mode_null(label, mode, n_bootstrap, seed, stability)
+        mode_payload = _mode_null(label, mode, n_bootstrap, seed, stability, method=method)
         mode_payload["ln_f"] = ln_f
         mode_payload["ln_Q"] = ln_q
     else:
@@ -481,7 +519,7 @@ def evaluate_mode(
             "ln_Q": ln_q,
             "Sigma": [[float(sigma[0, 0]), float(sigma[0, 1])], [float(sigma[1, 0]), float(sigma[1, 1])]],
             "fit": {
-                "method": "hilbert_peakband",
+                "method": method,
                 "n_bootstrap": int(n_bootstrap),
                 "bootstrap_seed": int(seed),
                 "stability": stability,
@@ -527,6 +565,11 @@ def main() -> int:
     ap.add_argument("--s3-estimates", default=None, help="Path to s3_ringdown_estimates outputs/estimates.json")
     ap.add_argument("--n-bootstrap", type=int, default=200)
     ap.add_argument("--seed", type=int, default=12345)
+    ap.add_argument(
+        "--method",
+        default="hilbert_peakband",
+        choices=["hilbert_peakband", "spectral_two_pass"],
+    )
     ap.add_argument("--max-lnf-span-220", type=float, default=1.0)
     ap.add_argument("--max-lnq-span-220", type=float, default=3.0)
     ap.add_argument("--max-lnf-span-221", type=float, default=1.0)
@@ -549,6 +592,7 @@ def main() -> int:
         params={
             "n_bootstrap": args.n_bootstrap,
             "seed": args.seed,
+            "method": args.method,
             "max_lnf_span_220": args.max_lnf_span_220,
             "max_lnq_span_220": args.max_lnq_span_220,
             "max_lnf_span_221": args.max_lnf_span_221,
@@ -579,30 +623,33 @@ def main() -> int:
         )
         signal, fs = _load_signal_from_npz(npz_path, window_meta=window_meta)
 
+        if args.method == "spectral_two_pass":
+            est_220 = lambda sig, sr: _estimate_220_spectral(sig, sr, band_low=band_low, band_high=band_high)
+            est_221 = lambda sig, sr: _estimate_221_spectral_two_pass(sig, sr, band_low=band_low, band_high=band_high)
+        else:
+            est_220 = lambda sig, sr: _estimate_220(sig, sr, band_low=band_low, band_high=band_high)
+            est_221 = lambda sig, sr: _estimate_221_from_signal(sig, sr, band_low=band_low, band_high=band_high)
+
         mode_220, flags_220, ok_220 = evaluate_mode(
             signal,
             fs,
             label="220",
             mode=[2, 2, 0],
-            estimator=lambda sig, sr: _estimate_220(sig, sr, band_low=band_low, band_high=band_high),
+            estimator=est_220,
             n_bootstrap=args.n_bootstrap,
             seed=args.seed,
             max_lnf_span=args.max_lnf_span_220,
             max_lnq_span=args.max_lnq_span_220,
             min_point_samples=50,
             min_point_valid_fraction=0.5,
+            method=args.method,
         )
         mode_221, flags_221, ok_221 = evaluate_mode(
             signal,
             fs,
             label="221",
             mode=[2, 2, 1],
-            estimator=lambda sig, sr: _estimate_221_from_signal(
-                sig,
-                sr,
-                band_low=band_low,
-                band_high=band_high,
-            ),
+            estimator=est_221,
             n_bootstrap=args.n_bootstrap,
             seed=args.seed + 1,
             min_valid_fraction=args.min_valid_fraction_221,
@@ -611,6 +658,7 @@ def main() -> int:
             max_lnq_span=args.max_lnq_span_221,
             min_point_samples=50,
             min_point_valid_fraction=0.5,
+            method=args.method,
         )
 
         payload = build_results_payload(
