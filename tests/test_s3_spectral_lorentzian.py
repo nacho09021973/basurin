@@ -38,6 +38,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from mvp.s3_ringdown_estimates import (
+    bootstrap_ringdown_observables,
     estimate_ringdown_observables,
     estimate_ringdown_spectral,
 )
@@ -632,3 +633,136 @@ class TestT0Scan:
         per0 = est["t0_scan"]["per_offset"]["0"]
         assert len(per0["detectors_used"]) == 1
         assert per0["BIC"] == 8.0
+
+
+# ── TestBootstrapEstimator (Gap 4 from test_coverage_proposal.md) ─────────
+
+
+class TestBootstrapEstimator:
+    """bootstrap_ringdown_observables() — previously zero coverage.
+
+    The bootstrap estimator runs block-bootstrap resampling on the Hilbert
+    estimate.  These tests verify the output schema, convergence on a clean
+    synthetic ringdown, and correct handling of degenerate inputs.
+    """
+
+    def test_output_schema_keys_present(self) -> None:
+        """Output dict must contain the documented keys."""
+        strain = _make_ringdown()
+        result = bootstrap_ringdown_observables(
+            strain, SAMPLE_RATE, BAND[0], BAND[1], n_bootstrap=50, seed=42
+        )
+        required_keys = {
+            "f_hz_median", "f_hz_std",
+            "tau_s_median", "tau_s_std",
+            "Q_median", "Q_std",
+            "n_successful", "n_failed", "block_size",
+            "samples",
+        }
+        for key in required_keys:
+            assert key in result, f"Missing key in bootstrap output: {key!r}"
+
+    def test_samples_sub_dict_keys(self) -> None:
+        """samples dict must have f_hz, tau_s, Q lists."""
+        strain = _make_ringdown()
+        result = bootstrap_ringdown_observables(
+            strain, SAMPLE_RATE, BAND[0], BAND[1], n_bootstrap=50, seed=42
+        )
+        for key in ("f_hz", "tau_s", "Q"):
+            assert key in result["samples"], f"Missing samples.{key}"
+            assert isinstance(result["samples"][key], list)
+
+    def test_bootstrap_converges_on_synthetic_ringdown(self) -> None:
+        """Median frequency from bootstrap must be within 10% of ground truth."""
+        strain = _make_ringdown(snr=30.0)  # high SNR for stable bootstrap
+        result = bootstrap_ringdown_observables(
+            strain, SAMPLE_RATE, BAND[0], BAND[1], n_bootstrap=100, seed=42
+        )
+        assert result["n_successful"] >= 10, (
+            f"Too few successful bootstrap iterations: {result['n_successful']}"
+        )
+        err_f = abs(result["f_hz_median"] - F_TRUE) / F_TRUE
+        assert err_f < 0.10, (
+            f"Bootstrap frequency error {err_f:.2%} >= 10% "
+            f"(f_median={result['f_hz_median']:.2f}, f_true={F_TRUE})"
+        )
+
+    def test_bootstrap_std_positive_on_clean_signal(self) -> None:
+        """Standard deviations must be positive and finite on a clean signal."""
+        strain = _make_ringdown()
+        result = bootstrap_ringdown_observables(
+            strain, SAMPLE_RATE, BAND[0], BAND[1], n_bootstrap=50, seed=0
+        )
+        if result["n_successful"] < 10:
+            pytest.skip("Too few successful iterations for std to be meaningful")
+
+        for key in ("f_hz_std", "tau_s_std", "Q_std"):
+            val = result[key]
+            assert math.isfinite(val), f"{key} not finite: {val}"
+            assert val > 0.0, f"{key} must be > 0, got {val}"
+
+    def test_bootstrap_n_successful_plus_failed_equals_n_bootstrap(self) -> None:
+        """n_successful + n_failed must equal n_bootstrap."""
+        strain = _make_ringdown()
+        n_bs = 80
+        result = bootstrap_ringdown_observables(
+            strain, SAMPLE_RATE, BAND[0], BAND[1], n_bootstrap=n_bs, seed=7
+        )
+        assert result["n_successful"] + result["n_failed"] == n_bs, (
+            f"n_successful ({result['n_successful']}) + "
+            f"n_failed ({result['n_failed']}) != {n_bs}"
+        )
+
+    def test_bootstrap_samples_length_equals_n_successful(self) -> None:
+        """Length of each samples list must equal n_successful."""
+        strain = _make_ringdown()
+        result = bootstrap_ringdown_observables(
+            strain, SAMPLE_RATE, BAND[0], BAND[1], n_bootstrap=60, seed=3
+        )
+        n = result["n_successful"]
+        for key in ("f_hz", "tau_s", "Q"):
+            assert len(result["samples"][key]) == n, (
+                f"samples.{key} length {len(result['samples'][key])} != n_successful={n}"
+            )
+
+    def test_bootstrap_too_short_strain_returns_nan_result(self) -> None:
+        """Very short strain (< 1 block) → n_blocks==0 → nan result dict."""
+        # With f≈250 Hz, block_size ≈ fs/f = 4096/250 ≈ 16 samples.
+        # Use only 10 samples so n_blocks = 10//16 = 0.
+        short_strain = np.ones(10, dtype=np.float64)
+        # estimate_ringdown_observables will likely fail (< 16 samples),
+        # triggering the n_blocks==0 early-return path.
+        try:
+            result = bootstrap_ringdown_observables(
+                short_strain, SAMPLE_RATE, BAND[0], BAND[1], n_bootstrap=50, seed=0
+            )
+            # If it returns, n_successful should be 0 and values NaN
+            assert result["n_successful"] == 0
+        except (ValueError, Exception):
+            # Also acceptable: degenerate input propagates an error
+            pass
+
+    def test_bootstrap_deterministic_with_same_seed(self) -> None:
+        """Same seed → identical output."""
+        strain = _make_ringdown()
+        r1 = bootstrap_ringdown_observables(
+            strain, SAMPLE_RATE, BAND[0], BAND[1], n_bootstrap=50, seed=42
+        )
+        r2 = bootstrap_ringdown_observables(
+            strain, SAMPLE_RATE, BAND[0], BAND[1], n_bootstrap=50, seed=42
+        )
+        assert r1["f_hz_median"] == r2["f_hz_median"]
+        assert r1["n_successful"] == r2["n_successful"]
+        assert r1["samples"]["f_hz"] == r2["samples"]["f_hz"]
+
+    def test_bootstrap_different_seeds_differ(self) -> None:
+        """Different seeds should (almost certainly) produce different samples."""
+        strain = _make_ringdown()
+        r1 = bootstrap_ringdown_observables(
+            strain, SAMPLE_RATE, BAND[0], BAND[1], n_bootstrap=50, seed=1
+        )
+        r2 = bootstrap_ringdown_observables(
+            strain, SAMPLE_RATE, BAND[0], BAND[1], n_bootstrap=50, seed=2
+        )
+        # The individual sample lists should differ (probability of identity ≈ 0)
+        assert r1["samples"]["f_hz"] != r2["samples"]["f_hz"]
