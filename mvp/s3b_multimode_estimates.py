@@ -30,6 +30,11 @@ MIN_BOOTSTRAP_SAMPLES = 128
 SIGMA_DET_EPS = 1e-12
 SIGMA_COND_MAX = 1e12
 
+# --- model_comparison numerical guards (documented in output conventions block) ---
+_RSS_FLOOR = 1e-300         # floor applied to rss/n inside log; prevents -inf on perfect fits
+_N_MIN_BIC_MARGIN = 2       # n must exceed k + this margin for BIC to be interpretable
+_DELTA_BIC_TIE_EPS = 1e-10  # |delta_bic| < eps → prefer simpler 1-mode (deterministic tie-break)
+
 
 def compute_covariance(samples: np.ndarray) -> np.ndarray:
     if samples.ndim != 2 or samples.shape[1] != 2:
@@ -552,6 +557,11 @@ def compute_model_comparison(
 
     k convention: 4 per mode (Acos, Asin, f, tau). Documented in output.
     delta_bic = bic_2mode - bic_1mode; two_mode_preferred iff delta_bic < threshold.
+
+    Numerical guards (all documented in returned conventions block):
+    - rss/n is clamped to _RSS_FLOOR before log to prevent -inf on perfect fits.
+    - BIC is only computed (valid_bic_*mode=True) when n > k + _N_MIN_BIC_MARGIN.
+    - Tie-breaking: |delta_bic| < _DELTA_BIC_TIE_EPS => prefer 1-mode deterministically.
     """
     from numpy.linalg import lstsq
 
@@ -559,6 +569,21 @@ def compute_model_comparison(
     t = np.arange(n, dtype=float) / fs
     k_1mode = 4
     k_2mode = 8
+
+    # Conventions block: all semantic choices documented for audit / reproducibility.
+    conventions: dict[str, Any] = {
+        "delta_bic_definition": "bic_2mode_minus_bic_1mode",
+        "two_mode_preferred_rule": (
+            f"delta_bic < threshold (strict); tie-break |delta_bic| < {_DELTA_BIC_TIE_EPS} => 1-mode"
+        ),
+        "two_mode_threshold": delta_bic_threshold,
+        "design_matrix_columns": ["220_cos", "220_sin", "221_cos", "221_sin"],
+        "k_definition": "4 per mode (Acos, Asin, f, tau)",
+        "bic_formula": "k * ln(n) + n * ln(rss / n)",
+        "rss_floor": _RSS_FLOOR,
+        "n_min_bic_margin": _N_MIN_BIC_MARGIN,
+    }
+
     trace_base: dict[str, Any] = {
         "fit_method": "lstsq_amplitudes",
         "bic_formula": "k*ln(n) + n*ln(rss/n)",
@@ -579,9 +604,12 @@ def compute_model_comparison(
             "bic_2mode": None,
             "delta_bic": None,
             "thresholds": {"two_mode_preferred_delta_bic": delta_bic_threshold},
+            "conventions": conventions,
             "decision": {"two_mode_preferred": False},
             "valid_1mode": valid_1mode,
             "valid_2mode": valid_2mode,
+            "valid_bic_1mode": False,
+            "valid_bic_2mode": False,
             "trace": {**trace_base, **(trace_extra or {})},
         }
 
@@ -614,8 +642,20 @@ def compute_model_comparison(
     if not math.isfinite(rss_1mode) or rss_1mode < 0.0:
         return _null_result(valid_1mode=False, valid_2mode=False, trace_extra={"rss_1mode_invalid": True})
 
-    bic_1mode = float(k_1mode * math.log(n) + n * math.log(max(rss_1mode / n, 1e-300)))
-    trace_1mode: dict[str, Any] = {**trace_base, "ln_f220": ln_f220, "ln_Q220": ln_q220}
+    # BIC validity gate: n must exceed k + margin for BIC to be interpretable.
+    valid_bic_1mode = n > k_1mode + _N_MIN_BIC_MARGIN
+    rss_floored_1mode = rss_1mode < n * _RSS_FLOOR  # floor was/will be applied
+    bic_1mode: float | None = (
+        float(k_1mode * math.log(n) + n * math.log(max(rss_1mode / n, _RSS_FLOOR)))
+        if valid_bic_1mode else None
+    )
+    trace_1mode: dict[str, Any] = {
+        **trace_base,
+        "ln_f220": ln_f220,
+        "ln_Q220": ln_q220,
+        "rss_floored_1mode": rss_floored_1mode,
+        "valid_bic_1mode": valid_bic_1mode,
+    }
 
     # --- Validate 221 point estimates ---
     valid_2mode = (
@@ -637,9 +677,12 @@ def compute_model_comparison(
             "bic_2mode": None,
             "delta_bic": None,
             "thresholds": {"two_mode_preferred_delta_bic": delta_bic_threshold},
+            "conventions": conventions,
             "decision": {"two_mode_preferred": False},
             "valid_1mode": True,
             "valid_2mode": False,
+            "valid_bic_1mode": valid_bic_1mode,
+            "valid_bic_2mode": False,
             "trace": trace_1mode,
         }
 
@@ -670,15 +713,34 @@ def compute_model_comparison(
             "bic_2mode": None,
             "delta_bic": None,
             "thresholds": {"two_mode_preferred_delta_bic": delta_bic_threshold},
+            "conventions": conventions,
             "decision": {"two_mode_preferred": False},
             "valid_1mode": True,
             "valid_2mode": False,
+            "valid_bic_1mode": valid_bic_1mode,
+            "valid_bic_2mode": False,
             "trace": {**trace_1mode, "rss_2mode_invalid": True},
         }
 
-    bic_2mode = float(k_2mode * math.log(n) + n * math.log(max(rss_2mode / n, 1e-300)))
-    delta_bic = bic_2mode - bic_1mode
-    two_mode_preferred = bool(delta_bic < delta_bic_threshold)
+    # BIC validity gate for 2-mode.
+    valid_bic_2mode = n > k_2mode + _N_MIN_BIC_MARGIN
+    rss_floored_2mode = rss_2mode < n * _RSS_FLOOR
+
+    bic_2mode: float | None
+    delta_bic: float | None
+    two_mode_preferred: bool
+    if valid_bic_1mode and valid_bic_2mode:
+        bic_2mode = float(k_2mode * math.log(n) + n * math.log(max(rss_2mode / n, _RSS_FLOOR)))
+        delta_bic = bic_2mode - bic_1mode  # type: ignore[operator]  # bic_1mode is float here
+        # Tie-breaking: near-zero delta_bic -> prefer simpler 1-mode deterministically.
+        if abs(delta_bic) < _DELTA_BIC_TIE_EPS:
+            two_mode_preferred = False
+        else:
+            two_mode_preferred = bool(delta_bic < delta_bic_threshold)
+    else:
+        bic_2mode = None
+        delta_bic = None
+        two_mode_preferred = False
 
     return {
         "schema_version": "model_comparison_v1",
@@ -691,10 +753,19 @@ def compute_model_comparison(
         "bic_2mode": bic_2mode,
         "delta_bic": delta_bic,
         "thresholds": {"two_mode_preferred_delta_bic": delta_bic_threshold},
+        "conventions": conventions,
         "decision": {"two_mode_preferred": two_mode_preferred},
         "valid_1mode": True,
         "valid_2mode": True,
-        "trace": {**trace_1mode, "ln_f221": ln_f221, "ln_Q221": ln_q221},
+        "valid_bic_1mode": valid_bic_1mode,
+        "valid_bic_2mode": valid_bic_2mode,
+        "trace": {
+            **trace_1mode,
+            "ln_f221": ln_f221,
+            "ln_Q221": ln_q221,
+            "rss_floored_2mode": rss_floored_2mode,
+            "valid_bic_2mode": valid_bic_2mode,
+        },
     }
 
 
