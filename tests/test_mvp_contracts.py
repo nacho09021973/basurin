@@ -81,7 +81,8 @@ class TestContractRegistry:
     def test_s3b_declares_model_comparison_output(self):
         """Guardrail: s3b contract must declare model comparison artifact."""
         produced = CONTRACTS["s3b_multimode_estimates"].produced_outputs
-        assert "outputs/model_comparison.json" in produced
+        assert "outputs/model_comparison.json" in produced, \
+            "s3b_multimode_estimates must declare outputs/model_comparison.json in produced_outputs"
 
 
 # ── Test 2: init_stage validation ──────────────────────────────────────────
