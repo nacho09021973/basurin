@@ -572,16 +572,18 @@ def compute_model_comparison(
 
     # Conventions block: all semantic choices documented for audit / reproducibility.
     conventions: dict[str, Any] = {
-        "delta_bic_definition": "bic_2mode_minus_bic_1mode",
-        "two_mode_preferred_rule": (
-            f"delta_bic < threshold (strict); tie-break |delta_bic| < {_DELTA_BIC_TIE_EPS} => 1-mode"
-        ),
+        "delta_bic_definition": "bic_2mode - bic_1mode",
         "two_mode_threshold": delta_bic_threshold,
         "design_matrix_columns": ["220_cos", "220_sin", "221_cos", "221_sin"],
-        "k_definition": "4 per mode (Acos, Asin, f, tau)",
-        "bic_formula": "k * ln(n) + n * ln(rss / n)",
+        "k_definition": {
+            "k_1mode": "4 (Acos_220, Asin_220, f_220, tau_220)",
+            "k_2mode": "8 (Acos_220, Asin_220, f_220, tau_220, Acos_221, Asin_221, f_221, tau_221)",
+        },
+        "bic_formula": "k*ln(n) + n*ln(rss/n)",
         "rss_floor": _RSS_FLOOR,
         "n_min_bic_margin": _N_MIN_BIC_MARGIN,
+        "delta_bic_tie_eps": _DELTA_BIC_TIE_EPS,
+        "tie_break_rule": "if |delta_bic| < delta_bic_tie_eps then prefer 1mode",
     }
 
     trace_base: dict[str, Any] = {
@@ -590,6 +592,8 @@ def compute_model_comparison(
         "k_convention": "k=4 per mode (Acos, Asin, f, tau)",
         "mode_220_label": mode_220.get("label"),
         "mode_221_label": mode_221.get("label"),
+        "rss_floored_1mode": False,
+        "rss_floored_2mode": False,
     }
 
     def _null_result(*, valid_1mode: bool, valid_2mode: bool, trace_extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -734,6 +738,7 @@ def compute_model_comparison(
         delta_bic = bic_2mode - bic_1mode  # type: ignore[operator]  # bic_1mode is float here
         # Tie-breaking: near-zero delta_bic -> prefer simpler 1-mode deterministically.
         if abs(delta_bic) < _DELTA_BIC_TIE_EPS:
+            delta_bic = 0.0
             two_mode_preferred = False
         else:
             two_mode_preferred = bool(delta_bic < delta_bic_threshold)
