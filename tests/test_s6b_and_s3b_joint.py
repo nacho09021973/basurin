@@ -364,3 +364,74 @@ def test_cli_multimode_estimates_has_quality_gates(tmp_path: Path) -> None:
     )
     assert "two_mode_preferred" in payload["results"]["quality_gates"]
     assert isinstance(payload["results"]["quality_gates"]["two_mode_preferred"], bool)
+
+
+# ---------------------------------------------------------------------------
+# Section 4 – Numerical edge cases (audit guards)
+# ---------------------------------------------------------------------------
+
+def test_model_comparison_rss_floor_finite_when_perfect_fit() -> None:
+    """Unit: when signal is exactly the 1-mode template (rss_1mode→0), BIC stays finite.
+
+    Verifies that the _RSS_FLOOR clamp prevents -inf from entering bic_1mode / delta_bic,
+    and that the output is JSON-serialisable with no inf/nan leaking through.
+    """
+    fs = 4096.0
+    t = np.arange(1229, dtype=float) / fs  # ~0.3 s at 4096 Hz
+    f220, q220 = 220.0, 12.0
+    tau220 = q220 / (math.pi * f220)
+    # Signal that is *exactly* a single-mode template (rss_1mode will be machine-epsilon small)
+    signal = np.exp(-t / tau220) * np.cos(2.0 * math.pi * f220 * t)
+
+    mode_220 = _make_mode_dict("220", f220, q220)
+    mode_221 = _make_mode_dict("221", 332.0, 8.0)
+
+    result = compute_model_comparison(signal, fs, mode_220, mode_221, ok_220=True, ok_221=True)
+
+    assert result["schema_version"] == "model_comparison_v1"
+    assert result["rss_1mode"] is not None and result["rss_1mode"] >= 0.0
+
+    if result["valid_bic_1mode"]:
+        assert result["bic_1mode"] is not None
+        assert math.isfinite(result["bic_1mode"]), (
+            f"bic_1mode must be finite even when rss_1mode≈0, got {result['bic_1mode']}"
+        )
+    if result["delta_bic"] is not None:
+        assert math.isfinite(result["delta_bic"]), (
+            f"delta_bic must be finite even when rss_1mode≈0, got {result['delta_bic']}"
+        )
+
+    # No inf/nan must escape into JSON
+    serialized = json.dumps(result)  # must not raise
+    reloaded = json.loads(serialized)
+    assert reloaded["schema_version"] == "model_comparison_v1"
+    # conventions block must be present
+    assert "conventions" in reloaded
+    assert reloaded["conventions"]["delta_bic_definition"] == "bic_2mode_minus_bic_1mode"
+
+
+def test_model_comparison_invalid_when_n_too_small_for_k() -> None:
+    """Unit: when n <= k_2mode + _N_MIN_BIC_MARGIN, valid_bic_2mode=False and delta_bic=None.
+
+    k_2mode=8, _N_MIN_BIC_MARGIN=2 → need n > 10; we use n=9 (too small for 2-mode BIC).
+    The function must not crash and must return a well-formed, JSON-serialisable dict.
+    """
+    fs = 4096.0
+    n = 9  # k_2mode + margin = 10; n=9 is below that threshold
+    signal = np.random.default_rng(0).standard_normal(n)
+    mode_220 = _make_mode_dict("220", 220.0, 12.0)
+    mode_221 = _make_mode_dict("221", 332.0, 8.0)
+
+    result = compute_model_comparison(signal, fs, mode_220, mode_221, ok_220=True, ok_221=True)
+
+    assert result["schema_version"] == "model_comparison_v1"
+    # 2-mode BIC is not interpretable → delta_bic must be null
+    assert result["delta_bic"] is None, (
+        f"delta_bic must be None when n={n} <= k_2mode + margin, got {result['delta_bic']}"
+    )
+    assert result["valid_bic_2mode"] is False
+    assert result["decision"]["two_mode_preferred"] is False
+
+    # JSON-serialisable even in this degenerate case
+    serialized = json.dumps(result)  # must not raise
+    assert json.loads(serialized)["schema_version"] == "model_comparison_v1"
