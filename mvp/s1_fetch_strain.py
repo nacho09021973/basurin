@@ -597,6 +597,14 @@ def main() -> int:
     )
     args = ap.parse_args()
 
+    if args.offline and not args.local_hdf5 and not args.reuse_if_present:
+        print(
+            "ERROR: --offline requires --local-hdf5 DET=PATH (repeatable) "
+            "or --reuse-if-present.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
     detectors = [d.strip().upper() for d in (args.detectors or "").split(",") if d.strip()]
 
     explicit_local_by_det = _resolve_local_hdf5_mappings(args.local_hdf5, event_id=args.event_id)
