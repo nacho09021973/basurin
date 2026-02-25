@@ -536,6 +536,37 @@ def main() -> int:
 
         has_covariance = sigma_logf_raw is not None and sigma_logQ_raw is not None
 
+        # Guard: s3 may produce sigma=0 when instantaneous frequency has zero MAD
+        # (all samples identical). This is a degenerate run, not a code bug — write
+        # an empty compatible_set and exit 0 so the pipeline sweep continues.
+        if has_covariance:
+            _slnf = float(sigma_logf_raw)
+            _slnq = float(sigma_logQ_raw)
+            if not (math.isfinite(_slnf) and _slnf > 0 and math.isfinite(_slnq) and _slnq > 0):
+                _reason = f"Degenerate s3 covariance: sigma_logf={_slnf}, sigma_logQ={_slnq} (MAD=0 fit)"
+                degenerate_result: dict[str, Any] = {
+                    "n_atlas": 0,
+                    "n_compatible": 0,
+                    "compatible_entries": [],
+                    "metric": "none",
+                    "threshold_d2": None,
+                    "d2_min": None,
+                    "bits_excluded": [],
+                    "event_id": estimates.get("event_id", "unknown"),
+                    "run_id": args.run,
+                    "degenerate": True,
+                    "degenerate_reason": _reason,
+                }
+                cs_path = ctx.outputs_dir / "compatible_set.json"
+                write_json_atomic(cs_path, degenerate_result)
+                finalize(
+                    ctx,
+                    artifacts={"compatible_set": cs_path},
+                    verdict="FAIL",
+                    extra_summary={"error": _reason},
+                )
+                return 0
+
         metric_name = args.metric or ("mahalanobis_log" if has_covariance else "euclidean_log")
         if metric_name == "mahalanobis_log" and not has_covariance:
             abort(
