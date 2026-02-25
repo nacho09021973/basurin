@@ -212,6 +212,49 @@ def test_spectral_two_pass_synthetic_orders_modes_and_has_finite_sigma() -> None
     assert isinstance(ok_221, bool)
     assert all(isinstance(flag, str) for flag in flags_220)
     assert all(isinstance(flag, str) for flag in flags_221)
+
+
+def test_spectral_two_pass_converts_lntau_to_lnq_for_stability_and_sigma() -> None:
+    signal = np.linspace(-1.0, 1.0, 4096)
+    ln_tau_values = np.log(np.linspace(0.03, 0.05, 100))
+    lnf_values = np.log(220.0) + np.linspace(-1e-3, 1e-3, 100)
+    synthetic_samples = np.column_stack([
+        lnf_values,
+        ln_tau_values,
+    ])
+
+    expected_lnq = np.log(np.pi) + synthetic_samples[:, 0] + synthetic_samples[:, 1]
+    expected_p50 = float(np.percentile(expected_lnq, 50))
+
+    original = _MODULE._bootstrap_mode_log_samples
+    _MODULE._bootstrap_mode_log_samples = lambda *_args, **_kwargs: (synthetic_samples.copy(), 0)
+    try:
+        mode, _flags, ok = evaluate_mode(
+            signal,
+            4096.0,
+            label="220",
+            mode=[2, 2, 0],
+            estimator=_stable_estimator,
+            n_bootstrap=100,
+            seed=77,
+            min_valid_fraction=0.0,
+            max_lnq_span=5.0,
+            min_point_samples=20,
+            min_point_valid_fraction=0.0,
+            method="spectral_two_pass",
+        )
+    finally:
+        _MODULE._bootstrap_mode_log_samples = original
+
+    assert ok
+    assert np.isclose(mode["ln_Q"], expected_p50, atol=1e-12)
+    assert np.exp(mode["ln_Q"]) > 1.0
+    sigma = np.asarray(mode["Sigma"], dtype=float)
+    assert np.isfinite(sigma).all()
+    assert sigma[1, 1] > 0.0
+    assert np.isclose(mode["fit"]["stability"]["lnQ_p50"], expected_p50, atol=1e-12)
+
+
 def _stable_estimator(signal: np.ndarray, fs: float) -> dict[str, float]:
     _ = signal, fs
     return {"f_hz": 250.0, "Q": 12.0, "tau_s": 12.0 / (np.pi * 250.0)}
