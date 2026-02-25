@@ -128,6 +128,10 @@ def test_model_comparison_schema_version_and_required_fields() -> None:
     assert isinstance(result["valid_1mode"], bool)
     assert isinstance(result["valid_2mode"], bool)
     assert "trace" in result
+    assert result["conventions"]["delta_bic_tie_eps"] == 1e-10
+    assert "tie_break_rule" in result["conventions"]
+    assert isinstance(result["trace"]["rss_floored_1mode"], bool)
+    assert isinstance(result["trace"]["rss_floored_2mode"], bool)
 
 
 def test_model_comparison_delta_bic_is_finite_on_valid_two_mode() -> None:
@@ -407,7 +411,7 @@ def test_model_comparison_rss_floor_finite_when_perfect_fit() -> None:
     assert reloaded["schema_version"] == "model_comparison_v1"
     # conventions block must be present
     assert "conventions" in reloaded
-    assert reloaded["conventions"]["delta_bic_definition"] == "bic_2mode_minus_bic_1mode"
+    assert reloaded["conventions"]["delta_bic_definition"] == "bic_2mode - bic_1mode"
 
 
 def test_model_comparison_invalid_when_n_too_small_for_k() -> None:
