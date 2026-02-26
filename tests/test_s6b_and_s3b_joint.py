@@ -159,6 +159,7 @@ def test_model_comparison_delta_bic_is_finite_on_valid_two_mode() -> None:
     assert math.isfinite(result["bic_2mode"])
     assert math.isfinite(result["rss_1mode"])
     assert math.isfinite(result["rss_2mode"])
+    assert isinstance(result["decision"]["two_mode_preferred"], bool)
 
 
 def test_model_comparison_json_serializable() -> None:
@@ -262,7 +263,7 @@ def test_model_comparison_invalid_221_returns_null_delta_bic() -> None:
     assert result["valid_2mode"] is False
     assert result["delta_bic"] is None
     assert result["bic_2mode"] is None
-    assert result["decision"]["two_mode_preferred"] is False
+    assert result["decision"]["two_mode_preferred"] is None
     assert result["schema_version"] == "model_comparison_v1"
     assert isinstance(result["trace"]["rss_floored_1mode"], bool)
     assert isinstance(result["trace"]["rss_floored_2mode"], bool)
@@ -280,7 +281,7 @@ def test_model_comparison_invalid_220_returns_all_null() -> None:
     assert result["valid_2mode"] is False
     assert result["delta_bic"] is None
     assert result["bic_1mode"] is None
-    assert result["decision"]["two_mode_preferred"] is False
+    assert result["decision"]["two_mode_preferred"] is None
     assert isinstance(result["trace"]["rss_floored_1mode"], bool)
     assert isinstance(result["trace"]["rss_floored_2mode"], bool)
 
@@ -319,7 +320,10 @@ def test_cli_writes_model_comparison_json(tmp_path: Path) -> None:
     assert isinstance(payload["n_samples"], int)
     assert payload["k_1mode"] == 4
     assert payload["k_2mode"] == 8
-    assert isinstance(payload["decision"]["two_mode_preferred"], bool)
+    if payload["delta_bic"] is None:
+        assert payload["decision"]["two_mode_preferred"] is None
+    else:
+        assert isinstance(payload["decision"]["two_mode_preferred"], bool)
     assert isinstance(payload["valid_1mode"], bool)
     assert isinstance(payload["valid_2mode"], bool)
     if payload["delta_bic"] is not None:
@@ -451,7 +455,7 @@ def test_model_comparison_invalid_when_n_too_small_for_k() -> None:
         f"delta_bic must be None when n={n} <= k_2mode + margin, got {result['delta_bic']}"
     )
     assert result["valid_bic_2mode"] is False
-    assert result["decision"]["two_mode_preferred"] is False
+    assert result["decision"]["two_mode_preferred"] is None
 
     # JSON-serialisable even in this degenerate case
     serialized = json.dumps(result, allow_nan=False)  # must not raise
