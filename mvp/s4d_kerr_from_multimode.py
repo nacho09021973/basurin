@@ -20,6 +20,11 @@ from typing import Any
 from mvp.contracts import StageContext, abort, check_inputs, finalize, init_stage
 
 STAGE = "s4d_kerr_from_multimode"
+MASS_MIN = 5.0
+MASS_MAX = 200.0
+SPIN_MIN = 0.0
+SPIN_MAX = 0.99
+BOUNDARY_FRACTION_THRESHOLD = 0.20
 
 
 def build_argparser() -> argparse.ArgumentParser:
@@ -165,6 +170,10 @@ def _quantiles(values: list[float]) -> dict[str, float]:
     return {"p10": _pick(0.10), "p50": _pick(0.50), "p90": _pick(0.90)}
 
 
+def _at_boundary(value: float, lo: float, hi: float, eps: float) -> bool:
+    return abs(float(value) - float(lo)) <= float(eps) or abs(float(value) - float(hi)) <= float(eps)
+
+
 def _build_grid() -> tuple[list[float], list[float], list[float], list[float], list[float], list[float]]:
     try:
         from mvp.kerr_qnm_fits import kerr_qnm
@@ -173,8 +182,8 @@ def _build_grid() -> tuple[list[float], list[float], list[float], list[float], l
             "Missing Kerr QNM forward model in repo; cannot invert f/tau to (M,a) without canonical model"
         ) from exc
 
-    a_vals = [0.0 + (0.99 * i / 199.0) for i in range(200)]
-    m_vals = [5.0 + (195.0 * i / 199.0) for i in range(200)]
+    a_vals = [SPIN_MIN + ((SPIN_MAX - SPIN_MIN) * i / 199.0) for i in range(200)]
+    m_vals = [MASS_MIN + ((MASS_MAX - MASS_MIN) * i / 199.0) for i in range(200)]
 
     grid_m: list[float] = []
     grid_a: list[float] = []
@@ -381,14 +390,49 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
     m221_med = _quantiles(m221_samples)["p50"]
     a220_med = _quantiles(a220_samples)["p50"]
     a221_med = _quantiles(a221_samples)["p50"]
-    m_med = _quantiles(m_joint_samples)["p50"]
+    m_q = _quantiles(m_joint_samples)
+    a_q = _quantiles(a_joint_samples)
+    m_med = m_q["p50"]
+    a_med = a_q["p50"]
+
+    eps_m = 1e-6 * (MASS_MAX - MASS_MIN)
+    eps_a = 1e-6
+    m_min_hits = sum(1 for m in m_joint_samples if abs(float(m) - MASS_MIN) <= eps_m)
+    m_max_hits = sum(1 for m in m_joint_samples if abs(float(m) - MASS_MAX) <= eps_m)
+    a_min_hits = sum(1 for a in a_joint_samples if abs(float(a) - SPIN_MIN) <= eps_a)
+    a_max_hits = sum(1 for a in a_joint_samples if abs(float(a) - SPIN_MAX) <= eps_a)
+    boundary_hits_any = 0
+    for m, a in zip(m_joint_samples, a_joint_samples):
+        if (
+            abs(float(m) - MASS_MIN) <= eps_m
+            or abs(float(m) - MASS_MAX) <= eps_m
+            or abs(float(a) - SPIN_MIN) <= eps_a
+            or abs(float(a) - SPIN_MAX) <= eps_a
+        ):
+            boundary_hits_any += 1
+
+    boundary_fraction = float(boundary_hits_any / len(m_joint_samples)) if m_joint_samples else 0.0
+
+    if _at_boundary(float(m_med), MASS_MIN, MASS_MAX, eps_m):
+        abort(ctx, reason=f"{STAGE} failed: KERR_BOUNDARY_HIT_M")
+    if _at_boundary(float(a_med), SPIN_MIN, SPIN_MAX, eps_a):
+        abort(ctx, reason=f"{STAGE} failed: KERR_BOUNDARY_HIT_A")
+    if boundary_fraction >= BOUNDARY_FRACTION_THRESHOLD:
+        abort(ctx, reason=f"{STAGE} failed: KERR_BOUNDARY_FRACTION_HIGH")
 
     delta = None
     if m220_med and m221_med and a220_med is not None and a221_med is not None and m_med and float(m_med) > 0:
         delta = float(math.sqrt(((float(m220_med) - float(m221_med)) / float(m_med)) ** 2 + (float(a220_med) - float(a221_med)) ** 2))
 
     kerr_payload["consistency"]["value"] = delta
-    kerr_payload["consistency"]["pass"] = bool(delta is not None and delta <= 0.1)
+    has_boundary_contact = bool(
+        boundary_fraction > 0.0
+        or _at_boundary(float(m_med), MASS_MIN, MASS_MAX, eps_m)
+        or _at_boundary(float(a_med), SPIN_MIN, SPIN_MAX, eps_a)
+    )
+    kerr_payload["estimates"]["kerr"]["M_f_solar"] = m_q
+    kerr_payload["estimates"]["kerr"]["a_f"] = a_q
+    kerr_payload["consistency"]["pass"] = bool(delta is not None and delta <= 0.1 and not has_boundary_contact)
 
     diagnostics_payload = {
         "schema_name": "kerr_from_multimode_diagnostics",
@@ -404,12 +448,25 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
                 "n_samples": n_samples,
                 "n_accepted": len(m_joint_samples),
                 "n_rejected": rejected,
+                "boundary_fraction": boundary_fraction,
+                "boundary_counts": {
+                    "M_min": m_min_hits,
+                    "M_max": m_max_hits,
+                    "a_min": a_min_hits,
+                    "a_max": a_max_hits,
+                },
             },
             "conditioning": {
-                "grid_mass_range_msun": [5.0, 200.0],
-                "grid_spin_range": [0.0, 0.99],
+                "grid_mass_range_msun": [MASS_MIN, MASS_MAX],
+                "grid_spin_range": [SPIN_MIN, SPIN_MAX],
                 "grid_shape": [200, 200],
                 "objective": "sum_squared_log_residuals_f_tau",
+                "grid_limits": {
+                    "mass_min": MASS_MIN,
+                    "mass_max": MASS_MAX,
+                    "spin_min": SPIN_MIN,
+                    "spin_max": SPIN_MAX,
+                },
             },
             "rejected_fraction": float(rejected / n_samples) if n_samples > 0 else 0.0,
             "notes": [
