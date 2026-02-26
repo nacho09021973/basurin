@@ -40,7 +40,7 @@ class TestContractRegistry:
     EXPECTED_STAGES = {"s0_oracle_mvp", "s1_fetch_strain", "s2_ringdown_window", "s3_ringdown_estimates",
                        "s3b_multimode_estimates",
                        "s4_geometry_filter", "s4_spectral_geometry_filter", "s4b_spectral_curvature",
-                       "s4c_kerr_consistency",
+                       "s4c_kerr_consistency", "s4d_kerr_from_multimode",
                        "s5_aggregate", "s6_information_geometry", "s6b_information_geometry_3d",
                        "s6b_information_geometry_ranked",
                        "s6c_population_geometry", "s3_spectral_estimates", "experiment_geometry_evidence_vs_gr"}

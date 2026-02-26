@@ -225,6 +225,19 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         upstream_stages=["s3_ringdown_estimates", "s3b_multimode_estimates"],
     ),
+    "s4d_kerr_from_multimode": StageContract(
+        name="s4d_kerr_from_multimode",
+        required_inputs=[
+            "s3b_multimode_estimates/outputs/multimode_estimates.json",
+            # Optional input (for future implementation):
+            # s3b_multimode_estimates/outputs/model_comparison.json
+        ],
+        produced_outputs=[
+            "outputs/kerr_from_multimode.json",
+            "outputs/kerr_from_multimode_diagnostics.json",
+        ],
+        upstream_stages=["s3b_multimode_estimates"],
+    ),
     "s3_spectral_estimates": StageContract(
         name="s3_spectral_estimates",
         required_inputs=[
