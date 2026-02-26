@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import argparse
 
-from mvp.contracts import StageContext, run_stage
+from mvp.contracts import StageContext, init_stage
+
+STAGE = "s4d_kerr_from_multimode"
 
 
 def build_argparser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="s4d_kerr_from_multimode")
+    p = argparse.ArgumentParser(prog=STAGE)
     p.add_argument("--run-id", required=True)
     return p
 
@@ -25,10 +27,12 @@ def _execute(ctx: StageContext) -> None:
     raise NotImplementedError("s4d_kerr_from_multimode not implemented yet")
 
 
-def main() -> None:
+def main() -> int:
     args = build_argparser().parse_args()
-    run_stage("s4d_kerr_from_multimode", run_id=args.run_id, execute_fn=_execute)
+    ctx = init_stage(args.run_id, STAGE)
+    _execute(ctx)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
