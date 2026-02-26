@@ -20,6 +20,12 @@ from typing import Any
 from mvp.contracts import StageContext, abort, check_inputs, finalize, init_stage
 
 STAGE = "s4d_kerr_from_multimode"
+M_MIN = 5.0
+M_MAX = 200.0
+A_MIN = 0.0
+A_MAX = 0.99
+EPS_M = 1e-9 * (M_MAX - M_MIN)
+EPS_A = 1e-9
 
 
 def build_argparser() -> argparse.ArgumentParser:
@@ -173,8 +179,8 @@ def _build_grid() -> tuple[list[float], list[float], list[float], list[float], l
             "Missing Kerr QNM forward model in repo; cannot invert f/tau to (M,a) without canonical model"
         ) from exc
 
-    a_vals = [0.0 + (0.99 * i / 199.0) for i in range(200)]
-    m_vals = [5.0 + (195.0 * i / 199.0) for i in range(200)]
+    a_vals = [A_MIN + ((A_MAX - A_MIN) * i / 199.0) for i in range(200)]
+    m_vals = [M_MIN + ((M_MAX - M_MIN) * i / 199.0) for i in range(200)]
 
     grid_m: list[float] = []
     grid_a: list[float] = []
@@ -315,6 +321,32 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
     if not m_joint_samples:
         abort(ctx, reason="No invertible samples in Kerr inversion from multimode estimates")
 
+    m_quantiles = _quantiles(m_joint_samples)
+    a_quantiles = _quantiles(a_joint_samples)
+    m_p50 = float(m_quantiles["p50"])
+    a_p50 = float(a_quantiles["p50"])
+
+    count_m_min = sum(1 for m in m_joint_samples if abs(float(m) - M_MIN) <= EPS_M)
+    count_m_max = sum(1 for m in m_joint_samples if abs(float(m) - M_MAX) <= EPS_M)
+    count_a_min = sum(1 for a in a_joint_samples if abs(float(a) - A_MIN) <= EPS_A)
+    count_a_max = sum(1 for a in a_joint_samples if abs(float(a) - A_MAX) <= EPS_A)
+    boundary_hit_count = sum(
+        1
+        for m, a in zip(m_joint_samples, a_joint_samples)
+        if (abs(float(m) - M_MIN) <= EPS_M)
+        or (abs(float(m) - M_MAX) <= EPS_M)
+        or (abs(float(a) - A_MIN) <= EPS_A)
+        or (abs(float(a) - A_MAX) <= EPS_A)
+    )
+    boundary_fraction = float(boundary_hit_count / len(m_joint_samples))
+
+    if abs(m_p50 - M_MIN) <= EPS_M or abs(m_p50 - M_MAX) <= EPS_M:
+        abort(ctx, reason="s4d_kerr_from_multimode failed: KERR_BOUNDARY_HIT_M")
+    if abs(a_p50 - A_MIN) <= EPS_A or abs(a_p50 - A_MAX) <= EPS_A:
+        abort(ctx, reason="s4d_kerr_from_multimode failed: KERR_BOUNDARY_HIT_A")
+    if boundary_fraction >= 0.20:
+        abort(ctx, reason="s4d_kerr_from_multimode failed: KERR_BOUNDARY_FRACTION_HIGH")
+
     per_mode = {
         "220": {"f_hz": q220["f_hz"], "tau_s": q220["tau_s"]},
         "221": {"f_hz": q221["f_hz"], "tau_s": q221["tau_s"]},
@@ -350,8 +382,8 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
         "estimates": {
             "per_mode": per_mode,
             "kerr": {
-                "M_f_solar": _quantiles(m_joint_samples),
-                "a_f": _quantiles(a_joint_samples),
+                "M_f_solar": m_quantiles,
+                "a_f": a_quantiles,
                 "covariance": None,
             },
         },
@@ -406,10 +438,23 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
                 "n_rejected": rejected,
             },
             "conditioning": {
-                "grid_mass_range_msun": [5.0, 200.0],
-                "grid_spin_range": [0.0, 0.99],
+                "grid_mass_range_msun": [M_MIN, M_MAX],
+                "grid_spin_range": [A_MIN, A_MAX],
                 "grid_shape": [200, 200],
                 "objective": "sum_squared_log_residuals_f_tau",
+                "grid_limits": {
+                    "M_min": M_MIN,
+                    "M_max": M_MAX,
+                    "a_min": A_MIN,
+                    "a_max": A_MAX,
+                },
+                "boundary_counts": {
+                    "M_min": count_m_min,
+                    "M_max": count_m_max,
+                    "a_min": count_a_min,
+                    "a_max": count_a_max,
+                },
+                "boundary_fraction": boundary_fraction,
             },
             "rejected_fraction": float(rejected / n_samples) if n_samples > 0 else 0.0,
             "notes": [
