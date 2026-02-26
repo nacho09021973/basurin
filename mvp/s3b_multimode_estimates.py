@@ -616,7 +616,7 @@ def compute_model_comparison(
             "delta_bic": None,
             "thresholds": {"two_mode_preferred_delta_bic": delta_bic_threshold},
             "conventions": conventions,
-            "decision": {"two_mode_preferred": False},
+            "decision": {"two_mode_preferred": None},
             "valid_1mode": valid_1mode,
             "valid_2mode": valid_2mode,
             "valid_bic_1mode": False,
@@ -698,7 +698,7 @@ def compute_model_comparison(
             "delta_bic": None,
             "thresholds": {"two_mode_preferred_delta_bic": delta_bic_threshold},
             "conventions": conventions,
-            "decision": {"two_mode_preferred": False},
+            "decision": {"two_mode_preferred": None},
             "valid_1mode": True,
             "valid_2mode": False,
             "valid_bic_1mode": valid_bic_1mode,
@@ -734,7 +734,7 @@ def compute_model_comparison(
             "delta_bic": None,
             "thresholds": {"two_mode_preferred_delta_bic": delta_bic_threshold},
             "conventions": conventions,
-            "decision": {"two_mode_preferred": False},
+            "decision": {"two_mode_preferred": None},
             "valid_1mode": True,
             "valid_2mode": False,
             "valid_bic_1mode": valid_bic_1mode,
@@ -748,7 +748,7 @@ def compute_model_comparison(
 
     bic_2mode: float | None
     delta_bic: float | None
-    two_mode_preferred: bool
+    two_mode_preferred: bool | None
     if valid_bic_1mode and valid_bic_2mode:
         bic_2mode = float(k_2mode * math.log(n) + n * math.log(max(rss_2mode / n, _RSS_FLOOR)))
         delta_bic = bic_2mode - bic_1mode  # type: ignore[operator]  # bic_1mode is float here
@@ -761,7 +761,7 @@ def compute_model_comparison(
     else:
         bic_2mode = None
         delta_bic = None
-        two_mode_preferred = False
+        two_mode_preferred = None
 
     return {
         "schema_version": "model_comparison_v1",
