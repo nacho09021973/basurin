@@ -21,9 +21,11 @@ from mvp.contracts import StageContext, abort, check_inputs, finalize, init_stag
 
 STAGE = "s4d_kerr_from_multimode"
 M_MIN = 5.0
-M_MAX = 200.0
+M_MAX = 500.0
 A_MIN = 0.0
-A_MAX = 0.99
+A_MAX = 0.999
+GRID_M_SIZE = 200
+GRID_A_SIZE = 200
 EPS_M = 1e-9 * (M_MAX - M_MIN)
 EPS_A = 1e-9
 
@@ -179,8 +181,8 @@ def _build_grid() -> tuple[list[float], list[float], list[float], list[float], l
             "Missing Kerr QNM forward model in repo; cannot invert f/tau to (M,a) without canonical model"
         ) from exc
 
-    a_vals = [A_MIN + ((A_MAX - A_MIN) * i / 199.0) for i in range(200)]
-    m_vals = [M_MIN + ((M_MAX - M_MIN) * i / 199.0) for i in range(200)]
+    a_vals = [A_MIN + ((A_MAX - A_MIN) * i / float(GRID_A_SIZE - 1)) for i in range(GRID_A_SIZE)]
+    m_vals = [M_MIN + ((M_MAX - M_MIN) * i / float(GRID_M_SIZE - 1)) for i in range(GRID_M_SIZE)]
 
     grid_m: list[float] = []
     grid_a: list[float] = []
@@ -341,11 +343,11 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
     boundary_fraction = float(boundary_hit_count / len(m_joint_samples))
 
     if abs(m_p50 - M_MIN) <= EPS_M or abs(m_p50 - M_MAX) <= EPS_M:
-        abort(ctx, reason="s4d_kerr_from_multimode failed: KERR_BOUNDARY_HIT_M")
+        abort(ctx, reason="s4d_kerr_from_multimode failed: KERR_GRID_SATURATION: median_mass_on_grid_edge")
     if abs(a_p50 - A_MIN) <= EPS_A or abs(a_p50 - A_MAX) <= EPS_A:
-        abort(ctx, reason="s4d_kerr_from_multimode failed: KERR_BOUNDARY_HIT_A")
+        abort(ctx, reason="s4d_kerr_from_multimode failed: KERR_GRID_SATURATION: median_spin_on_grid_edge")
     if boundary_fraction >= 0.20:
-        abort(ctx, reason="s4d_kerr_from_multimode failed: KERR_BOUNDARY_FRACTION_HIGH")
+        abort(ctx, reason="s4d_kerr_from_multimode failed: KERR_GRID_SATURATION: boundary_fraction_high")
 
     per_mode = {
         "220": {"f_hz": q220["f_hz"], "tau_s": q220["tau_s"]},
@@ -396,7 +398,7 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
         "trace": {
             "inversion": {
                 "method": "deterministic_grid_search",
-                "grid_or_solver": "grid_MxA_200x200_log_error",
+                "grid_or_solver": "grid_MxA_200x200_log_error_Mmax500_amax0p999",
                 "seed": seed,
                 "tie_break": "first_minimum_in_stable_grid_order",
             },
@@ -436,11 +438,19 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
                 "n_samples": n_samples,
                 "n_accepted": len(m_joint_samples),
                 "n_rejected": rejected,
+                "edge_hits": {
+                    "M_min": count_m_min,
+                    "M_max": count_m_max,
+                    "a_min": count_a_min,
+                    "a_max": count_a_max,
+                    "joint_boundary_total": boundary_hit_count,
+                },
+                "saturation_fraction": boundary_fraction,
             },
             "conditioning": {
                 "grid_mass_range_msun": [M_MIN, M_MAX],
                 "grid_spin_range": [A_MIN, A_MAX],
-                "grid_shape": [200, 200],
+                "grid_shape": [GRID_M_SIZE, GRID_A_SIZE],
                 "objective": "sum_squared_log_residuals_f_tau",
                 "grid_limits": {
                     "M_min": M_MIN,
