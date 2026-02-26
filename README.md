@@ -105,6 +105,87 @@ python mvp/pipeline.py multi \
   --atlas-path atlas.json
 ```
 
+## Cómo reproducir (multimode + s3b model_comparison)
+
+Esta guía está pensada para ejecución **auditables/copy-paste** dentro del repo, sin rutas ad hoc y con artefactos en `runs/<run_id>/...`.
+
+### 1) Ver la CLI real de `multimode`
+
+Antes de correr, inspecciona los flags disponibles en la versión actual:
+
+```bash
+python -m mvp.pipeline multimode -h
+```
+
+Puntos clave de esa ayuda:
+
+- `pipeline multimode` requiere atlas: usa `--atlas-default` o `--atlas-path`.
+- El flag correcto para s3b es `--s3b-method` (no `--method`).
+- No existe `--stop-after` en la CLI actual.
+
+### 2) Ejecutar un run real multimode (atlas por defecto + s3b spectral_two_pass)
+
+```bash
+RUN_ID="mvp_GW150914_$(date -u +%Y%m%dT%H%M%SZ)"
+
+python -m mvp.pipeline multimode \
+  --event-id GW150914 \
+  --atlas-default \
+  --run-id "$RUN_ID" \
+  --s3b-method spectral_two_pass
+```
+
+### 3) Verificar que existe `model_comparison.json`
+
+```bash
+ls -lah "runs/$RUN_ID/s3b_multimode_estimates/outputs/"
+```
+
+Debes ver `model_comparison.json` dentro de ese directorio.
+
+### 4) Validación estricta de JSON (sin NaN/Inf + claves clave)
+
+```bash
+python - << 'PY'
+import json
+import math
+import os
+
+run_id = os.environ["RUN_ID"]
+path = f"runs/{run_id}/s3b_multimode_estimates/outputs/model_comparison.json"
+
+def no_non_finite(x):
+    if isinstance(x, float):
+        if not math.isfinite(x):
+            raise ValueError(f"Valor no finito detectado: {x}")
+    elif isinstance(x, dict):
+        for v in x.values():
+            no_non_finite(v)
+    elif isinstance(x, list):
+        for v in x:
+            no_non_finite(v)
+
+with open(path, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+no_non_finite(data)
+
+required_top = ["conventions", "trace"]
+missing = [k for k in required_top if k not in data]
+if missing:
+    raise SystemExit(f"Faltan claves requeridas en {path}: {missing}")
+
+print(f"OK strict JSON: {path}")
+print("OK keys:", ", ".join(required_top))
+PY
+```
+
+### Troubleshooting rápido
+
+- Error `--atlas-path is required...`: vuelve a ejecutar añadiendo `--atlas-default` (o usa `--atlas-path` explícito).
+- No aparece `model_comparison.json`: probablemente estás mirando un run viejo; usa un `RUN_ID` nuevo y re-ejecuta `multimode`.
+- Si un `pytest -k ...` falla por usar `|`, cambia la expresión a `or` (por ejemplo: `pytest -k "foo or bar"`).
+
 ## Mantenimiento de ramas (dejar solo `main`)
 
 Si quieres limpiar el repositorio y mantener únicamente la rama `main`, verifica primero
