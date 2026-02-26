@@ -670,6 +670,14 @@ def run_multimode_event(
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
 
+    # Phase B: Kerr inference from multimode (canonical; does not replace s4/s4c)
+    s4d_args = ["--run-id", run_id]
+    rc = _run_stage("s4d_kerr_from_multimode.py", s4d_args, "s4d_kerr_from_multimode", out_root, run_id, timeline, stage_timeout_s)
+    if rc != 0:
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return rc, run_id
+
     timeline["multimode_results"] = _parse_multimode_results(out_root, run_id)
     timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
     _write_timeline(out_root, run_id, timeline)
