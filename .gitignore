@@ -30,3 +30,8 @@ data/losc/
 .coverage
 .coverage.*
 htmlcov/
+
+# Local large downloads (Zenodo / data releases)
+*.tar.gz
+*.tgz
+*.tar
