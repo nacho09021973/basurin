@@ -109,7 +109,7 @@ python mvp/pipeline.py multi \
 
 Esta guía está pensada para ejecución **auditables/copy-paste** dentro del repo, sin rutas ad hoc y con artefactos en `runs/<run_id>/...`.
 
-### 1) Ver la CLI real de `multimode`
+### Cómo correr multimode (real) y producir `model_comparison`
 
 Antes de correr, inspecciona los flags disponibles en la versión actual:
 
@@ -117,13 +117,7 @@ Antes de correr, inspecciona los flags disponibles en la versión actual:
 python -m mvp.pipeline multimode -h
 ```
 
-Puntos clave de esa ayuda:
-
-- `pipeline multimode` requiere atlas: usa `--atlas-default` o `--atlas-path`.
-- El flag correcto para s3b es `--s3b-method` (no `--method`).
-- No existe `--stop-after` en la CLI actual.
-
-### 2) Ejecutar un run real multimode (atlas por defecto + s3b spectral_two_pass)
+### 2) Ejecutar run real (GW150914) con atlas por defecto y s3b `spectral_two_pass`
 
 ```bash
 RUN_ID="mvp_GW150914_$(date -u +%Y%m%dT%H%M%SZ)"
@@ -135,56 +129,65 @@ python -m mvp.pipeline multimode \
   --s3b-method spectral_two_pass
 ```
 
-### 3) Verificar que existe `model_comparison.json`
+### 3) Comprobar outputs
 
 ```bash
 ls -lah "runs/$RUN_ID/s3b_multimode_estimates/outputs/"
 ```
 
-Debes ver `model_comparison.json` dentro de ese directorio.
-
-### 4) Validación estricta de JSON (sin NaN/Inf + claves clave)
-
-```bash
-python - << 'PY'
-import json
-import math
-import os
-
-run_id = os.environ["RUN_ID"]
-path = f"runs/{run_id}/s3b_multimode_estimates/outputs/model_comparison.json"
-
-def no_non_finite(x):
-    if isinstance(x, float):
-        if not math.isfinite(x):
-            raise ValueError(f"Valor no finito detectado: {x}")
-    elif isinstance(x, dict):
-        for v in x.values():
-            no_non_finite(v)
-    elif isinstance(x, list):
-        for v in x:
-            no_non_finite(v)
-
-with open(path, "r", encoding="utf-8") as f:
-    data = json.load(f)
-
-no_non_finite(data)
-
-required_top = ["conventions", "trace"]
-missing = [k for k in required_top if k not in data]
-if missing:
-    raise SystemExit(f"Faltan claves requeridas en {path}: {missing}")
-
-print(f"OK strict JSON: {path}")
-print("OK keys:", ", ".join(required_top))
-PY
-```
+Debes ver `model_comparison.json` en `runs/${RUN_ID}/s3b_multimode_estimates/outputs/`.
 
 ### Troubleshooting rápido
 
-- Error `--atlas-path is required...`: vuelve a ejecutar añadiendo `--atlas-default` (o usa `--atlas-path` explícito).
-- No aparece `model_comparison.json`: probablemente estás mirando un run viejo; usa un `RUN_ID` nuevo y re-ejecuta `multimode`.
-- Si un `pytest -k ...` falla por usar `|`, cambia la expresión a `or` (por ejemplo: `pytest -k "foo or bar"`).
+- Si aparece `--atlas-path is required ...`: usa `--atlas-default` o `--atlas-path`.
+- No existe `--stop-after` ni `--method` en esta CLI; el flag correcto es `--s3b-method`.
+
+### Autodetect + validate (sin copiar `run_id`)
+
+```bash
+P="$(ls -1t runs/*/s3b_multimode_estimates/outputs/model_comparison.json 2>/dev/null | head -n 1)"
+test -n "$P" || { echo "ERROR: no model_comparison.json found under runs/*/s3b_multimode_estimates/outputs/"; exit 2; }
+
+RUN_ID="$(echo "$P" | awk -F/ '{print $2}')"; echo "RUN_ID=$RUN_ID"
+ls -lah "$P"
+
+python - << PY
+import json, math
+p = r"""$P"""
+d = json.load(open(p))
+def walk(x):
+    if isinstance(x, float):
+        assert math.isfinite(x), f"non-finite float: {x}"
+    elif isinstance(x, dict):
+        for v in x.values(): walk(v)
+    elif isinstance(x, list):
+        for v in x: walk(v)
+walk(d)
+conv = d.get("conventions") or {}
+tr = d.get("trace") or {}
+print("OK: JSON strict (finite floats)")
+print("schema_version:", d.get("schema_version"))
+assert isinstance(conv, dict) and conv, "missing conventions"
+assert "delta_bic_definition" in conv, "missing conventions.delta_bic_definition"
+assert "rss_floored_1mode" in tr and "rss_floored_2mode" in tr, "missing trace rss_floored booleans"
+db = d.get("delta_bic")
+tmp = d.get("two_mode_preferred")
+# Semantics: if delta_bic is float => two_mode_preferred must be bool (not None)
+if isinstance(db, (int, float)):
+    assert isinstance(tmp, bool), "two_mode_preferred must be bool when delta_bic is finite"
+else:
+    # allow None only when delta_bic is None
+    assert db is None, "delta_bic must be None if not numeric"
+print("delta_bic:", db)
+print("two_mode_preferred:", tmp)
+PY
+```
+
+Evidence mínima esperada:
+
+- `RUN_ID=...`
+- `OK: JSON strict (finite floats)`
+- `schema_version: model_comparison_v1`
 
 ## Mantenimiento de ramas (dejar solo `main`)
 
