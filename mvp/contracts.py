@@ -183,10 +183,16 @@ CONTRACTS: dict[str, StageContract] = {
         name="s6c_brunete_psd_curvature",
         required_inputs=[
             "s3_ringdown_estimates/outputs/estimates.json",
+            # Prefer canonical upstream PSD produced by helper extract_psd.py.
+            # Runtime fallback is external_inputs/psd_model.json.
+            # (contract-first: explicit path documented in BRUNETE_S6C.md)
+            "psd/measured_psd.json",
         ],
         produced_outputs=[
             "outputs/brunete_metrics.json",
             "outputs/psd_derivatives.json",
+            "stage_summary.json",
+            "manifest.json",
         ],
         upstream_stages=["s3_ringdown_estimates"],
         check_run_valid=True,
