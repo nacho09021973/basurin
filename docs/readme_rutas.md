@@ -22,6 +22,13 @@ Objetivo: que una IA (o humano) no pierda 5–6 horas diarias por confundir `RUN
 - **Curvatura/diagnóstico (s6/s6b):**
   - `runs/<RUN_ID>/s6*/outputs/curvature*.json`
   - `runs/<RUN_ID>/s6*/outputs/metric_diagnostics*.json`
+- **Rutas canónicas (external inputs vs outputs de stages):**
+  - `data/losc/<EVENT_ID>/`
+  - `runs/<run_id>/external_inputs/...`
+  - `runs/<run_id>/<stage>/outputs/`
+  - `runs/<run_id>/experiment/<name>/`
+- **Ejemplo NetCDF contra release externo:**
+  - `runs/ext_220_210_20260227T090000Z/external_inputs/siegel_220_210/Users/RichardFineMan/Downloads/data_release/220_210/<file>.nc`
 
 ### Comando universal para encontrar outputs sin pensar
 
@@ -81,6 +88,27 @@ Un stage **siempre resuelve rutas como**:
 `<RUNS_ROOT>/<run_id>/...`
 
 Si eso no coincide con el árbol real donde está `RUN_VALID/verdict.json`, el stage falla.
+
+---
+
+## Rutas canónicas
+
+- `data/losc/<EVENT_ID>/`: caché local *read-only* de HDF5 (external input). No es generado por el pipeline.
+- `runs/<run_id>/external_inputs/...`: anclaje determinista de releases externos (por ejemplo, `siegel_220_210.tar.gz`) con hash verificable para trazabilidad.
+- `runs/<run_id>/<stage>/outputs/`: artefactos producidos por stages. Deben convivir con `manifest.json` y `stage_summary.json`, incluyendo hashes SHA256.
+- `runs/<run_id>/experiment/<name>/`: espacio para experimentos; no debe mutar artefactos canónicos de stages ya emitidos.
+
+Verificación mínima (contract-first, tratable/auditable):
+
+```bash
+RUN_ID="<run_id>"
+STAGE="<stage>"
+
+test -d "data/losc/<EVENT_ID>"
+test -d "runs/$RUN_ID/external_inputs"
+ls -l "runs/$RUN_ID/$STAGE/manifest.json" "runs/$RUN_ID/$STAGE/stage_summary.json"
+sha256sum runs/$RUN_ID/external_inputs/**/* 2>/dev/null || true
+```
 
 ---
 
@@ -258,6 +286,56 @@ Chequeo final:
 BASE="<RUNS_ROOT>/<run_id>/<stage_name>"
 ls -l "$BASE/manifest.json" "$BASE/stage_summary.json"
 ```
+
+---
+
+## Ejemplo completo: comparar contra un data release externo (NetCDF)
+
+Patrón general (sin crear stage nuevo):
+
+1. Guardar/anclar el tarball externo fuera del pipeline o en `runs/<run_id>/external_inputs/...` y registrar hash (`sha256sum`).
+2. Extraer un `.nc` concreto bajo `runs/<run_id>/external_inputs/...`.
+3. Inspeccionar cabecera con `ncdump -h` para confirmar grupos/variables.
+4. Extraer percentiles con `python3-netcdf4` leyendo `group='posterior'`, variables `M` y `chi`, aplanando `chain×draw`, y calculando `p10/p50/p90`.
+
+Ruta real usada como ejemplo:
+
+`runs/ext_220_210_20260227T090000Z/external_inputs/siegel_220_210/Users/RichardFineMan/Downloads/data_release/220_210/<file>.nc`
+
+Comandos:
+
+```bash
+RUN_ID="ext_220_210_20260227T090000Z"
+BASE="runs/$RUN_ID/external_inputs/siegel_220_210/Users/RichardFineMan/Downloads/data_release/220_210"
+NC_FILE="$BASE/<file>.nc"
+
+# 1) Integridad del release anclado
+sha256sum "runs/$RUN_ID/external_inputs/siegel_220_210"/*.tar.gz
+
+# 2) Confirmar archivo y cabecera NetCDF
+test -f "$NC_FILE"
+ncdump -h "$NC_FILE" | sed -n '1,120p'
+
+# 3) Percentiles p10/p50/p90 para posterior.M y posterior.chi
+python3 - <<'PY'
+import numpy as np
+from netCDF4 import Dataset
+
+nc_path = "runs/ext_220_210_20260227T090000Z/external_inputs/siegel_220_210/Users/RichardFineMan/Downloads/data_release/220_210/<file>.nc"
+with Dataset(nc_path, "r") as ds:
+    g = ds.groups["posterior"]
+    for name in ("M", "chi"):
+        arr = np.array(g.variables[name][:]).reshape(-1)
+        p10, p50, p90 = np.percentile(arr, [10, 50, 90])
+        print(f"{name}: p10={p10:.6g}, p50={p50:.6g}, p90={p90:.6g}")
+PY
+```
+
+Checklist corto de verificación:
+
+- `test -f "$NC_FILE"` debe pasar.
+- `ncdump -h` debe mostrar `group: posterior` con variables `M` y `chi`.
+- Registrar `sha256sum` del tarball y, si aplica, del `.nc` extraído para mantener artefactos auditables.
 
 Si este archivo se sigue, se eliminan casi todos los errores de “ruta equivocada”.
 

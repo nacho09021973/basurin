@@ -89,6 +89,73 @@ PY
 
 Para modo local con `--local-hdf5`, añade además `h5py` a la verificación.
 
+## Descarga manual rápida de strain (GWOSC) para modo offline
+
+En algunos entornos, `s1_fetch_strain` puede tardar o colgarse cuando `gwpy` intenta resolver/descargar desde GWOSC. Cuando pase eso, usa descarga directa y deja los HDF5 en caché local para ejecución offline reproducible.
+
+**Requisitos de shell**: `curl`, `jq`, `aria2c`, `sha256sum`.
+
+```bash
+EVENT_ID="GW190521_030229"
+OUT_DIR="data/losc/$EVENT_ID"
+mkdir -p "$OUT_DIR"
+
+# 1) Resolver versión correcta del evento (última detail_url)
+DETAIL_URL="$(curl -fsSL "https://gwosc.org/api/v2/events/${EVENT_ID}" \
+  | jq -r '.events[0].versions[-1].detail_url')"
+
+# 2) Extraer URLs H1/L1 para strain-files (duration=32, file-format=hdf5)
+H1_URL="$(curl -fsSL "$DETAIL_URL" | jq -r '
+  .strain[]
+  | select(.detector=="H1")
+  | .files[]
+  | select(.format=="hdf5" and .duration==32)
+  | .download_url' | head -n 1)"
+L1_URL="$(curl -fsSL "$DETAIL_URL" | jq -r '
+  .strain[]
+  | select(.detector=="L1")
+  | .files[]
+  | select(.format=="hdf5" and .duration==32)
+  | .download_url' | head -n 1)"
+
+test -n "$H1_URL" && test -n "$L1_URL"
+
+# 3) Descargar ambos archivos en cache local (external input read-only)
+aria2c -x 8 -s 8 -d "$OUT_DIR" "$H1_URL" "$L1_URL"
+
+# 4) Verificación mínima contract-first (integridad y auditabilidad)
+ls -lh "$OUT_DIR"/*.hdf5
+sha256sum "$OUT_DIR"/*.hdf5
+```
+
+Ejemplo real validado para `GW190521_030229`:
+
+- H1: `https://gwosc.org/eventapi/json/GWTC-2.1-confident/GW190521/v4/H-H1_GWOSC_16KHZ_R1-1242442952-32.hdf5`
+- L1: `https://gwosc.org/eventapi/json/GWTC-2.1-confident/GW190521/v4/L-L1_GWOSC_16KHZ_R1-1242442952-32.hdf5`
+- SHA256 H1 observado: `2761bf5eaffc2c9bc8620e82dcd4e91423f631c6374454172e63894364445ad4`
+- SHA256 L1: calcular con `sha256sum` tras descarga.
+
+### Ejecutar `s1_fetch_strain` offline con HDF5 ya presentes en `data/losc`
+
+Si no activas virtualenv con `source .venv/bin/activate`, usa siempre `.venv/bin/python` para evitar confusión con Python del sistema (PEP 668).
+
+```bash
+.venv/bin/python -m mvp.s1_fetch_strain \
+  --run <RUN_ID> \
+  --event-id <EVENT_ID> \
+  --offline \
+  --reuse-if-present
+```
+
+Verificación rápida (artefactos tratables/auditables):
+
+```bash
+ls -l "runs/<RUN_ID>/s1_fetch_strain/manifest.json" \
+      "runs/<RUN_ID>/s1_fetch_strain/stage_summary.json" \
+      "runs/<RUN_ID>/s1_fetch_strain/outputs/provenance.json"
+sha256sum "data/losc/<EVENT_ID>"/*.hdf5
+```
+
 ### 1) Single-event
 
 ```bash
