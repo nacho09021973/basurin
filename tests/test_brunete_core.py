@@ -125,3 +125,12 @@ def test_erfcx_asintotica_j0_j1_finitas_y_no_negativas(sigma_value: float) -> No
     assert math.isfinite(j1)
     assert j0 >= 0.0
     assert j1 >= 0.0
+
+
+def test_a2_erfcx_asintotica_sigma_muy_grande_cobertura() -> None:
+    for sigma in [0.1, 1.0, 10.0, 100.0, 1000.0]:
+        j0, j1, meta = J0_J1(sigma, sigma_switch=0.1)
+        assert meta["status"] == "ok"
+        assert j0 is not None and j1 is not None
+        assert math.isfinite(j0) and math.isfinite(j1)
+        assert j0 >= 0.0 and j1 >= 0.0
