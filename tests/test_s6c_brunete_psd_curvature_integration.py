@@ -3,10 +3,14 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+
+import pytest
 import sys
 from pathlib import Path
 
 from basurin_io import sha256_file, write_json_atomic
+
+pytest.importorskip("numpy")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -28,7 +32,7 @@ def _run_stage(run_id: str, runs_root: Path) -> subprocess.CompletedProcess[str]
     return subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, text=True, capture_output=True)
 
 
-def test_s6c_brunete_integration_lite_tmp_runs_root(tmp_path: Path) -> None:
+def _prepare_run(tmp_path: Path) -> tuple[Path, str, Path]:
     runs_root = tmp_path / "det_runs"
     run_id = "it_s6c_brunete"
     run_dir = runs_root / run_id
@@ -65,23 +69,84 @@ def test_s6c_brunete_integration_lite_tmp_runs_root(tmp_path: Path) -> None:
             },
         },
     )
+    return runs_root, run_id, run_dir
 
+
+def test_s6c_brunete_golden_schema_tmp_runs_root(tmp_path: Path) -> None:
+    runs_root, run_id, run_dir = _prepare_run(tmp_path)
     proc = _run_stage(run_id=run_id, runs_root=runs_root)
     assert proc.returncode == 0, proc.stderr
 
     stage_dir = run_dir / "s6c_brunete_psd_curvature"
     outputs_dir = stage_dir / "outputs"
-    metrics = outputs_dir / "brunete_metrics.json"
-    deriv = outputs_dir / "psd_derivatives.json"
-    summary = stage_dir / "stage_summary.json"
-    manifest = stage_dir / "manifest.json"
+    metrics_path = outputs_dir / "brunete_metrics.json"
+    deriv_path = outputs_dir / "psd_derivatives.json"
 
-    for p in (metrics, deriv, summary, manifest):
-        assert p.exists(), f"missing {p}"
+    assert metrics_path.exists()
+    assert deriv_path.exists()
 
-    manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
-    assert manifest_payload["hashes"]["brunete_metrics"] == sha256_file(metrics)
-    assert manifest_payload["hashes"]["psd_derivatives"] == sha256_file(deriv)
+    metrics_payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+    deriv_payload = json.loads(deriv_path.read_text(encoding="utf-8"))
+
+    assert isinstance(metrics_payload.get("metrics"), list)
+    assert isinstance(deriv_payload.get("derivatives"), list)
+    assert len(metrics_payload["metrics"]) == 1
+    assert len(deriv_payload["derivatives"]) == 1
+
+    row = metrics_payload["metrics"][0]
+    required_metrics = {
+        "event_id": str,
+        "mode": str,
+        "f_hz": float,
+        "s1": float,
+        "kappa": float,
+        "sigma": float,
+        "chi_psd": float,
+        "regime_sigma": str,
+        "regime_chi_psd": str,
+    }
+    for key, expected_type in required_metrics.items():
+        assert key in row
+        assert isinstance(row[key], expected_type)
+
+    assert "Q" in row or "tau_s" in row
+    if row["kappa"] >= 0:
+        assert row["sigma"] >= 0
+
+    drow = deriv_payload["derivatives"][0]
+    required_derivatives = {
+        "method": str,
+        "half_window_hz": float,
+        "n_points": int,
+        "s1": float,
+        "kappa": float,
+    }
+    for key, expected_type in required_derivatives.items():
+        assert key in drow
+        assert isinstance(drow[key], expected_type)
 
     repo_runs_dir = REPO_ROOT / "runs" / run_id
     assert not repo_runs_dir.exists(), "stage wrote outside BASURIN_RUNS_ROOT"
+
+
+def test_s6c_brunete_golden_manifest_hashes(tmp_path: Path) -> None:
+    runs_root, run_id, run_dir = _prepare_run(tmp_path)
+    proc = _run_stage(run_id=run_id, runs_root=runs_root)
+    assert proc.returncode == 0, proc.stderr
+
+    stage_dir = run_dir / "s6c_brunete_psd_curvature"
+    manifest_path = stage_dir / "manifest.json"
+    assert manifest_path.exists()
+
+    manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    hashes = manifest_payload.get("hashes", {})
+
+    expected = {
+        "brunete_metrics": stage_dir / "outputs" / "brunete_metrics.json",
+        "psd_derivatives": stage_dir / "outputs" / "psd_derivatives.json",
+        "stage_summary": stage_dir / "stage_summary.json",
+    }
+    for label, path in expected.items():
+        assert path.exists(), f"missing {path}"
+        assert label in hashes, f"missing hash for {label}"
+        assert hashes[label] == sha256_file(path)
