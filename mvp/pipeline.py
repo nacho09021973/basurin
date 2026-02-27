@@ -494,7 +494,7 @@ def run_single_event(
 
         if recommendation == "spectral":
             estimates_path_override = (
-                f"{run_id}/s3_spectral_estimates/outputs/spectral_estimates.json"
+                "s3_spectral_estimates/outputs/spectral_estimates.json"
             )
         timeline["dual_method_recommendation"] = recommendation
 
