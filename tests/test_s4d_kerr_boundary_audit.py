@@ -5,7 +5,7 @@ from mvp.contracts import init_stage
 import mvp.s4d_kerr_from_multimode as s4d
 
 
-def test_s4d_writes_boundary_audit_on_spin_grid_saturation(tmp_path: Path, monkeypatch) -> None:
+def test_s4d_fails_without_extra_boundary_artifact_on_spin_grid_saturation(tmp_path: Path, monkeypatch) -> None:
     runs_root = tmp_path / "runs"
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
 
@@ -50,19 +50,15 @@ def test_s4d_writes_boundary_audit_on_spin_grid_saturation(tmp_path: Path, monke
     out_dir = stage_dir / "outputs"
 
     audit_path = out_dir / "boundary_audit.json"
-    assert audit_path.exists()
-    audit = json.loads(audit_path.read_text(encoding="utf-8"))
-    assert audit["schema_version"] == "mvp_boundary_audit_v1"
-    assert audit["verdict"] == "FAIL"
-    assert audit["reasons"] == ["s4d_kerr_from_multimode failed: KERR_GRID_SATURATION: median_spin_on_grid_edge"]
-    assert audit["median"]["median_spin_on_grid_edge"] is True
+    assert not audit_path.exists()
 
     summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
     assert summary["verdict"] == "FAIL"
-    assert summary["error"] == "s4d_kerr_from_multimode failed: KERR_GRID_SATURATION: median_spin_on_grid_edge"
+    assert "KERR_GRID_SATURATION: median_spin_on_grid_edge" in summary["error"]
     output_paths = {item["path"] for item in summary["outputs"]}
-    assert "s4d_kerr_from_multimode/outputs/boundary_audit.json" in output_paths
+    assert output_paths == set()
 
     manifest = json.loads((stage_dir / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["artifacts"]["boundary_audit"] == "outputs/boundary_audit.json"
-    assert manifest["hashes"]["boundary_audit"]
+    assert manifest["artifacts"] == {"stage_summary": "stage_summary.json"}
+    assert "boundary_audit" not in manifest["artifacts"]
+    assert "boundary_audit" not in manifest["hashes"]

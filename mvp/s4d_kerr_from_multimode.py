@@ -249,74 +249,6 @@ def _best_idx_single(
     return best_i
 
 
-def _build_boundary_audit_payload(
-    *,
-    run_id: str,
-    reason: str,
-    n_samples: int,
-    boundary_hit_count: int,
-    boundary_fraction: float,
-    m_p50: float,
-    a_p50: float,
-) -> dict[str, Any]:
-    return {
-        "schema_version": "mvp_boundary_audit_v1",
-        "run_id": run_id,
-        "stage": STAGE,
-        "kerr_grid": {
-            "M_min": M_MIN,
-            "M_max": M_MAX,
-            "A_min": A_MIN,
-            "A_max": A_MAX,
-            "eps_M": EPS_M,
-            "eps_A": EPS_A,
-        },
-        "samples": {
-            "n": int(n_samples),
-            "boundary_hit_count": int(boundary_hit_count),
-            "boundary_fraction": float(boundary_fraction),
-        },
-        "median": {
-            "M_p50": float(m_p50),
-            "a_p50": float(a_p50),
-            "median_mass_on_grid_edge": bool(abs(float(m_p50) - M_MIN) <= EPS_M or abs(float(m_p50) - M_MAX) <= EPS_M),
-            "median_spin_on_grid_edge": bool(abs(float(a_p50) - A_MIN) <= EPS_A or abs(float(a_p50) - A_MAX) <= EPS_A),
-        },
-        "verdict": "FAIL",
-        "reasons": [reason],
-    }
-
-
-def _fail_with_boundary_audit(
-    ctx: StageContext,
-    *,
-    reason: str,
-    n_samples: int,
-    boundary_hit_count: int,
-    boundary_fraction: float,
-    m_p50: float,
-    a_p50: float,
-) -> None:
-    payload = _build_boundary_audit_payload(
-        run_id=ctx.run_id,
-        reason=reason,
-        n_samples=n_samples,
-        boundary_hit_count=boundary_hit_count,
-        boundary_fraction=boundary_fraction,
-        m_p50=m_p50,
-        a_p50=a_p50,
-    )
-    audit_path = _write_json_strict_atomic(ctx.outputs_dir / "boundary_audit.json", payload)
-    finalize(
-        ctx,
-        artifacts={"boundary_audit": audit_path},
-        verdict="FAIL",
-        results={"boundary_audit": payload},
-        extra_summary={"error": reason},
-    )
-    raise SystemExit(2)
-
-
 def _execute(ctx: StageContext) -> dict[str, Path]:
     multimode_path = ctx.run_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
     model_comparison_path = ctx.run_dir / "s3b_multimode_estimates" / "outputs" / "model_comparison.json"
@@ -410,36 +342,22 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
     )
     boundary_fraction = float(boundary_hit_count / len(m_joint_samples))
 
+    def _abort_boundary(reason_key: str) -> None:
+        abort(
+            ctx,
+            reason=(
+                f"{STAGE} failed: KERR_GRID_SATURATION: {reason_key}; "
+                f"n_accepted={len(m_joint_samples)}; boundary_hits={boundary_hit_count}; "
+                f"boundary_fraction={boundary_fraction:.6f}; M_p50={m_p50:.9g}; a_p50={a_p50:.9g}"
+            ),
+        )
+
     if abs(m_p50 - M_MIN) <= EPS_M or abs(m_p50 - M_MAX) <= EPS_M:
-        _fail_with_boundary_audit(
-            ctx,
-            reason="s4d_kerr_from_multimode failed: KERR_GRID_SATURATION: median_mass_on_grid_edge",
-            n_samples=len(m_joint_samples),
-            boundary_hit_count=boundary_hit_count,
-            boundary_fraction=boundary_fraction,
-            m_p50=m_p50,
-            a_p50=a_p50,
-        )
+        _abort_boundary("median_mass_on_grid_edge")
     if abs(a_p50 - A_MIN) <= EPS_A or abs(a_p50 - A_MAX) <= EPS_A:
-        _fail_with_boundary_audit(
-            ctx,
-            reason="s4d_kerr_from_multimode failed: KERR_GRID_SATURATION: median_spin_on_grid_edge",
-            n_samples=len(m_joint_samples),
-            boundary_hit_count=boundary_hit_count,
-            boundary_fraction=boundary_fraction,
-            m_p50=m_p50,
-            a_p50=a_p50,
-        )
+        _abort_boundary("median_spin_on_grid_edge")
     if boundary_fraction >= 0.20:
-        _fail_with_boundary_audit(
-            ctx,
-            reason="s4d_kerr_from_multimode failed: KERR_GRID_SATURATION: boundary_fraction_high",
-            n_samples=len(m_joint_samples),
-            boundary_hit_count=boundary_hit_count,
-            boundary_fraction=boundary_fraction,
-            m_p50=m_p50,
-            a_p50=a_p50,
-        )
+        _abort_boundary("boundary_fraction_high")
 
     per_mode = {
         "220": {"f_hz": q220["f_hz"], "tau_s": q220["tau_s"]},
