@@ -179,6 +179,18 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         upstream_stages=["s4_geometry_filter", "s6_information_geometry"],
     ),
+    "s6c_brunete_psd_curvature": StageContract(
+        name="s6c_brunete_psd_curvature",
+        required_inputs=[
+            "s3_ringdown_estimates/outputs/estimates.json",
+        ],
+        produced_outputs=[
+            "outputs/brunete_metrics.json",
+            "outputs/psd_derivatives.json",
+        ],
+        upstream_stages=["s3_ringdown_estimates"],
+        check_run_valid=True,
+    ),
     "s6c_population_geometry": StageContract(
         name="s6c_population_geometry",
         required_inputs=[
