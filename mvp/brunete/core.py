@@ -163,6 +163,10 @@ def K_R(rho0: float, Q: float, s1: float, kappa: float) -> tuple[float, float]:
 
 
 def J0(sigma_value: float) -> float:
+    """Evalúa ``𝓙0(σ)`` usando exclusivamente la forma cerrada (A.4/6.7).
+
+    La aproximación asintótica de A.5 *no* es normativa para implementación.
+    """
     if sigma_value < 0.0:
         raise ValueError("J0 solo está definida para sigma >= 0")
     return _j0_closed_form_nonnegative(sigma_value)

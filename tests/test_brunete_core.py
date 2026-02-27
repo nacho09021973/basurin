@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from mvp.brunete.core import J0_J1, chi_psd, curvature_KR, psd_log_derivatives_polyfit
+from mvp.brunete.core import J0, J0_J1, chi_psd, curvature_KR, psd_log_derivatives_polyfit
 
 
 def test_psd_plana_chi_y_curvatura_base() -> None:
@@ -49,6 +49,25 @@ def test_resummacion_j0_en_cero() -> None:
     assert meta["status"] == "ok"
     assert j0 == pytest.approx(math.pi / 2.0)
     assert j1 == pytest.approx(math.pi / 2.0)
+
+
+def test_j0_forma_cerrada_es_source_of_truth() -> None:
+    sigma = 3.5
+    expected = math.pi * (
+        (sigma + 0.5) * math.exp(sigma) * math.erfc(math.sqrt(sigma))
+        - math.sqrt(sigma / math.pi)
+    )
+    assert J0(sigma) == pytest.approx(expected, rel=1e-12, abs=1e-12)
+
+
+def test_j0_finita_no_negativa_y_monotona_para_sigma_no_negativo() -> None:
+    sigmas = np.linspace(0.0, 25.0, 251)
+    values = np.array([J0(float(s)) for s in sigmas], dtype=np.float64)
+
+    assert np.all(np.isfinite(values))
+    assert np.all(values >= 0.0)
+    # sanity check de estabilidad: J0 decrece al aumentar sigma
+    assert np.all(np.diff(values) <= 1e-12)
 
 
 def test_resummacion_sigma_negativo_grande_es_not_applicable() -> None:
