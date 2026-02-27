@@ -90,6 +90,7 @@ def _compute_payloads(
     c_window: float,
     min_points: int,
     sigma_switch: float,
+    chi_psd_threshold: float,
     psd_explicit: Path | None,
 ) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, str]]]:
     estimates_path = run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
@@ -198,7 +199,7 @@ def _compute_payloads(
             if abs(sigma_value) < sigma_switch
             else ("closed_form" if sigma_value >= 0 else "not_applicable")
         )
-        regime_chi_label = "low" if chi_value < sigma_switch else "elevated"
+        regime_chi_label = "low" if chi_value < chi_psd_threshold else "elevated"
         regime_sigma[regime_sigma_label] += 1
         regime_chi[regime_chi_label] += 1
 
@@ -271,6 +272,7 @@ def main() -> int:
     ap.add_argument("--c-window", type=float, default=30.0, dest="c_window")
     ap.add_argument("--min-points", type=int, default=7, dest="min_points")
     ap.add_argument("--sigma-switch", type=float, default=0.1, dest="sigma_switch")
+    ap.add_argument("--chi-psd-threshold", type=float, default=1.0, dest="chi_psd_threshold")
     ap.add_argument("--mode", default="220")
     ap.add_argument("--psd-path", default=None, help="Ruta opcional a modelo PSD JSON")
     ap.add_argument("--dry-run", action="store_true", help="Ejecuta cómputo sin escribir artefactos")
@@ -280,6 +282,7 @@ def main() -> int:
         "c_window": args.c_window,
         "min_points": args.min_points,
         "sigma_switch": args.sigma_switch,
+        "chi_psd_threshold": args.chi_psd_threshold,
         "mode": args.mode,
     }
     psd_explicit = Path(args.psd_path).resolve() if args.psd_path else None
@@ -296,6 +299,7 @@ def main() -> int:
             c_window=args.c_window,
             min_points=args.min_points,
             sigma_switch=args.sigma_switch,
+            chi_psd_threshold=args.chi_psd_threshold,
             psd_explicit=psd_explicit,
         )
         for row in metrics_payload["metrics"]:
@@ -329,6 +333,7 @@ def main() -> int:
             c_window=args.c_window,
             min_points=args.min_points,
             sigma_switch=args.sigma_switch,
+            chi_psd_threshold=args.chi_psd_threshold,
             psd_explicit=psd_explicit,
         )
 

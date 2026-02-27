@@ -317,7 +317,11 @@ def test_s6c_closed_form_regime_with_strong_local_curvature(tmp_path: Path) -> N
         },
     )
 
-    proc = _run_stage(run_id=run_id, runs_root=runs_root)
+    proc = _run_stage(
+        run_id=run_id,
+        runs_root=runs_root,
+        extra_args=["--chi-psd-threshold", "0.1"],
+    )
     assert proc.returncode == 0, proc.stderr
 
     metrics_payload = json.loads(
@@ -425,7 +429,11 @@ def test_s6c_a3b_sigma_very_large_uses_closed_form(tmp_path: Path) -> None:
         },
     )
 
-    proc = _run_stage(run_id=run_id, runs_root=runs_root)
+    proc = _run_stage(
+        run_id=run_id,
+        runs_root=runs_root,
+        extra_args=["--chi-psd-threshold", "0.1"],
+    )
     assert proc.returncode == 0, proc.stderr
 
     metrics_payload = json.loads(
@@ -439,3 +447,58 @@ def test_s6c_a3b_sigma_very_large_uses_closed_form(tmp_path: Path) -> None:
     assert row["regime_chi_psd"] == "elevated"
     assert math.isfinite(row["K"])
     assert math.isfinite(row["R"])
+
+
+def test_s6c_regimes_sigma_and_chi_psd_are_decoupled(tmp_path: Path) -> None:
+    runs_root = tmp_path / "det_runs"
+    run_id = "it_s6c_decoupled_thresholds"
+    run_dir = runs_root / run_id
+
+    write_json_atomic(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    write_json_atomic(
+        run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json",
+        {
+            "schema_version": "mvp_estimates_v2",
+            "event_id": "GW150914_like_decoupled",
+            "per_detector": {
+                "H1": {
+                    "f_hz": 251.0,
+                    "Q": 4.3,
+                    "tau_s": 4.3 / (3.141592653589793 * 251.0),
+                    "snr_peak": 12.0,
+                }
+            },
+        },
+    )
+
+    freqs = [200.0 + 0.05 * i for i in range(2401)]
+    psd_vals = [f ** (-4.0) for f in freqs]
+    write_json_atomic(
+        run_dir / "external_inputs" / "psd_model.json",
+        {
+            "schema_version": "mvp_psd_model_v1",
+            "models": {
+                "H1": {
+                    "frequencies_hz": freqs,
+                    "psd_values": psd_vals,
+                }
+            },
+        },
+    )
+
+    proc = _run_stage(
+        run_id=run_id,
+        runs_root=runs_root,
+        extra_args=["--sigma-switch", "10.0", "--chi-psd-threshold", "0.001"],
+    )
+    assert proc.returncode == 0, proc.stderr
+
+    metrics_payload = json.loads(
+        (run_dir / "s6c_brunete_psd_curvature" / "outputs" / "brunete_metrics.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    row = metrics_payload["metrics"][0]
+
+    assert row["regime_sigma"] == "perturbative"
+    assert row["regime_chi_psd"] == "elevated"

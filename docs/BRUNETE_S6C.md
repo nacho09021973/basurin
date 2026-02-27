@@ -45,7 +45,8 @@ Schema mínimo aceptado de PSD:
 ## Parámetros configurables (defaults)
 - `--c-window` (default `30.0`): se usa como `half_window_hz` en el cálculo local de derivadas PSD.
 - `--min-points` (default `7`): mínimo de bins en la ventana para ajuste local.
-- `--sigma-switch` (default `0.1`): umbral de régimen para aproximación perturbativa/cerrada.
+- `--sigma-switch` (default `0.1`): umbral numérico para régimen de expansión perturbativa/cerrada de `J0/J1` (control de `sigma`).
+- `--chi-psd-threshold` (default `1.0`): umbral físico para clasificar `chi_psd` como `elevated`.
 - `--mode` (default `220`).
 - `--psd-path` (opcional): ruta explícita a PSD JSON.
 
@@ -121,7 +122,8 @@ python mvp/s6c_brunete_psd_curvature.py \
   --run <RUN_ID> \
   --c-window 30.0 \
   --min-points 7 \
-  --sigma-switch 0.1
+  --sigma-switch 0.1 \
+  --chi-psd-threshold 1.0
 ```
 
 Con PSD explícita:
