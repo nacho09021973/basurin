@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
 import pytest
+
+np = pytest.importorskip("numpy")
 
 from mvp.brunete.core import J0, J0_J1, chi_psd, curvature_KR, psd_log_derivatives_polyfit
 
@@ -112,3 +113,15 @@ def test_a5_asintotico_inconsistente_con_forma_cerrada_source_of_truth() -> None
 
     assert ratio_closed == pytest.approx(2.0 ** (-1.5), rel=5e-2)
     assert ratio_closed != pytest.approx(ratio_a5, rel=1e-1)
+
+
+@pytest.mark.parametrize("sigma_value", [0.1, 1.0, 10.0, 100.0, 1000.0])
+def test_erfcx_asintotica_j0_j1_finitas_y_no_negativas(sigma_value: float) -> None:
+    j0, j1, meta = J0_J1(sigma_value, sigma_switch=0.1)
+
+    assert meta["status"] == "ok"
+    assert j0 is not None and j1 is not None
+    assert math.isfinite(j0)
+    assert math.isfinite(j1)
+    assert j0 >= 0.0
+    assert j1 >= 0.0
