@@ -7,12 +7,13 @@ Single source of truth for:
   - Deterministic IO rules (writes only under runs/<run_id>/).
 
 Usage in a stage:
-    from mvp.contracts import CONTRACTS, init_stage, check_inputs, finalize, abort
+    from mvp.contracts import CONTRACTS, init_stage, check_inputs, finalize, abort, log_stage_paths
 
     ctx = init_stage("my_run", "s1_fetch_strain", params={...})
     inputs = check_inputs(ctx, {"strain": path_to_strain})
     # ... do work ...
     finalize(ctx, artifacts={"result": output_path}, results={...})
+    log_stage_paths(ctx)  # mandatory: prints OUT_ROOT, STAGE_DIR, OUTPUTS_DIR, STAGE_SUMMARY, MANIFEST
 
     # On error:
     abort(ctx, "reason for failure")
@@ -178,6 +179,21 @@ CONTRACTS: dict[str, StageContract] = {
             "outputs/ranked_geometries.json",
         ],
         upstream_stages=["s4_geometry_filter", "s6_information_geometry"],
+    ),
+    # Stage-lite: extract_psd.py writes under runs/<run_id>/psd/ using the
+    # same manifest/stage_summary conventions but without init_stage/finalize.
+    # Declared here so downstream (s6c) can reference it as a formal upstream
+    # and auditors can verify the trazability chain.
+    "psd_extract": StageContract(
+        name="psd_extract",
+        required_inputs=[
+            "s1_fetch_strain/outputs/strain.npz",
+        ],
+        produced_outputs=[
+            "outputs/measured_psd.json",
+        ],
+        upstream_stages=["s1_fetch_strain"],
+        check_run_valid=True,
     ),
     "s6c_brunete_psd_curvature": StageContract(
         name="s6c_brunete_psd_curvature",
@@ -478,6 +494,20 @@ def abort(ctx: StageContext, reason: str) -> None:
         extra={"verdict": "FAIL", "error": reason},
     )
     _fatal(f"[{ctx.stage_name}] {reason}")
+
+
+def log_stage_paths(ctx: StageContext) -> None:
+    """Print the canonical output paths mandated by AGENTS.md §Logging.
+
+    Call this at the end of every stage entrypoint that writes outputs.
+    Emits exactly the five variables required:
+        OUT_ROOT, STAGE_DIR, OUTPUTS_DIR, STAGE_SUMMARY, MANIFEST
+    """
+    print(f"OUT_ROOT={ctx.out_root}")
+    print(f"STAGE_DIR={ctx.stage_dir}")
+    print(f"OUTPUTS_DIR={ctx.outputs_dir}")
+    print(f"STAGE_SUMMARY={ctx.stage_dir / 'stage_summary.json'}")
+    print(f"MANIFEST={ctx.stage_dir / 'manifest.json'}")
 
 
 def enforce_outputs(ctx: StageContext) -> list[str]:
