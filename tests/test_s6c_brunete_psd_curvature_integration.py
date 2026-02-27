@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 
@@ -219,3 +220,114 @@ def test_s6c_dry_run_does_not_write_stage_outputs(tmp_path: Path) -> None:
 
     stage_dir = run_dir / "s6c_brunete_psd_curvature"
     assert not stage_dir.exists(), "dry-run must not create stage directory"
+
+
+def test_s6c_gw150914_like_power_law_ranges(tmp_path: Path) -> None:
+    runs_root = tmp_path / "det_runs"
+    run_id = "it_s6c_gw150914_like"
+    run_dir = runs_root / run_id
+
+    write_json_atomic(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    write_json_atomic(
+        run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json",
+        {
+            "schema_version": "mvp_estimates_v2",
+            "event_id": "GW150914_like",
+            "per_detector": {
+                "H1": {
+                    "f_hz": 251.0,
+                    "Q": 4.3,
+                    "tau_s": 4.3 / (3.141592653589793 * 251.0),
+                    "snr_peak": 12.0,
+                }
+            },
+        },
+    )
+
+    freqs = [200.0 + 0.05 * i for i in range(2401)]
+    psd_vals = [f ** (-4.0) for f in freqs]
+    write_json_atomic(
+        run_dir / "external_inputs" / "psd_model.json",
+        {
+            "schema_version": "mvp_psd_model_v1",
+            "models": {
+                "H1": {
+                    "frequencies_hz": freqs,
+                    "psd_values": psd_vals,
+                }
+            },
+        },
+    )
+
+    proc = _run_stage(run_id=run_id, runs_root=runs_root)
+    assert proc.returncode == 0, proc.stderr
+
+    metrics_payload = json.loads(
+        (run_dir / "s6c_brunete_psd_curvature" / "outputs" / "brunete_metrics.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    row = metrics_payload["metrics"][0]
+
+    assert -0.05 <= row["sigma"] <= 0.05
+    assert 0.01 <= row["chi_psd"] <= 0.15
+    assert row["regime_sigma"] == "perturbative"
+    assert math.isfinite(row["K"])
+    assert row["K"] < 0.0
+
+
+def test_s6c_closed_form_regime_with_strong_local_curvature(tmp_path: Path) -> None:
+    runs_root = tmp_path / "det_runs"
+    run_id = "it_s6c_closed_form_regime"
+    run_dir = runs_root / run_id
+
+    write_json_atomic(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    write_json_atomic(
+        run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json",
+        {
+            "schema_version": "mvp_estimates_v2",
+            "event_id": "EVT_SPIKE",
+            "per_detector": {
+                "H1": {
+                    "f_hz": 251.0,
+                    "Q": 4.3,
+                    "tau_s": 4.3 / (3.141592653589793 * 251.0),
+                    "rho0": 10.0,
+                }
+            },
+        },
+    )
+
+    f0 = 251.0
+    freqs = [240.0 + 0.01 * i for i in range(2201)]
+    psd_vals = [
+        1.0 - 0.999 * math.exp(-((f - f0) / 0.08) ** 2)
+        for f in freqs
+    ]
+    write_json_atomic(
+        run_dir / "external_inputs" / "psd_model.json",
+        {
+            "schema_version": "mvp_psd_model_v1",
+            "models": {
+                "H1": {
+                    "frequencies_hz": freqs,
+                    "psd_values": psd_vals,
+                }
+            },
+        },
+    )
+
+    proc = _run_stage(run_id=run_id, runs_root=runs_root)
+    assert proc.returncode == 0, proc.stderr
+
+    metrics_payload = json.loads(
+        (run_dir / "s6c_brunete_psd_curvature" / "outputs" / "brunete_metrics.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    row = metrics_payload["metrics"][0]
+
+    assert row["regime_sigma"] == "closed_form"
+    assert row["regime_chi_psd"] == "elevated"
+    assert math.isfinite(row["K"])
+    assert math.isfinite(row["R"])
