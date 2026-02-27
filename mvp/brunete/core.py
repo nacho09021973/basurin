@@ -87,7 +87,8 @@ def _erfcx_stable(x: float) -> float:
         return math.exp(x * x) * math.erfc(x)
     inv = 1.0 / x
     inv2 = inv * inv
-    return inv / math.sqrt(math.pi) * (1.0 - 0.5 * inv2 + 0.75 * inv2 * inv2)
+    inv4 = inv2 * inv2
+    return inv / math.sqrt(math.pi) * (1.0 - 0.5 * inv2 + 0.75 * inv4 - 1.875 * inv4 * inv2)
 
 
 def _j0_closed_form_nonnegative(sigma_value: float) -> float:
