@@ -229,8 +229,6 @@ CONTRACTS: dict[str, StageContract] = {
         name="s4d_kerr_from_multimode",
         required_inputs=[
             "s3b_multimode_estimates/outputs/multimode_estimates.json",
-            # Nota: "s3b_multimode_estimates/outputs/model_comparison.json" es opcional
-            # y se tratará como optional input en la implementación del stage.
         ],
         produced_outputs=[
             "outputs/kerr_from_multimode.json",
