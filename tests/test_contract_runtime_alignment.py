@@ -64,3 +64,9 @@ def test_s4_stage_summary_records_actual_overridden_estimates_input(tmp_path: Pa
 def test_s6_cli_exposes_estimates_path_override() -> None:
     src = Path("mvp/s6_information_geometry.py").read_text(encoding="utf-8")
     assert "--estimates-path" in src
+
+
+def test_s6c_contract_does_not_require_measured_psd_when_fallback_exists() -> None:
+    s6c_req = CONTRACTS["s6c_brunete_psd_curvature"].required_inputs
+
+    assert "psd/measured_psd.json" not in s6c_req

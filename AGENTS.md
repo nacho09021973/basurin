@@ -13,6 +13,11 @@ Cada stage/experimento debe producir bajo su directorio:
 - `outputs/*`
 y reflejar hashes SHA256 de outputs en manifest/summary.
 
+### Excepción documentada (helper no-stage)
+- `mvp/extract_psd.py` (`psd_extract`) es un helper de preparación, no un stage canónico del pipeline.
+- `s6c_brunete_psd_curvature` soporta fallback runtime de PSD vía `external_inputs/psd_model.json` cuando no existe `psd/measured_psd.json`.
+- Por contract-first SSOT, no modelar `psd/measured_psd.json` como dependencia rígida de stage cuando ese fallback esté habilitado.
+
 ## Rutas canónicas (no adivinar)
 - Stage dir canónico: `<RUNS_ROOT>/<run_id>/<stage>/...`
 - Experimento canónico: `<RUNS_ROOT>/<run_id>/experiment/<name>/...`
