@@ -10,21 +10,11 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-import sys
-
-_here = Path(__file__).resolve()
-for _cand in [_here.parents[1], _here.parents[2]]:
-    if (_cand / "basurin_io.py").exists():
-        if str(_cand) not in sys.path:
-            sys.path.insert(0, str(_cand))
-        break
-
 from basurin_io import (
     ensure_stage_dirs,
     require_run_valid,
     resolve_out_root,
     sha256_file,
-    utc_now_iso,
     validate_run_id,
     write_json_atomic,
 )
@@ -46,7 +36,7 @@ def _is_valid_number(value: float) -> bool:
 
 
 def _detector_score(row: dict[str, Any]) -> float:
-    kappa = abs(_safe_float(row.get("kappa")))
+    kappa = abs(_safe_float(row.get("kappa", row.get("R"))))
     sigma = _safe_float(row.get("sigma"))
     chi_psd = _safe_float(row.get("chi_psd"))
     if not (_is_valid_number(kappa) and _is_valid_number(sigma) and _is_valid_number(chi_psd)):
@@ -76,6 +66,7 @@ def rank_events(metrics_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     ranking: list[dict[str, Any]] = []
     for event_id, rows in grouped.items():
+        rows = sorted(rows, key=lambda row: str(row.get("detector", "")))
         detector_scores: list[float] = []
         kappas: list[float] = []
         sigmas: list[float] = []
@@ -88,7 +79,7 @@ def rank_events(metrics_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             score = _detector_score(row)
             if _is_valid_number(score):
                 detector_scores.append(score)
-                kappas.append(abs(_safe_float(row.get("kappa"))))
+                kappas.append(abs(_safe_float(row.get("kappa", row.get("R")))))
                 sigmas.append(_safe_float(row.get("sigma")))
                 chis.append(_safe_float(row.get("chi_psd")))
 
@@ -128,15 +119,43 @@ def _resolve_input(run_dir: Path, input_override: str | None) -> Path:
     if expected.exists():
         return expected
 
-    candidates = sorted(run_dir.glob("**/brunete_metrics.json"))
-    cands = "\n".join(f"  - {c}" for c in candidates[:10]) or "  - (none)"
+    candidates = {str(p) for p in sorted(run_dir.glob("**/brunete_metrics.json"))}
+    candidates.update(str(p) for p in sorted(run_dir.parent.glob("**/brunete_metrics.json")))
+    cands = "\n".join(f"  - {c}" for c in sorted(candidates)[:20]) or "  - (none)"
     raise FileNotFoundError(
         "Input faltante para ex2_ranking.\n"
+        f"Ruta canónica esperada: runs/{run_dir.name}/s6c_brunete_psd_curvature/outputs/brunete_metrics.json\n"
         f"Ruta esperada exacta: {expected}\n"
         "Comando exacto para regenerar upstream: "
-        f"python -m mvp.s6c_brunete_psd_curvature --run {run_dir.name}\n"
+        f"python -m mvp.s6c_brunete_psd_curvature --run-id {run_dir.name}\n"
         f"Candidatos detectados:\n{cands}"
     )
+
+
+def _require_keys(metrics_rows: list[dict[str, Any]]) -> None:
+    for row in metrics_rows:
+        event_id = str(row.get("event_id", "UNKNOWN"))
+        detector = str(row.get("detector", "UNKNOWN"))
+        required_keys = ["sigma", "chi_psd"]
+        if "kappa" not in row and "R" not in row:
+            required_keys.append("kappa|R")
+
+        available = sorted(str(k) for k in row.keys())
+        for key in required_keys:
+            if key == "kappa|R":
+                continue
+            if key not in row:
+                raise KeyError(
+                    "Schema inválido en brunete_metrics row: "
+                    f"event_id={event_id}, detector={detector}, missing_key={key}, "
+                    f"available_keys={available}"
+                )
+        if "kappa|R" in required_keys:
+            raise KeyError(
+                "Schema inválido en brunete_metrics row: "
+                f"event_id={event_id}, detector={detector}, missing_key=kappa|R, "
+                f"available_keys={available}"
+            )
 
 
 def run_experiment(run_id: str, input_override: str | None = None) -> int:
@@ -151,6 +170,7 @@ def run_experiment(run_id: str, input_override: str | None = None) -> int:
     metrics_rows = payload.get("metrics", payload if isinstance(payload, list) else [])
     if not isinstance(metrics_rows, list):
         raise TypeError("Formato inválido: brunete_metrics debe ser lista o dict con clave 'metrics'.")
+    _require_keys(metrics_rows)
 
     stage_dir, outputs_dir = ensure_stage_dirs(run_id, EXPERIMENT_STAGE, base_dir=out_root)
 
@@ -200,9 +220,13 @@ def run_experiment(run_id: str, input_override: str | None = None) -> int:
         "schema_version": "ex2_event_ranking_summary_v1",
         "stage": EXPERIMENT_STAGE,
         "run_id": run_id,
-        "created_utc": utc_now_iso(),
+        "is_experiment": True,
+        "experiment_id": "ex2_ranking",
+        "upstream_stage": "s6c_brunete_psd_curvature",
         "results": {
             "n_events": len(ranking),
+            "n_rows_read": len(metrics_rows),
+            "n_warnings_total": sum(item["n_warnings"] for item in ranking),
             "top_event": ranking[0]["event_id"] if ranking else None,
         },
         "inputs": {
@@ -220,11 +244,13 @@ def run_experiment(run_id: str, input_override: str | None = None) -> int:
         "schema_version": "mvp_manifest_v1",
         "stage": EXPERIMENT_STAGE,
         "run_id": run_id,
-        "created_utc": utc_now_iso(),
         "artifacts": {
             "event_ranking_json": str(ranking_json.relative_to(stage_dir)),
             "event_ranking_csv": str(ranking_csv.relative_to(stage_dir)),
             "stage_summary": "stage_summary.json",
+        },
+        "inputs": {
+            "s6c_brunete_psd_curvature/outputs/brunete_metrics.json": sha256_file(input_path),
         },
         "hashes": {
             "event_ranking_json": sha256_file(ranking_json),
@@ -245,14 +271,14 @@ def run_experiment(run_id: str, input_override: str | None = None) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Ex2 ranking experiment from s6c metrics")
-    ap.add_argument("--run", required=True, help="Run ID")
+    ap.add_argument("--run-id", required=True, help="Run ID")
     ap.add_argument(
         "--input",
         default=None,
         help="Ruta opcional de brunete_metrics.json (abs o relativa al run dir)",
     )
     args = ap.parse_args()
-    return run_experiment(run_id=args.run, input_override=args.input)
+    return run_experiment(run_id=args.run_id, input_override=args.input)
 
 
 if __name__ == "__main__":

@@ -86,7 +86,7 @@ def test_rank_events_golden_order_and_schema() -> None:
 def test_cli_deterministic_byte_output_and_no_write_outside_runs_root(tmp_path: Path) -> None:
     runs_root, run_id, run_dir = _prepare_run(tmp_path)
     env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
-    cmd = [sys.executable, str(REPO_ROOT / "mvp" / "experiment" / "ex2_ranking.py"), "--run", run_id]
+    cmd = [sys.executable, "-m", "mvp.experiment.ex2_ranking", "--run-id", run_id]
 
     p1 = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, text=True, capture_output=True)
     assert p1.returncode == 0, p1.stderr
@@ -108,3 +108,34 @@ def test_cli_deterministic_byte_output_and_no_write_outside_runs_root(tmp_path: 
     assert ranked_ids == ["EV_A", "EV_B", "EV_C"]
 
     assert not (REPO_ROOT / "runs" / run_id).exists()
+
+
+def test_ex2_ranking_missing_required_keys_error_message_is_actionable(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs_tmp"
+    run_id = "it_ex2_ranking_missing_keys"
+    run_dir = runs_root / run_id
+    write_json_atomic(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    write_json_atomic(
+        run_dir / "s6c_brunete_psd_curvature" / "outputs" / "brunete_metrics.json",
+        {
+            "metrics": [
+                {
+                    "event_id": "EV_FAIL",
+                    "detector": "H1",
+                    "kappa": 0.7,
+                    "chi_psd": 0.1,
+                }
+            ]
+        },
+    )
+
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+    cmd = [sys.executable, "-m", "mvp.experiment.ex2_ranking", "--run-id", run_id]
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, text=True, capture_output=True)
+
+    assert proc.returncode != 0
+    err = proc.stderr
+    assert "event_id=EV_FAIL" in err
+    assert "detector=H1" in err
+    assert "missing_key=sigma" in err
+    assert "available_keys=['chi_psd', 'detector', 'event_id', 'kappa']" in err
