@@ -315,6 +315,17 @@ CONTRACTS: dict[str, StageContract] = {
         upstream_stages=["s4_geometry_filter", "s6_information_geometry"],
         check_run_valid=True,
     ),
+    "experiment_ex3_golden_sweep": StageContract(
+        name="experiment_ex3_golden_sweep",
+        required_inputs=[
+            "s5_aggregate/outputs/aggregate.json",
+        ],
+        produced_outputs=[
+            "outputs/t0_sweep_golden_results.json",
+        ],
+        upstream_stages=["s5_aggregate"],
+        check_run_valid=True,
+    ),
 }
 
 
