@@ -2,23 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 from mvp import pipeline
-
-
-REQUIRED_KEYS = {
-    "run_id",
-    "started_utc",
-    "pipeline_cmdline",
-    "git_commit",
-    "git_dirty",
-    "python_version",
-    "platform",
-    "contracts_sha256",
-    "pipeline_sha256",
-    "deps_freeze_sha256",
-}
 
 
 def _failing_run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s=None):
@@ -38,11 +25,16 @@ def _failing_run_stage(script, args, label, out_root, run_id, timeline, stage_ti
     return 1
 
 
-def test_run_provenance_written_and_has_required_keys(tmp_path, monkeypatch) -> None:
-    runs_root = tmp_path / "isolated_runs"
-    run_id = "prov_required_keys"
+def test_provenance_schema_keys(tmp_path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs_root"
+    run_id = "prov_schema"
 
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    def _fake_create_run_valid(out_root: Path, rid: str) -> None:
+        (out_root / rid / "RUN_VALID").mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(pipeline, "_create_run_valid", _fake_create_run_valid)
     monkeypatch.setattr(pipeline, "_run_stage", _failing_run_stage)
 
     rc, produced_run_id = pipeline.run_single_event(
@@ -58,33 +50,71 @@ def test_run_provenance_written_and_has_required_keys(tmp_path, monkeypatch) -> 
     provenance_path = runs_root / run_id / "run_provenance.json"
     assert provenance_path.exists()
 
-    timeline = json.loads((runs_root / run_id / "pipeline_timeline.json").read_text(encoding="utf-8"))
     provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    assert set(provenance.keys()) == {
+        "schema_version",
+        "run_id",
+        "created_utc",
+        "environment",
+        "invocation",
+        "dependencies",
+    }
+    assert provenance["schema_version"] == "run_provenance_v1"
+    assert provenance["invocation"]["mode"] == "single"
+    assert provenance["invocation"]["event_id"] == "GW150914"
 
-    assert REQUIRED_KEYS.issubset(provenance.keys())
-    assert provenance["started_utc"] == timeline["started_utc"]
 
-    contracts_path = Path(__file__).resolve().parents[1] / "mvp" / "contracts.py"
-    contracts_sha256 = hashlib.sha256(contracts_path.read_bytes()).hexdigest()
-    assert provenance["contracts_sha256"] == contracts_sha256
+def test_provenance_git_sha_format(tmp_path) -> None:
+    out_root = tmp_path / "runs"
+    run_id = "git_sha_case"
+
+    pipeline._write_run_provenance(out_root, run_id, mode="single", event_id="GW150914")
+
+    payload = json.loads((out_root / run_id / "run_provenance.json").read_text(encoding="utf-8"))
+    git_sha = payload["environment"]["git_sha"]
+
+    assert git_sha == "UNKNOWN" or bool(re.fullmatch(r"[0-9a-f]{40}", git_sha))
 
 
-def test_no_repo_runs_written(tmp_path, monkeypatch) -> None:
-    runs_root = tmp_path / "other_root"
-    run_id = "prov_no_repo_runs"
+def test_provenance_atlas_hash_matches(tmp_path) -> None:
+    out_root = tmp_path / "runs"
+    run_id = "atlas_hash_case"
+    atlas_path = tmp_path / "atlas.json"
+    atlas_path.write_text('{"atlas": "demo"}\n', encoding="utf-8")
 
-    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
-    monkeypatch.setattr(pipeline, "_run_stage", _failing_run_stage)
-
-    rc, _ = pipeline.run_single_event(
+    pipeline._write_run_provenance(
+        out_root,
+        run_id,
+        mode="single",
         event_id="GW150914",
-        atlas_path="mvp/test_atlas_fixture.json",
-        run_id=run_id,
-        synthetic=True,
+        atlas_path=str(atlas_path),
     )
 
-    assert rc != 0
-    assert (runs_root / run_id / "run_provenance.json").exists()
+    payload = json.loads((out_root / run_id / "run_provenance.json").read_text(encoding="utf-8"))
+    expected_hash = hashlib.sha256(atlas_path.read_bytes()).hexdigest()
+    assert payload["invocation"]["atlas_sha256"] == expected_hash
 
-    repo_runs_dir = Path(__file__).resolve().parents[1] / "runs" / run_id
-    assert not repo_runs_dir.exists()
+
+def test_provenance_no_secrets(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("SECRET_TOKEN", "top-secret")
+    monkeypatch.setenv("API_KEY", "abc123")
+
+    out_root = tmp_path / "runs"
+    run_id = "no_secrets_case"
+    pipeline._write_run_provenance(out_root, run_id, mode="multi", events=["GW150914", "GW151226"])
+
+    payload = json.loads((out_root / run_id / "run_provenance.json").read_text(encoding="utf-8"))
+    env_keys = set(payload["environment"].keys())
+    assert env_keys == {
+        "git_sha",
+        "git_dirty",
+        "git_branch",
+        "python_version",
+        "platform",
+        "basurin_runs_root",
+        "basurin_losc_root",
+    }
+
+    as_text = json.dumps(payload).lower()
+    for needle in ("secret_token", "api_key", "password", "token"):
+        assert needle not in as_text
