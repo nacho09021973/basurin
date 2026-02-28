@@ -67,7 +67,7 @@ def _load_source_run_valid_sha(out_root: Path, event_id: str, run_id: str) -> st
     if not verdict_path.exists():
         raise FileNotFoundError(
             "ERROR: [experiment_ex3_golden_sweep] Source run "
-            f"'{run_id}' for event '{event_id}'\n"
+            f"'{run_id}' for event '{event_id}'.\n"
             "  does not have RUN_VALID == PASS.\n"
             f"  Expected: {verdict_path}\n"
             "  Regenerate: "
@@ -78,7 +78,7 @@ def _load_source_run_valid_sha(out_root: Path, event_id: str, run_id: str) -> st
     if str(verdict_payload.get("verdict", "")).strip() != "PASS":
         raise RuntimeError(
             "ERROR: [experiment_ex3_golden_sweep] Source run "
-            f"'{run_id}' for event '{event_id}'\n"
+            f"'{run_id}' for event '{event_id}'.\n"
             "  does not have RUN_VALID == PASS.\n"
             f"  Expected: {verdict_path}\n"
             "  Regenerate: "
