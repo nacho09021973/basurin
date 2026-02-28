@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ from basurin_io import (
     require_run_valid,
     resolve_out_root,
     sha256_file,
+    utc_now_iso,
     validate_run_id,
     write_json_atomic,
 )
@@ -30,7 +32,7 @@ def _parse_events(raw: str) -> list[str]:
     return events
 
 
-def _resolve_event_run_map(out_root: Path, parent_run_id: str) -> dict[str, str]:
+def _resolve_event_run_map(out_root: Path, parent_run_id: str) -> tuple[dict[str, str], Path]:
     agg_path = out_root / parent_run_id / "s5_aggregate" / "outputs" / "aggregate.json"
     if not agg_path.exists():
         candidates = sorted(str(p) for p in out_root.glob("*/s5_aggregate/outputs/aggregate.json"))
@@ -57,7 +59,33 @@ def _resolve_event_run_map(out_root: Path, parent_run_id: str) -> dict[str, str]
         run_id = str(row.get("run_id", "")).strip()
         if event_id and run_id:
             mapping[event_id] = run_id
-    return mapping
+    return mapping, agg_path
+
+
+def _load_source_run_valid_sha(out_root: Path, event_id: str, run_id: str) -> str:
+    verdict_path = out_root / run_id / "RUN_VALID" / "verdict.json"
+    if not verdict_path.exists():
+        raise FileNotFoundError(
+            "ERROR: [experiment_ex3_golden_sweep] Source run "
+            f"'{run_id}' for event '{event_id}'\n"
+            "  does not have RUN_VALID == PASS.\n"
+            f"  Expected: {verdict_path}\n"
+            "  Regenerate: "
+            f"python mvp/pipeline.py single --event-id {event_id} --atlas-path <atlas>"
+        )
+
+    verdict_payload = json.loads(verdict_path.read_text(encoding="utf-8"))
+    if str(verdict_payload.get("verdict", "")).strip() != "PASS":
+        raise RuntimeError(
+            "ERROR: [experiment_ex3_golden_sweep] Source run "
+            f"'{run_id}' for event '{event_id}'\n"
+            "  does not have RUN_VALID == PASS.\n"
+            f"  Expected: {verdict_path}\n"
+            "  Regenerate: "
+            f"python mvp/pipeline.py single --event-id {event_id} --atlas-path <atlas>"
+        )
+
+    return sha256_file(verdict_path)
 
 
 def _build_cmd(
@@ -132,7 +160,7 @@ def run_experiment(args: argparse.Namespace) -> int:
     require_run_valid(out_root, args.run_id)
 
     event_ids = _parse_events(args.golden_events)
-    event_run_map = _resolve_event_run_map(out_root, args.run_id)
+    event_run_map, aggregate_path = _resolve_event_run_map(out_root, args.run_id)
 
     missing = [ev for ev in event_ids if ev not in event_run_map]
     if missing:
@@ -143,6 +171,16 @@ def run_experiment(args: argparse.Namespace) -> int:
             f"missing={missing}; disponibles={known_msg}"
         )
 
+    source_run_valid_sha: dict[str, str] = {}
+    for event_id in event_ids:
+        if not re.match(r"^[A-Za-z0-9_-]+$", event_id):
+            raise ValueError(
+                "ERROR: [experiment_ex3_golden_sweep] Invalid event_id for filename usage: "
+                f"'{event_id}'. Allowed pattern: ^[A-Za-z0-9_-]+$"
+            )
+        run_id = event_run_map[event_id]
+        source_run_valid_sha[event_id] = _load_source_run_valid_sha(out_root, event_id, run_id)
+
     stage_dir, outputs_dir = ensure_stage_dirs(args.run_id, EXPERIMENT_STAGE, base_dir=out_root)
     per_event_dir = outputs_dir / "per_event"
     per_event_dir.mkdir(parents=True, exist_ok=True)
@@ -152,7 +190,6 @@ def run_experiment(args: argparse.Namespace) -> int:
     results: list[dict[str, Any]] = []
     for event_id in event_ids:
         event_run_id = event_run_map[event_id]
-        require_run_valid(out_root, event_run_id)
 
         cmd = _build_cmd(script_path=script_path, event_run_id=event_run_id, out_root=out_root, args=args)
         env = dict(os.environ)
@@ -167,9 +204,11 @@ def run_experiment(args: argparse.Namespace) -> int:
 
         event_res = _read_event_result(out_root, event_run_id, int(args.seed))
         per_event_payload = {
-            "schema_version": "ex3_t0_golden_event_v1",
+            "schema_version": "ex3_per_event_v1",
             "parent_run_id": args.run_id,
             "event_id": event_id,
+            "source_run_id": event_run_id,
+            "source_run_valid_sha256": source_run_valid_sha[event_id],
             "event_run_id": event_run_id,
             "seed": int(args.seed),
             "source": {
@@ -197,10 +236,12 @@ def run_experiment(args: argparse.Namespace) -> int:
 
     agg_path = outputs_dir / RESULTS_NAME
     agg_payload = {
-        "schema_version": "ex3_t0_golden_results_v1",
+        "schema_version": "ex3_golden_sweep_v1",
         "stage": EXPERIMENT_STAGE,
         "parent_run_id": args.run_id,
+        "parent_aggregate_sha256": sha256_file(aggregate_path),
         "golden_events": event_ids,
+        "created": utc_now_iso(),
         "seed": int(args.seed),
         "results": results,
     }
