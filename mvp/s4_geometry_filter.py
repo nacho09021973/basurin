@@ -22,6 +22,7 @@ from mvp.distance_metrics import (
     get_metric,
     mahalanobis_log,
 )
+from mvp.schemas import validate_compatible_set
 from basurin_io import write_json_atomic
 from mvp.path_utils import resolve_run_scoped_input
 
@@ -609,6 +610,16 @@ def main() -> int:
         )
         result["event_id"] = estimates.get("event_id", "unknown")
         result["run_id"] = args.run
+
+        _ok, _errs = validate_compatible_set(
+            result,
+            strict_mahalanobis=(metric_name == "mahalanobis_log"),
+        )
+        if not _ok:
+            print(
+                f"WARNING: compatible_set self-check failed: {_errs}",
+                file=sys.stderr,
+            )
 
         cs_path = ctx.outputs_dir / "compatible_set.json"
         write_json_atomic(cs_path, result)
