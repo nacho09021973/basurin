@@ -77,6 +77,7 @@ def test_integration_lite_ex3_golden_writes_only_under_runs_root(tmp_path: Path,
     assert (stage_dir / "manifest.json").exists()
     assert (stage_dir / "stage_summary.json").exists()
     assert (outputs_dir / "t0_sweep_golden_results.json").exists()
+    assert (outputs_dir / "golden_diagnostics.json").exists()
     assert (outputs_dir / "per_event" / f"{ev1}_t0_sweep.json").exists()
     assert (outputs_dir / "per_event" / f"{ev2}_t0_sweep.json").exists()
 
@@ -84,6 +85,27 @@ def test_integration_lite_ex3_golden_writes_only_under_runs_root(tmp_path: Path,
     assert payload["golden_events"] == [ev1, ev2]
     assert len(payload["results"]) == 2
     assert all("science_diagnostics" in row for row in payload["results"])
+
+    diagnostics = json.loads((outputs_dir / "golden_diagnostics.json").read_text(encoding="utf-8"))
+    assert diagnostics["schema_version"] == "ex3_diagnostics_v1"
+    assert diagnostics["parent_run_id"] == parent_run
+    assert diagnostics["n_events_attempted"] == 2
+    assert diagnostics["n_events_completed"] == 2
+    assert diagnostics["n_events_failed"] == 0
+    assert diagnostics["failed_events"] == []
+    assert diagnostics["completed_events"] == [ev1, ev2]
+    assert diagnostics["t0_sweep_exit_codes"] == {ev1: 0, ev2: 0}
+    assert set(diagnostics["timing_s"].keys()) == {ev1, ev2}
+    assert all(isinstance(v, float) and v >= 0.0 for v in diagnostics["timing_s"].values())
+    assert isinstance(diagnostics["created"], str)
+
+    summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
+    summary_paths = [item["path"] for item in summary["outputs"]]
+    assert "outputs/golden_diagnostics.json" in summary_paths
+
+    manifest = json.loads((stage_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["artifacts"]["golden_diagnostics"] == "outputs/golden_diagnostics.json"
+    assert isinstance(manifest["hashes"]["golden_diagnostics"], str)
 
     accidental_repo_path = Path.cwd() / "runs" / parent_run / "experiment" / "ex3_t0_golden"
     assert not accidental_repo_path.exists()

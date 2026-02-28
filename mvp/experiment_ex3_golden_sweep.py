@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -188,21 +189,33 @@ def run_experiment(args: argparse.Namespace) -> int:
     script_path = Path(__file__).resolve().parent / "experiment_t0_sweep_full.py"
 
     results: list[dict[str, Any]] = []
+    completed_events: list[str] = []
+    failed_events: list[dict[str, Any]] = []
+    t0_sweep_exit_codes: dict[str, int] = {}
+    timing_s: dict[str, float] = {}
     for event_id in event_ids:
         event_run_id = event_run_map[event_id]
 
         cmd = _build_cmd(script_path=script_path, event_run_id=event_run_id, out_root=out_root, args=args)
         env = dict(os.environ)
         env["BASURIN_RUNS_ROOT"] = str(out_root)
+        t_start = time.monotonic()
         proc = subprocess.run(cmd, env=env, capture_output=True, text=True, check=False)
+        elapsed = time.monotonic() - t_start
+        t0_sweep_exit_codes[event_id] = int(proc.returncode)
+        timing_s[event_id] = float(elapsed)
         if proc.returncode != 0:
-            raise RuntimeError(
-                "experiment_t0_sweep_full falló (fail-fast). "
-                f"event_id={event_id} event_run={event_run_id} returncode={proc.returncode}\n"
-                f"CMD={' '.join(cmd)}\nSTDOUT={proc.stdout[-1000:]}\nSTDERR={proc.stderr[-1000:]}"
+            failed_events.append(
+                {
+                    "event_id": event_id,
+                    "reason": f"subprocess exit {int(proc.returncode)}",
+                    "exit_code": int(proc.returncode),
+                }
             )
+            continue
 
         event_res = _read_event_result(out_root, event_run_id, int(args.seed))
+        completed_events.append(event_id)
         per_event_payload = {
             "schema_version": "ex3_per_event_v1",
             "parent_run_id": args.run_id,
@@ -234,6 +247,21 @@ def run_experiment(args: argparse.Namespace) -> int:
             }
         )
 
+    diagnostics_path = outputs_dir / "golden_diagnostics.json"
+    diagnostics_payload = {
+        "schema_version": "ex3_diagnostics_v1",
+        "parent_run_id": args.run_id,
+        "n_events_attempted": len(event_ids),
+        "n_events_completed": len(completed_events),
+        "n_events_failed": len(failed_events),
+        "failed_events": failed_events,
+        "completed_events": completed_events,
+        "t0_sweep_exit_codes": t0_sweep_exit_codes,
+        "timing_s": timing_s,
+        "created": utc_now_iso(),
+    }
+    write_json_atomic(diagnostics_path, diagnostics_payload)
+
     agg_path = outputs_dir / RESULTS_NAME
     agg_payload = {
         "schema_version": "ex3_golden_sweep_v1",
@@ -261,6 +289,10 @@ def run_experiment(args: argparse.Namespace) -> int:
             {
                 "path": str(agg_path.relative_to(stage_dir)),
                 "sha256": sha256_file(agg_path),
+            },
+            {
+                "path": str(diagnostics_path.relative_to(stage_dir)),
+                "sha256": sha256_file(diagnostics_path),
             }
         ]
         + [
@@ -280,10 +312,12 @@ def run_experiment(args: argparse.Namespace) -> int:
         "run_id": args.run_id,
         "artifacts": {
             "golden_results": str(agg_path.relative_to(stage_dir)),
+            "golden_diagnostics": str(diagnostics_path.relative_to(stage_dir)),
             "stage_summary": "stage_summary.json",
         },
         "hashes": {
             "golden_results": sha256_file(agg_path),
+            "golden_diagnostics": sha256_file(diagnostics_path),
             "stage_summary": sha256_file(summary_path),
         },
         "per_event": {
