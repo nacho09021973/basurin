@@ -166,6 +166,49 @@ class TestMahalanobisLog:
         with pytest.raises(ValueError, match="sigma_lnf and sigma_lnQ are required"):
             mahalanobis_log(math.log(251), math.log(4.0), math.log(260), math.log(4.5))
 
+    def test_off_diagonal_exactly_zero_when_r0_asymmetric_sigmas(self) -> None:
+        """r=0 con sigma_f != sigma_Q: termino cruzado inv01=0, d^2=(d0/sf)^2+(d1/sQ)^2."""
+        sigma_f, sigma_Q = 0.05, 0.30
+        d0, d1 = 0.03, 0.12
+        d = mahalanobis_log(0.0, 0.0, d0, d1, sigma_lnf=sigma_f, sigma_lnQ=sigma_Q, r=0.0)
+        expected = math.sqrt((d0 / sigma_f) ** 2 + (d1 / sigma_Q) ** 2)
+        assert abs(d - expected) < 1e-14
+
+    def test_rotation_by_theta_diagonalizes_and_reproduces_distance(self) -> None:
+        """En ejes principales (autovectores de Sigma 2x2), d_Mahal se reproduce exactamente.
+
+        Para Sigma = [[a, b],[b, c]] los autovalores son:
+          lambda_+/- = (a+c)/2 +/- sqrt(((a-c)/2)^2 + b^2)
+        y los autovectores (normalizados) son (b, lambda - a) / ||...||.
+        Proyectando el vector de diferencia sobre esos ejes, d^2 = sum(ci^2 / lambda_i).
+        """
+        sigma_f, sigma_Q, r = 0.10, 0.25, 0.6
+        a = sigma_f ** 2
+        c = sigma_Q ** 2
+        b = r * sigma_f * sigma_Q  # != 0 con r=0.6
+
+        tr_half = (a + c) / 2.0
+        disc = math.sqrt(((a - c) / 2.0) ** 2 + b ** 2)
+        lam_plus = tr_half + disc
+        lam_minus = tr_half - disc
+
+        def _norm_eigvec(b_: float, shift: float) -> tuple[float, float]:
+            n = math.hypot(b_, shift)
+            return b_ / n, shift / n
+
+        v_plus = _norm_eigvec(b, lam_plus - a)
+        v_minus = _norm_eigvec(b, lam_minus - a)
+
+        d0, d1 = 0.07, 0.15
+        c_plus = v_plus[0] * d0 + v_plus[1] * d1
+        c_minus = v_minus[0] * d0 + v_minus[1] * d1
+
+        d_principal = math.sqrt(c_plus ** 2 / lam_plus + c_minus ** 2 / lam_minus)
+        d_direct = mahalanobis_log(
+            0.0, 0.0, d0, d1, sigma_lnf=sigma_f, sigma_lnQ=sigma_Q, r=r
+        )
+        assert abs(d_principal - d_direct) < 1e-12
+
 
 # ===========================================================================
 # Registry tests
