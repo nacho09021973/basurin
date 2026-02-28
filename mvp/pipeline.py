@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
+import platform
 import subprocess
 import sys
 import threading
@@ -128,6 +130,67 @@ def _set_run_valid_verdict(out_root: Path, run_id: str, verdict: str, reason: st
 
 def _write_timeline(out_root: Path, run_id: str, timeline: dict[str, Any]) -> None:
     write_json_atomic(out_root / run_id / "pipeline_timeline.json", timeline)
+
+
+def _sha256_bytes(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _safe_run(cmd: list[str], cwd: Path | None = None) -> tuple[str | None, str | None]:
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=True, cwd=cwd)
+        return proc.stdout.strip(), None
+    except Exception as exc:
+        return None, str(exc)
+
+
+def _build_run_provenance(run_id: str, started_utc: str) -> dict[str, Any]:
+    errors: list[str] = []
+    repo_root = MVP_DIR.parent
+
+    git_commit = "UNKNOWN"
+    commit_out, commit_err = _safe_run(["git", "rev-parse", "HEAD"], cwd=repo_root)
+    if commit_out:
+        git_commit = commit_out
+    elif commit_err:
+        errors.append(f"git rev-parse HEAD failed: {commit_err}")
+
+    git_dirty = False
+    try:
+        dirty_proc = subprocess.run(["git", "diff", "--quiet"], cwd=repo_root, check=False)
+        git_dirty = dirty_proc.returncode != 0
+    except Exception as exc:
+        errors.append(f"git diff --quiet failed: {exc}")
+
+    deps_hash = "UNKNOWN"
+    deps_out, deps_err = _safe_run([sys.executable, "-m", "pip", "freeze"], cwd=repo_root)
+    if deps_out is not None:
+        deps_hash = hashlib.sha256(deps_out.encode("utf-8")).hexdigest()
+
+    payload: dict[str, Any] = {
+        "run_id": run_id,
+        "started_utc": started_utc,
+        "pipeline_cmdline": list(sys.argv),
+        "git_commit": git_commit,
+        "git_dirty": git_dirty,
+        "python_version": sys.version,
+        "platform": platform.platform(),
+        "contracts_sha256": _sha256_bytes(MVP_DIR / "contracts.py"),
+        "pipeline_sha256": _sha256_bytes(Path(__file__).resolve()),
+        "deps_freeze_sha256": deps_hash,
+    }
+    if errors:
+        payload["git_error"] = " | ".join(errors)
+    if deps_hash == "UNKNOWN" and deps_err:
+        payload["deps_error"] = deps_err
+    return payload
+
+
+def _write_run_provenance(out_root: Path, run_id: str, started_utc: str) -> None:
+    write_json_atomic(
+        out_root / run_id / "run_provenance.json",
+        _build_run_provenance(run_id=run_id, started_utc=started_utc),
+    )
 
 
 def _heartbeat(label: str, t0: float, stop: threading.Event, interval: float = 5.0) -> None:
@@ -362,11 +425,14 @@ def run_single_event(
 
     _create_run_valid(out_root, run_id)
 
+    run_started_utc = datetime.now(timezone.utc).isoformat()
+    _write_run_provenance(out_root, run_id, run_started_utc)
+
     timeline: dict[str, Any] = {
         "schema_version": "mvp_pipeline_timeline_v1",
         "run_id": run_id,
         "mode": "single",
-        "started_utc": datetime.now(timezone.utc).isoformat(),
+        "started_utc": run_started_utc,
         "ended_utc": None,
         "event_id": event_id,
         "atlas_path": atlas_path,
@@ -576,11 +642,13 @@ def run_multimode_event(
     print(f"[pipeline] atlas={atlas_path}, synthetic={synthetic}")
 
     _create_run_valid(out_root, run_id)
+    run_started_utc = datetime.now(timezone.utc).isoformat()
+    _write_run_provenance(out_root, run_id, run_started_utc)
     timeline: dict[str, Any] = {
         "schema_version": "mvp_pipeline_timeline_v1",
         "run_id": run_id,
         "mode": "multimode",
-        "started_utc": datetime.now(timezone.utc).isoformat(),
+        "started_utc": run_started_utc,
         "ended_utc": None,
         "event_id": event_id,
         "atlas_path": atlas_path,
@@ -713,12 +781,14 @@ def run_multi_event(
     print(f"[pipeline] estimator={estimator}")
 
     _create_run_valid(out_root, agg_run_id)
+    run_started_utc = datetime.now(timezone.utc).isoformat()
+    _write_run_provenance(out_root, agg_run_id, run_started_utc)
 
     timeline: dict[str, Any] = {
         "schema_version": "mvp_pipeline_timeline_v1",
         "run_id": agg_run_id,
         "mode": "multi",
-        "started_utc": datetime.now(timezone.utc).isoformat(),
+        "started_utc": run_started_utc,
         "ended_utc": None,
         "events": events,
         "atlas_path": atlas_path,
