@@ -16,7 +16,7 @@ def test_contracts_do_not_hardcode_estimates_for_override_paths() -> None:
     s4_req = CONTRACTS["s4_geometry_filter"].required_inputs
     s6_req = CONTRACTS["s6_information_geometry"].required_inputs
 
-    assert "s3_ringdown_estimates/outputs/estimates.json" not in s4_req
+    assert "s3_ringdown_estimates/outputs/estimates.json" in s4_req
     assert "s3_ringdown_estimates/outputs/estimates.json" not in s6_req
 
 
@@ -28,6 +28,16 @@ def test_s4_stage_summary_records_actual_overridden_estimates_input(tmp_path: Pa
 
     atlas_path = tmp_path / "atlas.json"
     write_json_atomic(atlas_path, [{"geometry_id": "g1", "f_hz": 250.0, "Q": 3.14}])
+
+    base_est = run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+    write_json_atomic(
+        base_est,
+        {
+            "event_id": "EVT",
+            "combined": {"f_hz": 245.0, "Q": 3.10, "tau_s": 0.004},
+            "combined_uncertainty": {"sigma_logf": 0.1, "sigma_logQ": 0.2},
+        },
+    )
 
     alt_est = run_dir / "s3_spectral_estimates" / "outputs" / "spectral_estimates.json"
     write_json_atomic(
