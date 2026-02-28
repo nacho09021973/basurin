@@ -199,6 +199,33 @@ class TestMahalanobisLog:
         v_plus = _norm_eigvec(b, lam_plus - a)
         v_minus = _norm_eigvec(b, lam_minus - a)
 
+        # --- Preconditions: Σ must be SPD ---
+        EPS_SPD = 1e-12
+        det = a * c - b * b
+
+        assert a > 0.0, f"SPD failed: a={a} must be > 0"
+        assert c > 0.0, f"SPD failed: c={c} must be > 0"
+        assert det > 0.0, f"SPD failed: det(Σ)={det} must be > 0 (a={a}, b={b}, c={c})"
+        assert lam_plus > 0.0, f"SPD failed: λ+={lam_plus} must be > 0"
+        assert lam_minus > 0.0, f"SPD failed: λ-={lam_minus} must be > 0"
+
+        prod = lam_plus * lam_minus
+        scale = max(1.0, abs(det), abs(prod))
+        assert abs(prod - det) <= EPS_SPD * scale, (
+            f"Eigen/det consistency: λ+·λ-={prod} vs det(Σ)={det} (Δ={prod - det})"
+        )
+
+        vp0, vp1 = v_plus
+        vm0, vm1 = v_minus
+        nvp = math.hypot(vp0, vp1)
+        nvm = math.hypot(vm0, vm1)
+        dot = vp0 * vm0 + vp1 * vm1
+
+        assert abs(nvp - 1.0) <= EPS_SPD, f"v_plus not unit: ||v_plus||={nvp}"
+        assert abs(nvm - 1.0) <= EPS_SPD, f"v_minus not unit: ||v_minus||={nvm}"
+        assert abs(dot) <= EPS_SPD, f"eigenvectors not orthogonal: v+·v-={dot}"
+        # --- end preconditions ---
+
         d0, d1 = 0.07, 0.15
         c_plus = v_plus[0] * d0 + v_plus[1] * d1
         c_minus = v_minus[0] * d0 + v_minus[1] * d1
