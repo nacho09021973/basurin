@@ -58,6 +58,7 @@ class StageContract:
     produced_outputs: list[str]    # Paths relative to stage_dir
     upstream_stages: list[str]     # Stages that must have PASS verdict
     check_run_valid: bool = True   # Whether to check RUN_VALID before running
+    required_inputs_glob: list[str] = field(default_factory=list)  # Glob patterns relative to run_dir
 
     def input_paths(self, run_dir: Path) -> dict[str, Path]:
         """Resolve required_inputs to absolute paths under run_dir."""
@@ -102,8 +103,9 @@ CONTRACTS: dict[str, StageContract] = {
     ),
     "s3_ringdown_estimates": StageContract(
         name="s3_ringdown_estimates",
-        required_inputs=[
-            # Dynamic: discovers {H1,L1,V1}_rd.npz at runtime
+        required_inputs=[],
+        required_inputs_glob=[
+            "s2_ringdown_window/outputs/*_rd.npz",
         ],
         produced_outputs=[
             "outputs/estimates.json",
@@ -112,9 +114,9 @@ CONTRACTS: dict[str, StageContract] = {
     ),
     "s4_geometry_filter": StageContract(
         name="s4_geometry_filter",
-        required_inputs=[
-            # Dynamic: estimates can be overridden via --estimates-path.
-            # Runtime validates and hashes the actual consumed file.
+        required_inputs=[],
+        required_inputs_glob=[
+            "s3*_estimates/outputs/*estimates*.json",
         ],
         produced_outputs=[
             "outputs/compatible_set.json",
@@ -292,6 +294,7 @@ class StageContext:
     outputs_dir: Path
     params: dict[str, Any] = field(default_factory=dict)
     inputs_record: list[dict[str, str]] = field(default_factory=list)
+    check_inputs_info: dict[str, Any] = field(default_factory=dict)
 
 
 # ── API Functions ─────────────────────────────────────────────────────────
@@ -360,6 +363,41 @@ def check_inputs(
     """
     records: list[dict[str, str]] = []
     missing: list[str] = []
+
+    # Enforce contract-declared static required inputs.
+    for rel in ctx.contract.required_inputs:
+        abs_path = ctx.run_dir / rel
+        if not abs_path.exists():
+            missing.append(f"contract:{rel}: {abs_path}")
+
+    # Enforce contract-declared discovered/dynamic inputs.
+    discovered_inputs: list[str] = []
+    for pattern in ctx.contract.required_inputs_glob:
+        matches = sorted(
+            str(p.relative_to(ctx.run_dir))
+            for p in ctx.run_dir.glob(pattern)
+            if p.is_file()
+        )
+        if not matches:
+            candidates = sorted(
+                str(p.relative_to(ctx.run_dir))
+                for p in ctx.run_dir.rglob("*")
+                if p.is_file()
+            )[:5]
+            hint = _upstream_regen_hint(ctx.stage_name)
+            detail = (
+                f"stage_name={ctx.stage_name}; patterns={ctx.contract.required_inputs_glob}; "
+                f"missing_pattern={pattern}; candidates={candidates}"
+            )
+            if hint:
+                detail += f"; upstream_hint='{hint}'"
+            abort(ctx, detail)
+        discovered_inputs.extend(matches)
+
+    if discovered_inputs:
+        ctx.check_inputs_info = {
+            "discovered_inputs": sorted(set(discovered_inputs)),
+        }
 
     for label, path in paths.items():
         if not path.exists():
@@ -438,6 +476,8 @@ def finalize(
         summary["error"] = summary_error
     if results:
         summary["results"] = results
+    if ctx.check_inputs_info:
+        summary["check_inputs"] = ctx.check_inputs_info
     if extra_summary:
         summary.update(extra_summary)
 
@@ -498,3 +538,11 @@ def _fatal(message: str) -> None:
     """Print error and exit. Never returns."""
     print(f"ERROR: {message}", file=sys.stderr)
     raise SystemExit(EXIT_CONTRACT_FAIL)
+
+
+def _upstream_regen_hint(stage_name: str) -> str | None:
+    hints = {
+        "s3_ringdown_estimates": "python -m mvp.s2_ringdown_window --run-id <RUN_ID>",
+        "s4_geometry_filter": "python -m mvp.s3_ringdown_estimates --run-id <RUN_ID>",
+    }
+    return hints.get(stage_name)

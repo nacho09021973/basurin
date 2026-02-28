@@ -515,7 +515,16 @@ def main() -> int:
         abort(ctx, str(exc))
     if not atlas_path.exists():
         abort(ctx, f"Atlas not found: {atlas_path}")
-    check_inputs(ctx, {"estimates": estimates_path, "atlas": atlas_path})
+    default_estimates = ctx.run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+    optional_inputs: dict[str, Path] = {}
+    if args.estimates_path and estimates_path != default_estimates:
+        optional_inputs["estimates_override_external"] = estimates_path
+
+    check_inputs(
+        ctx,
+        {"estimates": estimates_path, "atlas": atlas_path},
+        optional=optional_inputs or None,
+    )
 
     try:
         with open(estimates_path, "r", encoding="utf-8") as f:
