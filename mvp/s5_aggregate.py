@@ -40,50 +40,40 @@ def _relpath_under(root: Path, p: Path) -> str:
         return p.as_posix()
 
 
-def _extract_compatible_geometry_ids(payload: dict[str, Any]) -> set[str]:
-    """Extract compatible geometry IDs from legacy and newer compatible_set schemas."""
-    compatible_geometries = payload.get("compatible_geometries")
-    if isinstance(compatible_geometries, list):
-        out: set[str] = set()
-        for row in compatible_geometries:
-            if not isinstance(row, dict):
-                continue
-            if "compatible" in row and row["compatible"] is not True:
-                continue
-            gid = row.get("geometry_id") or row.get("id")
-            if gid is not None:
-                out.add(str(gid))
-        return out
+def _extract_compatible_geometry_ids(payload: dict[str, Any], source_path: Path) -> list[str]:
+    """Extract compatible geometry IDs from canonical compatible_set schema only."""
+    required_keys = {"schema_version", "event_id", "compatible_geometry_ids"}
+    present_keys = sorted(payload.keys())
 
-    compatible_entries = payload.get("compatible_entries")
-    if isinstance(compatible_entries, list):
-        out = set()
-        for row in compatible_entries:
-            if isinstance(row, dict):
-                gid = row.get("geometry_id") or row.get("id")
-                if gid is not None:
-                    out.add(str(gid))
-            elif isinstance(row, str):
-                out.add(row)
-        return out
+    def _schema_error(reason: str) -> RuntimeError:
+        return RuntimeError(
+            "Invalid compatible_set schema at "
+            f"{source_path.as_posix()}: {reason}. "
+            f"Present keys={present_keys}. "
+            "Expected canonical schema keys: "
+            "['compatible_geometry_ids', 'event_id', 'schema_version'] with "
+            "additionalProperties=false. "
+            "Hint: include 'schema_version': 1 and regenerate upstream with "
+            f"`python -m mvp.s4_geometry_filter --run {source_path.parts[-5]} --atlas-path <atlas.json>`"
+        )
 
-    compatible_set = payload.get("compatible_set")
-    if isinstance(compatible_set, list):
-        out = set()
-        for row in compatible_set:
-            if isinstance(row, dict):
-                gid = row.get("geometry_id") or row.get("id")
-                if gid is not None:
-                    out.add(str(gid))
-            elif isinstance(row, str):
-                out.add(row)
-        return out
+    if set(payload.keys()) != required_keys:
+        raise _schema_error("unexpected keys or missing required keys")
 
-    compatible_ids = payload.get("compatible_ids")
-    if isinstance(compatible_ids, list):
-        return {str(x) for x in compatible_ids}
+    if payload.get("schema_version") != 1:
+        raise _schema_error("'schema_version' must be integer 1")
 
-    return set()
+    event_id = payload.get("event_id")
+    if not isinstance(event_id, str) or not event_id.strip():
+        raise _schema_error("'event_id' must be a non-empty string")
+
+    ids = payload.get("compatible_geometry_ids")
+    if not isinstance(ids, list) or not ids:
+        raise _schema_error("'compatible_geometry_ids' must be a non-empty array")
+    if any(not isinstance(gid, str) or not gid.strip() for gid in ids):
+        raise _schema_error("'compatible_geometry_ids' must contain only non-empty strings")
+
+    return sorted(set(ids))
 
 
 def _parse_s6b_indices(rows: Any) -> list[int]:
@@ -659,7 +649,7 @@ def main() -> int:
             with open(p, "r", encoding="utf-8") as f:
                 cs = json.load(f)
 
-            extracted_ids = _extract_compatible_geometry_ids(cs)
+            extracted_ids = _extract_compatible_geometry_ids(cs, p)
             if os.environ.get("BASURIN_DEBUG_S5"):
                 print(
                     f"[s5 debug] run={src} payload_keys={sorted(cs.keys())} extracted_ids={sorted(extracted_ids)}",
