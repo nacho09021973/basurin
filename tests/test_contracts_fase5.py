@@ -51,8 +51,8 @@ class TestAntiRegression:
     """Verify existing contracts are unchanged."""
 
     def test_total_contract_count(self):
-        """Total must be 12 including s4_spectral_geometry_filter."""
-        assert len(CONTRACTS) == 17
+        """Total must be 19 including experiments and s4 spectral variant."""
+        assert len(CONTRACTS) == 19
 
     def test_s3_ringdown_estimates_unchanged(self):
         c = CONTRACTS["s3_ringdown_estimates"]
