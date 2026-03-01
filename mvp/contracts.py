@@ -326,6 +326,18 @@ CONTRACTS: dict[str, StageContract] = {
         upstream_stages=["s5_aggregate"],
         check_run_valid=True,
     ),
+    "experiment_ex4_spectral_exclusion": StageContract(
+        name="experiment_ex4_spectral_exclusion",
+        required_inputs=[
+            "s5_aggregate/outputs/aggregate.json",
+        ],
+        produced_outputs=[
+            "outputs/exclusion_map.json",
+            "outputs/theory_survival.json",
+        ],
+        upstream_stages=["s5_aggregate"],
+        check_run_valid=True,
+    ),
 }
 
 
