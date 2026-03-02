@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from mvp.s5_aggregate import _extract_compatible_geometry_ids
+from mvp.s5_aggregate import validate_compatible_set_canonical
 
 
 def test_accepts_canonical_schema(tmp_path: Path) -> None:
@@ -15,7 +15,7 @@ def test_accepts_canonical_schema(tmp_path: Path) -> None:
     }
     cs_path.write_text(json.dumps(payload), encoding="utf-8")
 
-    extracted = _extract_compatible_geometry_ids(payload, cs_path)
+    extracted = validate_compatible_set_canonical(payload, cs_path)
 
     assert extracted == ["geo_001", "geo_002"]
 
@@ -29,7 +29,7 @@ def test_rejects_legacy_formats(tmp_path: Path) -> None:
     cs_path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(RuntimeError) as excinfo:
-        _extract_compatible_geometry_ids(payload, cs_path)
+        validate_compatible_set_canonical(payload, cs_path)
 
     msg = str(excinfo.value)
     assert "schema_version" in msg
