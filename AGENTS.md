@@ -38,7 +38,22 @@ Al final de cualquier entrypoint que escriba outputs, imprimir al menos:
   2) comando exacto para regenerar upstream
   3) (si aplica) lista de candidatos detectados
 
+## Logging obligatorio — helper canónico
+Usar `contracts.log_stage_paths(ctx)` al final de cada entrypoint que escriba outputs.
+Emite exactamente las cinco variables requeridas: `OUT_ROOT`, `STAGE_DIR`, `OUTPUTS_DIR`, `STAGE_SUMMARY`, `MANIFEST`.
+
 ## Tests obligatorios
 - Unit tests: determinismo, bordes, sigma_floor/scale_floor cuando aplique.
 - Integration-lite: ejecutar con `BASURIN_RUNS_ROOT` temporal y verificar que NO se escribe fuera.
 - Golden tests: snapshots de outputs normalizados para evitar regresiones silenciosas.
+
+## Regla de consolidación de tests (presupuesto por cambio)
+Por defecto **no crear fichero nuevo** si el test es del mismo stage/feature o del mismo tipo
+(CLI help, contract, smoke determinista): agregar al fichero existente.
+
+Presupuesto máximo de ficheros nuevos por PR:
+- Cambios parser/CLI → 1 fichero (usar/ampliar `tests/test_pipeline_cli_*.py`).
+- Cambios de contrato por stage → 1 fichero por stage (`tests/test_<stage>_contract_*.py`).
+- Experimentos → 1 fichero por experimento; preferir asserts de manifiesto/gating.
+
+Helpers compartidos → `tests/_util_*.py` (no duplicar utilidades entre ficheros).
