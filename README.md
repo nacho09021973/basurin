@@ -24,35 +24,27 @@ BASURIN implementa un pipeline reproducible para análisis de ringdown con estas
 - **Gobernanza por run** con `RUN_VALID/verdict.json`.
 - **Modo evento único y multi-evento** desde un orquestador central.
 
-## Posicionamiento estratégico (estado del arte 2026)
+## Posicionamiento científico (2026): dónde sí competir y dónde no
 
-Para alinear expectativas científicas y de ingeniería, BASURIN se posiciona explícitamente como
-**pipeline de screening auditable** y **motor de exclusión poblacional de geometrías**.
+BASURIN **no reemplaza** pipelines bayesianos oficiales (p. ej. pyRing/FIREFLY/ringdown)
+para inferencia final de parámetros físicos. El posicionamiento recomendado es:
 
-### Qué sí es BASURIN
+- **Screening auditable y trazable**: filtrar rápidamente geometrías/atlas compatibles
+  por evento y en agregado poblacional.
+- **Priorización computacional**: identificar hipótesis supervivientes para luego enviar
+  solo esos casos a inferencia bayesiana completa (MCMC / nested sampling).
+- **Intersección multi-evento orientada a teoría**: responder cuántas geometrías
+  (Kerr y beyond-Kerr) son simultáneamente compatibles con todo un conjunto de eventos.
 
-- Un framework contract-first para producir evidencia reproducible por run/stage con hashes,
-  manifests y `RUN_VALID` como gate duro.
-- Un pipeline orientado a catálogo (multi-evento) para intersectar compatibilidad de geometrías
-  (Kerr + beyond-Kerr) bajo una metodología uniforme.
-- Un banco metodológico para diagnóstico de capacidad discriminante usando geometría de
-  información (Fisher/Mahalanobis/curvatura), con trazabilidad completa.
+Fortaleza diferencial de BASURIN:
 
-### Qué no es BASURIN (hoy)
+- Contratos de artefactos por stage + hashes SHA256 + `RUN_VALID` + fail-fast, con
+  evidencia reproducible y auditable de punta a punta.
+- Diagnósticos de geometría de información (Fisher/Mahalanobis/curvatura) como capa
+  de comparación y ranking informacional entre hipótesis.
 
-- No reemplaza pipelines bayesianos oficiales (p.ej. pyRing/ringdown) para claims finales
-  evento-por-evento.
-- No pretende, en su MVP, sustituir inferencia full-posterior multi-detector coherente con
-  modelos calibrados a NR.
-
-### Uso recomendado en flujo científico
-
-1. **Screening rápido y auditable** en BASURIN para reducir espacio de hipótesis/teorías.
-2. **Confirmación bayesiana profunda** en pipelines especializados para los candidatos
-   supervivientes.
-
-Este acoplamiento evita sobrecoste computacional temprano y mantiene rigor en el tramo final de
-inferencia.
+En papers/reportes, explicitar este alcance evita sobre-claims: BASURIN aporta una
+**etapa de cribado robusta**, no un sustituto de la inferencia bayesiana de colaboración.
 
 ## Dónde están los datos y cómo encontrarlos (anti-pérdida de tiempo)
 
