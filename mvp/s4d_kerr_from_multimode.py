@@ -226,31 +226,36 @@ def _build_grid() -> tuple[list[float], list[float], list[float], list[float], l
 def _best_idx_joint(
     obs: dict[str, dict[str, float]],
     lnf_220: list[float],
-    lntau_220: list[float],
+    lnq_220: list[float],
     lnf_221: list[float],
-    lntau_221: list[float],
+    lnq_221: list[float],
     inv_sigma_220: tuple[tuple[float, float], tuple[float, float]],
     inv_sigma_221: tuple[tuple[float, float], tuple[float, float]],
 ) -> int:
-    t220_f = math.log(float(obs["220"]["f_hz"]))
-    t220_tau = math.log(float(obs["220"]["tau_s"]))
-    t221_f = math.log(float(obs["221"]["f_hz"]))
-    t221_tau = math.log(float(obs["221"]["tau_s"]))
+    def _obs_lnf_lnq(mode_obs: dict[str, float]) -> tuple[float, float]:
+        t_f = math.log(float(mode_obs["f_hz"]))
+        ln_q_obs = _to_float(mode_obs.get("ln_Q"))
+        if ln_q_obs is None:
+            ln_q_obs = math.log(float(mode_obs["tau_s"])) + t_f + math.log(math.pi)
+        return t_f, float(ln_q_obs)
+
+    t220_f, t220_q = _obs_lnf_lnq(obs["220"])
+    t221_f, t221_q = _obs_lnf_lnq(obs["221"])
 
     best_i = 0
     best_e = float("inf")
     for i in range(len(lnf_220)):
         r220_f = lnf_220[i] - t220_f
-        r220_tau = lntau_220[i] - t220_tau
+        r220_q = lnq_220[i] - t220_q
         r221_f = lnf_221[i] - t221_f
-        r221_tau = lntau_221[i] - t221_tau
+        r221_q = lnq_221[i] - t221_q
         e = (
             (inv_sigma_220[0][0] * r220_f * r220_f)
-            + (2.0 * inv_sigma_220[0][1] * r220_f * r220_tau)
-            + (inv_sigma_220[1][1] * r220_tau * r220_tau)
+            + (2.0 * inv_sigma_220[0][1] * r220_f * r220_q)
+            + (inv_sigma_220[1][1] * r220_q * r220_q)
             + (inv_sigma_221[0][0] * r221_f * r221_f)
-            + (2.0 * inv_sigma_221[0][1] * r221_f * r221_tau)
-            + (inv_sigma_221[1][1] * r221_tau * r221_tau)
+            + (2.0 * inv_sigma_221[0][1] * r221_f * r221_q)
+            + (inv_sigma_221[1][1] * r221_q * r221_q)
         )
         if e < best_e:
             best_e = e
@@ -261,17 +266,19 @@ def _best_idx_joint(
 def _best_idx_single(
     mode_obs: dict[str, float],
     lnf: list[float],
-    lntau: list[float],
+    lnq: list[float],
     inv_sigma: tuple[tuple[float, float], tuple[float, float]],
 ) -> int:
     tf = math.log(float(mode_obs["f_hz"]))
-    tt = math.log(float(mode_obs["tau_s"]))
+    tq = _to_float(mode_obs.get("ln_Q"))
+    if tq is None:
+        tq = math.log(float(mode_obs["tau_s"])) + tf + math.log(math.pi)
     best_i = 0
     best_e = float("inf")
     for i in range(len(lnf)):
         rf = lnf[i] - tf
-        rt = lntau[i] - tt
-        e = (inv_sigma[0][0] * rf * rf) + (2.0 * inv_sigma[0][1] * rf * rt) + (inv_sigma[1][1] * rt * rt)
+        rq = lnq[i] - tq
+        e = (inv_sigma[0][0] * rf * rf) + (2.0 * inv_sigma[0][1] * rf * rq) + (inv_sigma[1][1] * rq * rq)
         if e < best_e:
             best_e = e
             best_i = i
@@ -288,21 +295,6 @@ def _as_2x2_sigma(raw: Any) -> tuple[tuple[float, float], tuple[float, float]] |
     if any(v is None for r in vals for v in r):
         return None
     return ((float(vals[0][0]), float(vals[0][1])), (float(vals[1][0]), float(vals[1][1])))
-
-
-def _sigma_lnf_lnq_to_lnf_lntau(sigma_x: tuple[tuple[float, float], tuple[float, float]]) -> tuple[tuple[float, float], tuple[float, float]]:
-    # y = [ln_f, ln_tau] = J x with x=[ln_f, ln_Q], J=[[1,0],[-1,1]]
-    s00, s01 = sigma_x[0]
-    s10, s11 = sigma_x[1]
-    a00 = s00
-    a01 = s01
-    a10 = -s00 + s10
-    a11 = -s01 + s11
-    y00 = a00
-    y01 = -a00 + a01
-    y10 = a10
-    y11 = -a10 + a11
-    return ((float(y00), float(y01)), (float(y10), float(y11)))
 
 
 def _invert_2x2_sigma(sigma: tuple[tuple[float, float], tuple[float, float]]) -> tuple[tuple[float, float], tuple[float, float]]:
@@ -364,7 +356,7 @@ def _extract_mode_inverse_sigma(multimode: dict[str, Any], label: str) -> tuple[
         sigma = _as_2x2_sigma(node.get("Sigma"))
         if sigma is None:
             raise ValueError(f"Missing/invalid Sigma for mode {label}; expected 2x2 finite matrix")
-        return _regularize_and_invert_2x2_sigma(_sigma_lnf_lnq_to_lnf_lntau(sigma))
+        return _regularize_and_invert_2x2_sigma(sigma)
     raise ValueError(f"Mode {label} not found in multimode_estimates.modes")
 
 
@@ -401,8 +393,8 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
         {
             "matching_metric": "mahalanobis_sigma",
             "sigma_space_input": "ln_f_ln_Q",
-            "sigma_space_matching": "ln_f_ln_tau",
-            "sigma_transform_applied": True,
+            "sigma_space_matching": "ln_f_ln_Q",
+            "sigma_transform_applied": False,
             "sigma_jitter_used_220": sigma_diag_220["jitter_used"],
             "sigma_jitter_used_221": sigma_diag_221["jitter_used"],
             "sigma_det_before_220": sigma_diag_220["det_before"],
@@ -424,6 +416,10 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
         grid_m, grid_a, lnf_220, lntau_220, lnf_221, lntau_221 = _build_grid()
     except RuntimeError as exc:
         abort(ctx, reason=str(exc))
+
+    ln_pi = math.log(math.pi)
+    lnq_220 = [float(lnf + lntau + ln_pi) for lnf, lntau in zip(lnf_220, lntau_220)]
+    lnq_221 = [float(lnf + lntau + ln_pi) for lnf, lntau in zip(lnf_221, lntau_221)]
 
     seed = 0
     n_samples = 256
@@ -450,14 +446,14 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
             idx_joint = _best_idx_joint(
                 {"220": obs220, "221": obs221},
                 lnf_220,
-                lntau_220,
+                lnq_220,
                 lnf_221,
-                lntau_221,
+                lnq_221,
                 inv_sigma_220,
                 inv_sigma_221,
             )
-            idx_220 = _best_idx_single(obs220, lnf_220, lntau_220, inv_sigma_220)
-            idx_221 = _best_idx_single(obs221, lnf_221, lntau_221, inv_sigma_221)
+            idx_220 = _best_idx_single(obs220, lnf_220, lnq_220, inv_sigma_220)
+            idx_221 = _best_idx_single(obs221, lnf_221, lnq_221, inv_sigma_221)
         except Exception:
             rejected += 1
             continue
