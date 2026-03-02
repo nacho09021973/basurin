@@ -40,40 +40,77 @@ def _relpath_under(root: Path, p: Path) -> str:
         return p.as_posix()
 
 
-def _extract_compatible_geometry_ids(payload: dict[str, Any], source_path: Path) -> list[str]:
-    """Extract compatible geometry IDs from canonical compatible_set schema only."""
+def _extract_compatible_geometry_ids(
+    payload: dict[str, Any], source_path: Path | None = None,
+) -> set[str]:
+    """Extract compatible geometry IDs supporting canonical and legacy payloads."""
     required_keys = {"schema_version", "event_id", "compatible_geometry_ids"}
     present_keys = sorted(payload.keys())
+    source_display = source_path.as_posix() if source_path is not None else "<unknown>"
 
     def _schema_error(reason: str) -> RuntimeError:
+        hint = ""
+        if source_path is not None and len(source_path.parts) >= 5:
+            hint = (
+                " Hint: include 'schema_version': 1 and regenerate upstream with "
+                f"`python -m mvp.s4_geometry_filter --run {source_path.parts[-5]} --atlas-path <atlas.json>`"
+            )
         return RuntimeError(
             "Invalid compatible_set schema at "
-            f"{source_path.as_posix()}: {reason}. "
-            f"Present keys={present_keys}. "
-            "Expected canonical schema keys: "
-            "['compatible_geometry_ids', 'event_id', 'schema_version'] with "
-            "additionalProperties=false. "
-            "Hint: include 'schema_version': 1 and regenerate upstream with "
-            f"`python -m mvp.s4_geometry_filter --run {source_path.parts[-5]} --atlas-path <atlas.json>`"
+            f"{source_display}: {reason}. "
+            f"Present keys={present_keys}."
+            f"{hint}"
         )
 
-    if set(payload.keys()) != required_keys:
-        raise _schema_error("unexpected keys or missing required keys")
+    if "schema_version" in payload:
+        if set(payload.keys()) != required_keys:
+            raise _schema_error("unexpected keys or missing required keys")
+        if payload.get("schema_version") != 1:
+            raise _schema_error("'schema_version' must be integer 1")
 
-    if payload.get("schema_version") != 1:
-        raise _schema_error("'schema_version' must be integer 1")
+        event_id = payload.get("event_id")
+        if not isinstance(event_id, str) or not event_id.strip():
+            raise _schema_error("'event_id' must be a non-empty string")
 
-    event_id = payload.get("event_id")
-    if not isinstance(event_id, str) or not event_id.strip():
-        raise _schema_error("'event_id' must be a non-empty string")
+        ids = payload.get("compatible_geometry_ids")
+        if not isinstance(ids, list) or not ids:
+            raise _schema_error("'compatible_geometry_ids' must be a non-empty array")
+        if any(not isinstance(gid, str) or not gid.strip() for gid in ids):
+            raise _schema_error("'compatible_geometry_ids' must contain only non-empty strings")
+        return {gid for gid in ids}
 
-    ids = payload.get("compatible_geometry_ids")
-    if not isinstance(ids, list) or not ids:
-        raise _schema_error("'compatible_geometry_ids' must be a non-empty array")
-    if any(not isinstance(gid, str) or not gid.strip() for gid in ids):
-        raise _schema_error("'compatible_geometry_ids' must contain only non-empty strings")
+    compatible_geometries = payload.get("compatible_geometries")
+    if isinstance(compatible_geometries, list):
+        out: set[str] = set()
+        for row in compatible_geometries:
+            if not isinstance(row, dict) or row.get("compatible") is not True:
+                continue
+            geometry_id = row.get("geometry_id") if "geometry_id" in row else row.get("id")
+            if isinstance(geometry_id, str) and geometry_id:
+                out.add(geometry_id)
+        return out
 
-    return sorted(set(ids))
+    compatible_entries = payload.get("compatible_entries")
+    if isinstance(compatible_entries, list):
+        out: set[str] = set()
+        for row in compatible_entries:
+            if isinstance(row, str) and row:
+                out.add(row)
+                continue
+            if isinstance(row, dict):
+                geometry_id = row.get("id") if "id" in row else row.get("geometry_id")
+                if isinstance(geometry_id, str) and geometry_id:
+                    out.add(geometry_id)
+        return out
+
+    compatible_ids = payload.get("compatible_ids")
+    if isinstance(compatible_ids, list):
+        return {str(x) for x in compatible_ids}
+
+    raise _schema_error(
+        "missing supported keys: expected canonical schema or legacy keys "
+        "('compatible_geometries', 'compatible_entries', 'compatible_ids')"
+    )
 
 
 def _parse_s6b_indices(rows: Any) -> list[int]:
