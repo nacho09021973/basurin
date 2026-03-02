@@ -113,6 +113,44 @@ def _extract_compatible_geometry_ids(
     )
 
 
+def validate_compatible_set_canonical(
+    payload: dict[str, Any], source_path: Path | None = None,
+) -> list[str]:
+    """Canonical-only guard for compatible_set schema (legacy rejected by design).
+
+    This validator is intentionally strict for contract checks, while
+    `_extract_compatible_geometry_ids` remains tolerant for legacy pipeline
+    compatibility in s5 aggregation.
+    """
+    required_keys = {"schema_version", "event_id", "compatible_geometry_ids"}
+    present_keys = sorted(payload.keys())
+    source_display = source_path.as_posix() if source_path is not None else "<unknown>"
+
+    def _schema_error(reason: str) -> RuntimeError:
+        return RuntimeError(
+            "Invalid compatible_set canonical schema at "
+            f"{source_display}: {reason}. "
+            f"Present keys={present_keys}."
+        )
+
+    if set(payload.keys()) != required_keys:
+        raise _schema_error("unexpected keys or missing required keys (expected canonical keys including 'schema_version')")
+    if payload.get("schema_version") != 1:
+        raise _schema_error("'schema_version' must be integer 1")
+
+    event_id = payload.get("event_id")
+    if not isinstance(event_id, str) or not event_id.strip():
+        raise _schema_error("'event_id' must be a non-empty string")
+
+    ids = payload.get("compatible_geometry_ids")
+    if not isinstance(ids, list) or not ids:
+        raise _schema_error("'compatible_geometry_ids' must be a non-empty array")
+    if any(not isinstance(gid, str) or not gid.strip() for gid in ids):
+        raise _schema_error("'compatible_geometry_ids' must contain only non-empty strings")
+
+    return sorted(set(ids))
+
+
 def _parse_s6b_indices(rows: Any) -> list[int]:
     out: list[int] = []
     if not isinstance(rows, list):

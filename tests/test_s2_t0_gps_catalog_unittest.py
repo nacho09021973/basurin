@@ -26,7 +26,9 @@ def _write_catalog(path: Path, payload: dict) -> Path:
 def test_resolve_t0_gps_schema_a_nested_dict(tmp_path: Path) -> None:
     catalog_path = _write_catalog(tmp_path / "catalog_a.json", {"GW190521": {"t0_gps": 1242442967.4}})
 
-    t0_gps, source = _resolve_t0_gps("GW190521", catalog_path)
+    resolved = _resolve_t0_gps("GW190521", catalog_path)
+    assert isinstance(resolved, tuple) and len(resolved) == 3
+    t0_gps, source, _lookup_key = resolved
 
     assert t0_gps == pytest.approx(1242442967.4)
     assert source == str(catalog_path)
@@ -35,7 +37,9 @@ def test_resolve_t0_gps_schema_a_nested_dict(tmp_path: Path) -> None:
 def test_resolve_t0_gps_schema_b_scalar_value(tmp_path: Path) -> None:
     catalog_path = _write_catalog(tmp_path / "catalog_b.json", {"GW190521": 1242442967.4})
 
-    t0_gps, source = _resolve_t0_gps("GW190521", catalog_path)
+    resolved = _resolve_t0_gps("GW190521", catalog_path)
+    assert isinstance(resolved, tuple) and len(resolved) == 3
+    t0_gps, source, _lookup_key = resolved
 
     assert t0_gps == pytest.approx(1242442967.4)
     assert source == str(catalog_path)
@@ -72,7 +76,9 @@ def test_resolve_t0_gps_legacy_windows_schema(tmp_path: Path) -> None:
         },
     )
 
-    t0_gps, source = _resolve_t0_gps("GW150914", catalog_path)
+    resolved = _resolve_t0_gps("GW150914", catalog_path)
+    assert isinstance(resolved, tuple) and len(resolved) == 3
+    t0_gps, source, _lookup_key = resolved
 
     assert t0_gps == pytest.approx(1126259462.4)
     assert source == str(catalog_path)
@@ -135,7 +141,9 @@ def test_resolve_t0_gps_metadata_t_coalescence_gps(
     nonexistent_catalog = tmp_path / "no_catalog.json"
     monkeypatch.chdir(tmp_path)
 
-    t0_gps, source = _resolve_t0_gps("GW_TEST", nonexistent_catalog)
+    resolved = _resolve_t0_gps("GW_TEST", nonexistent_catalog)
+    assert isinstance(resolved, tuple) and len(resolved) == 3
+    t0_gps, source, _lookup_key = resolved
 
     assert t0_gps == pytest.approx(1234567890.1)
 
@@ -148,7 +156,9 @@ def test_resolve_t0_gps_metadata_t0_ref_gps_priority(
     nonexistent_catalog = tmp_path / "no_catalog.json"
     monkeypatch.chdir(tmp_path)
 
-    t0_gps, source = _resolve_t0_gps("GW_PRIO", nonexistent_catalog)
+    resolved = _resolve_t0_gps("GW_PRIO", nonexistent_catalog)
+    assert isinstance(resolved, tuple) and len(resolved) == 3
+    t0_gps, source, _lookup_key = resolved
 
     assert t0_gps == pytest.approx(1111111111.0)
 
@@ -161,7 +171,9 @@ def test_resolve_t0_gps_metadata_gps_fallback(
     nonexistent_catalog = tmp_path / "no_catalog.json"
     monkeypatch.chdir(tmp_path)
 
-    t0_gps, source = _resolve_t0_gps("GW_GPS", nonexistent_catalog)
+    resolved = _resolve_t0_gps("GW_GPS", nonexistent_catalog)
+    assert isinstance(resolved, tuple) and len(resolved) == 3
+    t0_gps, source, _lookup_key = resolved
 
     assert t0_gps == pytest.approx(1126259462.4)
 
