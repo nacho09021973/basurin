@@ -229,6 +229,8 @@ def _best_idx_joint(
     lntau_220: list[float],
     lnf_221: list[float],
     lntau_221: list[float],
+    inv_sigma_220: tuple[tuple[float, float], tuple[float, float]],
+    inv_sigma_221: tuple[tuple[float, float], tuple[float, float]],
 ) -> int:
     t220_f = math.log(float(obs["220"]["f_hz"]))
     t220_tau = math.log(float(obs["220"]["tau_s"]))
@@ -238,11 +240,17 @@ def _best_idx_joint(
     best_i = 0
     best_e = float("inf")
     for i in range(len(lnf_220)):
+        r220_f = lnf_220[i] - t220_f
+        r220_tau = lntau_220[i] - t220_tau
+        r221_f = lnf_221[i] - t221_f
+        r221_tau = lntau_221[i] - t221_tau
         e = (
-            (lnf_220[i] - t220_f) ** 2
-            + (lntau_220[i] - t220_tau) ** 2
-            + (lnf_221[i] - t221_f) ** 2
-            + (lntau_221[i] - t221_tau) ** 2
+            (inv_sigma_220[0][0] * r220_f * r220_f)
+            + (2.0 * inv_sigma_220[0][1] * r220_f * r220_tau)
+            + (inv_sigma_220[1][1] * r220_tau * r220_tau)
+            + (inv_sigma_221[0][0] * r221_f * r221_f)
+            + (2.0 * inv_sigma_221[0][1] * r221_f * r221_tau)
+            + (inv_sigma_221[1][1] * r221_tau * r221_tau)
         )
         if e < best_e:
             best_e = e
@@ -254,17 +262,74 @@ def _best_idx_single(
     mode_obs: dict[str, float],
     lnf: list[float],
     lntau: list[float],
+    inv_sigma: tuple[tuple[float, float], tuple[float, float]],
 ) -> int:
     tf = math.log(float(mode_obs["f_hz"]))
     tt = math.log(float(mode_obs["tau_s"]))
     best_i = 0
     best_e = float("inf")
     for i in range(len(lnf)):
-        e = (lnf[i] - tf) ** 2 + (lntau[i] - tt) ** 2
+        rf = lnf[i] - tf
+        rt = lntau[i] - tt
+        e = (inv_sigma[0][0] * rf * rf) + (2.0 * inv_sigma[0][1] * rf * rt) + (inv_sigma[1][1] * rt * rt)
         if e < best_e:
             best_e = e
             best_i = i
     return best_i
+
+
+def _as_2x2_sigma(raw: Any) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    if not isinstance(raw, list) or len(raw) != 2:
+        return None
+    row0, row1 = raw
+    if not (isinstance(row0, list) and isinstance(row1, list) and len(row0) == 2 and len(row1) == 2):
+        return None
+    vals = [[_to_float(row0[0]), _to_float(row0[1])], [_to_float(row1[0]), _to_float(row1[1])]]
+    if any(v is None for r in vals for v in r):
+        return None
+    return ((float(vals[0][0]), float(vals[0][1])), (float(vals[1][0]), float(vals[1][1])))
+
+
+def _sigma_lnf_lnq_to_lnf_lntau(sigma_x: tuple[tuple[float, float], tuple[float, float]]) -> tuple[tuple[float, float], tuple[float, float]]:
+    # y = [ln_f, ln_tau] = J x with x=[ln_f, ln_Q], J=[[1,0],[-1,1]]
+    s00, s01 = sigma_x[0]
+    s10, s11 = sigma_x[1]
+    a00 = s00
+    a01 = s01
+    a10 = -s00 + s10
+    a11 = -s01 + s11
+    y00 = a00
+    y01 = -a00 + a01
+    y10 = a10
+    y11 = -a10 + a11
+    return ((float(y00), float(y01)), (float(y10), float(y11)))
+
+
+def _invert_2x2_sigma(sigma: tuple[tuple[float, float], tuple[float, float]]) -> tuple[tuple[float, float], tuple[float, float]]:
+    s00, s01 = sigma[0]
+    s10, s11 = sigma[1]
+    sym_off = 0.5 * (s01 + s10)
+    s01 = sym_off
+    s10 = sym_off
+    det = (s00 * s11) - (s01 * s10)
+    if not (math.isfinite(det) and det > 0.0 and s00 > 0.0 and s11 > 0.0):
+        raise ValueError(f"Sigma must be SPD with positive determinant; got det={det}")
+    inv_det = 1.0 / det
+    return ((s11 * inv_det, -s01 * inv_det), (-s10 * inv_det, s00 * inv_det))
+
+
+def _extract_mode_inverse_sigma(multimode: dict[str, Any], label: str) -> tuple[tuple[float, float], tuple[float, float]]:
+    modes = multimode.get("modes")
+    if not isinstance(modes, list):
+        raise ValueError(f"Missing multimode_estimates.modes for mode {label}; cannot build Mahalanobis metric")
+    for node in modes:
+        if not isinstance(node, dict) or str(node.get("label")) != label:
+            continue
+        sigma = _as_2x2_sigma(node.get("Sigma"))
+        if sigma is None:
+            raise ValueError(f"Missing/invalid Sigma for mode {label}; expected 2x2 finite matrix")
+        return _invert_2x2_sigma(_sigma_lnf_lnq_to_lnf_lntau(sigma))
+    raise ValueError(f"Mode {label} not found in multimode_estimates.modes")
 
 
 def _execute(ctx: StageContext) -> dict[str, Path]:
@@ -291,8 +356,19 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
     try:
         q220 = _extract_mode_quantiles(multimode, "220")
         q221 = _extract_mode_quantiles(multimode, "221")
+        inv_sigma_220 = _extract_mode_inverse_sigma(multimode, "220")
+        inv_sigma_221 = _extract_mode_inverse_sigma(multimode, "221")
     except ValueError as exc:
         abort(ctx, reason=str(exc))
+
+    ctx.params.update(
+        {
+            "matching_metric": "mahalanobis_sigma",
+            "sigma_space_input": "ln_f_ln_Q",
+            "sigma_space_matching": "ln_f_ln_tau",
+            "sigma_transform_applied": True,
+        }
+    )
 
     for label, q in (("220", q220), ("221", q221)):
         for metric in ("f_hz", "tau_s"):
@@ -327,9 +403,17 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
             "tau_s": _triangular_sample(rng, q221["tau_s"]["p10"], q221["tau_s"]["p50"], q221["tau_s"]["p90"]),
         }
         try:
-            idx_joint = _best_idx_joint({"220": obs220, "221": obs221}, lnf_220, lntau_220, lnf_221, lntau_221)
-            idx_220 = _best_idx_single(obs220, lnf_220, lntau_220)
-            idx_221 = _best_idx_single(obs221, lnf_221, lntau_221)
+            idx_joint = _best_idx_joint(
+                {"220": obs220, "221": obs221},
+                lnf_220,
+                lntau_220,
+                lnf_221,
+                lntau_221,
+                inv_sigma_220,
+                inv_sigma_221,
+            )
+            idx_220 = _best_idx_single(obs220, lnf_220, lntau_220, inv_sigma_220)
+            idx_221 = _best_idx_single(obs221, lnf_221, lntau_221, inv_sigma_221)
         except Exception:
             rejected += 1
             continue
@@ -492,7 +576,7 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
                 "grid_mass_range_msun": [M_MIN, M_MAX],
                 "grid_spin_range": [A_MIN, A_MAX],
                 "grid_shape": [GRID_M_SIZE, GRID_A_SIZE],
-                "objective": "sum_squared_log_residuals_f_tau",
+                "objective": "mahalanobis_log_residuals_f_tau",
                 "grid_limits": {
                     "M_min": M_MIN,
                     "M_max": M_MAX,

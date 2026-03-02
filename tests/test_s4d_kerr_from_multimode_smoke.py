@@ -23,7 +23,11 @@ def test_s4d_smoke_minimal(tmp_path: Path) -> None:
                 "220": {"f_hz": {"p10": 150.0, "p50": 160.0, "p90": 170.0}, "tau_s": {"p10": 0.003, "p50": 0.004, "p90": 0.005}},
                 "221": {"f_hz": {"p10": 240.0, "p50": 250.0, "p90": 260.0}, "tau_s": {"p10": 0.002, "p50": 0.0025, "p90": 0.003}},
             }
-        }
+        },
+        "modes": [
+            {"label": "220", "Sigma": [[0.04, 0.01], [0.01, 0.09]]},
+            {"label": "221", "Sigma": [[0.04, 0.01], [0.01, 0.09]]},
+        ]
     }
     (s3b_out / "multimode_estimates.json").write_text(json.dumps(multimode, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
