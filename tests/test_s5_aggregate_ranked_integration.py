@@ -12,7 +12,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 MVP_DIR = REPO_ROOT / "mvp"
 
 
-def _mk_run(runs_root: Path, run_id: str, *, ranked: list[int] | None, compatible: list[int] | None) -> None:
+def _mk_run(
+    runs_root: Path,
+    run_id: str,
+    *,
+    ranked: list[int] | None,
+    compatible: list[int] | None,
+    viability_class: str = "MULTIMODE_OK",
+) -> None:
     rv = runs_root / run_id / "RUN_VALID"
     rv.mkdir(parents=True, exist_ok=True)
     (rv / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
@@ -40,12 +47,22 @@ def _mk_run(runs_root: Path, run_id: str, *, ranked: list[int] | None, compatibl
             "compatibility_criterion": {"name": "test", "params": {}},
         }), encoding="utf-8")
 
+    s3b_stage = runs_root / run_id / "s3b_multimode_estimates"
+    s3b_stage.mkdir(parents=True, exist_ok=True)
+    (s3b_stage / "stage_summary.json").write_text(json.dumps({
+        "multimode_viability": {
+            "class": viability_class,
+            "reasons": [] if viability_class == "MULTIMODE_OK" else ["BOUNDARY_FRACTION_HIGH"],
+            "metrics": {"boundary_fraction": None, "valid_fraction": {"220": 1.0, "221": 1.0}},
+        }
+    }), encoding="utf-8")
+
 
 def test_s5_aggregate_uses_s6b_and_warns_missing(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
-    _mk_run(runs_root, "run_a", ranked=[0, 1, 2], compatible=[1, 2])
-    _mk_run(runs_root, "run_b", ranked=[1, 2, 3], compatible=[2, 3])
-    _mk_run(runs_root, "run_c", ranked=None, compatible=None)
+    _mk_run(runs_root, "run_a", ranked=[0, 1, 2], compatible=[1, 2], viability_class="MULTIMODE_OK")
+    _mk_run(runs_root, "run_b", ranked=[1, 2, 3], compatible=[2, 3], viability_class="SINGLEMODE_ONLY")
+    _mk_run(runs_root, "run_c", ranked=None, compatible=None, viability_class="RINGDOWN_NONINFORMATIVE")
 
     cmd = [
         sys.executable,
@@ -70,6 +87,9 @@ def test_s5_aggregate_uses_s6b_and_warns_missing(tmp_path: Path) -> None:
     assert payload["n_common_compatible"] >= 0
     assert any(w.startswith("MISSING_S6B_RANKED:") for w in payload["warnings"])
     assert "NO_COMMON_COMPATIBLE_GEOMETRIES" in payload["warnings"]
+    assert payload["multimode_viability"]["counts"]["MULTIMODE_OK"] == 1
+    assert payload["multimode_viability"]["counts"]["SINGLEMODE_ONLY"] == 1
+    assert payload["multimode_viability"]["counts"]["RINGDOWN_NONINFORMATIVE"] == 1
 
 
 def test_s5_aggregate_sets_no_common_warning_only_when_data_present(tmp_path: Path) -> None:

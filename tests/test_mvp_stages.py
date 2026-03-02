@@ -389,6 +389,18 @@ class TestS5Aggregate:
             (s4_dir / "stage_summary.json").write_text(
                 json.dumps({"verdict": "PASS"}), encoding="utf-8"
             )
+            s3b_dir = runs_root / run_id / "s3b_multimode_estimates"
+            s3b_dir.mkdir(parents=True, exist_ok=True)
+            (s3b_dir / "stage_summary.json").write_text(
+                json.dumps({
+                    "multimode_viability": {
+                        "class": "MULTIMODE_OK",
+                        "reasons": [],
+                        "metrics": {"boundary_fraction": None, "valid_fraction": {"220": 1.0, "221": 1.0}},
+                    }
+                }),
+                encoding="utf-8",
+            )
 
         result = _run_stage(
             "s5_aggregate.py",
@@ -436,6 +448,18 @@ class TestS5Aggregate:
             (s4_out / "compatible_set.json").write_text(json.dumps(cs), encoding="utf-8")
             (s4_dir / "stage_summary.json").write_text(
                 json.dumps({"verdict": "PASS"}), encoding="utf-8"
+            )
+            s3b_dir = runs_root / run_id / "s3b_multimode_estimates"
+            s3b_dir.mkdir(parents=True, exist_ok=True)
+            (s3b_dir / "stage_summary.json").write_text(
+                json.dumps({
+                    "multimode_viability": {
+                        "class": "MULTIMODE_OK",
+                        "reasons": [],
+                        "metrics": {"boundary_fraction": None, "valid_fraction": {"220": 1.0, "221": 1.0}},
+                    }
+                }),
+                encoding="utf-8",
             )
 
         catalog_path = tmp_path / "catalog.json"

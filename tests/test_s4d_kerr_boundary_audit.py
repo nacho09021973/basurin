@@ -33,6 +33,16 @@ def test_s4d_fails_without_extra_boundary_artifact_on_spin_grid_saturation(tmp_p
         ],
     }
     (s3b_out / "multimode_estimates.json").write_text(json.dumps(multimode) + "\n", encoding="utf-8")
+    (run_dir / "s3b_multimode_estimates" / "stage_summary.json").write_text(
+        json.dumps({
+            "multimode_viability": {
+                "class": "MULTIMODE_OK",
+                "reasons": [],
+                "metrics": {"boundary_fraction": None, "valid_fraction": {"220": 1.0, "221": 1.0}},
+            }
+        }),
+        encoding="utf-8",
+    )
 
     def _fake_build_grid():
         n = 8
@@ -144,3 +154,34 @@ def test_should_abort_for_boundary_fails_when_spin_saturates_at_a_max() -> None:
     assert should_abort is True
     assert reason == "median_spin_on_grid_edge"
     assert warning is False
+
+
+def test_s4d_skips_multimode_when_viability_gate_blocks(tmp_path: Path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    run_id = "s4d_gate_skip_pytest"
+    run_dir = runs_root / run_id
+    (run_dir / "RUN_VALID").mkdir(parents=True)
+    (run_dir / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}\n', encoding="utf-8")
+    s3b_out = run_dir / "s3b_multimode_estimates" / "outputs"
+    s3b_out.mkdir(parents=True)
+    (s3b_out / "multimode_estimates.json").write_text(json.dumps({"modes": []}) + "\n", encoding="utf-8")
+    (run_dir / "s3b_multimode_estimates" / "stage_summary.json").write_text(
+        json.dumps({
+            "multimode_viability": {
+                "class": "SINGLEMODE_ONLY",
+                "reasons": ["BOUNDARY_FRACTION_HIGH"],
+                "metrics": {"boundary_fraction": 1.0, "valid_fraction": {"220": 0.9, "221": 0.2}},
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    ctx = init_stage(run_id, s4d.STAGE)
+    artifacts = s4d._execute(ctx)
+    assert set(artifacts.keys()) == {"kerr_from_multimode", "kerr_from_multimode_diagnostics"}
+
+    diag = json.loads((run_dir / "s4d_kerr_from_multimode" / "outputs" / "kerr_from_multimode_diagnostics.json").read_text(encoding="utf-8"))
+    assert diag["diagnostics"]["multimode_evaluated"] is False
+    assert "MULTIMODE_DUE_TO_GATE" in diag["diagnostics"]["skips"]

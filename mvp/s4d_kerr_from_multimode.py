@@ -31,6 +31,9 @@ EPS_A = 1e-9
 BOUNDARY_FRACTION_THRESHOLD = 0.20
 SPIN_PHYSICAL_FLOOR_WARNING_CODE = "SPIN_AT_PHYSICAL_FLOOR"
 SPIN_PHYSICAL_FLOOR_WARNING_MSG = "Spin posterior saturated at A_MIN=0 (physical floor); continuing with warning."
+MULTIMODE_OK = "MULTIMODE_OK"
+SINGLEMODE_ONLY = "SINGLEMODE_ONLY"
+RINGDOWN_NONINFORMATIVE = "RINGDOWN_NONINFORMATIVE"
 
 
 def _base_params() -> dict[str, Any]:
@@ -396,15 +399,66 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
 
     multimode_path = ctx.run_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
     model_comparison_path = ctx.run_dir / "s3b_multimode_estimates" / "outputs" / "model_comparison.json"
+    s3b_summary_path = ctx.run_dir / "s3b_multimode_estimates" / "stage_summary.json"
 
     inputs = check_inputs(
         ctx,
-        paths={"multimode_estimates": multimode_path},
+        paths={"multimode_estimates": multimode_path, "s3b_stage_summary": s3b_summary_path},
         optional={"model_comparison": model_comparison_path},
     )
     input_by_label = {row.get("label", ""): row for row in inputs}
 
     multimode = json.loads(multimode_path.read_text(encoding="utf-8"))
+    s3b_summary = json.loads(s3b_summary_path.read_text(encoding="utf-8"))
+    viability = s3b_summary.get("multimode_viability")
+    if not isinstance(viability, dict) or viability.get("class") not in {
+        MULTIMODE_OK,
+        SINGLEMODE_ONLY,
+        RINGDOWN_NONINFORMATIVE,
+    }:
+        abort(ctx, reason="Invalid or missing s3b multimode_viability contract in stage_summary.json")
+
+    viability_class = str(viability.get("class"))
+    viability_reasons = viability.get("reasons") if isinstance(viability.get("reasons"), list) else []
+    if viability_class != MULTIMODE_OK:
+        skip_payload = {
+            "schema_name": "kerr_from_multimode",
+            "schema_version": 1,
+            "json_strict": True,
+            "created_utc": _utc_now_z(),
+            "run_id": ctx.run_id,
+            "stage": STAGE,
+            "status": "SKIPPED_MULTIMODE_GATE",
+            "multimode_viability": viability,
+        }
+        diag_payload = {
+            "schema_name": "kerr_from_multimode_diagnostics",
+            "schema_version": 1,
+            "json_strict": True,
+            "created_utc": _utc_now_z(),
+            "run_id": ctx.run_id,
+            "stage": STAGE,
+            "diagnostics": {
+                "multimode_evaluated": False,
+                "skips": ["MULTIMODE_DUE_TO_GATE"],
+                "multimode_viability": viability,
+            },
+        }
+        kerr_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode.json", skip_payload)
+        diag_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode_diagnostics.json", diag_payload)
+        ctx.params.update(
+            {
+                "multimode_viability_class": viability_class,
+                "multimode_viability_reasons": viability_reasons,
+                "multimode_evaluated": False,
+                "skips": ["MULTIMODE_DUE_TO_GATE"],
+            }
+        )
+        return {
+            "kerr_from_multimode": kerr_path,
+            "kerr_from_multimode_diagnostics": diag_path,
+        }
+
     model_comparison = (
         json.loads(model_comparison_path.read_text(encoding="utf-8"))
         if model_comparison_path.exists()
@@ -561,6 +615,14 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
             existing_warnings = []
         existing_warnings.extend(warnings)
         ctx.params["warnings"] = existing_warnings
+    ctx.params.update(
+        {
+            "multimode_viability_class": viability_class,
+            "multimode_viability_reasons": viability_reasons,
+            "multimode_evaluated": True,
+            "skips": [],
+        }
+    )
     if should_abort and abort_reason is not None:
         _abort_boundary(abort_reason)
 
