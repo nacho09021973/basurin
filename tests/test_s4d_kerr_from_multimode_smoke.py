@@ -42,3 +42,11 @@ def test_s4d_smoke_minimal(tmp_path: Path) -> None:
     assert (out_dir / "kerr_from_multimode_diagnostics.json").exists()
     assert (stage_dir / "stage_summary.json").exists()
     assert (stage_dir / "manifest.json").exists()
+
+    summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
+    params = summary.get("parameters", {})
+    assert params.get("a_max") == 0.9999
+    assert params.get("a_n") == 200
+    assert params.get("M_n") == 200
+    assert params.get("n_accepted", 0) > 0
+    assert "boundary_fraction" in params
