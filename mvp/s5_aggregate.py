@@ -30,6 +30,11 @@ from mvp.contracts import init_stage, check_inputs, finalize, abort
 from basurin_io import sha256_file, utc_now_iso, write_json_atomic
 
 STAGE = "s5_aggregate"
+ALLOWED_MULTIMODE_VIABILITY_CLASSES = {
+    "MULTIMODE_OK",
+    "SINGLEMODE_ONLY",
+    "RINGDOWN_NONINFORMATIVE",
+}
 
 
 def _relpath_under(root: Path, p: Path) -> str:
@@ -222,6 +227,8 @@ def aggregate_compatible_sets(
     use_s6b_mode = len(s6b_ready) > 0
 
     warnings: list[str] = []
+    viability_counts = {k: 0 for k in sorted(ALLOWED_MULTIMODE_VIABILITY_CLASSES)}
+    viability_event_run_ids = {k: [] for k in sorted(ALLOWED_MULTIMODE_VIABILITY_CLASSES)}
     if use_s6b_mode:
         ranked_sets = [set(src.get("ranked_indices", [])) for src in s6b_ready]
         compatible_sets = [set(src.get("compatible_indices", [])) for src in s6b_ready]
@@ -303,6 +310,11 @@ def aggregate_compatible_sets(
         return None
 
     for src in source_data:
+        viability_class = str(src.get("multimode_viability_class"))
+        if viability_class in viability_counts:
+            viability_counts[viability_class] += 1
+            viability_event_run_ids[viability_class].append(str(src.get("run_id")))
+
         metric = str(src.get("metric", ""))
         ranked_all = src.get("ranked_all", [])
         if top_k is None:
@@ -468,6 +480,10 @@ def aggregate_compatible_sets(
         "coverage_histogram": coverage_hist,
         "coverage_histogram_basis": "ranked_all",
         "warnings": warnings,
+        "multimode_viability": {
+            "counts": viability_counts,
+            "event_run_ids": viability_event_run_ids,
+        },
         "events": events,
     }
 
@@ -706,11 +722,13 @@ def main() -> int:
     # Collect and validate source files.
     source_paths: dict[str, Path] = {}
     ranked_paths: dict[str, Path] = {}
+    s3b_summary_paths: dict[str, Path] = {}
     for src in source_runs:
         p = out_root / src / "s4_geometry_filter" / "outputs" / "compatible_set.json"
         source_paths[src] = p
         ranked_paths[src] = out_root / src / "s6b_information_geometry_ranked" / "outputs" / "ranked_geometries.json"
-    check_inputs(ctx, source_paths, optional=ranked_paths)
+        s3b_summary_paths[src] = out_root / src / "s3b_multimode_estimates" / "stage_summary.json"
+    check_inputs(ctx, {**source_paths, **s3b_summary_paths}, optional=ranked_paths)
     # Keep metadata portable/auditable: prefer paths relative to runs_root for upstream inputs.
     for rec in ctx.inputs_record:
         label = rec.get("label", "")
@@ -801,7 +819,22 @@ def main() -> int:
                 "s6b_present": False,
                 "ranked_indices": [],
                 "compatible_indices": [],
+                "multimode_viability_class": None,
             })
+
+            s3b_summary = json.loads(s3b_summary_paths[src].read_text(encoding="utf-8"))
+            mm_viability = s3b_summary.get("multimode_viability")
+            if not isinstance(mm_viability, dict):
+                raise RuntimeError(
+                    f"Missing multimode_viability in {s3b_summary_paths[src]}; regenerate upstream with "
+                    f"python -m mvp.s3b_multimode_estimates --run-id {src}"
+                )
+            mm_class = mm_viability.get("class")
+            if mm_class not in ALLOWED_MULTIMODE_VIABILITY_CLASSES:
+                raise RuntimeError(
+                    f"Invalid multimode_viability.class={mm_class!r} in {s3b_summary_paths[src]}"
+                )
+            source_data[-1]["multimode_viability_class"] = mm_class
 
             ranked_path = ranked_paths[src]
             if ranked_path.exists():

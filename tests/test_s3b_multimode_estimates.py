@@ -21,6 +21,7 @@ _MODULE = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MODULE)
 
 build_results_payload = _MODULE.build_results_payload
+classify_multimode_viability = _MODULE.classify_multimode_viability
 covariance_gate = _MODULE.covariance_gate
 compute_robust_stability = _MODULE.compute_robust_stability
 evaluate_mode = _MODULE.evaluate_mode
@@ -162,6 +163,29 @@ def test_main_populates_source_window_and_avoids_missing_flag(tmp_path: Path) ->
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["source"]["window"] == meta
     assert "missing_window_meta" not in payload["results"]["quality_flags"]
+
+    stage_summary = json.loads((tmp_runs / run_id / "s3b_multimode_estimates" / "stage_summary.json").read_text(encoding="utf-8"))
+    viability = stage_summary.get("multimode_viability")
+    assert viability["class"] in {"MULTIMODE_OK", "SINGLEMODE_ONLY", "RINGDOWN_NONINFORMATIVE"}
+    assert "metrics" in viability
+
+
+def test_classify_multimode_viability_is_conservative() -> None:
+    singlemode = classify_multimode_viability(
+        boundary_fraction=1.0,
+        valid_fraction_220=0.9,
+        valid_fraction_221=0.6,
+    )
+    assert singlemode["class"] == "SINGLEMODE_ONLY"
+    assert "BOUNDARY_FRACTION_HIGH" in singlemode["reasons"]
+
+    noninfo = classify_multimode_viability(
+        boundary_fraction=1.0,
+        valid_fraction_220=0.2,
+        valid_fraction_221=0.2,
+    )
+    assert noninfo["class"] == "RINGDOWN_NONINFORMATIVE"
+    assert "VALID_FRACTION_220_LOW" in noninfo["reasons"]
 
 
 

@@ -29,6 +29,9 @@ TARGET_MODES = [
 MIN_BOOTSTRAP_SAMPLES = 128
 SIGMA_DET_EPS = 1e-12
 SIGMA_COND_MAX = 1e12
+MULTIMODE_OK = "MULTIMODE_OK"
+SINGLEMODE_ONLY = "SINGLEMODE_ONLY"
+RINGDOWN_NONINFORMATIVE = "RINGDOWN_NONINFORMATIVE"
 
 # --- model_comparison numerical guards (documented in output conventions block) ---
 _RSS_FLOOR = 1e-300         # floor applied to rss/n inside log; prevents -inf on perfect fits
@@ -829,6 +832,45 @@ def build_results_payload(
     }
 
 
+def classify_multimode_viability(
+    *,
+    boundary_fraction: float | None,
+    valid_fraction_220: float | None,
+    valid_fraction_221: float | None,
+    boundary_fraction_threshold: float = 0.95,
+    valid_fraction_floor: float = 0.5,
+) -> dict[str, Any]:
+    reasons: list[str] = []
+    cls = MULTIMODE_OK
+
+    if boundary_fraction is not None and float(boundary_fraction) >= float(boundary_fraction_threshold):
+        reasons.append("BOUNDARY_FRACTION_HIGH")
+        cls = SINGLEMODE_ONLY
+
+    if valid_fraction_221 is not None and float(valid_fraction_221) < float(valid_fraction_floor):
+        reasons.append("VALID_FRACTION_221_LOW")
+        cls = SINGLEMODE_ONLY
+
+    if valid_fraction_220 is not None and float(valid_fraction_220) < float(valid_fraction_floor):
+        reasons.append("VALID_FRACTION_220_LOW")
+        cls = RINGDOWN_NONINFORMATIVE
+
+    if cls == MULTIMODE_OK:
+        reasons = []
+
+    return {
+        "class": cls,
+        "reasons": sorted(set(reasons)),
+        "metrics": {
+            "boundary_fraction": boundary_fraction,
+            "valid_fraction": {
+                "220": valid_fraction_220,
+                "221": valid_fraction_221,
+            },
+        },
+    }
+
+
 def _json_strictify(value: Any) -> Any:
     if isinstance(value, float):
         return value if math.isfinite(value) else None
@@ -963,11 +1005,18 @@ def main() -> int:
         comparison_path = ctx.outputs_dir / "model_comparison.json"
         write_json_atomic(comparison_path, _json_strictify(model_comparison))
 
+        viability = classify_multimode_viability(
+            boundary_fraction=None,
+            valid_fraction_220=mode_220.get("fit", {}).get("stability", {}).get("valid_fraction"),
+            valid_fraction_221=mode_221.get("fit", {}).get("stability", {}).get("valid_fraction"),
+        )
+
         finalize(
             ctx,
             {"multimode_estimates": out_path, "model_comparison": comparison_path},
             verdict="PASS",
             results=payload["results"],
+            extra_summary={"multimode_viability": viability},
         )
         return 0
     except SystemExit:

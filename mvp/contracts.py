@@ -156,6 +156,7 @@ CONTRACTS: dict[str, StageContract] = {
         required_inputs=[],  # Dynamic: depends on source_runs list
         dynamic_inputs=[
             "{source_run}/s4_geometry_filter/outputs/compatible_set.json",
+            "{source_run}/s3b_multimode_estimates/stage_summary.json",
             "{source_run}/s6_information_geometry/outputs/curvature.json",
         ],
         produced_outputs=[
@@ -299,6 +300,7 @@ CONTRACTS: dict[str, StageContract] = {
         name="s4d_kerr_from_multimode",
         required_inputs=[
             "s3b_multimode_estimates/outputs/multimode_estimates.json",
+            "s3b_multimode_estimates/stage_summary.json",
         ],
         produced_outputs=[
             "outputs/kerr_from_multimode.json",

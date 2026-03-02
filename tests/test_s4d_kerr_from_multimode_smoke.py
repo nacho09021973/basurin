@@ -30,6 +30,17 @@ def test_s4d_smoke_minimal(tmp_path: Path) -> None:
         ]
     }
     (s3b_out / "multimode_estimates.json").write_text(json.dumps(multimode, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (run_dir / "s3b_multimode_estimates" / "stage_summary.json").write_text(
+        json.dumps({
+            "stage": "s3b_multimode_estimates",
+            "multimode_viability": {
+                "class": "MULTIMODE_OK",
+                "reasons": [],
+                "metrics": {"boundary_fraction": None, "valid_fraction": {"220": 1.0, "221": 1.0}},
+            },
+        }),
+        encoding="utf-8",
+    )
 
     # Run stage as module (captures canonical init/finalize behavior)
     cp = subprocess.run(
