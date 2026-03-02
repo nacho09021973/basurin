@@ -25,10 +25,12 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import subprocess
 import sys
 import threading
 import time
+from importlib import metadata as importlib_metadata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -40,7 +42,7 @@ for _cand in [_here.parents[0], _here.parents[1]]:
         sys.path.insert(0, str(_cand))
         break
 
-from basurin_io import resolve_out_root, write_json_atomic
+from basurin_io import resolve_out_root, sha256_file, write_json_atomic
 
 MVP_DIR = Path(__file__).resolve().parent
 DEFAULT_ATLAS_PATH = Path("docs/ringdown/atlas/atlas_berti_v2.json")
@@ -128,6 +130,91 @@ def _set_run_valid_verdict(out_root: Path, run_id: str, verdict: str, reason: st
 
 def _write_timeline(out_root: Path, run_id: str, timeline: dict[str, Any]) -> None:
     write_json_atomic(out_root / run_id / "pipeline_timeline.json", timeline)
+
+
+def _write_run_provenance(
+    out_root: Path,
+    run_id: str,
+    *,
+    mode: str,
+    event_id: str | None = None,
+    events: list[str] | None = None,
+    atlas_path: str | None = None,
+    estimator: str | None = None,
+    key_params: dict[str, Any] | None = None,
+) -> None:
+    repo_root = MVP_DIR.parent
+
+    def _git_run(cmd: list[str]) -> subprocess.CompletedProcess[str] | None:
+        try:
+            return subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=repo_root,
+                check=False,
+            )
+        except Exception:
+            return None
+
+    git_sha = "UNKNOWN"
+    sha_proc = _git_run(["git", "rev-parse", "HEAD"])
+    if sha_proc is not None and sha_proc.returncode == 0:
+        maybe_sha = sha_proc.stdout.strip()
+        if maybe_sha:
+            git_sha = maybe_sha
+
+    git_dirty = False
+    dirty_proc = _git_run(["git", "status", "--porcelain"])
+    if dirty_proc is not None and dirty_proc.returncode == 0:
+        git_dirty = bool(dirty_proc.stdout.strip())
+
+    git_branch = "UNKNOWN"
+    branch_proc = _git_run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    if branch_proc is not None and branch_proc.returncode == 0:
+        maybe_branch = branch_proc.stdout.strip()
+        if maybe_branch:
+            git_branch = maybe_branch
+
+    atlas_sha: str | None = None
+    if atlas_path is not None:
+        atlas_file = Path(atlas_path)
+        if atlas_file.is_file():
+            atlas_sha = sha256_file(atlas_file)
+
+    deps: dict[str, str | None] = {}
+    for pkg in ("numpy", "scipy", "qnm"):
+        try:
+            deps[pkg] = importlib_metadata.version(pkg)
+        except Exception:
+            deps[pkg] = None
+
+    payload = {
+        "schema_version": "run_provenance_v1",
+        "run_id": run_id,
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "environment": {
+            "git_sha": git_sha,
+            "git_dirty": git_dirty,
+            "git_branch": git_branch,
+            "python_version": sys.version,
+            "platform": platform.platform(),
+            "basurin_runs_root": os.environ.get("BASURIN_RUNS_ROOT", ""),
+            "basurin_losc_root": os.environ.get("BASURIN_LOSC_ROOT", ""),
+        },
+        "invocation": {
+            "argv": list(sys.argv),
+            "mode": mode,
+            "event_id": event_id,
+            "events": events,
+            "atlas_path": str(atlas_path) if atlas_path is not None else None,
+            "atlas_sha256": atlas_sha,
+            "estimator": estimator,
+            "key_params": key_params or {},
+        },
+        "dependencies": deps,
+    }
+    write_json_atomic(out_root / run_id / "run_provenance.json", payload)
 
 
 def _heartbeat(label: str, t0: float, stop: threading.Event, interval: float = 5.0) -> None:
@@ -362,11 +449,29 @@ def run_single_event(
 
     _create_run_valid(out_root, run_id)
 
+    run_started_utc = datetime.now(timezone.utc).isoformat()
+    _write_run_provenance(
+        out_root,
+        run_id,
+        mode="single",
+        event_id=event_id,
+        events=None,
+        atlas_path=atlas_path,
+        estimator=estimator,
+        key_params={
+            "epsilon": epsilon,
+            "band_low": band_low,
+            "band_high": band_high,
+            "dt_start_s": dt_start_s,
+            "window_duration_s": window_duration_s,
+        },
+    )
+
     timeline: dict[str, Any] = {
         "schema_version": "mvp_pipeline_timeline_v1",
         "run_id": run_id,
         "mode": "single",
-        "started_utc": datetime.now(timezone.utc).isoformat(),
+        "started_utc": run_started_utc,
         "ended_utc": None,
         "event_id": event_id,
         "atlas_path": atlas_path,
@@ -576,11 +681,28 @@ def run_multimode_event(
     print(f"[pipeline] atlas={atlas_path}, synthetic={synthetic}")
 
     _create_run_valid(out_root, run_id)
+    run_started_utc = datetime.now(timezone.utc).isoformat()
+    _write_run_provenance(
+        out_root,
+        run_id,
+        mode="multimode",
+        event_id=event_id,
+        events=None,
+        atlas_path=atlas_path,
+        estimator=s3b_method,
+        key_params={
+            "epsilon": epsilon,
+            "band_low": band_low,
+            "band_high": band_high,
+            "dt_start_s": dt_start_s,
+            "window_duration_s": window_duration_s,
+        },
+    )
     timeline: dict[str, Any] = {
         "schema_version": "mvp_pipeline_timeline_v1",
         "run_id": run_id,
         "mode": "multimode",
-        "started_utc": datetime.now(timezone.utc).isoformat(),
+        "started_utc": run_started_utc,
         "ended_utc": None,
         "event_id": event_id,
         "atlas_path": atlas_path,
@@ -713,12 +835,29 @@ def run_multi_event(
     print(f"[pipeline] estimator={estimator}")
 
     _create_run_valid(out_root, agg_run_id)
+    run_started_utc = datetime.now(timezone.utc).isoformat()
+    _write_run_provenance(
+        out_root,
+        agg_run_id,
+        mode="multi",
+        event_id=None,
+        events=events,
+        atlas_path=atlas_path,
+        estimator=estimator,
+        key_params={
+            "epsilon": kwargs.get("epsilon", 0.3),
+            "band_low": kwargs.get("band_low", 150.0),
+            "band_high": kwargs.get("band_high", 400.0),
+            "dt_start_s": kwargs.get("dt_start_s", 0.003),
+            "window_duration_s": kwargs.get("window_duration_s", 0.06),
+        },
+    )
 
     timeline: dict[str, Any] = {
         "schema_version": "mvp_pipeline_timeline_v1",
         "run_id": agg_run_id,
         "mode": "multi",
-        "started_utc": datetime.now(timezone.utc).isoformat(),
+        "started_utc": run_started_utc,
         "ended_utc": None,
         "events": events,
         "atlas_path": atlas_path,

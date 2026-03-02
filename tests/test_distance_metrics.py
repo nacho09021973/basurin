@@ -187,10 +187,29 @@ class TestMahalanobisLog:
         c = sigma_Q ** 2
         b = r * sigma_f * sigma_Q  # != 0 con r=0.6
 
+        # Precondition: Σ = [[a, b],[b, c]] must be SPD.
+        # Symmetry: by construction (b appears in both off-diagonal slots).
+        # Positive definiteness: all leading minors > 0.
+        assert a > 0, f"Σ[0,0] = {a} must be > 0"
+        assert c > 0, f"Σ[1,1] = {c} must be > 0"
+        det_sigma = a * c - b * b
+        assert det_sigma > 0, (
+            f"det(Σ) = {det_sigma} must be > 0 (SPD precondition; "
+            f"requires |r| < 1, got r={r})"
+        )
+
         tr_half = (a + c) / 2.0
         disc = math.sqrt(((a - c) / 2.0) ** 2 + b ** 2)
         lam_plus = tr_half + disc
         lam_minus = tr_half - disc
+
+        # Both eigenvalues must be strictly positive (equivalent to SPD).
+        assert lam_plus > 0, f"λ+ = {lam_plus} must be > 0"
+        assert lam_minus > 0, f"λ- = {lam_minus} must be > 0"
+        # Product of eigenvalues equals det(Σ) — sanity cross-check.
+        assert abs(lam_plus * lam_minus - det_sigma) < 1e-14 * det_sigma, (
+            f"λ+ · λ- = {lam_plus * lam_minus} ≠ det(Σ) = {det_sigma}"
+        )
 
         def _norm_eigvec(b_: float, shift: float) -> tuple[float, float]:
             n = math.hypot(b_, shift)
@@ -199,32 +218,11 @@ class TestMahalanobisLog:
         v_plus = _norm_eigvec(b, lam_plus - a)
         v_minus = _norm_eigvec(b, lam_minus - a)
 
-        # --- Preconditions: Σ must be SPD ---
-        EPS_SPD = 1e-12
-        det = a * c - b * b
-
-        assert a > 0.0, f"SPD failed: a={a} must be > 0"
-        assert c > 0.0, f"SPD failed: c={c} must be > 0"
-        assert det > 0.0, f"SPD failed: det(Σ)={det} must be > 0 (a={a}, b={b}, c={c})"
-        assert lam_plus > 0.0, f"SPD failed: λ+={lam_plus} must be > 0"
-        assert lam_minus > 0.0, f"SPD failed: λ-={lam_minus} must be > 0"
-
-        prod = lam_plus * lam_minus
-        scale = max(1.0, abs(det), abs(prod))
-        assert abs(prod - det) <= EPS_SPD * scale, (
-            f"Eigen/det consistency: λ+·λ-={prod} vs det(Σ)={det} (Δ={prod - det})"
-        )
-
-        vp0, vp1 = v_plus
-        vm0, vm1 = v_minus
-        nvp = math.hypot(vp0, vp1)
-        nvm = math.hypot(vm0, vm1)
-        dot = vp0 * vm0 + vp1 * vm1
-
-        assert abs(nvp - 1.0) <= EPS_SPD, f"v_plus not unit: ||v_plus||={nvp}"
-        assert abs(nvm - 1.0) <= EPS_SPD, f"v_minus not unit: ||v_minus||={nvm}"
-        assert abs(dot) <= EPS_SPD, f"eigenvectors not orthogonal: v+·v-={dot}"
-        # --- end preconditions ---
+        # Eigenvectors must be orthonormal (precondition of the projection below).
+        assert abs(v_plus[0] ** 2 + v_plus[1] ** 2 - 1.0) < 1e-15, "v_plus not unit"
+        assert abs(v_minus[0] ** 2 + v_minus[1] ** 2 - 1.0) < 1e-15, "v_minus not unit"
+        dot_vv = v_plus[0] * v_minus[0] + v_plus[1] * v_minus[1]
+        assert abs(dot_vv) < 1e-14, f"Eigenvectors not orthogonal: dot = {dot_vv}"
 
         d0, d1 = 0.07, 0.15
         c_plus = v_plus[0] * d0 + v_plus[1] * d1

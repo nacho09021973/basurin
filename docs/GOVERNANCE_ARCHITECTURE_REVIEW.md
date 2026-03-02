@@ -209,15 +209,15 @@ Regex `^[A-Za-z0-9._-]+$` con límite de 128 caracteres. Esto previene path trav
 6. Suite de tests abarcando unit, integration, contract y golden.
 7. Separación canónico (`mvp/`) vs experimental (`runs/.../experiment/`) respetada.
 
-### No conformidades / áreas de mejora (⚠️)
+### No conformidades — TODAS RESUELTAS
 
-| # | Hallazgo | Severidad | Ubicación | Acción recomendada |
-|---|----------|-----------|-----------|-------------------|
-| 1 | Asintótico A.5 inconsistente con A.4 | Baja (solo texto) | `docs/metodo_brunete.md` A.5 | Corregir A.5 para reflejar `~3√π/(8σ^{3/2})` o añadir nota de reconciliación |
-| 2 | Docstring erróneo en `psd_log_derivatives_polyfit` | Baja | `mvp/brunete/core.py:23` | Cambiar `kappa=d²L/du² - s1` → `kappa=2*a2` en el docstring |
-| 3 | No existe stage canónico de PSD | Media | `mvp/contracts.py`, `mvp/extract_psd.py` | Crear `s2b_extract_psd` con contrato, o documentar explícitamente la excepción en `AGENTS.md` |
-| 4 | Logging de paths no estandarizado | Baja | múltiples entrypoints | Añadir helper `log_stage_paths(ctx)` en `contracts.py` |
-| 5 | Regla de consolidación de tests no en `AGENTS.md` | Baja | `AGENTS.md` | Mover la guía del README §"Diagnóstico de crecimiento en tests" a `AGENTS.md` |
+| # | Hallazgo | Severidad | Resolución |
+|---|----------|-----------|-----------|
+| 1 | Asintótico A.5 inconsistente con A.4 | Baja (texto) | **CERRADO** — `metodo_brunete.md` A.5 y tabla §6.5 corregidas a `3√π/(8σ^{3/2})`; nota editorial añadida. `BRUNETE_INCONSISTENCIES.md` marcado cerrado. |
+| 2 | Docstring ambiguo en `psd_log_derivatives_polyfit` | Baja | **CERRADO** — La identidad `kappa=d²L/du²-s1=2*a2-a1` era correcta pero implícita. Docstring expandido con la fórmula explícita y la derivación del jacobiano. |
+| 3 | No existe stage canónico de PSD en `CONTRACTS` | Media | **CERRADO** — Entrada `"psd_extract"` añadida a `CONTRACTS` con `required_inputs`, `produced_outputs` y `upstream_stages`. Cadena de trazabilidad de `s6c` cerrada. |
+| 4 | Logging de paths no estandarizado | Baja | **CERRADO** — Función `log_stage_paths(ctx)` añadida a `contracts.py`; referenciada en el docstring del módulo y en `AGENTS.md`. |
+| 5 | Regla de consolidación de tests no en `AGENTS.md` | Baja | **CERRADO** — Sección "Regla de consolidación de tests" añadida a `AGENTS.md` con presupuesto por tipo de cambio y convención de helpers compartidos. |
 
 ---
 
@@ -225,4 +225,4 @@ Regex `^[A-Za-z0-9._-]+$` con límite de 128 caracteres. Esto previene path trav
 
 La arquitectura de gobernanza de BASURIN es **sólida y bien implementada**. Los principios de IO determinista, gating por `RUN_VALID`, y contratos explícitos por stage están correctamente aplicados en el código. El módulo BRUNETE cumple el contrato matemático (Teorema 1, J0/J1, sigma/chi_psd) con fidelidad a la teoría en `metodo_brunete.md`.
 
-Los hallazgos son menores: una inconsistencia textual (no en código) en el asintótico A.5, un docstring incorrecto que no afecta al comportamiento, y la ausencia de un stage formal de PSD que deja un hueco en la cadena de trazabilidad de `s6c`. Ninguno de estos hallazgos compromete la reproducibilidad o auditoría del pipeline actual.
+Los 5 hallazgos identificados han sido resueltos: la inconsistencia textual A.5 está corregida con nota de reconciliación, el docstring de `kappa` es ahora explícito, el stage `psd_extract` está registrado en `CONTRACTS`, el logging canónico tiene helper centralizado, y la regla de consolidación de tests está en `AGENTS.md`.

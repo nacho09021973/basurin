@@ -20,7 +20,14 @@ def psd_log_derivatives_polyfit(
     """Estima ``s1`` y ``kappa`` vía ajuste local cuadrático de ``ln S``.
 
     Ajuste: ``L(Δu)=a2*Δu^2+a1*Δu+a0`` con ``Δu = ln(f)-ln(f0)``.
-    Identidades BRUNETE: ``s1=dL/du`` y ``kappa=d²L/du² - s1``.
+
+    Identidades BRUNETE (derivadas logarítmicas en coordenadas físicas,
+    ec. 6.13-6.14 de metodo_brunete.md):
+      ``s1    = f  · d(lnS)/df|_f0  = a1``
+      ``kappa = f² · d²(lnS)/df²|_f0 = 2*a2 - a1  (= 2*a2 - s1)``
+
+    La corrección ``-a1`` proviene del cambio de variable ``u=ln(f)→f``:
+    ``f²·d²(lnS)/df² = d²(lnS)/du² - d(lnS)/du = 2*a2 - a1``.
     """
     f = np.asarray(freqs_hz, dtype=np.float64)
     s = np.asarray(psd, dtype=np.float64)

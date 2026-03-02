@@ -162,6 +162,7 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
             self.assertEqual([s["stage"] for s in timeline["stages"]], [
                 "s0_oracle_mvp", "s1_fetch_strain", "s2_ringdown_window", "s3_ringdown_estimates",
                 "s3b_multimode_estimates", "s4_geometry_filter", "s4c_kerr_consistency",
+                "s4d_kerr_from_multimode",
             ])
             self.assertEqual(timeline["multimode_results"]["extraction_quality"], "INSUFFICIENT_DATA")
 

@@ -24,6 +24,28 @@ BASURIN implementa un pipeline reproducible para análisis de ringdown con estas
 - **Gobernanza por run** con `RUN_VALID/verdict.json`.
 - **Modo evento único y multi-evento** desde un orquestador central.
 
+## Posicionamiento científico (2026): dónde sí competir y dónde no
+
+BASURIN **no reemplaza** pipelines bayesianos oficiales (p. ej. pyRing/FIREFLY/ringdown)
+para inferencia final de parámetros físicos. El posicionamiento recomendado es:
+
+- **Screening auditable y trazable**: filtrar rápidamente geometrías/atlas compatibles
+  por evento y en agregado poblacional.
+- **Priorización computacional**: identificar hipótesis supervivientes para luego enviar
+  solo esos casos a inferencia bayesiana completa (MCMC / nested sampling).
+- **Intersección multi-evento orientada a teoría**: responder cuántas geometrías
+  (Kerr y beyond-Kerr) son simultáneamente compatibles con todo un conjunto de eventos.
+
+Fortaleza diferencial de BASURIN:
+
+- Contratos de artefactos por stage + hashes SHA256 + `RUN_VALID` + fail-fast, con
+  evidencia reproducible y auditable de punta a punta.
+- Diagnósticos de geometría de información (Fisher/Mahalanobis/curvatura) como capa
+  de comparación y ranking informacional entre hipótesis.
+
+En papers/reportes, explicitar este alcance evita sobre-claims: BASURIN aporta una
+**etapa de cribado robusta**, no un sustituto de la inferencia bayesiana de colaboración.
+
 ## Dónde están los datos y cómo encontrarlos (anti-pérdida de tiempo)
 
 Regla base: un run solo “existe” para downstream si existe:

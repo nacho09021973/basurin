@@ -43,7 +43,10 @@ class TestContractRegistry:
                        "s4c_kerr_consistency", "s4d_kerr_from_multimode",
                        "s5_aggregate", "s6_information_geometry", "s6b_information_geometry_3d",
                        "s6b_information_geometry_ranked",
-                       "s6c_population_geometry", "s3_spectral_estimates", "experiment_geometry_evidence_vs_gr"}
+                       "s6c_brunete_psd_curvature", "s6c_population_geometry",
+                       "s3_spectral_estimates", "experiment_geometry_evidence_vs_gr",
+                       "experiment_ex3_golden_sweep", "experiment_ex4_spectral_exclusion",
+                       "psd_extract"}
 
     def test_all_stages_registered(self):
         """Every MVP stage has a contract entry."""

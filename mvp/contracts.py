@@ -7,12 +7,13 @@ Single source of truth for:
   - Deterministic IO rules (writes only under runs/<run_id>/).
 
 Usage in a stage:
-    from mvp.contracts import CONTRACTS, init_stage, check_inputs, finalize, abort
+    from mvp.contracts import CONTRACTS, init_stage, check_inputs, finalize, abort, log_stage_paths
 
     ctx = init_stage("my_run", "s1_fetch_strain", params={...})
     inputs = check_inputs(ctx, {"strain": path_to_strain})
     # ... do work ...
     finalize(ctx, artifacts={"result": output_path}, results={...})
+    log_stage_paths(ctx)  # mandatory: prints OUT_ROOT, STAGE_DIR, OUTPUTS_DIR, STAGE_SUMMARY, MANIFEST
 
     # On error:
     abort(ctx, "reason for failure")
@@ -58,6 +59,9 @@ class StageContract:
     produced_outputs: list[str]    # Paths relative to stage_dir
     upstream_stages: list[str]     # Stages that must have PASS verdict
     check_run_valid: bool = True   # Whether to check RUN_VALID before running
+    required_inputs_glob: list[str] = field(default_factory=list)  # Glob patterns relative to run_dir
+    dynamic_inputs: list[str] = field(default_factory=list)  # Runtime-discovered input patterns
+    external_inputs: list[str] = field(default_factory=list)  # External input labels (outside runs/)
 
     def input_paths(self, run_dir: Path) -> dict[str, Path]:
         """Resolve required_inputs to absolute paths under run_dir."""
@@ -102,8 +106,12 @@ CONTRACTS: dict[str, StageContract] = {
     ),
     "s3_ringdown_estimates": StageContract(
         name="s3_ringdown_estimates",
-        required_inputs=[
-            # Dynamic: discovers {H1,L1,V1}_rd.npz at runtime
+        required_inputs=[],
+        required_inputs_glob=[
+            "s2_ringdown_window/outputs/*_rd.npz",
+        ],
+        dynamic_inputs=[
+            "s2_ringdown_window/outputs/{detector}_rd.npz",
         ],
         produced_outputs=[
             "outputs/estimates.json",
@@ -113,8 +121,13 @@ CONTRACTS: dict[str, StageContract] = {
     "s4_geometry_filter": StageContract(
         name="s4_geometry_filter",
         required_inputs=[
-            # Dynamic: estimates can be overridden via --estimates-path.
-            # Runtime validates and hashes the actual consumed file.
+            "s3_ringdown_estimates/outputs/estimates.json",
+        ],
+        required_inputs_glob=[
+            "s3*_estimates/outputs/*estimates*.json",
+        ],
+        dynamic_inputs=[
+            "s3*_estimates/outputs/*estimates*.json",
         ],
         produced_outputs=[
             "outputs/compatible_set.json",
@@ -127,6 +140,12 @@ CONTRACTS: dict[str, StageContract] = {
             # Dynamic: estimates can be overridden via --estimates-path.
             # Runtime validates and hashes the actual consumed file.
         ],
+        dynamic_inputs=[
+            "s3*_estimates/outputs/*estimates*.json",
+        ],
+        external_inputs=[
+            "atlas",
+        ],
         produced_outputs=[
             "outputs/compatible_set.json",
         ],
@@ -135,6 +154,10 @@ CONTRACTS: dict[str, StageContract] = {
     "s5_aggregate": StageContract(
         name="s5_aggregate",
         required_inputs=[],  # Dynamic: depends on source_runs list
+        dynamic_inputs=[
+            "{source_run}/s4_geometry_filter/outputs/compatible_set.json",
+            "{source_run}/s6_information_geometry/outputs/curvature.json",
+        ],
         produced_outputs=[
             "outputs/aggregate.json",
         ],
@@ -147,6 +170,9 @@ CONTRACTS: dict[str, StageContract] = {
             "s4_geometry_filter/outputs/compatible_set.json",
             # Dynamic: estimates can be overridden via --estimates-path.
             # Runtime validates and hashes the actual consumed file.
+        ],
+        dynamic_inputs=[
+            "s3*_estimates/outputs/*estimates*.json",
         ],
         produced_outputs=[
             "outputs/curvature.json",
@@ -179,6 +205,21 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         upstream_stages=["s4_geometry_filter", "s6_information_geometry"],
     ),
+    # Stage-lite: extract_psd.py writes under runs/<run_id>/psd/ using the
+    # same manifest/stage_summary conventions but without init_stage/finalize.
+    # Declared here so downstream (s6c) can reference it as a formal upstream
+    # and auditors can verify the trazability chain.
+    "psd_extract": StageContract(
+        name="psd_extract",
+        required_inputs=[
+            "s1_fetch_strain/outputs/strain.npz",
+        ],
+        produced_outputs=[
+            "outputs/measured_psd.json",
+        ],
+        upstream_stages=["s1_fetch_strain"],
+        check_run_valid=True,
+    ),
     "s6c_brunete_psd_curvature": StageContract(
         name="s6c_brunete_psd_curvature",
         required_inputs=[
@@ -186,6 +227,12 @@ CONTRACTS: dict[str, StageContract] = {
             # PSD is runtime-resolved (first psd/measured_psd.json, fallback to
             # external_inputs/psd_model.json). extract_psd.py is a helper,
             # not a canonical stage dependency.
+        ],
+        dynamic_inputs=[
+            "psd/{psd_name}.json",
+        ],
+        external_inputs=[
+            "psd_model",
         ],
         produced_outputs=[
             "outputs/brunete_metrics.json",
@@ -214,6 +261,9 @@ CONTRACTS: dict[str, StageContract] = {
             "s3_ringdown_estimates/outputs/estimates.json",
             # atlas_path is external, checked separately
         ],
+        external_inputs=[
+            "atlas",
+        ],
         produced_outputs=[
             "outputs/spectral_diagnostics.json",
         ],
@@ -224,6 +274,9 @@ CONTRACTS: dict[str, StageContract] = {
         required_inputs=[
             "s3_ringdown_estimates/outputs/estimates.json",
             # Dynamic: discovers {H1,L1,V1}_rd.npz at runtime (like s3)
+        ],
+        dynamic_inputs=[
+            "s2_ringdown_window/outputs/{detector}_rd.npz",
         ],
         produced_outputs=[
             "outputs/multimode_estimates.json",
@@ -258,6 +311,9 @@ CONTRACTS: dict[str, StageContract] = {
         required_inputs=[
             # Dynamic: discovers {H1,L1,V1}_rd.npz at runtime (same as s3)
         ],
+        dynamic_inputs=[
+            "s2_ringdown_window/outputs/{detector}_rd.npz",
+        ],
         produced_outputs=[
             "outputs/spectral_estimates.json",
         ],
@@ -275,7 +331,39 @@ CONTRACTS: dict[str, StageContract] = {
         upstream_stages=["s4_geometry_filter", "s6_information_geometry"],
         check_run_valid=True,
     ),
+    "experiment_ex3_golden_sweep": StageContract(
+        name="experiment_ex3_golden_sweep",
+        required_inputs=[
+            "s5_aggregate/outputs/aggregate.json",
+        ],
+        produced_outputs=[
+            "outputs/t0_sweep_golden_results.json",
+        ],
+        upstream_stages=["s5_aggregate"],
+        check_run_valid=True,
+    ),
+    "experiment_ex4_spectral_exclusion": StageContract(
+        name="experiment_ex4_spectral_exclusion",
+        required_inputs=[
+            "s5_aggregate/outputs/aggregate.json",
+        ],
+        produced_outputs=[
+            "outputs/exclusion_map.json",
+            "outputs/theory_survival.json",
+        ],
+        upstream_stages=["s5_aggregate"],
+        check_run_valid=True,
+    ),
 }
+
+
+def audit_contract_completeness() -> list[str]:
+    """Return stages missing static, dynamic, and external input declarations."""
+    return sorted(
+        name
+        for name, contract in CONTRACTS.items()
+        if not contract.required_inputs and not contract.dynamic_inputs and not contract.external_inputs
+    )
 
 
 # ── Stage Context ─────────────────────────────────────────────────────────
@@ -292,6 +380,7 @@ class StageContext:
     outputs_dir: Path
     params: dict[str, Any] = field(default_factory=dict)
     inputs_record: list[dict[str, str]] = field(default_factory=list)
+    check_inputs_info: dict[str, Any] = field(default_factory=dict)
 
 
 # ── API Functions ─────────────────────────────────────────────────────────
@@ -360,6 +449,41 @@ def check_inputs(
     """
     records: list[dict[str, str]] = []
     missing: list[str] = []
+
+    # Enforce contract-declared static required inputs.
+    for rel in ctx.contract.required_inputs:
+        abs_path = ctx.run_dir / rel
+        if not abs_path.exists():
+            missing.append(f"contract:{rel}: {abs_path}")
+
+    # Enforce contract-declared discovered/dynamic inputs.
+    discovered_inputs: list[str] = []
+    for pattern in ctx.contract.required_inputs_glob:
+        matches = sorted(
+            str(p.relative_to(ctx.run_dir))
+            for p in ctx.run_dir.glob(pattern)
+            if p.is_file()
+        )
+        if not matches:
+            candidates = sorted(
+                str(p.relative_to(ctx.run_dir))
+                for p in ctx.run_dir.rglob("*")
+                if p.is_file()
+            )[:5]
+            hint = _upstream_regen_hint(ctx.stage_name)
+            detail = (
+                f"stage_name={ctx.stage_name}; patterns={ctx.contract.required_inputs_glob}; "
+                f"missing_pattern={pattern}; candidates={candidates}"
+            )
+            if hint:
+                detail += f"; upstream_hint='{hint}'"
+            abort(ctx, detail)
+        discovered_inputs.extend(matches)
+
+    if discovered_inputs:
+        ctx.check_inputs_info = {
+            "discovered_inputs": sorted(set(discovered_inputs)),
+        }
 
     for label, path in paths.items():
         if not path.exists():
@@ -438,6 +562,8 @@ def finalize(
         summary["error"] = summary_error
     if results:
         summary["results"] = results
+    if ctx.check_inputs_info:
+        summary["check_inputs"] = ctx.check_inputs_info
     if extra_summary:
         summary.update(extra_summary)
 
@@ -479,6 +605,20 @@ def abort(ctx: StageContext, reason: str) -> None:
     _fatal(f"[{ctx.stage_name}] {reason}")
 
 
+def log_stage_paths(ctx: StageContext) -> None:
+    """Print the canonical output paths mandated by AGENTS.md §Logging.
+
+    Call this at the end of every stage entrypoint that writes outputs.
+    Emits exactly the five variables required:
+        OUT_ROOT, STAGE_DIR, OUTPUTS_DIR, STAGE_SUMMARY, MANIFEST
+    """
+    print(f"OUT_ROOT={ctx.out_root}")
+    print(f"STAGE_DIR={ctx.stage_dir}")
+    print(f"OUTPUTS_DIR={ctx.outputs_dir}")
+    print(f"STAGE_SUMMARY={ctx.stage_dir / 'stage_summary.json'}")
+    print(f"MANIFEST={ctx.stage_dir / 'manifest.json'}")
+
+
 def enforce_outputs(ctx: StageContext) -> list[str]:
     """Verify that all declared produced_outputs exist after finalize.
 
@@ -498,3 +638,11 @@ def _fatal(message: str) -> None:
     """Print error and exit. Never returns."""
     print(f"ERROR: {message}", file=sys.stderr)
     raise SystemExit(EXIT_CONTRACT_FAIL)
+
+
+def _upstream_regen_hint(stage_name: str) -> str | None:
+    hints = {
+        "s3_ringdown_estimates": "python -m mvp.s2_ringdown_window --run-id <RUN_ID>",
+        "s4_geometry_filter": "python -m mvp.s3_ringdown_estimates --run-id <RUN_ID>",
+    }
+    return hints.get(stage_name)

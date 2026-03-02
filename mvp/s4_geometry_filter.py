@@ -22,6 +22,7 @@ from mvp.distance_metrics import (
     get_metric,
     mahalanobis_log,
 )
+from mvp.schemas import validate_compatible_set
 from basurin_io import write_json_atomic
 from mvp.path_utils import resolve_run_scoped_input
 
@@ -515,7 +516,16 @@ def main() -> int:
         abort(ctx, str(exc))
     if not atlas_path.exists():
         abort(ctx, f"Atlas not found: {atlas_path}")
-    check_inputs(ctx, {"estimates": estimates_path, "atlas": atlas_path})
+    default_estimates = ctx.run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+    optional_inputs: dict[str, Path] = {}
+    if args.estimates_path and estimates_path != default_estimates:
+        optional_inputs["estimates_override_external"] = estimates_path
+
+    check_inputs(
+        ctx,
+        {"estimates": estimates_path, "atlas": atlas_path},
+        optional=optional_inputs or None,
+    )
 
     try:
         with open(estimates_path, "r", encoding="utf-8") as f:
@@ -600,6 +610,16 @@ def main() -> int:
         )
         result["event_id"] = estimates.get("event_id", "unknown")
         result["run_id"] = args.run
+
+        _ok, _errs = validate_compatible_set(
+            result,
+            strict_mahalanobis=(metric_name == "mahalanobis_log"),
+        )
+        if not _ok:
+            print(
+                f"WARNING: compatible_set self-check failed: {_errs}",
+                file=sys.stderr,
+            )
 
         cs_path = ctx.outputs_dir / "compatible_set.json"
         write_json_atomic(cs_path, result)
