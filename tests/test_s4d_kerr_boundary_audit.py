@@ -98,3 +98,13 @@ def test_best_idx_joint_accepts_sigma_weighting() -> None:
     inv_sigma = s4d._invert_2x2_sigma(s4d._sigma_lnf_lnq_to_lnf_lntau(((0.03, 0.01), (0.01, 0.05))))
     idx = s4d._best_idx_joint(obs, lnf_220, lntau_220, lnf_221, lntau_221, inv_sigma, inv_sigma)
     assert idx in (0, 1)
+
+
+def test_regularize_and_invert_sigma_near_singular_is_finite() -> None:
+    sigma_near_singular = ((0.07361859, 0.14723593), (0.14723593, 0.29446937))
+    inv_sigma, diag = s4d._regularize_and_invert_2x2_sigma(sigma_near_singular)
+
+    assert diag["det_after"] > 0.0
+    assert diag["jitter_used"] > 0.0
+    assert diag["det_after"] >= diag["det_before"]
+    assert all(value == value for row in inv_sigma for value in row)
