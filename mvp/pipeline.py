@@ -234,7 +234,8 @@ def _run_stage(
     timeline: dict[str, Any],
     stage_timeout_s: float | None = None,
 ) -> int:
-    cmd = [sys.executable, str(MVP_DIR / script)] + args
+    module = f"mvp.{Path(script).stem}"
+    cmd = [sys.executable, "-m", module] + args
     stage_started = datetime.now(timezone.utc).isoformat()
     stage_t0 = time.time()
     print(f"\n{'=' * 60}")
@@ -325,7 +326,7 @@ def _run_optional_experiment_t0_sweep(
         print("[pipeline] WARNING: experiment_t0_sweep.py not found, skipping best-effort experiment", flush=True)
         return
 
-    cmd = [sys.executable, str(script_path), "--run", run_id]
+    cmd = [sys.executable, "-m", "mvp.experiment_t0_sweep", "--run", run_id]
     stage_t0 = time.time()
     status = "OK"
     message = "completed"

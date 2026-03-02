@@ -17,17 +17,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from mvp.contracts import StageContext, abort, check_inputs, finalize, init_stage
+from mvp.contracts import StageContext, abort, check_inputs, finalize, init_stage, log_stage_paths
 
 STAGE = "s4d_kerr_from_multimode"
 M_MIN = 5.0
 M_MAX = 500.0
 A_MIN = 0.0
-A_MAX = 0.999
+A_MAX = 0.9999
 GRID_M_SIZE = 200
 GRID_A_SIZE = 200
 EPS_M = 1e-9 * (M_MAX - M_MIN)
 EPS_A = 1e-9
+BOUNDARY_FRACTION_THRESHOLD = 0.20
 
 
 def build_argparser() -> argparse.ArgumentParser:
@@ -341,6 +342,21 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
         or (abs(float(a) - A_MAX) <= EPS_A)
     )
     boundary_fraction = float(boundary_hit_count / len(m_joint_samples))
+    ctx.params.update({
+        "M_min": M_MIN,
+        "M_max": M_MAX,
+        "M_n": GRID_M_SIZE,
+        "a_min": A_MIN,
+        "a_max": A_MAX,
+        "a_n": GRID_A_SIZE,
+        "boundary_fraction_threshold": BOUNDARY_FRACTION_THRESHOLD,
+        "n_samples": n_samples,
+        "n_accepted": len(m_joint_samples),
+        "boundary_hits": boundary_hit_count,
+        "boundary_fraction": boundary_fraction,
+        "M_p50": m_p50,
+        "a_p50": a_p50,
+    })
 
     def _abort_boundary(reason_key: str) -> None:
         abort(
@@ -356,7 +372,7 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
         _abort_boundary("median_mass_on_grid_edge")
     if abs(a_p50 - A_MIN) <= EPS_A or abs(a_p50 - A_MAX) <= EPS_A:
         _abort_boundary("median_spin_on_grid_edge")
-    if boundary_fraction >= 0.20:
+    if boundary_fraction >= BOUNDARY_FRACTION_THRESHOLD:
         _abort_boundary("boundary_fraction_high")
 
     per_mode = {
@@ -488,11 +504,7 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
     kerr_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode.json", kerr_payload)
     diag_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode_diagnostics.json", diagnostics_payload)
 
-    print(f"OUT_ROOT={ctx.out_root}")
-    print(f"STAGE_DIR={ctx.stage_dir}")
-    print(f"OUTPUTS_DIR={ctx.outputs_dir}")
-    print(f"STAGE_SUMMARY={ctx.stage_dir / 'stage_summary.json'}")
-    print(f"MANIFEST={ctx.stage_dir / 'manifest.json'}")
+    log_stage_paths(ctx)
 
     return {
         "kerr_from_multimode": kerr_path,
@@ -514,7 +526,15 @@ def _abort_with_reason(ctx: StageContext, reason: str) -> int:
 
 def main() -> int:
     args = build_argparser().parse_args()
-    ctx = init_stage(args.run_id, STAGE)
+    ctx = init_stage(args.run_id, STAGE, params={
+        "M_min": M_MIN,
+        "M_max": M_MAX,
+        "M_n": GRID_M_SIZE,
+        "a_min": A_MIN,
+        "a_max": A_MAX,
+        "a_n": GRID_A_SIZE,
+        "boundary_fraction_threshold": BOUNDARY_FRACTION_THRESHOLD,
+    })
     try:
         artifacts = _execute(ctx)
     except NotImplementedError:

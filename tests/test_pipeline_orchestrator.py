@@ -195,6 +195,44 @@ def test_run_stage_nonzero_exit_propagated(
     assert rc == 2
 
 
+
+
+def test_run_stage_invokes_python_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_root = _make_runs_root(tmp_path)
+    run_id = "test_module_invocation"
+
+    captured: dict[str, Any] = {}
+
+    class _OkProc:
+        returncode = 0
+
+        def wait(self, timeout: float | None = None) -> None:
+            pass
+
+        def kill(self) -> None:
+            pass
+
+    def _fake_popen(cmd: list[str], *a: Any, **kw: Any) -> _OkProc:
+        captured["cmd"] = cmd
+        return _OkProc()
+
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+
+    timeline: dict[str, Any] = {"stages": []}
+    rc = _run_stage(
+        "s4d_kerr_from_multimode.py",
+        ["--run-id", run_id],
+        "s4d_kerr_from_multimode",
+        runs_root,
+        run_id,
+        timeline,
+    )
+
+    assert rc == 0
+    assert captured["cmd"][:3] == [sys.executable, "-m", "mvp.s4d_kerr_from_multimode"]
+
 def test_run_stage_appends_to_timeline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
