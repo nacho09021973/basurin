@@ -194,3 +194,4 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 # noop: trigger docs_contract_guard
+# noop: trigger docs_contract_guard (post-contract-fix)
