@@ -110,3 +110,37 @@ def test_regularize_and_invert_sigma_near_singular_is_finite() -> None:
     assert diag["jitter_used"] > 0.0
     assert diag["det_after"] >= diag["det_before"]
     assert all(value == value for row in inv_sigma for value in row)
+
+
+def test_should_abort_for_boundary_allows_spin_saturation_at_physical_floor() -> None:
+    should_abort, reason, warning = s4d._should_abort_for_boundary(
+        a_p50=s4d.A_MIN,
+        m_p50=100.0,
+        boundary_fraction=1.0,
+        a_min=s4d.A_MIN,
+        a_max=s4d.A_MAX,
+        m_min=s4d.M_MIN,
+        m_max=s4d.M_MAX,
+        threshold=s4d.BOUNDARY_FRACTION_THRESHOLD,
+    )
+
+    assert should_abort is False
+    assert reason is None
+    assert warning is True
+
+
+def test_should_abort_for_boundary_fails_when_spin_saturates_at_a_max() -> None:
+    should_abort, reason, warning = s4d._should_abort_for_boundary(
+        a_p50=s4d.A_MAX,
+        m_p50=100.0,
+        boundary_fraction=1.0,
+        a_min=s4d.A_MIN,
+        a_max=s4d.A_MAX,
+        m_min=s4d.M_MIN,
+        m_max=s4d.M_MAX,
+        threshold=s4d.BOUNDARY_FRACTION_THRESHOLD,
+    )
+
+    assert should_abort is True
+    assert reason == "median_spin_on_grid_edge"
+    assert warning is False

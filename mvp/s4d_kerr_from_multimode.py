@@ -29,6 +29,8 @@ GRID_A_SIZE = 200
 EPS_M = 1e-9 * (M_MAX - M_MIN)
 EPS_A = 1e-9
 BOUNDARY_FRACTION_THRESHOLD = 0.20
+SPIN_PHYSICAL_FLOOR_WARNING_CODE = "SPIN_AT_PHYSICAL_FLOOR"
+SPIN_PHYSICAL_FLOOR_WARNING_MSG = "Spin posterior saturated at A_MIN=0 (physical floor); continuing with warning."
 
 
 def _base_params() -> dict[str, Any]:
@@ -302,6 +304,34 @@ def _invert_2x2_sigma(sigma: tuple[tuple[float, float], tuple[float, float]]) ->
     return inv
 
 
+def _should_abort_for_boundary(
+    a_p50: float,
+    m_p50: float,
+    boundary_fraction: float,
+    a_min: float,
+    a_max: float,
+    m_min: float,
+    m_max: float,
+    threshold: float,
+) -> tuple[bool, str | None, bool]:
+    on_m_min = abs(m_p50 - m_min) <= EPS_M
+    on_m_max = abs(m_p50 - m_max) <= EPS_M
+    on_a_min = abs(a_p50 - a_min) <= EPS_A
+    on_a_max = abs(a_p50 - a_max) <= EPS_A
+
+    if on_m_min or on_m_max:
+        return True, "median_mass_on_grid_edge", False
+    if on_a_max:
+        return True, "median_spin_on_grid_edge", False
+    if on_a_min and a_min == 0.0 and boundary_fraction >= threshold:
+        return False, None, True
+    if on_a_min:
+        return True, "median_spin_on_grid_edge", False
+    if boundary_fraction >= threshold:
+        return True, "boundary_fraction_high", False
+    return False, None, False
+
+
 def _regularize_and_invert_2x2_sigma(
     sigma: tuple[tuple[float, float], tuple[float, float]],
 ) -> tuple[tuple[tuple[float, float], tuple[float, float]], dict[str, float]]:
@@ -507,12 +537,32 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
             ),
         )
 
-    if abs(m_p50 - M_MIN) <= EPS_M or abs(m_p50 - M_MAX) <= EPS_M:
-        _abort_boundary("median_mass_on_grid_edge")
-    if abs(a_p50 - A_MIN) <= EPS_A or abs(a_p50 - A_MAX) <= EPS_A:
-        _abort_boundary("median_spin_on_grid_edge")
-    if boundary_fraction >= BOUNDARY_FRACTION_THRESHOLD:
-        _abort_boundary("boundary_fraction_high")
+    should_abort, abort_reason, warning_spin_physical_floor = _should_abort_for_boundary(
+        a_p50=a_p50,
+        m_p50=m_p50,
+        boundary_fraction=boundary_fraction,
+        a_min=A_MIN,
+        a_max=A_MAX,
+        m_min=M_MIN,
+        m_max=M_MAX,
+        threshold=BOUNDARY_FRACTION_THRESHOLD,
+    )
+    warnings: list[dict[str, str]] = []
+    if warning_spin_physical_floor:
+        warnings.append(
+            {
+                "warning_code": SPIN_PHYSICAL_FLOOR_WARNING_CODE,
+                "warning_msg": SPIN_PHYSICAL_FLOOR_WARNING_MSG,
+            }
+        )
+    if warnings:
+        existing_warnings = ctx.params.get("warnings")
+        if not isinstance(existing_warnings, list):
+            existing_warnings = []
+        existing_warnings.extend(warnings)
+        ctx.params["warnings"] = existing_warnings
+    if should_abort and abort_reason is not None:
+        _abort_boundary(abort_reason)
 
     per_mode = {
         "220": {"f_hz": q220["f_hz"], "tau_s": q220["tau_s"]},
@@ -632,6 +682,7 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
                 "boundary_fraction": boundary_fraction,
             },
             "rejected_fraction": float(rejected / n_samples) if n_samples > 0 else 0.0,
+            "warnings": warnings,
             "notes": [
                 "Uncertainty propagation uses deterministic triangular sampling from per-mode p10/p50/p90.",
                 "Tie-break for equal objective values uses first minimum in stable nested-loop grid order.",
