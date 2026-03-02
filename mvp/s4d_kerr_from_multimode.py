@@ -306,19 +306,55 @@ def _sigma_lnf_lnq_to_lnf_lntau(sigma_x: tuple[tuple[float, float], tuple[float,
 
 
 def _invert_2x2_sigma(sigma: tuple[tuple[float, float], tuple[float, float]]) -> tuple[tuple[float, float], tuple[float, float]]:
+    inv, _ = _regularize_and_invert_2x2_sigma(sigma)
+    return inv
+
+
+def _regularize_and_invert_2x2_sigma(
+    sigma: tuple[tuple[float, float], tuple[float, float]],
+) -> tuple[tuple[tuple[float, float], tuple[float, float]], dict[str, float]]:
     s00, s01 = sigma[0]
     s10, s11 = sigma[1]
     sym_off = 0.5 * (s01 + s10)
-    s01 = sym_off
-    s10 = sym_off
-    det = (s00 * s11) - (s01 * s10)
-    if not (math.isfinite(det) and det > 0.0 and s00 > 0.0 and s11 > 0.0):
-        raise ValueError(f"Sigma must be SPD with positive determinant; got det={det}")
-    inv_det = 1.0 / det
-    return ((s11 * inv_det, -s01 * inv_det), (-s10 * inv_det, s00 * inv_det))
+    s01 = float(sym_off)
+    s10 = float(sym_off)
+    s00 = float(s00)
+    s11 = float(s11)
+
+    det_before = (s00 * s11) - (s01 * s10)
+    trace_half = 0.5 * (s00 + s11)
+    base_jitter = max(1e-10, 1e-6 * trace_half)
+    jitter = base_jitter
+    det_after = float("nan")
+
+    for _ in range(6):
+        r00 = s00 + jitter
+        r11 = s11 + jitter
+        det_after = (r00 * r11) - (s01 * s10)
+        if math.isfinite(det_after) and det_after > 0.0 and r00 > 0.0 and r11 > 0.0:
+            inv_det = 1.0 / det_after
+            disc = (r00 - r11) * (r00 - r11) + (4.0 * s01 * s01)
+            disc = max(0.0, disc)
+            root = math.sqrt(disc)
+            eig_hi = 0.5 * (r00 + r11 + root)
+            eig_lo = 0.5 * (r00 + r11 - root)
+            cond_proxy = float("inf") if eig_lo <= 0.0 else float(eig_hi / eig_lo)
+            diag = {
+                "jitter_used": float(jitter),
+                "det_before": float(det_before),
+                "det_after": float(det_after),
+                "cond_proxy": cond_proxy,
+            }
+            return ((r11 * inv_det, -s01 * inv_det), (-s10 * inv_det, r00 * inv_det)), diag
+        jitter *= 10.0
+
+    raise ValueError(
+        "SIGMA_SINGULAR: Sigma regularization failed after jitter escalation "
+        f"(det_before={det_before}, det_after={det_after})"
+    )
 
 
-def _extract_mode_inverse_sigma(multimode: dict[str, Any], label: str) -> tuple[tuple[float, float], tuple[float, float]]:
+def _extract_mode_inverse_sigma(multimode: dict[str, Any], label: str) -> tuple[tuple[tuple[float, float], tuple[float, float]], dict[str, float]]:
     modes = multimode.get("modes")
     if not isinstance(modes, list):
         raise ValueError(f"Missing multimode_estimates.modes for mode {label}; cannot build Mahalanobis metric")
@@ -328,7 +364,7 @@ def _extract_mode_inverse_sigma(multimode: dict[str, Any], label: str) -> tuple[
         sigma = _as_2x2_sigma(node.get("Sigma"))
         if sigma is None:
             raise ValueError(f"Missing/invalid Sigma for mode {label}; expected 2x2 finite matrix")
-        return _invert_2x2_sigma(_sigma_lnf_lnq_to_lnf_lntau(sigma))
+        return _regularize_and_invert_2x2_sigma(_sigma_lnf_lnq_to_lnf_lntau(sigma))
     raise ValueError(f"Mode {label} not found in multimode_estimates.modes")
 
 
@@ -356,8 +392,8 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
     try:
         q220 = _extract_mode_quantiles(multimode, "220")
         q221 = _extract_mode_quantiles(multimode, "221")
-        inv_sigma_220 = _extract_mode_inverse_sigma(multimode, "220")
-        inv_sigma_221 = _extract_mode_inverse_sigma(multimode, "221")
+        inv_sigma_220, sigma_diag_220 = _extract_mode_inverse_sigma(multimode, "220")
+        inv_sigma_221, sigma_diag_221 = _extract_mode_inverse_sigma(multimode, "221")
     except ValueError as exc:
         abort(ctx, reason=str(exc))
 
@@ -367,6 +403,14 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
             "sigma_space_input": "ln_f_ln_Q",
             "sigma_space_matching": "ln_f_ln_tau",
             "sigma_transform_applied": True,
+            "sigma_jitter_used_220": sigma_diag_220["jitter_used"],
+            "sigma_jitter_used_221": sigma_diag_221["jitter_used"],
+            "sigma_det_before_220": sigma_diag_220["det_before"],
+            "sigma_det_before_221": sigma_diag_221["det_before"],
+            "sigma_det_after_220": sigma_diag_220["det_after"],
+            "sigma_det_after_221": sigma_diag_221["det_after"],
+            "sigma_cond_proxy_220": sigma_diag_220["cond_proxy"],
+            "sigma_cond_proxy_221": sigma_diag_221["cond_proxy"],
         }
     )
 
