@@ -67,8 +67,8 @@ def test_s4d_fails_without_extra_boundary_artifact_on_spin_grid_saturation(tmp_p
     assert params.get("GRID_A_SIZE") == s4d.GRID_A_SIZE
     assert params.get("matching_metric") == "mahalanobis_sigma"
     assert params.get("sigma_space_input") == "ln_f_ln_Q"
-    assert params.get("sigma_space_matching") == "ln_f_ln_tau"
-    assert params.get("sigma_transform_applied") is True
+    assert params.get("sigma_space_matching") == "ln_f_ln_Q"
+    assert params.get("sigma_transform_applied") is False
     assert params.get("boundary_fraction", 0.0) >= 1.0
     assert params.get("boundary_hits", 0) > 0
     assert "KERR_GRID_SATURATION: median_spin_on_grid_edge" in summary["error"]
@@ -81,22 +81,24 @@ def test_s4d_fails_without_extra_boundary_artifact_on_spin_grid_saturation(tmp_p
     assert "boundary_audit" not in manifest["hashes"]
 
 
-def test_sigma_transform_preserves_symmetric_positive_definite() -> None:
-    sigma_x = ((0.04, 0.01), (0.01, 0.09))
-    sigma_y = s4d._sigma_lnf_lnq_to_lnf_lntau(sigma_x)
-    assert sigma_y[0][1] == sigma_y[1][0]
-    det = sigma_y[0][0] * sigma_y[1][1] - sigma_y[0][1] * sigma_y[1][0]
-    assert det > 0.0
+def test_lnq_reconstruction_matches_lnf_lntau_identity() -> None:
+    lnf = [2.30, 2.35]
+    lntau = [-3.10, -3.00]
+    ln_pi = s4d.math.log(s4d.math.pi)
+    lnq = [lf + lt + ln_pi for lf, lt in zip(lnf, lntau)]
+
+    for i in range(len(lnf)):
+        assert lnq[i] == lnf[i] + lntau[i] + ln_pi
 
 
 def test_best_idx_joint_accepts_sigma_weighting() -> None:
     obs = {"220": {"f_hz": 10.0, "tau_s": 1.0}, "221": {"f_hz": 20.0, "tau_s": 2.0}}
     lnf_220 = [2.30, 2.35]
-    lntau_220 = [0.02, -0.02]
+    lnq_220 = [s4d.math.log(obs["220"]["f_hz"]) + s4d.math.log(obs["220"]["tau_s"]) + s4d.math.log(s4d.math.pi), 2.60]
     lnf_221 = [2.99, 3.02]
-    lntau_221 = [0.70, 0.69]
-    inv_sigma = s4d._invert_2x2_sigma(s4d._sigma_lnf_lnq_to_lnf_lntau(((0.03, 0.01), (0.01, 0.05))))
-    idx = s4d._best_idx_joint(obs, lnf_220, lntau_220, lnf_221, lntau_221, inv_sigma, inv_sigma)
+    lnq_221 = [s4d.math.log(obs["221"]["f_hz"]) + s4d.math.log(obs["221"]["tau_s"]) + s4d.math.log(s4d.math.pi), 3.80]
+    inv_sigma = s4d._invert_2x2_sigma(((0.03, 0.01), (0.01, 0.05)))
+    idx = s4d._best_idx_joint(obs, lnf_220, lnq_220, lnf_221, lnq_221, inv_sigma, inv_sigma)
     assert idx in (0, 1)
 
 
