@@ -23,12 +23,29 @@ STAGE = "s4d_kerr_from_multimode"
 M_MIN = 5.0
 M_MAX = 500.0
 A_MIN = 0.0
-A_MAX = 0.9999
+A_MAX = 0.99999
 GRID_M_SIZE = 200
 GRID_A_SIZE = 200
 EPS_M = 1e-9 * (M_MAX - M_MIN)
 EPS_A = 1e-9
 BOUNDARY_FRACTION_THRESHOLD = 0.20
+
+
+def _base_params() -> dict[str, Any]:
+    return {
+        "M_MIN": M_MIN,
+        "M_MAX": M_MAX,
+        "A_MIN": A_MIN,
+        "A_MAX": A_MAX,
+        "GRID_M_SIZE": GRID_M_SIZE,
+        "GRID_A_SIZE": GRID_A_SIZE,
+        "EPS_M": EPS_M,
+        "EPS_A": EPS_A,
+        "gate": {
+            "name": "KERR_GRID_SATURATION",
+            "boundary_fraction_threshold": BOUNDARY_FRACTION_THRESHOLD,
+        },
+    }
 
 
 def build_argparser() -> argparse.ArgumentParser:
@@ -251,6 +268,9 @@ def _best_idx_single(
 
 
 def _execute(ctx: StageContext) -> dict[str, Path]:
+    if not isinstance(ctx.params, dict) or not ctx.params:
+        ctx.params = _base_params()
+
     multimode_path = ctx.run_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
     model_comparison_path = ctx.run_dir / "s3b_multimode_estimates" / "outputs" / "model_comparison.json"
 
@@ -342,23 +362,18 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
         or (abs(float(a) - A_MAX) <= EPS_A)
     )
     boundary_fraction = float(boundary_hit_count / len(m_joint_samples))
-    ctx.params.update({
-        "M_min": M_MIN,
-        "M_max": M_MAX,
-        "M_n": GRID_M_SIZE,
-        "a_min": A_MIN,
-        "a_max": A_MAX,
-        "a_n": GRID_A_SIZE,
-        "boundary_fraction_threshold": BOUNDARY_FRACTION_THRESHOLD,
+    diagnostics = {
         "n_samples": n_samples,
         "n_accepted": len(m_joint_samples),
         "boundary_hits": boundary_hit_count,
         "boundary_fraction": boundary_fraction,
         "M_p50": m_p50,
         "a_p50": a_p50,
-    })
+    }
+    ctx.params.update(diagnostics)
 
     def _abort_boundary(reason_key: str) -> None:
+        ctx.params.update(diagnostics)
         abort(
             ctx,
             reason=(
@@ -526,15 +541,8 @@ def _abort_with_reason(ctx: StageContext, reason: str) -> int:
 
 def main() -> int:
     args = build_argparser().parse_args()
-    ctx = init_stage(args.run_id, STAGE, params={
-        "M_min": M_MIN,
-        "M_max": M_MAX,
-        "M_n": GRID_M_SIZE,
-        "a_min": A_MIN,
-        "a_max": A_MAX,
-        "a_n": GRID_A_SIZE,
-        "boundary_fraction_threshold": BOUNDARY_FRACTION_THRESHOLD,
-    })
+    ctx = init_stage(args.run_id, STAGE)
+    ctx.params = _base_params()
     try:
         artifacts = _execute(ctx)
     except NotImplementedError:

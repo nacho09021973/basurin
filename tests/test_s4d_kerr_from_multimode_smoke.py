@@ -45,8 +45,9 @@ def test_s4d_smoke_minimal(tmp_path: Path) -> None:
 
     summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
     params = summary.get("parameters", {})
-    assert params.get("a_max") == 0.9999
-    assert params.get("a_n") == 200
-    assert params.get("M_n") == 200
+    assert params.get("A_MAX") == 0.99999
+    assert params.get("GRID_A_SIZE") == 200
+    assert params.get("GRID_M_SIZE") == 200
+    assert params.get("gate", {}).get("name") == "KERR_GRID_SATURATION"
     assert params.get("n_accepted", 0) > 0
     assert "boundary_fraction" in params

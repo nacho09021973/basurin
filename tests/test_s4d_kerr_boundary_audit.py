@@ -55,7 +55,8 @@ def test_s4d_fails_without_extra_boundary_artifact_on_spin_grid_saturation(tmp_p
     summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
     assert summary["verdict"] == "FAIL"
     params = summary.get("parameters", {})
-    assert params.get("a_max") == s4d.A_MAX
+    assert params.get("A_MAX") == s4d.A_MAX
+    assert params.get("GRID_A_SIZE") == s4d.GRID_A_SIZE
     assert params.get("boundary_fraction", 0.0) >= 1.0
     assert params.get("boundary_hits", 0) > 0
     assert "KERR_GRID_SATURATION: median_spin_on_grid_edge" in summary["error"]
