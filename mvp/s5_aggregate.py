@@ -111,6 +111,56 @@ def _parse_s6b_indices(rows: Any) -> list[int]:
     return out
 
 
+def _event_id_from_source_run(run_id: str) -> str | None:
+    """Extract event_id from run_id in canonical format: mvp_<EVENT_ID>_<DATE>_<TIME>."""
+    if not isinstance(run_id, str) or not run_id.startswith("mvp_"):
+        return None
+    tokens = run_id.split("_")
+    if len(tokens) < 4:
+        return None
+    return "_".join(tokens[1:-2]) or None
+
+
+def _safe_event_id(run_id: str, payload_event_id: Any) -> str:
+    """Resolve event_id using source_run naming first, payload as fallback."""
+    from_run = _event_id_from_source_run(run_id)
+    if from_run:
+        return from_run
+    if isinstance(payload_event_id, str) and payload_event_id.strip():
+        return payload_event_id.strip()
+    return "unknown"
+
+
+def _compute_chi2_p_value(chi2_value: float, dof: int) -> tuple[float | None, str | None]:
+    """Compute χ² survival p-value with explicit reasons for null outputs."""
+    if dof <= 0:
+        return None, "dof=0"
+    if not isinstance(chi2_value, (int, float)) or not math.isfinite(float(chi2_value)):
+        return None, "invalid_chi2"
+
+    chi2_value = float(chi2_value)
+
+    try:
+        from scipy.stats import chi2 as scipy_chi2
+
+        p_value = float(scipy_chi2.sf(chi2_value, df=dof))
+        if math.isfinite(p_value):
+            return p_value, None
+        return None, "nan"
+    except Exception:
+        # Wilson–Hilferty approximation fallback (finite for dof>0 and chi2>=0).
+        x = max(0.0, chi2_value)
+        z_num = (x / dof) ** (1.0 / 3.0) - (1.0 - 2.0 / (9.0 * dof))
+        z_den = math.sqrt(2.0 / (9.0 * dof))
+        if z_den <= 0.0 or not math.isfinite(z_num) or not math.isfinite(z_den):
+            return None, "invalid_variance"
+        z = z_num / z_den
+        p_value = 0.5 * math.erfc(z / math.sqrt(2.0))
+        if not math.isfinite(p_value):
+            return None, "nan"
+        return min(1.0, max(0.0, p_value)), "approx_wilson_hilferty"
+
+
 
 
 def _extract_mode(multimode: dict[str, Any], label: str) -> dict[str, Any] | None:
@@ -574,19 +624,11 @@ def compute_deviation_distribution(
                  for r in per_event_rows)
     n_events = len(per_event_rows)
 
-    # p-value from chi2 distribution with n_events DOF
-    try:
-        from scipy.stats import chi2 as scipy_chi2
-        p_value_f = float(scipy_chi2.sf(chi2_f, df=n_events))
-    except Exception:
-        # Approximation without scipy: use simple lookup
-        # chi2 sf ≈ 1 - CDF; for large chi2: p < 0.05
-        p_value_f = float("nan")
+    p_value_f, p_value_reason = _compute_chi2_p_value(chi2_f, n_events)
+    consistent_gr_95 = None if p_value_f is None else (p_value_f > 0.05)
 
-    consistent_gr_95 = (not math.isnan(p_value_f)) and (p_value_f > 0.05)
-
-    if math.isnan(p_value_f):
-        interpretation = "GR test inconclusive (scipy unavailable)"
+    if p_value_f is None:
+        interpretation = "GR test inconclusive"
     elif p_value_f > 0.05:
         interpretation = "GR consistent"
     elif p_value_f > 0.003:
@@ -608,6 +650,7 @@ def compute_deviation_distribution(
             "n_events": n_events,
             "chi2_GR": chi2_f,
             "p_value_GR": p_value_f,
+            "p_value_reason": p_value_reason,
             "consistent_GR_95": consistent_gr_95,
         },
         "interpretation": interpretation,
@@ -662,13 +705,7 @@ def main() -> int:
             print(f"[s5] WARNING: could not load catalog {args.catalog_path}: {exc}",
                   file=sys.stderr, flush=True)
     else:
-        # Try to use built-in GWTC_EVENTS as default catalog
-        try:
-            from mvp.gwtc_events import GWTC_EVENTS
-            catalog = GWTC_EVENTS
-            print(f"[s5] Using built-in GWTC catalog ({len(catalog)} events)", flush=True)
-        except Exception:
-            pass
+        catalog = None
 
     # Collect and validate source files.
     source_paths: dict[str, Path] = {}
@@ -761,7 +798,7 @@ def main() -> int:
                     continue
 
             source_data.append({
-                "run_id": src, "event_id": cs.get("event_id", "unknown"),
+                "run_id": src, "event_id": _safe_event_id(src, cs.get("event_id")),
                 "metric": cs.get("metric"),
                 "threshold_d2": cs.get("threshold_d2"),
                 "ranked_all": ranked_all,
@@ -862,15 +899,17 @@ def main() -> int:
                 combined = deviation_analysis.get("combined")
                 if isinstance(combined, dict):
                     combined["p_value_GR"] = None
+                    combined["p_value_reason"] = "no_common_compatible_geometries"
                     combined["consistent_GR_95"] = None
             result["deviation_analysis"] = deviation_analysis
             if deviation_analysis.get("combined"):
                 comb = deviation_analysis["combined"]
                 p_value = comb.get("p_value_GR")
+                p_reason = comb.get("p_value_reason")
                 p_text = "null" if p_value is None else f"{p_value:.3f}"
                 print(
                     f"[s5] GR test: δf_rel={comb['delta_f_rel']:.4f}±{comb['sigma_delta_f_rel']:.4f}, "
-                    f"χ²={comb['chi2_GR']:.2f}, p={p_text}, "
+                    f"χ²={comb['chi2_GR']:.2f}, p={p_text}, p_value_reason={p_reason}, "
                     f"consistent_GR_95={comb['consistent_GR_95']}",
                     flush=True,
                 )

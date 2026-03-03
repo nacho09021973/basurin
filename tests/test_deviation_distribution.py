@@ -185,6 +185,28 @@ class TestWithoutCatalog:
         assert "deviation_analysis" not in result
 
 
+
+
+def test_p_value_is_finite_for_valid_chi2_and_dof() -> None:
+    m, chi = 62.2, 0.67
+    kerr = kerr_qnm(m, chi)
+    catalog = {
+        "GW150914": {"m_final_msun": m, "chi_final": chi},
+        "GW151226": {"m_final_msun": m, "chi_final": chi},
+    }
+    source_data = [
+        _make_source_data("GW150914", kerr.f_hz * 1.01, kerr.Q, sigma_f=5.0, sigma_Q=0.5),
+        _make_source_data("GW151226", kerr.f_hz * 0.99, kerr.Q, sigma_f=5.0, sigma_Q=0.5),
+    ]
+
+    result = compute_deviation_distribution(source_data, catalog)
+    assert result is not None
+    combined = result["combined"]
+    assert combined["chi2_GR"] >= 0.0
+    assert combined["p_value_GR"] is not None
+    assert math.isfinite(combined["p_value_GR"])
+    assert 0.0 <= combined["p_value_GR"] <= 1.0
+
 class TestDeviationFields:
     """Test schema of deviation_analysis output."""
 
