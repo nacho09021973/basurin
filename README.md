@@ -420,6 +420,31 @@ Nota sobre subruns por seed: el experimento crea árboles por semilla para aisla
 - `data/losc/<EVENT_ID>/`
 - Convención de nombres (plana, sin subdirectorios por detector): los archivos deben incluir `H1` o `L1` en el nombre.
 
+### Precheck LOSC (canónico, 10 segundos)
+
+> **STOP**: no continúes con `s1` (ni con ningún stage downstream) si este precheck falla.
+
+```bash
+EVENT_ID=GW150914
+echo "data/losc -> $(readlink -f data/losc 2>/dev/null || echo '(no symlink)')"
+test -d "data/losc/$EVENT_ID" || { echo "ERROR: falta data/losc/$EVENT_ID (cache no montada/visible)"; exit 2; }
+echo "H1/L1 matches:"
+ls -1 "data/losc/$EVENT_ID" | egrep -i 'H1.*\.(h5|hdf5)$|L1.*\.(h5|hdf5)$' || echo "ERROR: hay ficheros pero no casan con H1/L1"
+echo "total h5/hdf5:"; find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*.h5' -o -iname '*.hdf5' \) | wc -l
+```
+
+Resolución rápida en 2 ramas:
+
+- **Caso A (mount/symlink)**: `data/losc` no apunta a la caché real.
+  - Reapunta con **una sola** estrategia recomendada por el equipo (symlink o bind mount) para que `data/losc/<EVENT_ID>/...` exista y sea visible.
+- **Caso B (nombres)**: hay `.h5/.hdf5`, pero el patrón no casa con `H1/L1`.
+  - Sin renombrar originales, crea symlinks casables dentro de `data/losc/<EVENT_ID>/`:
+
+```bash
+ln -sf "<archivo_real_H1>.h5" "data/losc/$EVENT_ID/H1.h5"
+ln -sf "<archivo_real_L1>.h5" "data/losc/$EVENT_ID/L1.h5"
+```
+
 Ejemplo recomendado:
 
 ```text

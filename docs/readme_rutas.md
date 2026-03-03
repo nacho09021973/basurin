@@ -52,16 +52,35 @@ find "runs/$RUN_ID" -type f \
 
 `data/losc/<EVENT_ID>/`
 
-**1) Lista los H5 disponibles (H1/L1)**:
+## Precheck LOSC (canónico)
+
+> **STOP**: no continúes si este precheck falla.
 
 ```bash
 EVENT_ID=GW150914
-find "data/losc/$EVENT_ID" -type f \( -iname '*.hdf5' -o -iname '*.h5' \)
+echo "data/losc -> $(readlink -f data/losc 2>/dev/null || echo '(no symlink)')"
+test -d "data/losc/$EVENT_ID" || { echo "ERROR: falta data/losc/$EVENT_ID (cache no montada/visible)"; exit 2; }
+echo "H1/L1 matches:"
+ls -1 "data/losc/$EVENT_ID" | egrep -i 'H1.*\.(h5|hdf5)$|L1.*\.(h5|hdf5)$' || echo "ERROR: hay ficheros pero no casan con H1/L1"
+echo "total h5/hdf5:"; find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*.h5' -o -iname '*.hdf5' \) | wc -l
 ```
 
-**2) Escoge uno de H1 y uno de L1** (típicamente contienen `H-H1_...` y `L-L1_...` en el nombre).
 
-**3) Ejecuta s1 con rutas explícitas (copy/paste)**:
+### Resolución en 2 ramas (sin salir del contrato)
+
+- **Caso A (mount/symlink roto o mal apuntado)**: `data/losc` no apunta a la caché real.
+  - Reapunta `data/losc` con la estrategia estándar del equipo (symlink o bind mount).
+- **Caso B (naming)**: hay `.h5/.hdf5`, pero no casan con H1/L1.
+  - Crea symlinks casables `H1.h5` y `L1.h5` dentro del evento, sin renombrar originales:
+
+```bash
+ln -sf "<archivo_real_H1>.h5" "data/losc/$EVENT_ID/H1.h5"
+ln -sf "<archivo_real_L1>.h5" "data/losc/$EVENT_ID/L1.h5"
+```
+
+**Solo después del precheck PASS**, ejecuta `s1` con rutas explícitas.
+
+Ejemplo (copy/paste):
 
 ```bash
 RUN_ID="mvp_${EVENT_ID}_real_local_$(date -u +%Y%m%dT%H%M%SZ)"
@@ -248,11 +267,18 @@ Patrones de nombre esperados:
 - `*H1*.hdf5` o `*H1*.h5`
 - `*L1*.hdf5` o `*L1*.h5`
 
-Verificación:
+Precheck obligatorio (mismo bloque canónico):
 
 ```bash
-find data/losc/GW150914 \( -iname '*.hdf5' -o -iname '*.h5' \) -type f
+EVENT_ID=GW150914
+echo "data/losc -> $(readlink -f data/losc 2>/dev/null || echo '(no symlink)')"
+test -d "data/losc/$EVENT_ID" || { echo "ERROR: falta data/losc/$EVENT_ID (cache no montada/visible)"; exit 2; }
+echo "H1/L1 matches:"
+ls -1 "data/losc/$EVENT_ID" | egrep -i 'H1.*\.(h5|hdf5)$|L1.*\.(h5|hdf5)$' || echo "ERROR: hay ficheros pero no casan con H1/L1"
+echo "total h5/hdf5:"; find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*.h5' -o -iname '*.hdf5' \) | wc -l
 ```
+
+Si falla: resolver primero **Caso A (mount/symlink)** o **Caso B (nombres con symlinks H1.h5/L1.h5)** y repetir el precheck.
 
 Ejemplo mínimo (s1 exige rutas explícitas si no hay fetch/caché):
 
