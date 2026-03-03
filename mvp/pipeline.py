@@ -49,16 +49,24 @@ DEFAULT_ATLAS_PATH = Path("docs/ringdown/atlas/atlas_berti_v2.json")
 
 
 def _autodetect_losc_hdf5_mappings(event_id: str) -> list[str]:
-    """Return canonical local LOSC mappings when both detectors are present."""
+    """Return local LOSC mappings when both detectors are present.
+
+    Selection is deterministic per detector:
+      1) largest file size
+      2) lexicographically largest file name (full path)
+    """
     losc_root = Path(os.environ.get("BASURIN_LOSC_ROOT", "data/losc"))
     event_root = losc_root / event_id
 
     def _pick(det: str) -> Path | None:
-        for ext in ("h5", "hdf5"):
-            candidate = event_root / f"{det}.{ext}"
-            if candidate.exists():
-                return candidate
-        return None
+        candidates = [
+            *event_root.glob(f"*{det}*.h5"),
+            *event_root.glob(f"*{det}*.hdf5"),
+        ]
+        files = [p for p in candidates if p.is_file()]
+        if not files:
+            return None
+        return sorted(files, key=lambda p: (p.stat().st_size, p.name), reverse=True)[0]
 
     h1 = _pick("H1")
     l1 = _pick("L1")
@@ -88,6 +96,23 @@ def _build_s1_fetch_args(
         args.extend(["--local-hdf5", mapping])
     if offline:
         args.append("--offline")
+    return args
+
+
+def _build_s0_oracle_args(
+    run_id: str,
+    event_id: str,
+    local_hdf5: list[str] | None,
+    offline: bool,
+) -> list[str]:
+    args = ["--run", run_id, "--event-id", event_id]
+    effective_local_hdf5 = list(local_hdf5 or [])
+    if offline:
+        args.append("--require-offline")
+        if not effective_local_hdf5:
+            effective_local_hdf5 = _autodetect_losc_hdf5_mappings(event_id)
+    for mapping in effective_local_hdf5:
+        args.extend(["--local-hdf5", mapping])
     return args
 
 
@@ -483,11 +508,12 @@ def run_single_event(
     _write_timeline(out_root, run_id, timeline)
 
     # Stage 0: Oracle precheck (deterministic/offline-first)
-    s0_args = ["--run", run_id, "--event-id", event_id]
-    if offline:
-        s0_args.append("--require-offline")
-    for mapping in (local_hdf5 or []):
-        s0_args.extend(["--local-hdf5", mapping])
+    s0_args = _build_s0_oracle_args(
+        run_id=run_id,
+        event_id=event_id,
+        local_hdf5=local_hdf5,
+        offline=offline,
+    )
     rc = _run_stage("s0_oracle_mvp.py", s0_args, "s0_oracle_mvp", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         _set_run_valid_verdict(out_root, run_id, "FAIL", "s0_oracle_mvp precheck failed")
@@ -718,11 +744,12 @@ def run_multimode_event(
     }
     _write_timeline(out_root, run_id, timeline)
 
-    s0_args = ["--run", run_id, "--event-id", event_id]
-    if offline:
-        s0_args.append("--require-offline")
-    for mapping in (local_hdf5 or []):
-        s0_args.extend(["--local-hdf5", mapping])
+    s0_args = _build_s0_oracle_args(
+        run_id=run_id,
+        event_id=event_id,
+        local_hdf5=local_hdf5,
+        offline=offline,
+    )
     rc = _run_stage("s0_oracle_mvp.py", s0_args, "s0_oracle_mvp", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         _set_run_valid_verdict(out_root, run_id, "FAIL", "s0_oracle_mvp precheck failed")
