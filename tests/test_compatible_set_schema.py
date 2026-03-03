@@ -1,36 +1,40 @@
-import json
-from pathlib import Path
+from mvp.schemas import (
+    COMPATIBLE_SET_SCHEMA_VERSION,
+    extract_compatible_geometry_ids,
+    normalize_schema_version,
+    validate,
+)
 
-import pytest
 
-from mvp.s5_aggregate import validate_compatible_set_canonical
+def test_compatible_set_accepts_extra_keys() -> None:
+    payload = {
+        "schema_version": COMPATIBLE_SET_SCHEMA_VERSION,
+        "event_id": "GW150914",
+        "compatible_geometries": [
+            {"geometry_id": "geo_001", "compatible": True},
+            {"geometry_id": "geo_002", "compatible": False},
+        ],
+        "extra": {"debug": True},
+    }
+
+    errors = validate("compatible_set", payload)
+
+    assert errors == []
+    assert extract_compatible_geometry_ids(payload) == {"geo_001"}
 
 
-def test_accepts_canonical_schema(tmp_path: Path) -> None:
-    cs_path = tmp_path / "compatible_set.json"
+def test_compatible_set_normalizes_int_schema_version() -> None:
     payload = {
         "schema_version": 1,
         "event_id": "GW150914",
-        "compatible_geometry_ids": ["geo_002", "geo_001", "geo_002"],
+        "compatible_geometries": [
+            {"id": "geo_001", "compatible": True},
+        ],
     }
-    cs_path.write_text(json.dumps(payload), encoding="utf-8")
 
-    extracted = validate_compatible_set_canonical(payload, cs_path)
+    normalized = normalize_schema_version("compatible_set", payload)
 
-    assert extracted == ["geo_001", "geo_002"]
-
-
-def test_rejects_legacy_formats(tmp_path: Path) -> None:
-    cs_path = tmp_path / "compatible_set.json"
-    payload = {
-        "event_id": "GW150914",
-        "compatible_entries": [{"geometry_id": "geo_001"}],
-    }
-    cs_path.write_text(json.dumps(payload), encoding="utf-8")
-
-    with pytest.raises(RuntimeError) as excinfo:
-        validate_compatible_set_canonical(payload, cs_path)
-
-    msg = str(excinfo.value)
-    assert "schema_version" in msg
-    assert cs_path.as_posix() in msg
+    assert payload["schema_version"] == 1
+    assert normalized["schema_version"] == COMPATIBLE_SET_SCHEMA_VERSION
+    assert validate("compatible_set", payload) == []
+    assert extract_compatible_geometry_ids(payload) == {"geo_001"}

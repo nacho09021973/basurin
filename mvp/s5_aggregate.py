@@ -27,6 +27,12 @@ for _cand in [_here.parents[0], _here.parents[1]]:
         break
 
 from mvp.contracts import init_stage, check_inputs, finalize, abort, log_stage_paths
+from mvp.schemas import (
+    SchemaError,
+    extract_compatible_geometry_ids,
+    normalize_schema_version,
+    validate as validate_schema,
+)
 from basurin_io import sha256_file, utc_now_iso, write_json_atomic
 
 STAGE = "s5_aggregate"
@@ -37,11 +43,6 @@ ALLOWED_MULTIMODE_VIABILITY_CLASSES = {
 }
 SINGLEMODE_FALLBACK_CLASS = "SINGLEMODE_ONLY"
 SINGLEMODE_FALLBACK_REASON = "MISSING_S3B_UPSTREAM"
-COMPATIBLE_SET_V1_SCHEMA = "mvp_compatible_set_v1"
-COMPATIBLE_SET_V2_KEYS = {"schema_version", "event_id", "compatible_geometry_ids"}
-COMPATIBLE_SET_V1_MIN_KEYS = {"schema_version", "event_id", "compatible_geometries"}
-
-
 def _relpath_under(root: Path, p: Path) -> str:
     """Return POSIX path relative to root when possible, else absolute POSIX path."""
     try:
@@ -53,150 +54,51 @@ def _relpath_under(root: Path, p: Path) -> str:
 def _extract_compatible_geometry_ids(
     payload: dict[str, Any], source_path: Path | None = None,
 ) -> set[str]:
-    """Extract compatible geometry IDs supporting canonical and legacy payloads."""
+    """Extract compatible geometry IDs via centralized schemas helpers."""
     present_keys = sorted(payload.keys())
     source_display = source_path.as_posix() if source_path is not None else "<unknown>"
 
-    def _schema_error(reason: str) -> RuntimeError:
+    try:
+        return extract_compatible_geometry_ids(payload)
+    except SchemaError as exc:
         hint = ""
         if source_path is not None and len(source_path.parts) >= 5:
             hint = (
-                " Hint: include 'schema_version': 1 and regenerate upstream with "
+                " Hint: regenerate upstream with "
                 f"`python -m mvp.s4_geometry_filter --run {source_path.parts[-5]} --atlas-path <atlas.json>`"
             )
-        return RuntimeError(
-            "Invalid compatible_set schema at "
-            f"{source_display}: {reason}. "
-            f"Present keys={present_keys}."
-            f"{hint}"
-        )
-
-    if "schema_version" in payload:
-        _, schema_normalized = _detect_compatible_set_schema(payload, source_path)
-        if schema_normalized == "v2":
-            ids = payload.get("compatible_geometry_ids")
-            if not isinstance(ids, list) or not ids:
-                raise _schema_error("'compatible_geometry_ids' must be a non-empty array")
-            if any(not isinstance(gid, str) or not gid.strip() for gid in ids):
-                raise _schema_error("'compatible_geometry_ids' must contain only non-empty strings")
-            return {gid for gid in ids}
-
-        event_id = payload.get("event_id")
-        if not isinstance(event_id, str) or not event_id.strip():
-            raise _schema_error("'event_id' must be a non-empty string")
-
-    compatible_geometries = payload.get("compatible_geometries")
-    if isinstance(compatible_geometries, list):
-        out: set[str] = set()
-        for row in compatible_geometries:
-            if not isinstance(row, dict) or row.get("compatible") is not True:
-                continue
-            geometry_id = row.get("geometry_id") if "geometry_id" in row else row.get("id")
-            if isinstance(geometry_id, str) and geometry_id:
-                out.add(geometry_id)
-        return out
-
-    compatible_entries = payload.get("compatible_entries")
-    if isinstance(compatible_entries, list):
-        out: set[str] = set()
-        for row in compatible_entries:
-            if isinstance(row, str) and row:
-                out.add(row)
-                continue
-            if isinstance(row, dict):
-                geometry_id = row.get("id") if "id" in row else row.get("geometry_id")
-                if isinstance(geometry_id, str) and geometry_id:
-                    out.add(geometry_id)
-        return out
-
-    compatible_ids = payload.get("compatible_ids")
-    if isinstance(compatible_ids, list):
-        return {str(x) for x in compatible_ids}
-
-    raise _schema_error(
-        "missing supported keys: expected canonical schema or legacy keys "
-        "('compatible_geometries', 'compatible_entries', 'compatible_ids')"
-    )
+        raise RuntimeError(
+            f"Invalid compatible_set schema at {source_display}: {exc}. "
+            f"Present keys={present_keys}.{hint}"
+        ) from exc
 
 
 def _detect_compatible_set_schema(
     payload: dict[str, Any], source_path: Path | None = None,
-) -> tuple[int | str, str]:
-    """Validate and normalize supported compatible_set schema versions."""
-    present_keys = sorted(payload.keys())
+) -> tuple[Any, str]:
+    """Validate and normalize compatible_set schema using centralized schemas helpers."""
     source_display = source_path.as_posix() if source_path is not None else "<unknown>"
-
-    def _schema_error(reason: str) -> RuntimeError:
-        hint = ""
-        if source_path is not None and len(source_path.parts) >= 5:
-            hint = (
-                " Hint: include 'schema_version': 1 and regenerate upstream with "
-                f"`python -m mvp.s4_geometry_filter --run {source_path.parts[-5]} --atlas-path <atlas.json>`"
-            )
-        return RuntimeError(
-            "Invalid compatible_set schema at "
-            f"{source_display}: {reason}. "
-            f"Present keys={present_keys}."
-            f"{hint}"
-        )
-
-    if "schema_version" not in payload:
-        raise _schema_error("missing required key 'schema_version'")
-    schema_version = payload.get("schema_version")
-    if schema_version == 1:
-        if set(payload.keys()) != COMPATIBLE_SET_V2_KEYS:
-            raise _schema_error("unexpected keys or missing required keys")
-        return schema_version, "v2"
-    if schema_version == COMPATIBLE_SET_V1_SCHEMA:
-        missing_keys = COMPATIBLE_SET_V1_MIN_KEYS.difference(payload.keys())
-        if missing_keys:
-            missing_keys_display = ", ".join(sorted(missing_keys))
-            raise _schema_error(
-                "missing required legacy keys: "
-                f"{missing_keys_display}"
-            )
-        return schema_version, "v1"
-    raise _schema_error(
-        "unsupported 'schema_version'; expected integer 1 or 'mvp_compatible_set_v1'"
-    )
-
-
-def validate_compatible_set_canonical(
-    payload: dict[str, Any], source_path: Path | None = None,
-) -> list[str]:
-    """Canonical-only guard for compatible_set schema (legacy rejected by design).
-
-    This validator is intentionally strict for contract checks, while
-    `_extract_compatible_geometry_ids` remains tolerant for legacy pipeline
-    compatibility in s5 aggregation.
-    """
-    required_keys = {"schema_version", "event_id", "compatible_geometry_ids"}
     present_keys = sorted(payload.keys())
-    source_display = source_path.as_posix() if source_path is not None else "<unknown>"
 
-    def _schema_error(reason: str) -> RuntimeError:
-        return RuntimeError(
-            "Invalid compatible_set canonical schema at "
-            f"{source_display}: {reason}. "
+    try:
+        errors = validate_schema("compatible_set", payload)
+    except SchemaError as exc:
+        raise RuntimeError(
+            f"Invalid compatible_set schema at {source_display}: {exc}. Present keys={present_keys}."
+        ) from exc
+
+    if errors:
+        raise RuntimeError(
+            f"Invalid compatible_set schema at {source_display}: {'; '.join(errors)}. "
             f"Present keys={present_keys}."
         )
 
-    if set(payload.keys()) != required_keys:
-        raise _schema_error("unexpected keys or missing required keys (expected canonical keys including 'schema_version')")
-    if payload.get("schema_version") != 1:
-        raise _schema_error("'schema_version' must be integer 1")
-
-    event_id = payload.get("event_id")
-    if not isinstance(event_id, str) or not event_id.strip():
-        raise _schema_error("'event_id' must be a non-empty string")
-
-    ids = payload.get("compatible_geometry_ids")
-    if not isinstance(ids, list) or not ids:
-        raise _schema_error("'compatible_geometry_ids' must be a non-empty array")
-    if any(not isinstance(gid, str) or not gid.strip() for gid in ids):
-        raise _schema_error("'compatible_geometry_ids' must contain only non-empty strings")
-
-    return sorted(set(ids))
+    normalized = normalize_schema_version("compatible_set", payload)
+    detected = payload.get("schema_version", "legacy_without_schema_version")
+    normalized_schema = "compatible_set_v1"
+    if payload.get("schema_version") == normalized.get("schema_version"):
+        normalized_schema = "compatible_set_v1_canonical"
+    return detected, normalized_schema
 
 
 def _parse_s6b_indices(rows: Any) -> list[int]:
@@ -882,8 +784,8 @@ def main() -> int:
             else:
                 detected_schema, normalized_schema = "legacy_without_schema_version", "legacy"
             source_data[-1]["compatible_set_schema"] = {
-                "detected": detected_schema,
-                "normalized": normalized_schema,
+                "schema_detected": detected_schema,
+                "schema_normalized": normalized_schema,
             }
 
             s3b_summary_path = s3b_summary_paths[src]
@@ -939,14 +841,14 @@ def main() -> int:
             {
                 "run_id": str(src.get("run_id")),
                 "event_id": str(src.get("event_id")),
-                "detected": src.get("compatible_set_schema", {}).get("detected"),
-                "normalized": src.get("compatible_set_schema", {}).get("normalized"),
+                "schema_detected": src.get("compatible_set_schema", {}).get("schema_detected"),
+                "schema_normalized": src.get("compatible_set_schema", {}).get("schema_normalized"),
             }
             for src in source_data
         ]
         result["compatible_set_schema"] = {
             "per_event": schema_rows,
-            "counts": dict(Counter(row["normalized"] for row in schema_rows if row.get("normalized"))),
+            "counts": dict(Counter(row["schema_normalized"] for row in schema_rows if row.get("schema_normalized"))),
         }
 
         # Compute deviation distribution if catalog available
