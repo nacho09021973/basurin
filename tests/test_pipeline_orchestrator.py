@@ -372,6 +372,35 @@ def test_run_single_event_writes_timeline_on_abort(
     assert "ended_utc" in tl
 
 
+def test_run_single_event_marks_run_valid_fail_when_s2_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_root = _make_runs_root(tmp_path)
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    def fake_run_stage(
+        script: str,
+        args: list[str],
+        label: str,
+        out_root: Path,
+        run_id: str,
+        timeline: dict[str, Any],
+        stage_timeout_s: float | None = None,
+    ) -> int:
+        if label == "s2_ringdown_window":
+            return 2
+        return 0
+
+    monkeypatch.setattr(pipeline, "_run_stage", fake_run_stage)
+
+    rc, run_id = run_single_event("GW150914", "fake_atlas.json", run_id="s2_fail_run")
+    assert rc == 2
+
+    verdict = json.loads((runs_root / run_id / "RUN_VALID" / "verdict.json").read_text(encoding="utf-8"))
+    assert verdict["verdict"] == "FAIL"
+    assert verdict["reason"] == "s2_ringdown_window failed: exit=2"
+
+
 def test_run_single_event_timeline_has_required_keys_on_success(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

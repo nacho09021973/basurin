@@ -25,7 +25,7 @@ for _cand in [_here.parents[0], _here.parents[1]]:
             sys.path.insert(0, str(_cand))
         break
 
-from mvp.contracts import init_stage, check_inputs, finalize, abort
+from mvp.contracts import init_stage, check_inputs, finalize, abort, log_stage_paths
 from basurin_io import sha256_file, write_json_atomic
 
 STAGE = "s2_ringdown_window"
@@ -127,6 +127,11 @@ def main() -> int:
     ap.add_argument("--event-id", default="GW150914")
     ap.add_argument("--dt-start-s", type=float, default=0.003)
     ap.add_argument("--duration-s", type=float, default=0.06)
+    ap.add_argument(
+        "--clip-window",
+        action="store_true",
+        help="Clip per-detector window indices to valid [0, n] range instead of failing on out-of-range.",
+    )
     ap.add_argument("--window-catalog", default=str(DEFAULT_WINDOW_CATALOG))
     ap.add_argument(
         "--strain-npz",
@@ -189,6 +194,8 @@ def main() -> int:
             abort(ctx, "No detector arrays found in strain.npz")
 
         artifacts: dict[str, Path] = {}
+        window_status: dict[str, dict[str, Any]] = {}
+        window_errors: list[str] = []
         n_out = 0
         for det in detectors:
             strain = np.asarray(data[det], dtype=np.float64)
@@ -201,13 +208,57 @@ def main() -> int:
             n_out = int(round(args.duration_s * fs))
             i_end = i_start + n_out
             if i_start < 0 or i_end > strain.size:
-                abort(ctx, f"Window out of range for {det}: i_start={i_start}, i_end={i_end}, n={strain.size}")
+                err = f"Window out of range for {det}: i_start={i_start}, i_end={i_end}, n={strain.size}"
+                status: dict[str, Any] = {
+                    "ok": False,
+                    "reason": "out_of_range",
+                    "i_start": i_start,
+                    "i_end": i_end,
+                    "n": int(strain.size),
+                }
+                if args.clip_window:
+                    i_start_clipped = max(0, min(i_start, int(strain.size)))
+                    i_end_clipped = max(0, min(i_end, int(strain.size)))
+                    status.update({
+                        "clipped": True,
+                        "i_start_clipped": i_start_clipped,
+                        "i_end_clipped": i_end_clipped,
+                        "clip_left_samples": max(0, -i_start),
+                        "clip_right_samples": max(0, i_end - int(strain.size)),
+                    })
+                    if i_end_clipped > i_start_clipped:
+                        out_path = ctx.outputs_dir / f"{det}_rd.npz"
+                        np.savez(out_path, strain=strain[i_start_clipped:i_end_clipped].copy(),
+                                 gps_start=np.float64(gps_start + (i_start_clipped / fs)),
+                                 duration_s=np.float64((i_end_clipped - i_start_clipped) / fs),
+                                 sample_rate_hz=np.float64(fs))
+                        artifacts[f"{det}_rd"] = out_path
+                        status["ok"] = True
+                        status["reason"] = "clipped"
+                    else:
+                        status["reason"] = "empty_after_clip"
+                        window_errors.append(
+                            f"{err}; clip produced empty window (i_start_clipped={i_start_clipped}, "
+                            f"i_end_clipped={i_end_clipped})"
+                        )
+                else:
+                    window_errors.append(err)
+                window_status[det] = status
+                continue
 
             out_path = ctx.outputs_dir / f"{det}_rd.npz"
             np.savez(out_path, strain=strain[i_start:i_end].copy(),
                      gps_start=np.float64(t_start_gps), duration_s=np.float64(args.duration_s),
                      sample_rate_hz=np.float64(fs))
             artifacts[f"{det}_rd"] = out_path
+            window_status[det] = {
+                "ok": True,
+                "reason": "ok",
+                "i_start": i_start,
+                "i_end": i_end,
+                "n": int(strain.size),
+                "clipped": False,
+            }
 
         window_meta = {
             "event_id": args.event_id, "t0_gps": t0_gps, "t0_source": t0_source,
@@ -215,13 +266,20 @@ def main() -> int:
             "dt_start_s": args.dt_start_s, "duration_s": args.duration_s,
             "t_start_gps": t_start_gps, "t_end_gps": t_end_gps,
             "sample_rate_hz": fs, "detectors": detectors, "n_samples": n_out,
+            "clip_window": bool(args.clip_window),
+            "window_status": window_status,
         }
         meta_path = ctx.outputs_dir / "window_meta.json"
         write_json_atomic(meta_path, window_meta)
         artifacts["window_meta"] = meta_path
 
         _ensure_window_meta_contract(ctx, artifacts, strain_path)
-        finalize(ctx, artifacts, results=window_meta)
+        verdict = "FAIL" if window_errors else "PASS"
+        extra_summary = {"error": "; ".join(window_errors)} if window_errors else None
+        finalize(ctx, artifacts, verdict=verdict, results=window_meta, extra_summary=extra_summary)
+        log_stage_paths(ctx)
+        if window_errors:
+            return 2
         return 0
 
     except SystemExit:
