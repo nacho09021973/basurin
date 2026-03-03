@@ -38,3 +38,6 @@ htmlcov/
 
 # local data (never commit)
 gw_data_32s/
+
+# local GW cache (never commit)
+gw_data_32s/
