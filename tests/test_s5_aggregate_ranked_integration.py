@@ -356,3 +356,68 @@ def test_s5_aggregate_does_not_fail_schema_when_compatible_geometries_empty(tmp_
     payload = json.loads(agg_path.read_text(encoding="utf-8"))
     assert payload["n_common_compatible"] == 0
     assert "NO_COMMON_COMPATIBLE_GEOMETRIES" in payload["warnings"]
+
+
+def test_s5_aggregate_empty_compatible_set_respects_min_coverage_without_schema_error(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_empty = "run_empty"
+    run_non_empty = "run_non_empty"
+
+    for run_id in (run_empty, run_non_empty):
+        rv = runs_root / run_id / "RUN_VALID"
+        rv.mkdir(parents=True, exist_ok=True)
+        (rv / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
+
+        s3_stage = runs_root / run_id / "s3_ringdown_estimates"
+        s3_stage.mkdir(parents=True, exist_ok=True)
+        (s3_stage / "stage_summary.json").write_text(
+            json.dumps({"stage": "s3_ringdown_estimates"}), encoding="utf-8"
+        )
+
+    empty_s4 = runs_root / run_empty / "s4_geometry_filter" / "outputs"
+    empty_s4.mkdir(parents=True, exist_ok=True)
+    (empty_s4 / "compatible_set.json").write_text(
+        json.dumps({
+            "schema_version": "mvp_compatible_set_v1",
+            "event_id": "GW-empty",
+            "compatible_geometries": [],
+            "ranked_all": [{"geometry_id": "g0", "d2": 0.1}],
+        }),
+        encoding="utf-8",
+    )
+
+    non_empty_s4 = runs_root / run_non_empty / "s4_geometry_filter" / "outputs"
+    non_empty_s4.mkdir(parents=True, exist_ok=True)
+    (non_empty_s4 / "compatible_set.json").write_text(
+        json.dumps({
+            "schema_version": "mvp_compatible_set_v1",
+            "event_id": "GW-non-empty",
+            "compatible_geometries": [{"geometry_id": "g0", "compatible": True}],
+            "ranked_all": [{"geometry_id": "g0", "d2": 0.1}],
+        }),
+        encoding="utf-8",
+    )
+
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s5_aggregate.py"),
+        "--out-run",
+        "agg_min_coverage_empty",
+        "--source-runs",
+        f"{run_empty},{run_non_empty}",
+        "--min-coverage",
+        "1.0",
+    ]
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, capture_output=True, text=True, check=False)
+
+    assert proc.returncode == 0, proc.stderr
+    assert "Invalid compatible_set schema" not in proc.stderr
+
+    agg_path = runs_root / "agg_min_coverage_empty" / "s5_aggregate" / "outputs" / "aggregate.json"
+    payload = json.loads(agg_path.read_text(encoding="utf-8"))
+    assert payload["n_events"] == 2
+    assert payload["n_common_compatible"] == 0
+    assert payload["min_coverage"] == 1.0
+    assert payload["min_count"] == 2
+    assert "NO_COMMON_COMPATIBLE_GEOMETRIES" in payload["warnings"]
