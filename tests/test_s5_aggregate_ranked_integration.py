@@ -19,6 +19,7 @@ def _mk_run(
     ranked: list[int] | None,
     compatible: list[int] | None,
     viability_class: str = "MULTIMODE_OK",
+    with_s3b: bool = True,
 ) -> None:
     rv = runs_root / run_id / "RUN_VALID"
     rv.mkdir(parents=True, exist_ok=True)
@@ -34,6 +35,10 @@ def _mk_run(
         "compatible_geometries": [{"geometry_id": "g0"}],
     }), encoding="utf-8")
 
+    s3_stage = runs_root / run_id / "s3_ringdown_estimates"
+    s3_stage.mkdir(parents=True, exist_ok=True)
+    (s3_stage / "stage_summary.json").write_text(json.dumps({"stage": "s3_ringdown_estimates"}), encoding="utf-8")
+
     if ranked is not None and compatible is not None:
         s6b_out = runs_root / run_id / "s6b_information_geometry_ranked" / "outputs"
         s6b_out.mkdir(parents=True, exist_ok=True)
@@ -47,15 +52,16 @@ def _mk_run(
             "compatibility_criterion": {"name": "test", "params": {}},
         }), encoding="utf-8")
 
-    s3b_stage = runs_root / run_id / "s3b_multimode_estimates"
-    s3b_stage.mkdir(parents=True, exist_ok=True)
-    (s3b_stage / "stage_summary.json").write_text(json.dumps({
-        "multimode_viability": {
-            "class": viability_class,
-            "reasons": [] if viability_class == "MULTIMODE_OK" else ["BOUNDARY_FRACTION_HIGH"],
-            "metrics": {"boundary_fraction": None, "valid_fraction": {"220": 1.0, "221": 1.0}},
-        }
-    }), encoding="utf-8")
+    if with_s3b:
+        s3b_stage = runs_root / run_id / "s3b_multimode_estimates"
+        s3b_stage.mkdir(parents=True, exist_ok=True)
+        (s3b_stage / "stage_summary.json").write_text(json.dumps({
+            "multimode_viability": {
+                "class": viability_class,
+                "reasons": [] if viability_class == "MULTIMODE_OK" else ["BOUNDARY_FRACTION_HIGH"],
+                "metrics": {"boundary_fraction": None, "valid_fraction": {"220": 1.0, "221": 1.0}},
+            }
+        }), encoding="utf-8")
 
 
 def test_s5_aggregate_uses_s6b_and_warns_missing(tmp_path: Path) -> None:
@@ -112,6 +118,50 @@ def test_s5_aggregate_sets_no_common_warning_only_when_data_present(tmp_path: Pa
     agg_path = runs_root / "agg_test_2" / "s5_aggregate" / "outputs" / "aggregate.json"
     payload = json.loads(agg_path.read_text(encoding="utf-8"))
     assert "NO_COMMON_COMPATIBLE_GEOMETRIES" in payload["warnings"]
+
+
+def test_s5_aggregate_fallback_to_s3_when_s3b_absent(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    _mk_run(runs_root, "run_a", ranked=[0, 1], compatible=[0], with_s3b=False)
+
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s5_aggregate.py"),
+        "--out-run",
+        "agg_fallback",
+        "--source-runs",
+        "run_a",
+    ]
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, proc.stderr
+
+    agg_path = runs_root / "agg_fallback" / "s5_aggregate" / "outputs" / "aggregate.json"
+    payload = json.loads(agg_path.read_text(encoding="utf-8"))
+    assert agg_path.exists()
+    assert payload["multimode_viability"]["counts"]["SINGLEMODE_ONLY"] == 1
+    assert "MISSING_S3B_UPSTREAM:run_a" in payload["warnings"]
+    assert payload["multimode_viability"]["per_event"]["run_a"]["reasons"] == ["MISSING_S3B_UPSTREAM"]
+    assert payload["multimode_viability"]["per_event"]["run_a"]["metrics"] == {}
+
+
+def test_s5_aggregate_require_multimode_fails_without_s3b(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    _mk_run(runs_root, "run_a", ranked=[0, 1], compatible=[0], with_s3b=False)
+
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s5_aggregate.py"),
+        "--out-run",
+        "agg_fallback_strict",
+        "--source-runs",
+        "run_a",
+        "--require-multimode",
+    ]
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, capture_output=True, text=True, check=False)
+    assert proc.returncode == 2
+    assert "s3b_multimode_estimates/stage_summary.json" in proc.stderr
 
 
 def test_s6b_common_geometries_match_common_compatible_when_events_match() -> None:
