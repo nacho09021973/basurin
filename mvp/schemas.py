@@ -1,8 +1,15 @@
-"""Helpers de validación de schemas canónicos del MVP."""
+"""Helpers de validación/normalización de schemas canónicos del MVP."""
 from __future__ import annotations
 
 from typing import Any
 
+
+class SchemaError(ValueError):
+    """Raised when payloads do not satisfy schema contracts."""
+
+
+COMPATIBLE_SET_SCHEMA_VERSION = "mvp_compatible_set_v1"
+COMPATIBLE_SET_MIN_KEYS = {"schema_version", "event_id", "compatible_geometries"}
 
 REQUIRED_KEYS = (
     "schema_version",
@@ -27,8 +34,99 @@ MAHALANOBIS_KEYS = (
 )
 
 
+def normalize_schema_version(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Return a normalized copy with canonical string schema_version when supported."""
+    if not isinstance(payload, dict):
+        raise SchemaError(f"payload must be dict, got {type(payload).__name__}")
+
+    normalized = dict(payload)
+    if kind == "compatible_set" and normalized.get("schema_version") == 1:
+        normalized["schema_version"] = COMPATIBLE_SET_SCHEMA_VERSION
+    return normalized
+
+
+def extract_compatible_geometry_ids(payload: dict[str, Any]) -> set[str]:
+    """Extract compatible geometry IDs for canonical and legacy compatible_set payloads."""
+    normalized = normalize_schema_version("compatible_set", payload)
+
+    compatible_geometries = normalized.get("compatible_geometries")
+    if isinstance(compatible_geometries, list):
+        out: set[str] = set()
+        for row in compatible_geometries:
+            if not isinstance(row, dict) or row.get("compatible") is not True:
+                continue
+            geometry_id = row.get("geometry_id") if "geometry_id" in row else row.get("id")
+            if isinstance(geometry_id, str) and geometry_id:
+                out.add(geometry_id)
+        return out
+
+    compatible_entries = normalized.get("compatible_entries")
+    if isinstance(compatible_entries, list):
+        out = set()
+        for row in compatible_entries:
+            if isinstance(row, str) and row:
+                out.add(row)
+                continue
+            if isinstance(row, dict):
+                geometry_id = row.get("id") if "id" in row else row.get("geometry_id")
+                if isinstance(geometry_id, str) and geometry_id:
+                    out.add(geometry_id)
+        return out
+
+    compatible_ids = normalized.get("compatible_ids")
+    if isinstance(compatible_ids, list):
+        return {str(x) for x in compatible_ids}
+
+    raise SchemaError(
+        "missing supported keys: expected canonical schema or legacy keys "
+        "('compatible_geometries', 'compatible_entries', 'compatible_ids')"
+    )
+
+
+def validate(kind: str, payload: dict[str, Any]) -> list[str]:
+    """Validate payload by kind and raise SchemaError on unsupported kinds."""
+    if kind == "compatible_set":
+        errors = _validate_compatible_set_contract(payload)
+    else:
+        raise SchemaError(f"unsupported schema kind: {kind!r}")
+    return errors
+
+
+def _validate_compatible_set_contract(payload: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    normalized = normalize_schema_version("compatible_set", payload)
+
+    missing_min = sorted(COMPATIBLE_SET_MIN_KEYS.difference(normalized.keys()))
+    if missing_min:
+        errors.append(f"missing required keys: {', '.join(missing_min)}")
+
+    if normalized.get("schema_version") != COMPATIBLE_SET_SCHEMA_VERSION:
+        errors.append(f"schema_version must be '{COMPATIBLE_SET_SCHEMA_VERSION}'")
+
+    event_id = normalized.get("event_id")
+    if not isinstance(event_id, str) or not event_id.strip():
+        errors.append("event_id must be a non-empty string")
+
+    compatible_geometries = normalized.get("compatible_geometries")
+    if not isinstance(compatible_geometries, list):
+        errors.append("compatible_geometries must be a list")
+    else:
+        has_any_valid = False
+        for row in compatible_geometries:
+            if not isinstance(row, dict) or row.get("compatible") is not True:
+                continue
+            geometry_id = row.get("geometry_id") if "geometry_id" in row else row.get("id")
+            if isinstance(geometry_id, str) and geometry_id:
+                has_any_valid = True
+                break
+        if not has_any_valid:
+            errors.append("compatible_geometries must include at least one compatible geometry id")
+
+    return errors
+
+
 def validate_compatible_set(
-    data: dict[str, Any], *, strict_mahalanobis: bool = False
+    data: dict[str, Any], *, strict_mahalanobis: bool = False,
 ) -> tuple[bool, list[str]]:
     """Valida el schema canónico de compatible_set.json.
 
@@ -43,8 +141,8 @@ def validate_compatible_set(
         if key not in data:
             errors.append(f"missing required key: {key}")
 
-    if data.get("schema_version") != "mvp_compatible_set_v1":
-        errors.append("schema_version must be 'mvp_compatible_set_v1'")
+    if data.get("schema_version") != COMPATIBLE_SET_SCHEMA_VERSION:
+        errors.append(f"schema_version must be '{COMPATIBLE_SET_SCHEMA_VERSION}'")
 
     observables = data.get("observables")
     if not isinstance(observables, dict):
@@ -86,4 +184,3 @@ def validate_compatible_set(
                 errors.append(f"missing mahalanobis key: {key}")
 
     return len(errors) == 0, errors
-

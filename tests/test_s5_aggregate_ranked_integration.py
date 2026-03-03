@@ -270,6 +270,46 @@ def test_s5_aggregate_accepts_historic_compatible_set_schema_v1(tmp_path: Path) 
 
     agg_path = runs_root / "agg_v1" / "s5_aggregate" / "outputs" / "aggregate.json"
     payload = json.loads(agg_path.read_text(encoding="utf-8"))
-    assert payload["compatible_set_schema"]["counts"]["v1"] == 1
-    assert payload["compatible_set_schema"]["per_event"][0]["detected"] == "mvp_compatible_set_v1"
-    assert payload["compatible_set_schema"]["per_event"][0]["normalized"] == "v1"
+    assert payload["compatible_set_schema"]["counts"]["compatible_set_v1_canonical"] == 1
+    assert payload["compatible_set_schema"]["per_event"][0]["schema_detected"] == "mvp_compatible_set_v1"
+    assert payload["compatible_set_schema"]["per_event"][0]["schema_normalized"] == "compatible_set_v1_canonical"
+
+
+def test_s5_aggregate_accepts_legacy_int_schema_version(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "run_legacy_int"
+
+    rv = runs_root / run_id / "RUN_VALID"
+    rv.mkdir(parents=True, exist_ok=True)
+    (rv / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
+
+    s4_out = runs_root / run_id / "s4_geometry_filter" / "outputs"
+    s4_out.mkdir(parents=True, exist_ok=True)
+    (s4_out / "compatible_set.json").write_text(json.dumps({
+        "schema_version": 1,
+        "event_id": "GW150914",
+        "compatible_geometries": [{"geometry_id": "g0", "compatible": True}],
+        "ranked_all": [{"geometry_id": "g0", "d2": 0.1}],
+    }), encoding="utf-8")
+
+    s3_stage = runs_root / run_id / "s3_ringdown_estimates"
+    s3_stage.mkdir(parents=True, exist_ok=True)
+    (s3_stage / "stage_summary.json").write_text(json.dumps({"stage": "s3_ringdown_estimates"}), encoding="utf-8")
+
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s5_aggregate.py"),
+        "--out-run",
+        "agg_legacy_int",
+        "--source-runs",
+        run_id,
+    ]
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, proc.stderr
+
+    agg_path = runs_root / "agg_legacy_int" / "s5_aggregate" / "outputs" / "aggregate.json"
+    payload = json.loads(agg_path.read_text(encoding="utf-8"))
+    row = payload["compatible_set_schema"]["per_event"][0]
+    assert row["schema_detected"] == 1
+    assert row["schema_normalized"] == "compatible_set_v1"

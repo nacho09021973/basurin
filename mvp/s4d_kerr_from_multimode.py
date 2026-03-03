@@ -423,7 +423,7 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
     if viability_class != MULTIMODE_OK:
         skip_payload = {
             "schema_name": "kerr_from_multimode",
-            "schema_version": 1,
+            "schema_version": "mvp_kerr_from_multimode_v1",
             "json_strict": True,
             "created_utc": _utc_now_z(),
             "run_id": ctx.run_id,
@@ -433,7 +433,7 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
         }
         diag_payload = {
             "schema_name": "kerr_from_multimode_diagnostics",
-            "schema_version": 1,
+            "schema_version": "mvp_kerr_from_multimode_diagnostics_v1",
             "json_strict": True,
             "created_utc": _utc_now_z(),
             "run_id": ctx.run_id,
@@ -633,7 +633,7 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
 
     kerr_payload = {
         "schema_name": "kerr_from_multimode",
-        "schema_version": 1,
+        "schema_version": "mvp_kerr_from_multimode_v1",
         "json_strict": True,
         "created_utc": _utc_now_z(),
         "run_id": ctx.run_id,
@@ -703,7 +703,7 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
 
     diagnostics_payload = {
         "schema_name": "kerr_from_multimode_diagnostics",
-        "schema_version": 1,
+        "schema_version": "mvp_kerr_from_multimode_diagnostics_v1",
         "json_strict": True,
         "created_utc": _utc_now_z(),
         "run_id": ctx.run_id,
