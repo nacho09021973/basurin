@@ -26,7 +26,7 @@ for _cand in [_here.parents[0], _here.parents[1]]:
             sys.path.insert(0, str(_cand))
         break
 
-from mvp.contracts import init_stage, check_inputs, finalize, abort
+from mvp.contracts import init_stage, check_inputs, finalize, abort, log_stage_paths
 from basurin_io import sha256_file, utc_now_iso, write_json_atomic
 
 STAGE = "s5_aggregate"
@@ -35,6 +35,8 @@ ALLOWED_MULTIMODE_VIABILITY_CLASSES = {
     "SINGLEMODE_ONLY",
     "RINGDOWN_NONINFORMATIVE",
 }
+SINGLEMODE_FALLBACK_CLASS = "SINGLEMODE_ONLY"
+SINGLEMODE_FALLBACK_REASON = "MISSING_S3B_UPSTREAM"
 
 
 def _relpath_under(root: Path, p: Path) -> str:
@@ -677,6 +679,11 @@ def main() -> int:
     ap.add_argument("--min-coverage", type=float, default=1.0)
     ap.add_argument("--top-k", type=int, default=50)
     ap.add_argument(
+        "--require-multimode",
+        action="store_true",
+        help="Fail when {source_run}/s3b_multimode_estimates/stage_summary.json is missing.",
+    )
+    ap.add_argument(
         "--catalog-path", default=None,
         help="Optional JSON catalog {event_id: {m_final_msun, chi_final}} for deviation analysis",
     )
@@ -697,6 +704,7 @@ def main() -> int:
     ctx = init_stage(args.out_run, STAGE, params={
         "source_runs": source_runs, "min_coverage": args.min_coverage, "top_k": args.top_k,
         "catalog_path": args.catalog_path,
+        "require_multimode": bool(args.require_multimode),
     })
 
     # Load optional catalog for deviation analysis
@@ -723,12 +731,18 @@ def main() -> int:
     source_paths: dict[str, Path] = {}
     ranked_paths: dict[str, Path] = {}
     s3b_summary_paths: dict[str, Path] = {}
+    s3_summary_paths: dict[str, Path] = {}
     for src in source_runs:
         p = out_root / src / "s4_geometry_filter" / "outputs" / "compatible_set.json"
         source_paths[src] = p
         ranked_paths[src] = out_root / src / "s6b_information_geometry_ranked" / "outputs" / "ranked_geometries.json"
         s3b_summary_paths[src] = out_root / src / "s3b_multimode_estimates" / "stage_summary.json"
-    check_inputs(ctx, {**source_paths, **s3b_summary_paths}, optional=ranked_paths)
+        s3_summary_paths[src] = out_root / src / "s3_ringdown_estimates" / "stage_summary.json"
+    check_inputs(
+        ctx,
+        source_paths,
+        optional={**ranked_paths, **s3b_summary_paths, **s3_summary_paths},
+    )
     # Keep metadata portable/auditable: prefer paths relative to runs_root for upstream inputs.
     for rec in ctx.inputs_record:
         label = rec.get("label", "")
@@ -822,19 +836,43 @@ def main() -> int:
                 "multimode_viability_class": None,
             })
 
-            s3b_summary = json.loads(s3b_summary_paths[src].read_text(encoding="utf-8"))
-            mm_viability = s3b_summary.get("multimode_viability")
-            if not isinstance(mm_viability, dict):
-                raise RuntimeError(
-                    f"Missing multimode_viability in {s3b_summary_paths[src]}; regenerate upstream with "
-                    f"python -m mvp.s3b_multimode_estimates --run-id {src}"
-                )
-            mm_class = mm_viability.get("class")
-            if mm_class not in ALLOWED_MULTIMODE_VIABILITY_CLASSES:
-                raise RuntimeError(
-                    f"Invalid multimode_viability.class={mm_class!r} in {s3b_summary_paths[src]}"
-                )
-            source_data[-1]["multimode_viability_class"] = mm_class
+            s3b_summary_path = s3b_summary_paths[src]
+            s3_summary_path = s3_summary_paths[src]
+            if s3b_summary_path.exists():
+                s3b_summary = json.loads(s3b_summary_path.read_text(encoding="utf-8"))
+                mm_viability = s3b_summary.get("multimode_viability")
+                if not isinstance(mm_viability, dict):
+                    raise RuntimeError(
+                        f"Missing multimode_viability in {s3b_summary_path}; regenerate upstream with "
+                        f"python -m mvp.s3b_multimode_estimates --run-id {src}"
+                    )
+                mm_class = mm_viability.get("class")
+                if mm_class not in ALLOWED_MULTIMODE_VIABILITY_CLASSES:
+                    raise RuntimeError(
+                        f"Invalid multimode_viability.class={mm_class!r} in {s3b_summary_path}"
+                    )
+                source_data[-1]["multimode_viability_class"] = mm_class
+            else:
+                if args.require_multimode:
+                    raise RuntimeError(
+                        f"Missing required inputs: {s3b_summary_path} "
+                        f"(expected for --require-multimode); regenerate upstream with "
+                        f"python -m mvp.s3b_multimode_estimates --run-id {src}. "
+                        f"Fallback candidate detected: {s3_summary_path if s3_summary_path.exists() else 'none'}"
+                    )
+                if not s3_summary_path.exists():
+                    raise RuntimeError(
+                        f"Missing required inputs: {s3b_summary_path} (multimode) or {s3_summary_path} (single-mode fallback). "
+                        f"Regenerate upstream with python -m mvp.s3_ringdown_estimates --run-id {src} "
+                        f"or python -m mvp.s3b_multimode_estimates --run-id {src}."
+                    )
+                source_data[-1]["multimode_viability_class"] = SINGLEMODE_FALLBACK_CLASS
+                result_warnings = source_data[-1].setdefault("multimode_viability_fallback", {})
+                if isinstance(result_warnings, dict):
+                    result_warnings.update({
+                        "reasons": [SINGLEMODE_FALLBACK_REASON],
+                        "metrics": {},
+                    })
 
             ranked_path = ranked_paths[src]
             if ranked_path.exists():
@@ -872,6 +910,14 @@ def main() -> int:
                     flush=True,
                 )
 
+        for src in source_data:
+            if src.get("multimode_viability_class") == SINGLEMODE_FALLBACK_CLASS and src.get("multimode_viability_fallback"):
+                result.setdefault("warnings", []).append(
+                    f"{SINGLEMODE_FALLBACK_REASON}:{src['run_id']}"
+                )
+                mm_viability = result.setdefault("multimode_viability", {}).setdefault("per_event", {})
+                mm_viability[src["run_id"]] = src["multimode_viability_fallback"]
+
         agg_path = ctx.outputs_dir / "aggregate.json"
         write_json_atomic(agg_path, result)
 
@@ -896,11 +942,7 @@ def main() -> int:
             summary_results["consistent_GR_95"] = comb["consistent_GR_95"]
 
         finalize(ctx, artifacts={"aggregate": agg_path}, results=summary_results)
-        print(f"OUT_ROOT={ctx.out_root}")
-        print(f"STAGE_DIR={ctx.stage_dir}")
-        print(f"OUTPUTS_DIR={ctx.outputs_dir}")
-        print(f"STAGE_SUMMARY={ctx.stage_dir / 'stage_summary.json'}")
-        print(f"MANIFEST={ctx.stage_dir / 'manifest.json'}")
+        log_stage_paths(ctx)
         return 0
 
     except SystemExit:
