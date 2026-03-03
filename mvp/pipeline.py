@@ -545,6 +545,8 @@ def run_single_event(
         "--dt-start-s", str(dt_start_s),
         "--duration-s", str(window_duration_s),
     ]
+    if offline:
+        s2_args.append("--offline")
     rc = _run_stage("s2_ringdown_window.py", s2_args, "s2_ringdown_window", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         _set_run_valid_verdict(out_root, run_id, "FAIL", f"s2_ringdown_window failed: exit={rc}")
@@ -780,6 +782,8 @@ def run_multimode_event(
         "--dt-start-s", str(dt_start_s),
         "--duration-s", str(window_duration_s),
     ]
+    if offline:
+        s2_args.append("--offline")
     rc = _run_stage("s2_ringdown_window.py", s2_args, "s2_ringdown_window", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         _set_run_valid_verdict(out_root, run_id, "FAIL", f"s2_ringdown_window failed: exit={rc}")
