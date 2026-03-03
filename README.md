@@ -420,6 +420,52 @@ Nota sobre subruns por seed: el experimento crea árboles por semilla para aisla
 - `data/losc/<EVENT_ID>/`
 - Convención de nombres (plana, sin subdirectorios por detector): los archivos deben incluir `H1` o `L1` en el nombre.
 
+### Precheck LOSC (canónico, 10 segundos)
+
+> **STOP**: no continúes con `s1` (ni con ningún stage downstream) si este precheck falla.
+
+```bash
+EVENT_ID=GW150914
+EVENT_DIR="data/losc/$EVENT_ID"
+
+echo "data/losc -> $(readlink -f data/losc 2>/dev/null || echo '(no symlink)')"
+test -d "$EVENT_DIR" || { echo "ERROR: falta $EVENT_DIR (cache no montada/visible)"; exit 2; }
+
+TOTAL=$(find "$EVENT_DIR" -maxdepth 1 -type f \( -iname '*.h5' -o -iname '*.hdf5' \) | wc -l | tr -d ' ')
+echo "total h5/hdf5: $TOTAL"
+test "$TOTAL" -gt 0 || { echo "ERROR: no hay .h5/.hdf5 en $EVENT_DIR"; exit 3; }
+
+echo "H1/L1 matches:"
+MATCHES=$(ls -1 "$EVENT_DIR" | egrep -i 'H1.*\.(h5|hdf5)$|L1.*\.(h5|hdf5)$' || true)
+test -n "$MATCHES" || {
+  echo "ERROR: hay .h5/.hdf5 pero ningún nombre casa con H1/L1";
+  echo "Candidatos detectados (.h5/.hdf5):";
+  ls -1 "$EVENT_DIR" | egrep -i '\.(h5|hdf5)$' || true;
+  exit 4;
+}
+echo "$MATCHES"
+```
+
+### ¿Por qué `s1` “no encuentra” las h5?
+
+Casi siempre por uno de estos motivos contract-first:
+
+- `data/losc/<EVENT_ID>/` no es visible desde este entorno (mount/symlink roto o apuntando a otra ruta).
+- Los ficheros existen, pero sus nombres no contienen `H1`/`L1` (el auto-resolver no adivina detectores).
+- Los `.h5/.hdf5` están en subdirectorios; el precheck y s1 validan nivel evento (`maxdepth 1`).
+
+Resolución rápida en 2 ramas:
+
+- **Caso A (mount/symlink)**: `data/losc` no apunta a la caché real.
+  - Reapunta con **una sola** estrategia recomendada por el equipo (symlink o bind mount) para que `data/losc/<EVENT_ID>/...` exista y sea visible.
+- **Caso B (nombres)**: hay `.h5/.hdf5`, pero el patrón no casa con `H1/L1`.
+  - Sin renombrar originales, crea symlinks casables dentro de `data/losc/<EVENT_ID>/`:
+
+```bash
+ln -sf "<archivo_real_H1>.hdf5" "data/losc/$EVENT_ID/H1.h5"
+ln -sf "<archivo_real_L1>.hdf5" "data/losc/$EVENT_ID/L1.h5"
+```
+
 Ejemplo recomendado:
 
 ```text
