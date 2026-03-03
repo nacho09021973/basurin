@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import io
 import json
+import hashlib
 import sys
+from urllib.error import HTTPError
 from urllib.request import Request
 
 import tools.fetch_losc_event as fetch_losc_event
@@ -12,8 +14,8 @@ class _FakeHTTPResponse:
     def __init__(self, payload: bytes):
         self._buf = io.BytesIO(payload)
 
-    def read(self) -> bytes:
-        return self._buf.read()
+    def read(self, size: int = -1) -> bytes:
+        return self._buf.read(size)
 
     def __enter__(self):
         return self
@@ -43,6 +45,7 @@ def test_http_get_json_adds_format_api_and_accept_header(monkeypatch):
     assert isinstance(req, Request)
     assert "format=api" in req.full_url
     assert req.headers["Accept"] == "application/json"
+    assert req.headers["User-agent"] == "basurin-fetch/1.0"
 
 
 def test_select_h1_l1_files_selects_expected_rows():
@@ -102,8 +105,10 @@ def test_fetch_losc_event_creates_aliases_and_inventory(tmp_path, monkeypatch):
     inv = event_dir / "INVENTORY.sha256"
     assert inv.exists()
     content = inv.read_text(encoding="utf-8")
-    assert "H1.hdf5" in content
-    assert "L1.hdf5" in content
+    h1_sha = hashlib.sha256(b"h1-bytes").hexdigest()
+    l1_sha = hashlib.sha256(b"l1-bytes").hexdigest()
+    assert f"{h1_sha}  H1.hdf5" in content
+    assert f"{l1_sha}  L1.hdf5" in content
 
     for path in event_dir.rglob("*"):
         path.resolve().relative_to(out_root.resolve())
@@ -134,3 +139,47 @@ def test_fetch_losc_event_fails_when_h1_or_l1_missing(tmp_path, monkeypatch):
         assert False, "expected SystemExit"
     except SystemExit as exc:
         assert "missing detector" in str(exc)
+
+
+def test_auto_event_version_retries_when_v1_fails_406(tmp_path, monkeypatch):
+    out_root = tmp_path / "data" / "losc"
+    payload = {
+        "strain_files": [
+            {"detector": "H1", "download_url": "https://example.org/H-H1_TEST-32.hdf5"},
+            {"detector": "L1", "download_url": "https://example.org/L-L1_TEST-32.hdf5"},
+        ]
+    }
+
+    calls: list[str] = []
+
+    def fake_urlopen(req, timeout=60):
+        url = req.full_url if isinstance(req, Request) else str(req)
+        calls.append(url)
+        if "GW150914-v1" in url and "strain-files" in url:
+            raise HTTPError(url=url, code=406, msg="Not Acceptable", hdrs=None, fp=None)
+        if "strain-files" in url:
+            return _FakeHTTPResponse(json.dumps(payload).encode("utf-8"))
+        if "H-H1" in url:
+            return _FakeHTTPResponse(b"h1-bytes")
+        if "L-L1" in url:
+            return _FakeHTTPResponse(b"l1-bytes")
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr(fetch_losc_event, "urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "fetch_losc_event.py",
+            "--event-id",
+            "GW150914",
+            "--out-root",
+            str(out_root),
+            "--event-version",
+            "auto",
+        ],
+    )
+
+    assert fetch_losc_event.main() == 0
+    assert any("GW150914-v1" in c for c in calls)
+    assert any("GW150914-v2" in c for c in calls)
