@@ -139,6 +139,19 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def _make_two_mode_ringdown(
+    *,
+    sample_rate: float = SAMPLE_RATE,
+    duration: float = DURATION,
+) -> np.ndarray:
+    """Synthetic signal with two ringdown-like modes for smoke regression."""
+    n = int(sample_rate * duration)
+    t = np.arange(n) / sample_rate
+    mode_220 = 1.0 * np.exp(-t / 0.05) * np.cos(2.0 * np.pi * 250.0 * t)
+    mode_aliased = 1.8 * np.exp(-t / 0.07) * np.cos(2.0 * np.pi * 335.0 * t)
+    return mode_220 + mode_aliased
+
+
 # ── Test 1: Accuracy on synthetic signal ─────────────────────────────────
 
 class TestSpectralAccuracy:
@@ -198,6 +211,46 @@ class TestSpectralAccuracy:
 
 
 # ── Test 2: Bias comparison hilbert vs spectral ───────────────────────────
+
+class TestKerrCenteredBand:
+    """Regression tests for Kerr-centered spectral banding."""
+
+    def test_kerr_centered_band_deterministic(self):
+        f_low, f_high, half_width = s3_mod._compute_kerr_centered_band(
+            f220_kerr_hz=250.0,
+            width_factor=5.0,
+            min_half_width_hz=10.0,
+            q_ref=12.0,
+            f_min_floor_hz=10.0,
+        )
+        assert f_low == pytest.approx(145.83333333333334)
+        assert f_high == pytest.approx(354.16666666666663)
+        assert half_width == pytest.approx(104.16666666666667)
+
+    def test_band_prevents_degeneracy_smoke(self):
+        strain = _make_two_mode_ringdown()
+
+        legacy = estimate_ringdown_spectral(
+            strain,
+            SAMPLE_RATE,
+            BAND,
+            kerr_centered_band=False,
+        )
+        kerr = estimate_ringdown_spectral(
+            strain,
+            SAMPLE_RATE,
+            BAND,
+            kerr_centered_band=True,
+            kerr_f220_hz=250.0,
+            band_width_factor=1.0,
+            min_half_width_hz=15.0,
+        )
+
+        assert legacy["fit_success"]
+        assert kerr["fit_success"]
+        assert legacy["f_hz"] > 300.0
+        assert abs(kerr["f_hz"] - 250.0) < 20.0
+
 
 class TestBiasComparison:
     """spectral_lorentzian corrects the known hilbert_envelope bias."""
@@ -376,6 +429,23 @@ class TestDeterminism:
         )
 
 
+    def test_integration_lite_writes_only_under_runs_root(self, tmp_path):
+        runs_root = tmp_path / "runs_root"
+        run_id = "io_contract_kerr_band"
+        _create_run_valid(runs_root, run_id)
+        _create_s2_outputs(runs_root, run_id)
+
+        r = _run_s3(run_id, runs_root)
+        assert r.returncode == 0, f"s3 failed (rc={r.returncode}):\n{r.stderr}"
+
+        stage_dir = runs_root / run_id / "s3_ringdown_estimates"
+        assert (stage_dir / "manifest.json").exists()
+        assert (stage_dir / "stage_summary.json").exists()
+        assert (stage_dir / "outputs" / "estimates.json").exists()
+
+        outside_stage = list(tmp_path.glob("*.json"))
+        assert outside_stage == [], f"Unexpected writes outside runs root: {outside_stage}"
+
 # ── Test 5: Contract keys ────────────────────────────────────────────────
 
 class TestContractKeys:
@@ -425,6 +495,13 @@ class TestContractKeys:
         assert est.get("method") == "spectral_lorentzian", (
             f"Expected method='spectral_lorentzian', got '{est.get('method')}'"
         )
+
+    def test_spectral_band_block_present_when_spectral(self, tmp_path):
+        est = self._run_and_load(tmp_path, "test_contract_band_block")
+        block = est.get("spectral_band")
+        assert isinstance(block, dict)
+        assert block.get("method") in {"kerr_centered", "fixed"}
+        assert isinstance(block.get("band_n_bins"), int)
 
     def test_method_field_hilbert_when_requested(self, tmp_path):
         """--method hilbert_envelope must record that method."""
