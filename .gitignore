@@ -35,3 +35,6 @@ htmlcov/
 *.tar.gz
 *.tgz
 *.tar
+
+# local data (never commit)
+gw_data_32s/
