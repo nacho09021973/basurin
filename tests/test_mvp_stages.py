@@ -6,6 +6,7 @@ Each test validates the BASURIN contract: manifest.json + stage_summary.json + o
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import os
 import subprocess
@@ -627,3 +628,106 @@ class TestS1ReuseIfPresent:
         )
         assert r.returncode == 0
         assert "outputs not found, will fetch" in r.stdout
+
+
+    def test_reuse_uses_local_losc_cache_before_gwosc(self, tmp_path, monkeypatch):
+        """With --reuse-if-present, local data/losc cache is used and GWOSC fetch is skipped."""
+        h5py = pytest.importorskip("h5py")
+        from mvp import s1_fetch_strain as s1
+
+        runs_root = tmp_path / "runs"
+        run_id = "test_reuse_local_losc"
+        event_id = "GW170104"
+        _create_run_valid(runs_root, run_id)
+
+        losc_root = tmp_path / "data" / "losc" / event_id
+        losc_root.mkdir(parents=True, exist_ok=True)
+
+        fs = 256.0
+        duration = 4.0
+        n = int(fs * duration)
+        gps_start = 1126259446.0
+        for det, seed in (("H1", 1), ("L1", 2)):
+            p_h5 = losc_root / f"{det}_dummy.hdf5"
+            with h5py.File(p_h5, "w") as h5:
+                grp = h5.create_group("strain")
+                data = np.random.default_rng(seed).normal(0.0, 1e-21, n).astype(np.float64)
+                ds = grp.create_dataset("Strain", data=data)
+                ds.attrs["Xspacing"] = 1.0 / fs
+                ds.attrs["Xstart"] = gps_start
+
+        called = {"fetch": False}
+
+        def _fail_fetch(*args, **kwargs):
+            called["fetch"] = True
+            raise AssertionError("GWOSC fetch should not be called when local LOSC exists")
+
+        monkeypatch.setattr(s1, "_fetch_via_gwpy", _fail_fetch)
+        monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "s1_fetch_strain.py",
+                "--run", run_id,
+                "--event-id", event_id,
+                "--detectors", "H1,L1",
+                "--duration-s", str(duration),
+                "--reuse-if-present",
+                "--hdf5-root", str(tmp_path / "data" / "losc"),
+            ],
+        )
+
+        assert s1.main() == 0
+        assert called["fetch"] is False
+
+        stage_dir = runs_root / run_id / "s1_fetch_strain"
+        outputs_dir = stage_dir / "outputs"
+        assert (outputs_dir / "strain.npz").exists()
+        assert (outputs_dir / "provenance.json").exists()
+
+        prov = json.loads((outputs_dir / "provenance.json").read_text(encoding="utf-8"))
+        assert prov["source"] == "local_losc"
+
+        manifest = json.loads((stage_dir / "manifest.json").read_text(encoding="utf-8"))
+        manifest_text = json.dumps(manifest, sort_keys=True)
+        for rel in ("outputs/strain.npz", "outputs/provenance.json"):
+            digest = hashlib.sha256((stage_dir / rel).read_bytes()).hexdigest()
+            assert digest in manifest_text
+
+    def test_reuse_without_local_cache_calls_fetch(self, tmp_path, monkeypatch):
+        """When local cache is absent, --reuse-if-present falls back to fetch path."""
+        from mvp import s1_fetch_strain as s1
+
+        runs_root = tmp_path / "runs"
+        run_id = "test_reuse_fetch_fallback"
+        event_id = "GW170104"
+        _create_run_valid(runs_root, run_id)
+
+        called = {"fetch": False}
+
+        def _fake_fetch(detector, gps_start, duration_s, timeout_s=60):
+            called["fetch"] = True
+            assert detector in {"H1", "L1"}
+            n = int(128 * duration_s)
+            return np.zeros(n, dtype=np.float64), 128.0, "fake_gwpy"
+
+        monkeypatch.setattr(s1, "_fetch_gps_center", lambda event: 1126259462.0)
+        monkeypatch.setattr(s1, "_fetch_via_gwpy", _fake_fetch)
+        monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "s1_fetch_strain.py",
+                "--run", run_id,
+                "--event-id", event_id,
+                "--detectors", "H1,L1",
+                "--duration-s", "2",
+                "--reuse-if-present",
+                "--hdf5-root", str(tmp_path / "data" / "losc"),
+            ],
+        )
+
+        assert s1.main() == 0
+        assert called["fetch"] is True

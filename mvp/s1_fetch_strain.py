@@ -333,6 +333,37 @@ def _resolve_local_cache_hdf5(
     return local_by_det
 
 
+def _candidate_event_ids(event_id: str, hdf5_root: Path) -> list[str]:
+    candidates = [event_id]
+    if "_" in event_id:
+        base = event_id.split("_", 1)[0]
+        if base and base not in candidates:
+            candidates.append(base)
+    else:
+        for match in sorted([p.name for p in hdf5_root.glob(f"{event_id}_*") if p.is_dir()]):
+            if match not in candidates:
+                candidates.append(match)
+    return candidates
+
+
+def find_local_losc_files(event_id: str, detectors: list[str], hdf5_root: Path) -> dict[str, Path]:
+    """Best-effort deterministic resolver for local LOSC cache under data/losc/<EVENT_ID>/."""
+    resolved: dict[str, Path] = {}
+    for det in detectors:
+        candidates: list[Path] = []
+        for candidate_event in _candidate_event_ids(event_id, hdf5_root):
+            event_dir = (hdf5_root / candidate_event).resolve()
+            if not event_dir.exists() or not event_dir.is_dir():
+                continue
+            candidates.extend(_collect_hdf5_candidates(event_dir, det))
+        unique = sorted(set(candidates), key=lambda p: str(p))
+        if not unique:
+            continue
+        unique.sort(key=lambda p: (-p.stat().st_size, p.name))
+        resolved[det] = unique[0].resolve()
+    return resolved
+
+
 def _find_strain_dataset(h5: Any) -> Any:
     if "strain/Strain" in h5:
         return h5["strain/Strain"]
@@ -424,8 +455,8 @@ def _try_reuse(
         print(f"[s1_fetch_strain] reuse: detectors mismatch ({prov_dets} != {sorted(detectors)})", flush=True)
         return False
     if local_input_sha is not None:
-        if prov.get("source") != "local_hdf5":
-            print("[s1_fetch_strain] reuse: source mismatch (expected local_hdf5)", flush=True)
+        if prov.get("source") not in {"local_hdf5", "local_losc"}:
+            print("[s1_fetch_strain] reuse: source mismatch (expected local_hdf5/local_losc)", flush=True)
             return False
         if prov.get("local_input_sha256", {}) != local_input_sha:
             print("[s1_fetch_strain] reuse: local input SHA mismatch, will fetch", flush=True)
@@ -501,7 +532,7 @@ def _try_reuse_from_other_runs(
             continue
 
         if local_input_sha is not None:
-            if prov.get("source") != "local_hdf5":
+            if prov.get("source") not in {"local_hdf5", "local_losc"}:
                 continue
             if prov.get("local_input_sha256", {}) != local_input_sha:
                 continue
@@ -620,9 +651,20 @@ def main() -> int:
     if local_by_det and args.synthetic:
         print("ERROR: --local-hdf5 cannot be used with --synthetic", file=sys.stderr)
         raise SystemExit(2)
-    # Skip auto-resolve when --reuse-if-present: reuse check runs first and
-    # may succeed without local HDF5 files. If reuse fails, HDF5 is resolved
-    # below after the reuse check returns False.
+
+    local_source_type = "local_hdf5" if local_by_det else None
+
+    if not local_by_det and not args.synthetic and args.event_id:
+        local_losc = find_local_losc_files(args.event_id, detectors, Path(args.hdf5_root))
+        if all(det in local_losc for det in detectors):
+            local_by_det = local_losc
+            local_source_type = "local_losc"
+            print(
+                f"[s1_fetch_strain] Found local LOSC cache for {args.event_id} in {Path(args.hdf5_root).resolve()}",
+                flush=True,
+            )
+
+    # Preserve strict explicit error behavior for non-reuse online mode.
     if not local_by_det and not args.synthetic and args.event_id and not args.reuse_if_present:
         try:
             local_by_det = _resolve_event_hdf5_or_die(
@@ -630,6 +672,7 @@ def main() -> int:
                 event_id=args.event_id,
                 detectors=detectors,
             )
+            local_source_type = "local_hdf5"
             print(
                 f"[s1_fetch_strain] Auto-resolved local HDF5 in {Path(args.hdf5_root).resolve() / args.event_id}",
                 flush=True,
@@ -640,6 +683,8 @@ def main() -> int:
 
     if not local_by_det and not args.synthetic:
         local_by_det = _resolve_local_cache_hdf5(args.run, args.event_id, detectors)
+        if local_by_det:
+            local_source_type = "local_hdf5"
     local_mode = bool(local_by_det)
 
     local_input_sha = {det: sha256_file(path) for det, path in sorted(local_by_det.items())} if local_mode else None
@@ -649,6 +694,7 @@ def main() -> int:
         "duration_s": args.duration_s, "synthetic": args.synthetic,
         "offline": args.offline,
         "local_hdf5": {det: str(path) for det, path in sorted(local_by_det.items())},
+        "local_source_type": local_source_type,
     })
 
     # --- Reuse check (before any network / generation) ---
@@ -747,9 +793,10 @@ def main() -> int:
         npz_path = ctx.outputs_dir / "strain.npz"
         np.savez(npz_path, **npz_payload)
 
+        local_source = local_source_type or "local_hdf5"
         provenance = {
             "event_id": args.event_id,
-            "source": "local_hdf5" if local_mode else ("synthetic" if args.synthetic else "GWOSC"),
+            "source": local_source if local_mode else ("synthetic" if args.synthetic else "GWOSC"),
             "detectors": detectors, "gps_center": gps_center,
             "gps_start": gps_start, "duration_s": args.duration_s,
             "sample_rate_hz": sample_rate_hz, "library_version": library_version,
@@ -774,8 +821,12 @@ def main() -> int:
                 },
             )
 
-        finalize(ctx, artifacts={"strain_npz": npz_path, "provenance": prov_path},
-                 results={"detectors": detectors, "sample_rate_hz": sample_rate_hz})
+        finalize(
+            ctx,
+            artifacts={"strain_npz": npz_path, "provenance": prov_path},
+            results={"detectors": detectors, "sample_rate_hz": sample_rate_hz},
+            extra_summary={"source": {"type": provenance["source"]}},
+        )
         _write_run_valid_verdict(args.run, "PASS", "s1_fetch_strain completed successfully")
         return 0
 
