@@ -1,3015 +1,558 @@
+<#
+.SYNOPSIS
+    Download GWOSC strain HDF5 files for BASURIN ringdown analysis.
+
+.DESCRIPTION
+    Iterates over a list of LIGO BBH events, queries the GWOSC API v2,
+    and downloads H1/L1 strain files (HDF format, duration=32s, 4KHz preferred).
+
+    API chain per event:
+      1) GET /api/v2/events/<EVENT_ID>           -> versions[] (iterate backwards)
+      2) GET <version.detail_url>                -> strain_files_url
+      3) GET <strain_files_url> (paginated)      -> list of download URLs
+      4) Select best file per detector: HDF, duration=32, 4KHz preferred
+
+    Known API quirks handled:
+      - GWTC-2.1-confident versions often have 0 strain files -> fall back
+      - Field is "file_format" with value "HDF" (not "format"/"hdf5")
+      - strain_files_url returns paginated {next, results, results_count}
+      - GW190521_030229 resolves to GW190521 via aliases
+
+.PARAMETER StrictDuration32
+    $true  -> skip detectors lacking duration=32 HDF files
+    $false -> fall back to shortest available HDF duration (default)
+
+.PARAMETER PreferredSampleRateKHz
+    Preferred sample rate in kHz. Default: 4 (sufficient for ringdown at 200-400 Hz).
+    Falls back to any available rate if preferred not found.
+
+.EXAMPLE
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+    .\download_gwosc_strain.ps1
+
+    # Strict mode + debug output:
+    .\download_gwosc_strain.ps1 -StrictDuration32 $true -DebugCandidates
+
+    # Self-check only (no downloads):
+    .\download_gwosc_strain.ps1 -SelfCheckOnly
+
+.NOTES
+    Output: data\losc\<EVENT_ID>\{H1,L1}.hdf5
+    UNC workaround: copy script to C:\tmp if running from \\wsl$\...
+#>
+
+param(
+    [bool]$StrictDuration32 = $false,
+    [int]$PreferredSampleRateKHz = 4,
+    [int]$MaxRetries = 3,
+    [int]$BackoffBaseSeconds = 2,
+    [switch]$DebugCandidates,
+    [switch]$SelfCheckOnly
+)
+
+# ============================================================================
+# Configuration
+# ============================================================================
+
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"   # speeds up Invoke-WebRequest
 
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
+$EVENTS = @(
+    "GW150914",
+    "GW151226",
+    "GW170104",
+    "GW170608",
+    "GW170729",
+    "GW170809",
+    "GW170814",
+    "GW170818",
+    "GW170823",
+    "GW190521_030229"
 )
 
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  try {
-    $resp = Invoke-RestMethod -Uri $api -Method GET
-  } catch {
-    throw "GWOSC request failed for ${EventId}. API=$api. $($ErrorActionPreference = "Stop"
+$API_BASE = "https://gwosc.org/api/v2"
+$DETECTORS = @("H1", "L1")
+$PREFERRED_FORMAT = "HDF"          # API field value (not "hdf5")
+$PREFERRED_DURATION = 32
+$OUTPUT_ROOT = Join-Path (Get-Location) "data" "losc"
 
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
+# ============================================================================
+# Helpers
+# ============================================================================
 
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  $resp = Invoke-RestMethod -Uri $api -Method GET
-  $detail = $resp.events[0].versions[-1].detail_url
-  if (-not $detail) { throw "No detail_url para $EventId (API=$api)" }
-  return $detail
+function Write-Log {
+    param([string]$Tag, [string]$Message)
+    $ts = Get-Date -Format "HH:mm:ss"
+    Write-Host "[$ts] [$Tag] $Message"
 }
 
-function Pick-DetectorUrl($StrainFilesJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  # StrainFilesJson suele ser un array (lista) o un objeto con propiedad 'strain_files'
-  $files = $null
-  if ($StrainFilesJson -is [System.Array]) {
-    $files = $StrainFilesJson
-  } elseif ($StrainFilesJson -and ($StrainFilesJson.PSObject.Properties.Name -contains "strain_files")) {
-    $files = $StrainFilesJson.strain_files
-  }
+function Invoke-ApiGet {
+    <#
+    .SYNOPSIS
+        GET a JSON endpoint with retries and exponential backoff.
+    #>
+    param([string]$Url)
 
-  if (-not $files) { return $null }
-
-  # Preferencia: hdf5 + duration exacta; si no, cualquier hdf5; si no, cualquier formato.
-  $cand = $files | Where-Object { $ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  try {
-    $resp = Invoke-RestMethod -Uri $api -Method GET
-  } catch {
-    throw "GWOSC request failed for ${EventId}. API=$api. $($ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  $resp = Invoke-RestMethod -Uri $api -Method GET
-  $detail = $resp.events[0].versions[-1].detail_url
-  if (-not $detail) { throw "No detail_url para $EventId (API=$api)" }
-  return $detail
-}
-
-function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
+    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+        try {
+            $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 30
+            return ($resp.Content | ConvertFrom-Json)
+        }
+        catch {
+            $err = $_.Exception.Message
+            if ($attempt -lt $MaxRetries) {
+                $wait = $BackoffBaseSeconds * [math]::Pow(2, $attempt - 1)
+                Write-Log "RETRY" "Attempt ${attempt}/${MaxRetries} failed for $Url -- waiting ${wait}s"
+                Start-Sleep -Seconds $wait
+            }
+            else {
+                throw "API call failed after $MaxRetries attempts: $Url -- $err"
+            }
+        }
     }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
 }
 
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
+function Get-AllStrainFiles {
+    <#
+    .SYNOPSIS
+        Fetch all pages from a paginated strain_files_url endpoint.
+    #>
+    param([string]$Url)
 
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+    $allResults = @()
+    $currentUrl = $Url
 
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-.Exception.Message)"
-  }
-
-  # GWOSC puede devolver 'events' (lista) o 'event' (objeto) o estructuras diferentes.
-  $detail = $null
-
-  if ($resp -and $resp.PSObject.Properties.Name -contains "events" -and $resp.events -and $resp.events.Count -gt 0) {
-    $ev = $resp.events[0]
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "event" -and $resp.event) {
-    $ev = $resp.event
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "detail_url") {
-    $detail = $resp.detail_url
-  }
-
-    if (-not $detail -and $resp -and ($resp.PSObject.Properties.Name -contains "versions") -and $resp.versions -and $resp.versions.Count -gt 0) {
-    $detail = $resp.versions[-1].detail_url
-  }
-
-  if (-not $detail) {
-    # Dump mínimo auditable (sin volcar 10k líneas)
-    $keys = if ($resp) { ($resp.PSObject.Properties.Name -join ",") } else { "<null>" }
-    throw "No detail_url para ${EventId}. API=$api. Top-level keys=[$keys]"
-  }
-  return $detail
-}function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
+    while ($currentUrl) {
+        $page = Invoke-ApiGet -Url $currentUrl
+        if ($page.results) {
+            $allResults += $page.results
+        }
+        $currentUrl = $page.next   # null when no more pages
     }
-  }
 
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
+    return $allResults
 }
 
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
+function Find-BestVersionWithStrain {
+    <#
+    .SYNOPSIS
+        Iterate versions backwards until finding one with strain files.
+        Returns (strain_file_list, version_number, catalog_name) or $null.
+    #>
+    param([object[]]$Versions, [string]$EventId)
 
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+    # Iterate from last to first
+    $indices = ($Versions.Count - 1)..0
+    foreach ($i in $indices) {
+        $ver = $Versions[$i]
+        $detailUrl = $ver.detail_url
+        if (-not $detailUrl) { continue }
 
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
+        try {
+            $versionData = Invoke-ApiGet -Url $detailUrl
+            $strainUrl = $versionData.strain_files_url
+            if (-not $strainUrl) { continue }
 
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-
-
-.detector -eq $Detector -and $ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  try {
-    $resp = Invoke-RestMethod -Uri $api -Method GET
-  } catch {
-    throw "GWOSC request failed for ${EventId}. API=$api. $($ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  $resp = Invoke-RestMethod -Uri $api -Method GET
-  $detail = $resp.events[0].versions[-1].detail_url
-  if (-not $detail) { throw "No detail_url para $EventId (API=$api)" }
-  return $detail
-}
-
-function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
+            $files = Get-AllStrainFiles -Url $strainUrl
+            if ($files -and $files.Count -gt 0) {
+                $vNum = $ver.version
+                $catalog = $ver.catalog
+                Write-Log "API" "${EventId}: using v${vNum} (${catalog}) with $($files.Count) strain files"
+                return @{
+                    Files = $files
+                    Version = $vNum
+                    Catalog = $catalog
+                }
+            }
+            else {
+                Write-Log "INFO" "${EventId}: v$($ver.version) ($($ver.catalog)) has 0 strain files, trying older..."
+            }
+        }
+        catch {
+            Write-Log "WARN" "${EventId}: v$($ver.version) detail fetch failed: $($_.Exception.Message)"
+        }
     }
-  }
 
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
+    return $null
 }
 
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
+function Download-File {
+    <#
+    .SYNOPSIS
+        Download a file. Try BITS first, fall back to Invoke-WebRequest with retries.
+    #>
+    param(
+        [string]$Url,
+        [string]$Destination
+    )
 
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-.Exception.Message)"
-  }
-
-  # GWOSC puede devolver 'events' (lista) o 'event' (objeto) o estructuras diferentes.
-  $detail = $null
-
-  if ($resp -and $resp.PSObject.Properties.Name -contains "events" -and $resp.events -and $resp.events.Count -gt 0) {
-    $ev = $resp.events[0]
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "event" -and $resp.event) {
-    $ev = $resp.event
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "detail_url") {
-    $detail = $resp.detail_url
-  }
-
-    if (-not $detail -and $resp -and ($resp.PSObject.Properties.Name -contains "versions") -and $resp.versions -and $resp.versions.Count -gt 0) {
-    $detail = $resp.versions[-1].detail_url
-  }
-
-  if (-not $detail) {
-    # Dump mínimo auditable (sin volcar 10k líneas)
-    $keys = if ($resp) { ($resp.PSObject.Properties.Name -join ",") } else { "<null>" }
-    throw "No detail_url para ${EventId}. API=$api. Top-level keys=[$keys]"
-  }
-  return $detail
-}function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
+    # Skip if already downloaded and non-empty
+    if (Test-Path $Destination) {
+        $existing = Get-Item $Destination
+        if ($existing.Length -gt 0) {
+            $sizeMB = '{0:N1}' -f ($existing.Length / 1MB)
+            Write-Log "SKIP" "Already exists (${sizeMB} MB): $(Split-Path $Destination -Leaf)"
+            return $true
+        }
+        else {
+            Remove-Item $Destination -Force
+        }
     }
-  }
 
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-
-
-.format -eq $Format -and $ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  try {
-    $resp = Invoke-RestMethod -Uri $api -Method GET
-  } catch {
-    throw "GWOSC request failed for ${EventId}. API=$api. $($ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  $resp = Invoke-RestMethod -Uri $api -Method GET
-  $detail = $resp.events[0].versions[-1].detail_url
-  if (-not $detail) { throw "No detail_url para $EventId (API=$api)" }
-  return $detail
-}
-
-function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
+    # Ensure parent directory exists
+    $parentDir = Split-Path $Destination -Parent
+    if (-not (Test-Path $parentDir)) {
+        New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
     }
-  }
 
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-.Exception.Message)"
-  }
-
-  # GWOSC puede devolver 'events' (lista) o 'event' (objeto) o estructuras diferentes.
-  $detail = $null
-
-  if ($resp -and $resp.PSObject.Properties.Name -contains "events" -and $resp.events -and $resp.events.Count -gt 0) {
-    $ev = $resp.events[0]
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "event" -and $resp.event) {
-    $ev = $resp.event
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "detail_url") {
-    $detail = $resp.detail_url
-  }
-
-    if (-not $detail -and $resp -and ($resp.PSObject.Properties.Name -contains "versions") -and $resp.versions -and $resp.versions.Count -gt 0) {
-    $detail = $resp.versions[-1].detail_url
-  }
-
-  if (-not $detail) {
-    # Dump mínimo auditable (sin volcar 10k líneas)
-    $keys = if ($resp) { ($resp.PSObject.Properties.Name -join ",") } else { "<null>" }
-    throw "No detail_url para ${EventId}. API=$api. Top-level keys=[$keys]"
-  }
-  return $detail
-}function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
+    # Try BITS transfer first (faster, resumable)
+    $bitsOk = $false
+    try {
+        if (Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue) {
+            Write-Log "BITS" "Downloading -> $(Split-Path $Destination -Leaf)"
+            Start-BitsTransfer -Source $Url -Destination $Destination -ErrorAction Stop
+            if ((Test-Path $Destination) -and ((Get-Item $Destination).Length -gt 0)) {
+                $bitsOk = $true
+            }
+        }
     }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-
-
-.duration -eq $Duration } | Select-Object -First 1
-  if ($cand -and $cand.download_url) { return $cand.download_url }
-
-  $cand = $files | Where-Object { $ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  try {
-    $resp = Invoke-RestMethod -Uri $api -Method GET
-  } catch {
-    throw "GWOSC request failed for ${EventId}. API=$api. $($ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  $resp = Invoke-RestMethod -Uri $api -Method GET
-  $detail = $resp.events[0].versions[-1].detail_url
-  if (-not $detail) { throw "No detail_url para $EventId (API=$api)" }
-  return $detail
-}
-
-function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
+    catch {
+        Write-Log "WARN" "BITS failed: $($_.Exception.Message) -- falling back to WebRequest"
+        if (Test-Path $Destination) { Remove-Item $Destination -Force -ErrorAction SilentlyContinue }
     }
-  }
 
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
+    if ($bitsOk) { return $true }
 
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-.Exception.Message)"
-  }
-
-  # GWOSC puede devolver 'events' (lista) o 'event' (objeto) o estructuras diferentes.
-  $detail = $null
-
-  if ($resp -and $resp.PSObject.Properties.Name -contains "events" -and $resp.events -and $resp.events.Count -gt 0) {
-    $ev = $resp.events[0]
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "event" -and $resp.event) {
-    $ev = $resp.event
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "detail_url") {
-    $detail = $resp.detail_url
-  }
-
-    if (-not $detail -and $resp -and ($resp.PSObject.Properties.Name -contains "versions") -and $resp.versions -and $resp.versions.Count -gt 0) {
-    $detail = $resp.versions[-1].detail_url
-  }
-
-  if (-not $detail) {
-    # Dump mínimo auditable (sin volcar 10k líneas)
-    $keys = if ($resp) { ($resp.PSObject.Properties.Name -join ",") } else { "<null>" }
-    throw "No detail_url para ${EventId}. API=$api. Top-level keys=[$keys]"
-  }
-  return $detail
-}function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
+    # Fallback: Invoke-WebRequest with retries
+    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+        try {
+            Write-Log "HTTP" "Download attempt ${attempt}/${MaxRetries} -> $(Split-Path $Destination -Leaf)"
+            Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing -TimeoutSec 600
+            if ((Test-Path $Destination) -and ((Get-Item $Destination).Length -gt 0)) {
+                return $true
+            }
+            throw "Downloaded file is empty or missing"
+        }
+        catch {
+            if (Test-Path $Destination) { Remove-Item $Destination -Force -ErrorAction SilentlyContinue }
+            if ($attempt -lt $MaxRetries) {
+                $wait = $BackoffBaseSeconds * [math]::Pow(2, $attempt - 1)
+                Write-Log "RETRY" "Download failed -- waiting ${wait}s"
+                Start-Sleep -Seconds $wait
+            }
+            else {
+                Write-Log "ERROR" "Download failed after $MaxRetries attempts: $($_.Exception.Message)"
+                return $false
+            }
+        }
     }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
+    return $false
 }
 
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
+function Select-StrainFile {
+    <#
+    .SYNOPSIS
+        From a list of strain file entries, pick the best candidate for a detector.
+        Preference: HDF format, duration=32, lowest sample rate >= PreferredSampleRateKHz.
+        Returns $null if nothing suitable found.
+    #>
+    param(
+        [object[]]$Files,
+        [string]$Detector,
+        [string]$EventId
+    )
 
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+    # Filter: this detector + HDF format
+    $hdfCandidates = @($Files | Where-Object {
+        $_.detector -eq $Detector -and $_.file_format -eq $PREFERRED_FORMAT
+    })
 
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-
-
-.detector -eq $Detector -and $ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  try {
-    $resp = Invoke-RestMethod -Uri $api -Method GET
-  } catch {
-    throw "GWOSC request failed for ${EventId}. API=$api. $($ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  $resp = Invoke-RestMethod -Uri $api -Method GET
-  $detail = $resp.events[0].versions[-1].detail_url
-  if (-not $detail) { throw "No detail_url para $EventId (API=$api)" }
-  return $detail
-}
-
-function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
+    if ($hdfCandidates.Count -eq 0) {
+        if ($DebugCandidates) {
+            Write-Log "DEBUG" "No HDF files for ${EventId}/${Detector}. All entries:"
+            $allDet = @($Files | Where-Object { $_.detector -eq $Detector })
+            foreach ($c in $allDet) {
+                $bn = ($c.download_url -split '/')[-1]
+                Write-Log "DEBUG" "  fmt=$($c.file_format) dur=$($c.duration) rate=$($c.sample_rate_kHz)kHz -> $bn"
+            }
+        }
+        return $null
     }
-  }
 
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
+    # Sub-filter: preferred duration
+    $dur32 = @($hdfCandidates | Where-Object { $_.duration -eq $PREFERRED_DURATION })
 
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-.Exception.Message)"
-  }
-
-  # GWOSC puede devolver 'events' (lista) o 'event' (objeto) o estructuras diferentes.
-  $detail = $null
-
-  if ($resp -and $resp.PSObject.Properties.Name -contains "events" -and $resp.events -and $resp.events.Count -gt 0) {
-    $ev = $resp.events[0]
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "event" -and $resp.event) {
-    $ev = $resp.event
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "detail_url") {
-    $detail = $resp.detail_url
-  }
-
-    if (-not $detail -and $resp -and ($resp.PSObject.Properties.Name -contains "versions") -and $resp.versions -and $resp.versions.Count -gt 0) {
-    $detail = $resp.versions[-1].detail_url
-  }
-
-  if (-not $detail) {
-    # Dump mínimo auditable (sin volcar 10k líneas)
-    $keys = if ($resp) { ($resp.PSObject.Properties.Name -join ",") } else { "<null>" }
-    throw "No detail_url para ${EventId}. API=$api. Top-level keys=[$keys]"
-  }
-  return $detail
-}function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
+    if ($dur32.Count -gt 0) {
+        # Among duration=32, prefer the requested sample rate
+        $preferred = @($dur32 | Where-Object { $_.sample_rate_kHz -eq $PreferredSampleRateKHz })
+        if ($preferred.Count -gt 0) {
+            return $preferred[0]
+        }
+        # Otherwise take the lowest sample rate available (smallest file)
+        $sorted = @($dur32 | Sort-Object { [int]$_.sample_rate_kHz })
+        return $sorted[0]
     }
-  }
 
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-
-
-.format -eq $Format } | Sort-Object duration | Select-Object -First 1
-  if ($cand -and $cand.download_url) { return $cand.download_url }
-
-  $cand = $files | Where-Object { $ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  try {
-    $resp = Invoke-RestMethod -Uri $api -Method GET
-  } catch {
-    throw "GWOSC request failed for ${EventId}. API=$api. $($ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  $resp = Invoke-RestMethod -Uri $api -Method GET
-  $detail = $resp.events[0].versions[-1].detail_url
-  if (-not $detail) { throw "No detail_url para $EventId (API=$api)" }
-  return $detail
-}
-
-function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
+    # No duration=32 HDF available
+    if ($StrictDuration32) {
+        $availDurations = ($hdfCandidates | ForEach-Object { $_.duration } | Sort-Object -Unique) -join ", "
+        Write-Log "SKIP" "${EventId}/${Detector}: no HDF duration=32 (available durations: $availDurations)"
+        if ($DebugCandidates) {
+            foreach ($c in $hdfCandidates) {
+                $bn = ($c.download_url -split '/')[-1]
+                Write-Log "DEBUG" "  dur=$($c.duration) rate=$($c.sample_rate_kHz)kHz -> $bn"
+            }
+        }
+        return $null
     }
-  }
 
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
+    # Flexible: pick shortest available duration, then lowest sample rate
+    $sorted = @($hdfCandidates | Sort-Object { [int]$_.duration }, { [int]$_.sample_rate_kHz })
+    $chosen = $sorted[0]
+    Write-Log "INFO" "${EventId}/${Detector}: no duration=32; using duration=$($chosen.duration) rate=$($chosen.sample_rate_kHz)kHz (fallback)"
+    return $chosen
 }
 
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-.Exception.Message)"
-  }
-
-  # GWOSC puede devolver 'events' (lista) o 'event' (objeto) o estructuras diferentes.
-  $detail = $null
-
-  if ($resp -and $resp.PSObject.Properties.Name -contains "events" -and $resp.events -and $resp.events.Count -gt 0) {
-    $ev = $resp.events[0]
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "event" -and $resp.event) {
-    $ev = $resp.event
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "detail_url") {
-    $detail = $resp.detail_url
-  }
-
-    if (-not $detail -and $resp -and ($resp.PSObject.Properties.Name -contains "versions") -and $resp.versions -and $resp.versions.Count -gt 0) {
-    $detail = $resp.versions[-1].detail_url
-  }
-
-  if (-not $detail) {
-    # Dump mínimo auditable (sin volcar 10k líneas)
-    $keys = if ($resp) { ($resp.PSObject.Properties.Name -join ",") } else { "<null>" }
-    throw "No detail_url para ${EventId}. API=$api. Top-level keys=[$keys]"
-  }
-  return $detail
-}function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
+function Get-FileSha256 {
+    param([string]$FilePath)
+    if (Test-Path $FilePath) {
+        return (Get-FileHash -Path $FilePath -Algorithm SHA256).Hash
     }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
+    return "FILE_NOT_FOUND"
 }
 
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
+# ============================================================================
+# Self-check: inventory of files on disk
+# ============================================================================
 
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+function Invoke-SelfCheck {
+    Write-Host ""
+    Write-Host "=========================================="
+    Write-Host "  SELF-CHECK: strain files on disk"
+    Write-Host "=========================================="
+    Write-Host ""
 
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
+    $totalOk = 0
+    $totalMiss = 0
 
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
+    foreach ($eventId in $EVENTS) {
+        $eventDir = Join-Path $OUTPUT_ROOT $eventId
+        $status = @{}
 
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
+        foreach ($det in $DETECTORS) {
+            $found = $false
+            $foundInfo = ""
 
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
+            if (Test-Path $eventDir) {
+                # Look for canonical name first, then any matching file
+                $canonical = Join-Path $eventDir "${det}.hdf5"
+                if ((Test-Path $canonical) -and ((Get-Item $canonical).Length -gt 0)) {
+                    $f = Get-Item $canonical
+                    $found = $true
+                    $sizeMB = '{0:N1}' -f ($f.Length / 1MB)
+                    $foundInfo = "${det}.hdf5 (${sizeMB} MB)"
+                }
+                else {
+                    $others = Get-ChildItem -Path $eventDir -File -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Name -match "$det" -and $_.Name -match "\.(hdf5|h5)$" -and $_.Length -gt 0 }
+                    if ($others) {
+                        $f = $others[0]
+                        $found = $true
+                        $sizeMB = '{0:N1}' -f ($f.Length / 1MB)
+                        $foundInfo = "$($f.Name) (${sizeMB} MB)"
+                    }
+                }
+            }
 
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
+            if ($found) {
+                $status[$det] = "[OK] $foundInfo"
+                $totalOk++
+            }
+            else {
+                $status[$det] = "[MISS]"
+                $totalMiss++
+            }
+        }
 
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-
-
-.detector -eq $Detector -and $ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  try {
-    $resp = Invoke-RestMethod -Uri $api -Method GET
-  } catch {
-    throw "GWOSC request failed for ${EventId}. API=$api. $($ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  $resp = Invoke-RestMethod -Uri $api -Method GET
-  $detail = $resp.events[0].versions[-1].detail_url
-  if (-not $detail) { throw "No detail_url para $EventId (API=$api)" }
-  return $detail
-}
-
-function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
+        Write-Host "  ${eventId}:"
+        Write-Host "    H1: $($status['H1'])"
+        Write-Host "    L1: $($status['L1'])"
     }
-  }
 
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
+    $total = $EVENTS.Count * $DETECTORS.Count
+    Write-Host ""
+    Write-Host "  Total: $totalOk OK, $totalMiss MISSING (of $total expected)"
+    Write-Host ""
 }
 
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
+# ============================================================================
+# Main download logic
+# ============================================================================
 
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+function Invoke-DownloadAll {
+    Write-Host ""
+    Write-Host "=========================================="
+    Write-Host "  GWOSC Strain Downloader for BASURIN"
+    Write-Host "=========================================="
+    Write-Host "  Output root     : $OUTPUT_ROOT"
+    Write-Host "  Events          : $($EVENTS.Count)"
+    Write-Host "  Strict dur=32   : $StrictDuration32"
+    Write-Host "  Preferred rate  : ${PreferredSampleRateKHz} kHz"
+    Write-Host "  Max retries     : $MaxRetries"
+    Write-Host "=========================================="
+    Write-Host ""
 
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-.Exception.Message)"
-  }
-
-  # GWOSC puede devolver 'events' (lista) o 'event' (objeto) o estructuras diferentes.
-  $detail = $null
-
-  if ($resp -and $resp.PSObject.Properties.Name -contains "events" -and $resp.events -and $resp.events.Count -gt 0) {
-    $ev = $resp.events[0]
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "event" -and $resp.event) {
-    $ev = $resp.event
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "detail_url") {
-    $detail = $resp.detail_url
-  }
-
-    if (-not $detail -and $resp -and ($resp.PSObject.Properties.Name -contains "versions") -and $resp.versions -and $resp.versions.Count -gt 0) {
-    $detail = $resp.versions[-1].detail_url
-  }
-
-  if (-not $detail) {
-    # Dump mínimo auditable (sin volcar 10k líneas)
-    $keys = if ($resp) { ($resp.PSObject.Properties.Name -join ",") } else { "<null>" }
-    throw "No detail_url para ${EventId}. API=$api. Top-level keys=[$keys]"
-  }
-  return $detail
-}function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
+    # UNC path warning
+    $cwd = (Get-Location).Path
+    if ($cwd -match "^\\\\") {
+        Write-Log "WARN" "Running from UNC path ($cwd)."
+        Write-Log "WARN" "BITS transfer may fail on UNC. If downloads fail,"
+        Write-Log "WARN" "copy this script to a local path (e.g. C:\tmp) and rerun."
     }
-  }
 
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
+    $summary = @{}
 
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
+    foreach ($eventId in $EVENTS) {
+        Write-Host ""
+        Write-Host ("=" * 55)
+        Write-Log "EVENT" "Processing $eventId"
+        Write-Host ("=" * 55)
 
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+        $eventDir = Join-Path $OUTPUT_ROOT $eventId
+        if (-not (Test-Path $eventDir)) {
+            New-Item -ItemType Directory -Path $eventDir -Force | Out-Null
+        }
 
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
+        $eventStatus = @{ "H1" = "PENDING"; "L1" = "PENDING" }
 
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
+        try {
+            # ---- Step 1: GET event metadata ----
+            $eventUrl = "${API_BASE}/events/${eventId}"
+            Write-Log "API" "GET $eventUrl"
+            $eventData = Invoke-ApiGet -Url $eventUrl
 
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
+            $versions = $eventData.versions
+            if (-not $versions -or $versions.Count -eq 0) {
+                throw "No versions found in API response"
+            }
+            Write-Log "INFO" "Found $($versions.Count) version(s): $(($versions | ForEach-Object { 'v' + $_.version + '(' + $_.catalog + ')' }) -join ', ')"
 
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
+            # ---- Step 2-3: Find version with strain files (iterate backwards) ----
+            $result = Find-BestVersionWithStrain -Versions $versions -EventId $eventId
 
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
+            if (-not $result) {
+                throw "No version has downloadable strain files"
+            }
 
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
+            $fileList = $result.Files
 
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
+            # Debug: show all candidates
+            if ($DebugCandidates) {
+                Write-Log "DEBUG" "All strain file candidates for ${eventId} (v$($result.Version)):"
+                foreach ($sf in $fileList) {
+                    $bn = ($sf.download_url -split '/')[-1]
+                    Write-Log "DEBUG" "  det=$($sf.detector) fmt=$($sf.file_format) dur=$($sf.duration) rate=$($sf.sample_rate_kHz)kHz -> $bn"
+                }
+            }
 
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
+            # ---- Step 4: Select and download per detector ----
+            foreach ($det in $DETECTORS) {
+                $selected = Select-StrainFile -Files $fileList -Detector $det -EventId $eventId
 
+                if (-not $selected) {
+                    $eventStatus[$det] = "MISS"
+                    Write-Log "MISS" "${eventId}/${det}: no suitable strain file found"
+                    continue
+                }
 
-.download_url } | Sort-Object format,duration | Select-Object -First 1
-  if ($cand -and $cand.download_url) { return $cand.download_url }
+                $downloadUrl = $selected.download_url
+                $originalBasename = ($downloadUrl -split '/')[-1]
+                $rateTxt = "$($selected.sample_rate_kHz)kHz"
+                $durTxt  = "$($selected.duration)s"
+                Write-Log "INFO" "${eventId}/${det}: selected ${rateTxt} ${durTxt} -> $originalBasename"
 
-  return $null
-}function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
+                # Download to original filename, then copy to canonical name
+                $originalDest = Join-Path $eventDir $originalBasename
+                $canonicalDest = Join-Path $eventDir "${det}.hdf5"
 
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
+                $ok = Download-File -Url $downloadUrl -Destination $originalDest
 
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
+                if ($ok) {
+                    # Create canonical copy (overwrite if stale)
+                    if ($originalDest -ne $canonicalDest) {
+                        if (Test-Path $canonicalDest) {
+                            Remove-Item $canonicalDest -Force
+                        }
+                        Copy-Item -Path $originalDest -Destination $canonicalDest -Force
+                    }
+
+                    $fileSize = (Get-Item $canonicalDest).Length
+                    $sizeMB = '{0:N1}' -f ($fileSize / 1MB)
+                    $sha = Get-FileSha256 -FilePath $canonicalDest
+                    Write-Log "OK" "${eventId}/${det}: ${sizeMB} MB  SHA256=$sha"
+                    $eventStatus[$det] = "OK"
+                }
+                else {
+                    $eventStatus[$det] = "ERROR"
+                    Write-Log "ERROR" "${eventId}/${det}: download failed"
+                }
+            }
+        }
+        catch {
+            Write-Log "ERROR" "${eventId}: $($_.Exception.Message)"
+            foreach ($det in $DETECTORS) {
+                if ($eventStatus[$det] -eq "PENDING") {
+                    $eventStatus[$det] = "ERROR"
+                }
+            }
+        }
+
+        $summary[$eventId] = $eventStatus
     }
-  }
 
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
+    # ========================================================================
+    # Final summary
+    # ========================================================================
+    Write-Host ""
+    Write-Host "=========================================="
+    Write-Host "  DOWNLOAD SUMMARY"
+    Write-Host "=========================================="
 
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
+    $okCount = 0
+    $missCount = 0
+    $errCount = 0
 
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+    foreach ($eventId in $EVENTS) {
+        $st = $summary[$eventId]
+        $h1tag = $st["H1"]
+        $l1tag = $st["L1"]
+        Write-Host "  ${eventId}: H1=${h1tag}  L1=${l1tag}"
 
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-.Exception.Message)"
-  }
-
-  # GWOSC puede devolver 'events' (lista) o 'event' (objeto) o estructuras diferentes.
-  $detail = $null
-
-  if ($resp -and $resp.PSObject.Properties.Name -contains "events" -and $resp.events -and $resp.events.Count -gt 0) {
-    $ev = $resp.events[0]
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "event" -and $resp.event) {
-    $ev = $resp.event
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "detail_url") {
-    $detail = $resp.detail_url
-  }
-
-    if (-not $detail -and $resp -and ($resp.PSObject.Properties.Name -contains "versions") -and $resp.versions -and $resp.versions.Count -gt 0) {
-    $detail = $resp.versions[-1].detail_url
-  }
-
-  if (-not $detail) {
-    # Dump mínimo auditable (sin volcar 10k líneas)
-    $keys = if ($resp) { ($resp.PSObject.Properties.Name -join ",") } else { "<null>" }
-    throw "No detail_url para ${EventId}. API=$api. Top-level keys=[$keys]"
-  }
-  return $detail
-}function Pick-DetectorUrl($StrainFilesJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  # StrainFilesJson suele ser un array (lista) o un objeto con propiedad 'strain_files'
-  $files = $null
-  if ($StrainFilesJson -is [System.Array]) {
-    $files = $StrainFilesJson
-  } elseif ($StrainFilesJson -and ($StrainFilesJson.PSObject.Properties.Name -contains "strain_files")) {
-    $files = $StrainFilesJson.strain_files
-  }
-
-  if (-not $files) { return $null }
-
-  # Preferencia: hdf5 + duration exacta; si no, cualquier hdf5; si no, cualquier formato.
-  $cand = $files | Where-Object { $ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  try {
-    $resp = Invoke-RestMethod -Uri $api -Method GET
-  } catch {
-    throw "GWOSC request failed for ${EventId}. API=$api. $($ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  $resp = Invoke-RestMethod -Uri $api -Method GET
-  $detail = $resp.events[0].versions[-1].detail_url
-  if (-not $detail) { throw "No detail_url para $EventId (API=$api)" }
-  return $detail
-}
-
-function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
+        foreach ($det in $DETECTORS) {
+            switch ($st[$det]) {
+                "OK"    { $okCount++ }
+                "MISS"  { $missCount++ }
+                "ERROR" { $errCount++ }
+            }
+        }
     }
-  }
 
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
+    $total = $EVENTS.Count * $DETECTORS.Count
+    Write-Host ""
+    Write-Host "  Totals: $okCount OK, $missCount MISS, $errCount ERROR (of $total)"
+    Write-Host ""
+
+    # Always run self-check at the end
+    Invoke-SelfCheck
 }
 
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
+# ============================================================================
+# Entry point
+# ============================================================================
 
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
+if ($SelfCheckOnly) {
+    Invoke-SelfCheck
 }
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-.Exception.Message)"
-  }
-
-  # GWOSC puede devolver 'events' (lista) o 'event' (objeto) o estructuras diferentes.
-  $detail = $null
-
-  if ($resp -and $resp.PSObject.Properties.Name -contains "events" -and $resp.events -and $resp.events.Count -gt 0) {
-    $ev = $resp.events[0]
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "event" -and $resp.event) {
-    $ev = $resp.event
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "detail_url") {
-    $detail = $resp.detail_url
-  }
-
-    if (-not $detail -and $resp -and ($resp.PSObject.Properties.Name -contains "versions") -and $resp.versions -and $resp.versions.Count -gt 0) {
-    $detail = $resp.versions[-1].detail_url
-  }
-
-  if (-not $detail) {
-    # Dump mínimo auditable (sin volcar 10k líneas)
-    $keys = if ($resp) { ($resp.PSObject.Properties.Name -join ",") } else { "<null>" }
-    throw "No detail_url para ${EventId}. API=$api. Top-level keys=[$keys]"
-  }
-  return $detail
-}function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
+else {
+    Invoke-DownloadAll
 }
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
-    }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-
-
-.detector -eq $Detector -and $ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  try {
-    $resp = Invoke-RestMethod -Uri $api -Method GET
-  } catch {
-    throw "GWOSC request failed for ${EventId}. API=$api. $($ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  $resp = Invoke-RestMethod -Uri $api -Method GET
-  $detail = $resp.events[0].versions[-1].detail_url
-  if (-not $detail) { throw "No detail_url para $EventId (API=$api)" }
-  return $detail
-}
-
-function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
-    }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-.Exception.Message)"
-  }
-
-  # GWOSC puede devolver 'events' (lista) o 'event' (objeto) o estructuras diferentes.
-  $detail = $null
-
-  if ($resp -and $resp.PSObject.Properties.Name -contains "events" -and $resp.events -and $resp.events.Count -gt 0) {
-    $ev = $resp.events[0]
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "event" -and $resp.event) {
-    $ev = $resp.event
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "detail_url") {
-    $detail = $resp.detail_url
-  }
-
-    if (-not $detail -and $resp -and ($resp.PSObject.Properties.Name -contains "versions") -and $resp.versions -and $resp.versions.Count -gt 0) {
-    $detail = $resp.versions[-1].detail_url
-  }
-
-  if (-not $detail) {
-    # Dump mínimo auditable (sin volcar 10k líneas)
-    $keys = if ($resp) { ($resp.PSObject.Properties.Name -join ",") } else { "<null>" }
-    throw "No detail_url para ${EventId}. API=$api. Top-level keys=[$keys]"
-  }
-  return $detail
-}function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
-    }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-
-
-.format -eq $Format -and $ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  try {
-    $resp = Invoke-RestMethod -Uri $api -Method GET
-  } catch {
-    throw "GWOSC request failed for ${EventId}. API=$api. $($ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  $resp = Invoke-RestMethod -Uri $api -Method GET
-  $detail = $resp.events[0].versions[-1].detail_url
-  if (-not $detail) { throw "No detail_url para $EventId (API=$api)" }
-  return $detail
-}
-
-function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
-    }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-.Exception.Message)"
-  }
-
-  # GWOSC puede devolver 'events' (lista) o 'event' (objeto) o estructuras diferentes.
-  $detail = $null
-
-  if ($resp -and $resp.PSObject.Properties.Name -contains "events" -and $resp.events -and $resp.events.Count -gt 0) {
-    $ev = $resp.events[0]
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "event" -and $resp.event) {
-    $ev = $resp.event
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "detail_url") {
-    $detail = $resp.detail_url
-  }
-
-    if (-not $detail -and $resp -and ($resp.PSObject.Properties.Name -contains "versions") -and $resp.versions -and $resp.versions.Count -gt 0) {
-    $detail = $resp.versions[-1].detail_url
-  }
-
-  if (-not $detail) {
-    # Dump mínimo auditable (sin volcar 10k líneas)
-    $keys = if ($resp) { ($resp.PSObject.Properties.Name -join ",") } else { "<null>" }
-    throw "No detail_url para ${EventId}. API=$api. Top-level keys=[$keys]"
-  }
-  return $detail
-}function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
-    }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-
-
-.duration -eq $Duration } | Select-Object -First 1
-  if ($cand -and $cand.download_url) { return $cand.download_url }
-
-  $cand = $files | Where-Object { $ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  try {
-    $resp = Invoke-RestMethod -Uri $api -Method GET
-  } catch {
-    throw "GWOSC request failed for ${EventId}. API=$api. $($ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  $resp = Invoke-RestMethod -Uri $api -Method GET
-  $detail = $resp.events[0].versions[-1].detail_url
-  if (-not $detail) { throw "No detail_url para $EventId (API=$api)" }
-  return $detail
-}
-
-function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
-    }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-.Exception.Message)"
-  }
-
-  # GWOSC puede devolver 'events' (lista) o 'event' (objeto) o estructuras diferentes.
-  $detail = $null
-
-  if ($resp -and $resp.PSObject.Properties.Name -contains "events" -and $resp.events -and $resp.events.Count -gt 0) {
-    $ev = $resp.events[0]
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "event" -and $resp.event) {
-    $ev = $resp.event
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "detail_url") {
-    $detail = $resp.detail_url
-  }
-
-    if (-not $detail -and $resp -and ($resp.PSObject.Properties.Name -contains "versions") -and $resp.versions -and $resp.versions.Count -gt 0) {
-    $detail = $resp.versions[-1].detail_url
-  }
-
-  if (-not $detail) {
-    # Dump mínimo auditable (sin volcar 10k líneas)
-    $keys = if ($resp) { ($resp.PSObject.Properties.Name -join ",") } else { "<null>" }
-    throw "No detail_url para ${EventId}. API=$api. Top-level keys=[$keys]"
-  }
-  return $detail
-}function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
-    }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-
-
-.detector -eq $Detector -and $ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  try {
-    $resp = Invoke-RestMethod -Uri $api -Method GET
-  } catch {
-    throw "GWOSC request failed for ${EventId}. API=$api. $($ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  $resp = Invoke-RestMethod -Uri $api -Method GET
-  $detail = $resp.events[0].versions[-1].detail_url
-  if (-not $detail) { throw "No detail_url para $EventId (API=$api)" }
-  return $detail
-}
-
-function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
-    }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-.Exception.Message)"
-  }
-
-  # GWOSC puede devolver 'events' (lista) o 'event' (objeto) o estructuras diferentes.
-  $detail = $null
-
-  if ($resp -and $resp.PSObject.Properties.Name -contains "events" -and $resp.events -and $resp.events.Count -gt 0) {
-    $ev = $resp.events[0]
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "event" -and $resp.event) {
-    $ev = $resp.event
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "detail_url") {
-    $detail = $resp.detail_url
-  }
-
-    if (-not $detail -and $resp -and ($resp.PSObject.Properties.Name -contains "versions") -and $resp.versions -and $resp.versions.Count -gt 0) {
-    $detail = $resp.versions[-1].detail_url
-  }
-
-  if (-not $detail) {
-    # Dump mínimo auditable (sin volcar 10k líneas)
-    $keys = if ($resp) { ($resp.PSObject.Properties.Name -join ",") } else { "<null>" }
-    throw "No detail_url para ${EventId}. API=$api. Top-level keys=[$keys]"
-  }
-  return $detail
-}function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
-    }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-
-
-.format -eq $Format } | Sort-Object duration | Select-Object -First 1
-  if ($cand -and $cand.download_url) { return $cand.download_url }
-
-  $cand = $files | Where-Object { $ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  try {
-    $resp = Invoke-RestMethod -Uri $api -Method GET
-  } catch {
-    throw "GWOSC request failed for ${EventId}. API=$api. $($ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  $resp = Invoke-RestMethod -Uri $api -Method GET
-  $detail = $resp.events[0].versions[-1].detail_url
-  if (-not $detail) { throw "No detail_url para $EventId (API=$api)" }
-  return $detail
-}
-
-function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
-    }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-.Exception.Message)"
-  }
-
-  # GWOSC puede devolver 'events' (lista) o 'event' (objeto) o estructuras diferentes.
-  $detail = $null
-
-  if ($resp -and $resp.PSObject.Properties.Name -contains "events" -and $resp.events -and $resp.events.Count -gt 0) {
-    $ev = $resp.events[0]
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "event" -and $resp.event) {
-    $ev = $resp.event
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "detail_url") {
-    $detail = $resp.detail_url
-  }
-
-    if (-not $detail -and $resp -and ($resp.PSObject.Properties.Name -contains "versions") -and $resp.versions -and $resp.versions.Count -gt 0) {
-    $detail = $resp.versions[-1].detail_url
-  }
-
-  if (-not $detail) {
-    # Dump mínimo auditable (sin volcar 10k líneas)
-    $keys = if ($resp) { ($resp.PSObject.Properties.Name -join ",") } else { "<null>" }
-    throw "No detail_url para ${EventId}. API=$api. Top-level keys=[$keys]"
-  }
-  return $detail
-}function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
-    }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-
-
-.detector -eq $Detector -and $ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  try {
-    $resp = Invoke-RestMethod -Uri $api -Method GET
-  } catch {
-    throw "GWOSC request failed for ${EventId}. API=$api. $($ErrorActionPreference = "Stop"
-
-$RepoRoot = (Get-Location).Path
-$OutRoot  = Join-Path $RepoRoot "data\losc"
-$Duration = 32
-$Format   = "hdf5"
-
-$Events = @(
-  "GW150914","GW151226","GW170104","GW170608","GW170729",
-  "GW170809","GW170814","GW170818","GW170823","GW190521_030229"
-)
-
-function Get-EventDetailUrl([string]$EventId) {
-  $api = "https://gwosc.org/api/v2/events/$EventId"
-  $resp = Invoke-RestMethod -Uri $api -Method GET
-  $detail = $resp.events[0].versions[-1].detail_url
-  if (-not $detail) { throw "No detail_url para $EventId (API=$api)" }
-  return $detail
-}
-
-function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
-    }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-.Exception.Message)"
-  }
-
-  # GWOSC puede devolver 'events' (lista) o 'event' (objeto) o estructuras diferentes.
-  $detail = $null
-
-  if ($resp -and $resp.PSObject.Properties.Name -contains "events" -and $resp.events -and $resp.events.Count -gt 0) {
-    $ev = $resp.events[0]
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "event" -and $resp.event) {
-    $ev = $resp.event
-    if ($ev.versions -and $ev.versions.Count -gt 0) { $detail = $ev.versions[-1].detail_url }
-    if (-not $detail -and $ev.detail_url) { $detail = $ev.detail_url }
-  } elseif ($resp -and $resp.PSObject.Properties.Name -contains "detail_url") {
-    $detail = $resp.detail_url
-  }
-
-    if (-not $detail -and $resp -and ($resp.PSObject.Properties.Name -contains "versions") -and $resp.versions -and $resp.versions.Count -gt 0) {
-    $detail = $resp.versions[-1].detail_url
-  }
-
-  if (-not $detail) {
-    # Dump mínimo auditable (sin volcar 10k líneas)
-    $keys = if ($resp) { ($resp.PSObject.Properties.Name -join ",") } else { "<null>" }
-    throw "No detail_url para ${EventId}. API=$api. Top-level keys=[$keys]"
-  }
-  return $detail
-}function Pick-DetectorUrl($DetailJson, [string]$Detector, [int]$Duration, [string]$Format) {
-  $strain = $DetailJson.strain | Where-Object { $_.detector -eq $Detector }
-  if (-not $strain) { return $null }
-  $file = $strain.files | Where-Object { $_.format -eq $Format -and $_.duration -eq $Duration } | Select-Object -First 1
-  if (-not $file) { return $null }
-  return $file.download_url
-}
-
-function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
-    }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-
-
-.download_url } | Sort-Object format,duration | Select-Object -First 1
-  if ($cand -and $cand.download_url) { return $cand.download_url }
-
-  return $null
-}function Ensure-EventFiles([string]$OutDir) {
-  $h1 = Get-ChildItem -Path $OutDir -Filter "*H1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  $l1 = Get-ChildItem -Path $OutDir -Filter "*L1*.hdf5" -ErrorAction SilentlyContinue | Select-Object -First 1
-  return ($null -ne $h1 -and $null -ne $l1)
-}
-
-function Download-File([string]$Url, [string]$OutDir) {
-  $fileName = [System.IO.Path]::GetFileName(([uri]$Url).AbsolutePath)
-  $outPath = Join-Path $OutDir $fileName
-
-  if (Test-Path $outPath) {
-    $len = (Get-Item $outPath).Length
-    if ($len -gt 0) {
-      Write-Host "  [SKIP] Existe: $outPath ($len bytes)"
-      return $outPath
-    } else {
-      Remove-Item -Force $outPath
-    }
-  }
-
-  Write-Host "  [GET]  $Url"
-  Start-BitsTransfer -Source $Url -Destination $outPath -TransferType Download -ErrorAction Stop
-  return $outPath
-}
-
-New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
-
-foreach ($EventId in $Events) {
-  $OutDir  = Join-Path $OutRoot $EventId
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-  if (Ensure-EventFiles -OutDir $OutDir) {
-    Write-Host "[OK]   ${EventId}: ya existe H1+L1 en $OutDir"
-    continue
-  }
-
-  Write-Host "[MISS] ${EventId}: descargando H1+L1 (duration=$Duration format=$Format) → $OutDir"
-
-  $detailUrl = Get-EventDetailUrl -EventId $EventId
-  $detail      = Invoke-RestMethod -Uri $detailUrl -Method GET
-$strainFiles = Invoke-RestMethod -Uri $detail.strain_files_url -Method GET
-
-$h1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "H1" -Duration $Duration -Format $Format
-$l1Url = Pick-DetectorUrl -StrainFilesJson $strainFiles -Detector "L1" -Duration $Duration -Format $Format
-
-  if (-not $h1Url -or -not $l1Url) {
-    throw "No encontré URLs H1/L1 para $EventId (duration=$Duration format=$Format). detail_url=$detailUrl"
-  }
-
-  $h1Path = Download-File -Url $h1Url -OutDir $OutDir
-  $l1Path = Download-File -Url $l1Url -OutDir $OutDir
-
-  Write-Host "  [HASH] $EventId"
-  Get-FileHash -Algorithm SHA256 $h1Path | Format-Table -AutoSize
-  Get-FileHash -Algorithm SHA256 $l1Path | Format-Table -AutoSize
-}
-
-Write-Host "[DONE] Descarga finalizada en $OutRoot"
-
-
-
-
