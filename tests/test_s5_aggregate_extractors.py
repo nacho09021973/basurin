@@ -1,4 +1,8 @@
-from mvp.s5_aggregate import _detect_compatible_set_schema, _extract_compatible_geometry_ids
+from mvp.s5_aggregate import (
+    _detect_compatible_set_schema,
+    _event_id_from_source_run,
+    _extract_compatible_geometry_ids,
+)
 
 
 def test_extract_ids_from_legacy_compatible_geometries():
@@ -108,3 +112,9 @@ def test_extract_ids_from_empty_legacy_compatible_geometries() -> None:
     assert detected == "mvp_compatible_set_v1"
     assert normalized == "compatible_set_v1_canonical"
     assert _extract_compatible_geometry_ids(payload) == set()
+
+
+def test_event_id_parser_from_source_run_handles_embedded_underscore() -> None:
+    assert _event_id_from_source_run("mvp_GW190521_030229_20260201_120001") == "GW190521_030229"
+    assert _event_id_from_source_run("mvp_GW200311_115853_20260201_120001") == "GW200311_115853"
+    assert _event_id_from_source_run("invalid_run") is None
