@@ -243,6 +243,7 @@ def test_s5_aggregate_accepts_historic_compatible_set_schema_v1(tmp_path: Path) 
         "ranked_all": [{"geometry_id": "g0", "d2": 0.1}],
         "run_id": run_id,
         "threshold_d2": 5.99,
+        "diagnostic_extra": {"source": "legacy"},
     }), encoding="utf-8")
 
     s3_stage = runs_root / run_id / "s3_ringdown_estimates"

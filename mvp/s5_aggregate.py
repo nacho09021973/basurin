@@ -38,29 +38,8 @@ ALLOWED_MULTIMODE_VIABILITY_CLASSES = {
 SINGLEMODE_FALLBACK_CLASS = "SINGLEMODE_ONLY"
 SINGLEMODE_FALLBACK_REASON = "MISSING_S3B_UPSTREAM"
 COMPATIBLE_SET_V1_SCHEMA = "mvp_compatible_set_v1"
-COMPATIBLE_SET_V1_KEYS = {
-    "atlas_posterior",
-    "bits_excluded",
-    "bits_kl",
-    "chi2_fixed_theta",
-    "compatible_geometries",
-    "covariance_logspace",
-    "d2_min",
-    "distance",
-    "epsilon",
-    "event_id",
-    "likelihood_stats",
-    "metric",
-    "metric_params",
-    "n_atlas",
-    "n_compatible",
-    "observables",
-    "ranked_all",
-    "run_id",
-    "schema_version",
-    "threshold_d2",
-}
 COMPATIBLE_SET_V2_KEYS = {"schema_version", "event_id", "compatible_geometry_ids"}
+COMPATIBLE_SET_V1_MIN_KEYS = {"schema_version", "event_id", "compatible_geometries"}
 
 
 def _relpath_under(root: Path, p: Path) -> str:
@@ -169,8 +148,13 @@ def _detect_compatible_set_schema(
             raise _schema_error("unexpected keys or missing required keys")
         return schema_version, "v2"
     if schema_version == COMPATIBLE_SET_V1_SCHEMA:
-        if set(payload.keys()) != COMPATIBLE_SET_V1_KEYS:
-            raise _schema_error("unexpected keys or missing required keys")
+        missing_keys = COMPATIBLE_SET_V1_MIN_KEYS.difference(payload.keys())
+        if missing_keys:
+            missing_keys_display = ", ".join(sorted(missing_keys))
+            raise _schema_error(
+                "missing required legacy keys: "
+                f"{missing_keys_display}"
+            )
         return schema_version, "v1"
     raise _schema_error(
         "unsupported 'schema_version'; expected integer 1 or 'mvp_compatible_set_v1'"
