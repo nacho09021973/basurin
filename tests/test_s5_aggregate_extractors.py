@@ -59,3 +59,22 @@ def test_detect_schema_accepts_historic_v1_string_and_extracts_ids():
     assert detected == "mvp_compatible_set_v1"
     assert normalized == "v1"
     assert _extract_compatible_geometry_ids(payload) == {"geo_101", "geo_102"}
+
+
+def test_detect_schema_accepts_legacy_with_extra_keys_and_minimum_required_subset():
+    payload = {
+        "schema_version": "mvp_compatible_set_v1",
+        "event_id": "GWTEST",
+        "compatible_geometries": [
+            {"geometry_id": "geo_201", "compatible": True},
+            {"geometry_id": "geo_202", "compatible": False},
+            {"id": "geo_203", "compatible": True},
+        ],
+        "diagnostic_extra": {"note": "legacy payloads can include additional keys"},
+    }
+
+    detected, normalized = _detect_compatible_set_schema(payload)
+
+    assert detected == "mvp_compatible_set_v1"
+    assert normalized == "v1"
+    assert _extract_compatible_geometry_ids(payload) == {"geo_201", "geo_203"}
