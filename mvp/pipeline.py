@@ -547,6 +547,7 @@ def run_single_event(
     ]
     rc = _run_stage("s2_ringdown_window.py", s2_args, "s2_ringdown_window", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
+        _set_run_valid_verdict(out_root, run_id, "FAIL", f"s2_ringdown_window failed: exit={rc}")
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
@@ -781,6 +782,7 @@ def run_multimode_event(
     ]
     rc = _run_stage("s2_ringdown_window.py", s2_args, "s2_ringdown_window", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
+        _set_run_valid_verdict(out_root, run_id, "FAIL", f"s2_ringdown_window failed: exit={rc}")
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
