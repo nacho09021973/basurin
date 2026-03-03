@@ -169,6 +169,17 @@ def test_main_populates_source_window_and_avoids_missing_flag(tmp_path: Path) ->
     assert viability["class"] in {"MULTIMODE_OK", "SINGLEMODE_ONLY", "RINGDOWN_NONINFORMATIVE"}
     assert "metrics" in viability
 
+    systematics_gate = stage_summary.get("systematics_gate")
+    assert systematics_gate["schema_version"] == "systematics_gate_v1"
+    assert systematics_gate["verdict_auto"] in {"PASS", "FAIL", "NOT_AVAILABLE"}
+
+    science_evidence = stage_summary.get("science_evidence")
+    assert science_evidence["schema_version"] == "science_evidence_v1"
+    assert science_evidence["status"] in {"EVALUATED", "NOT_EVALUATED"}
+
+    annotations = stage_summary.get("annotations")
+    assert annotations["kerr_inconsistency_is_not_fail"] is True
+
 
 def test_classify_multimode_viability_is_conservative() -> None:
     singlemode = classify_multimode_viability(
