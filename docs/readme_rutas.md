@@ -60,8 +60,12 @@ find "runs/$RUN_ID" -type f \
 EVENT_ID=GW150914
 echo "data/losc -> $(readlink -f data/losc 2>/dev/null || echo '(no symlink)')"
 test -d "data/losc/$EVENT_ID" || { echo "ERROR: falta data/losc/$EVENT_ID (cache no montada/visible)"; exit 2; }
-echo "H1/L1 matches:"
-ls -1 "data/losc/$EVENT_ID" | egrep -i 'H1.*\.(h5|hdf5)$|L1.*\.(h5|hdf5)$' || echo "ERROR: hay ficheros pero no casan con H1/L1"
+H1_MATCHES="$(find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*H1*.h5' -o -iname '*H1*.hdf5' \) | wc -l)"
+L1_MATCHES="$(find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*L1*.h5' -o -iname '*L1*.hdf5' \) | wc -l)"
+echo "H1 matches: ${H1_MATCHES}"
+echo "L1 matches: ${L1_MATCHES}"
+test "$H1_MATCHES" -ge 1 || { echo "ERROR: falta al menos 1 archivo H1 (.h5/.hdf5) en data/losc/$EVENT_ID"; exit 2; }
+test "$L1_MATCHES" -ge 1 || { echo "ERROR: falta al menos 1 archivo L1 (.h5/.hdf5) en data/losc/$EVENT_ID"; exit 2; }
 echo "total h5/hdf5:"; find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*.h5' -o -iname '*.hdf5' \) | wc -l
 ```
 
