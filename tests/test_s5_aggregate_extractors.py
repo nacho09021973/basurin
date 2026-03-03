@@ -1,4 +1,4 @@
-from mvp.s5_aggregate import _extract_compatible_geometry_ids
+from mvp.s5_aggregate import _detect_compatible_set_schema, _extract_compatible_geometry_ids
 
 
 def test_extract_ids_from_legacy_compatible_geometries():
@@ -25,3 +25,37 @@ def test_extract_ids_from_compatible_entries_and_ids_fallbacks():
 
     assert _extract_compatible_geometry_ids(payload_entries) == {"geo_001", "geo_002", "geo_003"}
     assert _extract_compatible_geometry_ids(payload_ids) == {"5", "geo_010"}
+
+
+def test_detect_schema_accepts_historic_v1_string_and_extracts_ids():
+    payload = {
+        "atlas_posterior": {},
+        "bits_excluded": 0.0,
+        "bits_kl": 0.0,
+        "chi2_fixed_theta": 0.0,
+        "compatible_geometries": [
+            {"geometry_id": "geo_101", "compatible": True},
+            {"id": "geo_102", "compatible": True},
+        ],
+        "covariance_logspace": [[1.0, 0.0], [0.0, 1.0]],
+        "d2_min": 0.1,
+        "distance": 0.2,
+        "epsilon": 0.0,
+        "event_id": "GW150914",
+        "likelihood_stats": {},
+        "metric": "mahalanobis_log",
+        "metric_params": {},
+        "n_atlas": 2,
+        "n_compatible": 2,
+        "observables": {"f_hz": 250.0, "Q": 8.0},
+        "ranked_all": [{"geometry_id": "geo_101"}, {"geometry_id": "geo_102"}],
+        "run_id": "run_x",
+        "schema_version": "mvp_compatible_set_v1",
+        "threshold_d2": 5.99,
+    }
+
+    detected, normalized = _detect_compatible_set_schema(payload)
+
+    assert detected == "mvp_compatible_set_v1"
+    assert normalized == "v1"
+    assert _extract_compatible_geometry_ids(payload) == {"geo_101", "geo_102"}
