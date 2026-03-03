@@ -94,3 +94,17 @@ def test_detect_schema_normalizes_int_schema_version_for_compatible_set():
     assert detected == 1
     assert normalized == "compatible_set_v1"
     assert _extract_compatible_geometry_ids(payload) == {"geo_301"}
+
+
+def test_extract_ids_from_empty_legacy_compatible_geometries() -> None:
+    payload = {
+        "schema_version": "mvp_compatible_set_v1",
+        "event_id": "GWTEST",
+        "compatible_geometries": [],
+    }
+
+    detected, normalized = _detect_compatible_set_schema(payload)
+
+    assert detected == "mvp_compatible_set_v1"
+    assert normalized == "compatible_set_v1_canonical"
+    assert _extract_compatible_geometry_ids(payload) == set()

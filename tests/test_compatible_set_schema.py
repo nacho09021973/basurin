@@ -38,3 +38,14 @@ def test_compatible_set_normalizes_int_schema_version() -> None:
     assert normalized["schema_version"] == COMPATIBLE_SET_SCHEMA_VERSION
     assert validate("compatible_set", payload) == []
     assert extract_compatible_geometry_ids(payload) == {"geo_001"}
+
+
+def test_compatible_set_allows_empty_compatible_geometries() -> None:
+    payload = {
+        "schema_version": COMPATIBLE_SET_SCHEMA_VERSION,
+        "event_id": "GW150914",
+        "compatible_geometries": [],
+    }
+
+    assert validate("compatible_set", payload) == []
+    assert extract_compatible_geometry_ids(payload) == set()
