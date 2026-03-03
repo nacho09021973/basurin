@@ -111,16 +111,17 @@ def _validate_compatible_set_contract(payload: dict[str, Any]) -> list[str]:
     if not isinstance(compatible_geometries, list):
         errors.append("compatible_geometries must be a list")
     else:
-        has_any_valid = False
         for row in compatible_geometries:
-            if not isinstance(row, dict) or row.get("compatible") is not True:
+            if not isinstance(row, dict):
+                errors.append("compatible_geometries entries must be objects")
+                continue
+            if "compatible" in row and not isinstance(row.get("compatible"), bool):
+                errors.append("compatible_geometries[*].compatible must be bool when present")
+            if row.get("compatible") is not True:
                 continue
             geometry_id = row.get("geometry_id") if "geometry_id" in row else row.get("id")
-            if isinstance(geometry_id, str) and geometry_id:
-                has_any_valid = True
-                break
-        if not has_any_valid:
-            errors.append("compatible_geometries must include at least one compatible geometry id")
+            if not isinstance(geometry_id, str) or not geometry_id:
+                errors.append("compatible_geometries[*] compatible rows must include non-empty geometry_id/id")
 
     return errors
 

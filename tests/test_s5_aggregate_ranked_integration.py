@@ -313,3 +313,46 @@ def test_s5_aggregate_accepts_legacy_int_schema_version(tmp_path: Path) -> None:
     row = payload["compatible_set_schema"]["per_event"][0]
     assert row["schema_detected"] == 1
     assert row["schema_normalized"] == "compatible_set_v1"
+
+
+def test_s5_aggregate_does_not_fail_schema_when_compatible_geometries_empty(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "run_empty_compatible"
+
+    rv = runs_root / run_id / "RUN_VALID"
+    rv.mkdir(parents=True, exist_ok=True)
+    (rv / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
+
+    s4_out = runs_root / run_id / "s4_geometry_filter" / "outputs"
+    s4_out.mkdir(parents=True, exist_ok=True)
+    (s4_out / "compatible_set.json").write_text(json.dumps({
+        "schema_version": "mvp_compatible_set_v1",
+        "event_id": "GW150914",
+        "compatible_geometries": [],
+        "ranked_all": [{"geometry_id": "g0", "d2": 0.1}],
+    }), encoding="utf-8")
+
+    s3_stage = runs_root / run_id / "s3_ringdown_estimates"
+    s3_stage.mkdir(parents=True, exist_ok=True)
+    (s3_stage / "stage_summary.json").write_text(json.dumps({"stage": "s3_ringdown_estimates"}), encoding="utf-8")
+
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s5_aggregate.py"),
+        "--out-run",
+        "agg_empty_compatible",
+        "--source-runs",
+        run_id,
+        "--min-coverage",
+        "1.0",
+    ]
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, capture_output=True, text=True, check=False)
+
+    assert proc.returncode == 0, proc.stderr
+    assert "Invalid compatible_set schema" not in proc.stderr
+
+    agg_path = runs_root / "agg_empty_compatible" / "s5_aggregate" / "outputs" / "aggregate.json"
+    payload = json.loads(agg_path.read_text(encoding="utf-8"))
+    assert payload["n_common_compatible"] == 0
+    assert "NO_COMMON_COMPATIBLE_GEOMETRIES" in payload["warnings"]
