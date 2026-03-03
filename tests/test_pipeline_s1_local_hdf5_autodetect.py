@@ -1,6 +1,17 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+
+def _extract_local_hdf5_paths(args: list[str]) -> list[str]:
+    paths: list[str] = []
+    for idx, arg in enumerate(args):
+        if arg == "--local-hdf5":
+            det, path = args[idx + 1].split("=", 1)
+            assert det in {"H1", "L1"}
+            paths.append(path)
+    return paths
 
 
 def test_build_s1_fetch_args_autodetects_canonical_losc_paths(monkeypatch, tmp_path):
@@ -24,8 +35,9 @@ def test_build_s1_fetch_args_autodetects_canonical_losc_paths(monkeypatch, tmp_p
     )
 
     assert args.count("--local-hdf5") == 2
-    assert "H1=data/losc/GW150914/H1.h5" in args
-    assert "L1=data/losc/GW150914/L1.h5" in args
+    assert f"H1={(losc_dir / 'H1.h5').resolve().as_posix()}" in args
+    assert f"L1={(losc_dir / 'L1.h5').resolve().as_posix()}" in args
+    assert all(os.path.isabs(path) for path in _extract_local_hdf5_paths(args))
 
 
 def test_build_s1_fetch_args_respects_basurin_losc_root(monkeypatch, tmp_path):
@@ -51,8 +63,9 @@ def test_build_s1_fetch_args_respects_basurin_losc_root(monkeypatch, tmp_path):
     )
 
     assert args.count("--local-hdf5") == 2
-    assert f"H1={Path(losc_root / event_id / 'H1.hdf5').as_posix()}" in args
-    assert f"L1={Path(losc_root / event_id / 'L1.h5').as_posix()}" in args
+    assert f"H1={Path(losc_root / event_id / 'H1.hdf5').resolve().as_posix()}" in args
+    assert f"L1={Path(losc_root / event_id / 'L1.h5').resolve().as_posix()}" in args
+    assert all(os.path.isabs(path) for path in _extract_local_hdf5_paths(args))
 
 
 def test_build_s0_oracle_args_offline_autodetects_h1_l1(monkeypatch, tmp_path):
@@ -79,5 +92,6 @@ def test_build_s0_oracle_args_offline_autodetects_h1_l1(monkeypatch, tmp_path):
 
     assert "--require-offline" in args
     assert args.count("--local-hdf5") == 2
-    assert f"H1={Path('data/losc') / event_id / 'zzz_H1_big.h5'}" in args
-    assert f"L1={Path('data/losc') / event_id / 'aaa_L1_big.hdf5'}" in args
+    assert f"H1={(losc_dir / 'zzz_H1_big.h5').resolve().as_posix()}" in args
+    assert f"L1={(losc_dir / 'aaa_L1_big.hdf5').resolve().as_posix()}" in args
+    assert all(os.path.isabs(path) for path in _extract_local_hdf5_paths(args))

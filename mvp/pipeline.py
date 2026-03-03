@@ -72,7 +72,9 @@ def _autodetect_losc_hdf5_mappings(event_id: str) -> list[str]:
     l1 = _pick("L1")
     if h1 is None or l1 is None:
         return []
-    return [f"H1={h1.as_posix()}", f"L1={l1.as_posix()}"]
+    h1_abs = h1.resolve()
+    l1_abs = l1.resolve()
+    return [f"H1={h1_abs.as_posix()}", f"L1={l1_abs.as_posix()}"]
 
 
 def _build_s1_fetch_args(
