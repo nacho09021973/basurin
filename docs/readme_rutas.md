@@ -56,26 +56,23 @@ find "runs/$RUN_ID" -type f \
 
 > **STOP**: no continúes si este precheck falla.
 
+Precheck read-only recomendado (script canónico):
+
+```bash
+python tools/losc_precheck.py --event-id "$EVENT_ID" --losc-root data/losc
+```
+
 ```bash
 EVENT_ID=GW150914
-EVENT_DIR="data/losc/$EVENT_ID"
-
 echo "data/losc -> $(readlink -f data/losc 2>/dev/null || echo '(no symlink)')"
-test -d "$EVENT_DIR" || { echo "ERROR: falta $EVENT_DIR (cache no montada/visible)"; exit 2; }
-
-TOTAL=$(find "$EVENT_DIR" -maxdepth 1 -type f \( -iname '*.h5' -o -iname '*.hdf5' \) | wc -l | tr -d ' ')
-echo "total h5/hdf5: $TOTAL"
-test "$TOTAL" -gt 0 || { echo "ERROR: no hay .h5/.hdf5 en $EVENT_DIR"; exit 3; }
-
-echo "H1/L1 matches:"
-MATCHES=$(ls -1 "$EVENT_DIR" | egrep -i 'H1.*\.(h5|hdf5)$|L1.*\.(h5|hdf5)$' || true)
-test -n "$MATCHES" || {
-  echo "ERROR: hay .h5/.hdf5 pero ningún nombre casa con H1/L1";
-  echo "Candidatos detectados (.h5/.hdf5):";
-  ls -1 "$EVENT_DIR" | egrep -i '\.(h5|hdf5)$' || true;
-  exit 4;
-}
-echo "$MATCHES"
+test -d "data/losc/$EVENT_ID" || { echo "ERROR: falta data/losc/$EVENT_ID (cache no montada/visible)"; exit 2; }
+H1_MATCHES="$(find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*H1*.h5' -o -iname '*H1*.hdf5' \) | wc -l)"
+L1_MATCHES="$(find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*L1*.h5' -o -iname '*L1*.hdf5' \) | wc -l)"
+echo "H1 matches: ${H1_MATCHES}"
+echo "L1 matches: ${L1_MATCHES}"
+test "$H1_MATCHES" -ge 1 || { echo "ERROR: falta al menos 1 archivo H1 (.h5/.hdf5) en data/losc/$EVENT_ID"; exit 2; }
+test "$L1_MATCHES" -ge 1 || { echo "ERROR: falta al menos 1 archivo L1 (.h5/.hdf5) en data/losc/$EVENT_ID"; exit 2; }
+echo "total h5/hdf5:"; find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*.h5' -o -iname '*.hdf5' \) | wc -l
 ```
 
 
@@ -87,8 +84,8 @@ echo "$MATCHES"
   - Crea symlinks casables `H1.h5` y `L1.h5` dentro del evento, sin renombrar originales:
 
 ```bash
-ln -sf "<archivo_real_H1>.hdf5" "data/losc/$EVENT_ID/H1.h5"
-ln -sf "<archivo_real_L1>.hdf5" "data/losc/$EVENT_ID/L1.h5"
+ln -sf "<archivo_real_H1>.h5" "data/losc/$EVENT_ID/H1.h5"
+ln -sf "<archivo_real_L1>.h5" "data/losc/$EVENT_ID/L1.h5"
 ```
 
 **Solo después del precheck PASS**, ejecuta `s1` con rutas explícitas.
@@ -111,7 +108,6 @@ python mvp/s1_fetch_strain.py \
 
 **Nota de gobernanza**: `data/losc/...` es input externo. El árbol auditable del run empieza en `runs/<RUN_ID>/...`.
 
----
 
 ## 0) Regla de oro (léela primero)
 
@@ -284,24 +280,11 @@ Precheck obligatorio (mismo bloque canónico):
 
 ```bash
 EVENT_ID=GW150914
-EVENT_DIR="data/losc/$EVENT_ID"
-
 echo "data/losc -> $(readlink -f data/losc 2>/dev/null || echo '(no symlink)')"
-test -d "$EVENT_DIR" || { echo "ERROR: falta $EVENT_DIR (cache no montada/visible)"; exit 2; }
-
-TOTAL=$(find "$EVENT_DIR" -maxdepth 1 -type f \( -iname '*.h5' -o -iname '*.hdf5' \) | wc -l | tr -d ' ')
-echo "total h5/hdf5: $TOTAL"
-test "$TOTAL" -gt 0 || { echo "ERROR: no hay .h5/.hdf5 en $EVENT_DIR"; exit 3; }
-
+test -d "data/losc/$EVENT_ID" || { echo "ERROR: falta data/losc/$EVENT_ID (cache no montada/visible)"; exit 2; }
 echo "H1/L1 matches:"
-MATCHES=$(ls -1 "$EVENT_DIR" | egrep -i 'H1.*\.(h5|hdf5)$|L1.*\.(h5|hdf5)$' || true)
-test -n "$MATCHES" || {
-  echo "ERROR: hay .h5/.hdf5 pero ningún nombre casa con H1/L1";
-  echo "Candidatos detectados (.h5/.hdf5):";
-  ls -1 "$EVENT_DIR" | egrep -i '\.(h5|hdf5)$' || true;
-  exit 4;
-}
-echo "$MATCHES"
+ls -1 "data/losc/$EVENT_ID" | egrep -i 'H1.*\.(h5|hdf5)$|L1.*\.(h5|hdf5)$' || echo "ERROR: hay ficheros pero no casan con H1/L1"
+echo "total h5/hdf5:"; find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*.h5' -o -iname '*.hdf5' \) | wc -l
 ```
 
 Si falla: resolver primero **Caso A (mount/symlink)** o **Caso B (nombres con symlinks H1.h5/L1.h5)** y repetir el precheck.
@@ -416,5 +399,4 @@ runs/<RUN_ID>/experiment/t0_sweep_full_seed<seed>/outputs/t0_sweep_full_results.
 
 Si falta ese directorio/JSON, el oráculo imprime la ruta esperada exacta y el comando para regenerar el sweep (`phase=run`).
 
-=======
 ## Codex

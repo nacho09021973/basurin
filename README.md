@@ -426,33 +426,16 @@ Nota sobre subruns por seed: el experimento crea árboles por semilla para aisla
 
 ```bash
 EVENT_ID=GW150914
-EVENT_DIR="data/losc/$EVENT_ID"
-
 echo "data/losc -> $(readlink -f data/losc 2>/dev/null || echo '(no symlink)')"
-test -d "$EVENT_DIR" || { echo "ERROR: falta $EVENT_DIR (cache no montada/visible)"; exit 2; }
-
-TOTAL=$(find "$EVENT_DIR" -maxdepth 1 -type f \( -iname '*.h5' -o -iname '*.hdf5' \) | wc -l | tr -d ' ')
-echo "total h5/hdf5: $TOTAL"
-test "$TOTAL" -gt 0 || { echo "ERROR: no hay .h5/.hdf5 en $EVENT_DIR"; exit 3; }
-
-echo "H1/L1 matches:"
-MATCHES=$(ls -1 "$EVENT_DIR" | egrep -i 'H1.*\.(h5|hdf5)$|L1.*\.(h5|hdf5)$' || true)
-test -n "$MATCHES" || {
-  echo "ERROR: hay .h5/.hdf5 pero ningún nombre casa con H1/L1";
-  echo "Candidatos detectados (.h5/.hdf5):";
-  ls -1 "$EVENT_DIR" | egrep -i '\.(h5|hdf5)$' || true;
-  exit 4;
-}
-echo "$MATCHES"
+test -d "data/losc/$EVENT_ID" || { echo "ERROR: falta data/losc/$EVENT_ID (cache no montada/visible)"; exit 2; }
+H1_MATCHES="$(find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*H1*.h5' -o -iname '*H1*.hdf5' \) | wc -l)"
+L1_MATCHES="$(find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*L1*.h5' -o -iname '*L1*.hdf5' \) | wc -l)"
+echo "H1 matches: ${H1_MATCHES}"
+echo "L1 matches: ${L1_MATCHES}"
+test "$H1_MATCHES" -ge 1 || { echo "ERROR: falta al menos 1 archivo H1 (.h5/.hdf5) en data/losc/$EVENT_ID"; exit 2; }
+test "$L1_MATCHES" -ge 1 || { echo "ERROR: falta al menos 1 archivo L1 (.h5/.hdf5) en data/losc/$EVENT_ID"; exit 2; }
+echo "total h5/hdf5:"; find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*.h5' -o -iname '*.hdf5' \) | wc -l
 ```
-
-### ¿Por qué `s1` “no encuentra” las h5?
-
-Casi siempre por uno de estos motivos contract-first:
-
-- `data/losc/<EVENT_ID>/` no es visible desde este entorno (mount/symlink roto o apuntando a otra ruta).
-- Los ficheros existen, pero sus nombres no contienen `H1`/`L1` (el auto-resolver no adivina detectores).
-- Los `.h5/.hdf5` están en subdirectorios; el precheck y s1 validan nivel evento (`maxdepth 1`).
 
 Resolución rápida en 2 ramas:
 
@@ -462,8 +445,8 @@ Resolución rápida en 2 ramas:
   - Sin renombrar originales, crea symlinks casables dentro de `data/losc/<EVENT_ID>/`:
 
 ```bash
-ln -sf "<archivo_real_H1>.hdf5" "data/losc/$EVENT_ID/H1.h5"
-ln -sf "<archivo_real_L1>.hdf5" "data/losc/$EVENT_ID/L1.h5"
+ln -sf "<archivo_real_H1>.h5" "data/losc/$EVENT_ID/H1.h5"
+ln -sf "<archivo_real_L1>.h5" "data/losc/$EVENT_ID/L1.h5"
 ```
 
 Ejemplo recomendado:
@@ -581,7 +564,7 @@ Todo cambio debe cerrar un ciclo completo: **Inputs deterministas → Estimació
 **Regla soberana:**
 
 * `RUN_VALID` es la **única puerta** hacia downstream.
-* Si `RUN_VALID != PASS` o falta `runs/<run_id>/RUN_VALID/verdict.json`, ningún stage downstream puede correr.
+* Si `runs/<run_id>/RUN_VALID/verdict.json` no existe o su `verdict != PASS`, ningún stage downstream puede correr.
 * Si un stage falla, el run **no existe** a efectos downstream (fail-fast).
 
 **Criterio de aceptación:**
@@ -684,7 +667,7 @@ Todo cambio debe cerrar un ciclo completo: **Inputs deterministas → Estimació
 
 **Criterio de aceptación:**
 
-* Si falla preflight, no se crea `runs/<run_id>/` (o se crea y queda `RUN_VALID=FAIL` con razón explícita).
+* Si falla preflight, no se crea `runs/<run_id>/` (o se crea y queda `RUN_VALID/verdict.json` con `verdict=FAIL` y razón explícita).
 
 ---
 

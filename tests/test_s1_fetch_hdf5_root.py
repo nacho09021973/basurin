@@ -91,3 +91,25 @@ def test_main_does_not_write_outside_runs_root(monkeypatch: pytest.MonkeyPatch, 
     outside_runs = [p for p in written if runs_root not in p.parents and p != runs_root]
     outside_runs = [p for p in outside_runs if not str(p).startswith(str(external_root))]
     assert outside_runs == []
+
+
+def test_match_hdf5_files_is_deterministic_and_filters_extensions(tmp_path: Path) -> None:
+    event_dir = tmp_path / "GW150914"
+    event_dir.mkdir()
+    (event_dir / "b_L1.h5").write_bytes(b"1")
+    (event_dir / "a_H1.hdf5").write_bytes(b"2")
+    (event_dir / "c_H1.txt").write_text("x", encoding="utf-8")
+
+    matches_1 = s1_fetch_strain.match_hdf5_files(event_dir)
+    matches_2 = s1_fetch_strain.match_hdf5_files(event_dir)
+
+    assert [p.name for p in matches_1["all"]] == ["a_H1.hdf5", "b_L1.h5"]
+    assert [p.name for p in matches_1["H1"]] == ["a_H1.hdf5"]
+    assert [p.name for p in matches_1["L1"]] == ["b_L1.h5"]
+    assert [p.name for p in matches_2["all"]] == [p.name for p in matches_1["all"]]
+
+
+def test_match_hdf5_files_no_throw_on_missing_dir(tmp_path: Path) -> None:
+    missing = tmp_path / "does_not_exist"
+    matches = s1_fetch_strain.match_hdf5_files(missing)
+    assert matches == {"all": [], "H1": [], "L1": []}
