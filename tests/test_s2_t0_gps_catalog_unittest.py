@@ -239,12 +239,13 @@ def test_resolve_t0_gps_online_fetch_creates_run_cache_and_reuses(
     monkeypatch.setattr("mvp.s2_ringdown_window._fetch_gwosc_event_gps", _fake_fetch)
     run_dir = tmp_path / "runs" / "rid"
 
-    t0_gps, source, lookup_key, cache_path = _resolve_t0_gps(
+    t0_gps, source, details, used_cache = _resolve_t0_gps(
         "GW_ONLINE", nonexistent_catalog, offline=False, run_dir=run_dir
     )
     assert t0_gps == pytest.approx(1234567890.25)
-    assert lookup_key == "GW_ONLINE"
-    assert cache_path is not None
+    assert details["lookup_key"] == "GW_ONLINE"
+    assert details["gwosc_cache_path"] is not None
+    assert used_cache is False
     assert source.endswith("GW_ONLINE.json")
     assert calls == ["GW_ONLINE"]
 
@@ -256,10 +257,11 @@ def test_resolve_t0_gps_online_fetch_creates_run_cache_and_reuses(
     assert payload["source"] == "gwosc_api_v2"
 
     # Reuse cache; no additional network call expected.
-    t0_again, source_again, _, cache_again = _resolve_t0_gps(
+    t0_again, source_again, details_again, used_cache_again = _resolve_t0_gps(
         "GW_ONLINE", nonexistent_catalog, offline=False, run_dir=run_dir
     )
     assert t0_again == pytest.approx(1234567890.25)
     assert source_again == str(cache_file)
-    assert cache_again == str(cache_file)
+    assert details_again["gwosc_cache_path"] == str(cache_file)
+    assert used_cache_again is True
     assert calls == ["GW_ONLINE"]
