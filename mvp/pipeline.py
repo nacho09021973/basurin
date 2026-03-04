@@ -1020,10 +1020,16 @@ def main() -> int:
         help="Pass --offline only to s2_ringdown_window",
     )
     sp_single.add_argument(
+        "--window-catalog",
+        default=None,
+        metavar="PATH",
+        help="Preferred alias: pass PATH as --window-catalog to s2_ringdown_window",
+    )
+    sp_single.add_argument(
         "--t0-catalog",
         default=None,
         metavar="PATH",
-        help="Pass PATH as --window-catalog to s2_ringdown_window",
+        help="Alias supported for compatibility; pass PATH as --window-catalog to s2_ringdown_window",
     )
     sp_single.add_argument(
         "--estimator", choices=["hilbert", "spectral", "dual"], default="spectral",
@@ -1143,6 +1149,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.mode == "single":
+        window_catalog = args.window_catalog if args.window_catalog is not None else args.t0_catalog
         atlas_path = _resolve_atlas_path(args.atlas_path, args.atlas_default)
         event_id = _require_nonempty_event_id(args.event_id, "--event-id")
         rc, run_id = run_single_event(
@@ -1162,7 +1169,7 @@ def main() -> int:
             local_hdf5=args.local_hdf5,
             offline=args.offline,
             offline_s2=args.offline_s2,
-            t0_catalog=args.t0_catalog,
+            t0_catalog=window_catalog,
             estimator=args.estimator,
         )
         return rc

@@ -120,8 +120,10 @@ python -m mvp.pipeline single \
   --event-id GW150914 \
   --atlas-default \
   --offline-s2 \
-  --t0-catalog "runs/${AUDIT_RUN}/experiment/losc_quality/t0_catalog_gwosc_v2.json"
+  --window-catalog "runs/${AUDIT_RUN}/experiment/losc_quality/t0_catalog_gwosc_v2.json"
 ```
+
+> Alias soportado: `--t0-catalog`.
 
 ## Quality gates (auditoría de eventos)
 

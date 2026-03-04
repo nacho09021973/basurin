@@ -128,6 +128,8 @@ Si eso no coincide con el árbol real donde está `RUN_VALID/verdict.json`, el s
 
 ### Rutas de auditoría LOSC/t0 y batch offline
 
+> En CLI de pipeline/batch, usa `--window-catalog` para s2. Alias soportado: `--t0-catalog`.
+
 - `runs/<audit>/experiment/losc_quality/losc_event_quality.csv`
 - `runs/<audit>/experiment/losc_quality/approved_events.txt`
 - `runs/<audit>/experiment/losc_quality/t0_catalog_gwosc_v2.json`
