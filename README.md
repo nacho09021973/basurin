@@ -132,6 +132,27 @@ python -m mvp.pipeline single \
 python -m mvp.experiment_offline_batch --batch-run-id <BATCH_RUN_ID> --window-catalog "runs/${AUDIT_RUN}/experiment/losc_quality/t0_catalog_gwosc_v2.json" --events-file "runs/${AUDIT_RUN}/experiment/losc_quality/approved_events.txt"
 ```
 
+### Catálogo t0 de GWOSC v2 (input externo auditable)
+
+- **Qué es**: `t0_catalog_gwosc_v2.json` es un catálogo determinista `event_id -> t0_gps` (segundos GPS) para eventos GWOSC v2.
+- **Dónde vive**: `runs/<audit_run_id>/experiment/losc_quality/t0_catalog_gwosc_v2.json`.
+- **Cómo se usa**: pásalo a `experiment_offline_batch` con `--t0-catalog` (alias de `--window-catalog`) para ejecutar en modo offline-first sin resolver t0 online en runtime.
+- **Práctica recomendada**: construir `events_with_t0.txt` como intersección entre eventos disponibles en `data/losc/*` y `keys(t0_catalog_gwosc_v2.json)`, y guardarlo en `runs/<prep_run_id>/external_inputs/events_with_t0.txt`.
+- **Por qué**: mejora reproducibilidad y auditoría, reduce dependencia de consultas online y evita fallos por eventos sin t0.
+
+Ejemplo explícito:
+
+```bash
+T0_CATALOG="runs/<audit_run_id>/experiment/losc_quality/t0_catalog_gwosc_v2.json"
+EVENTS_FILE="runs/<prep_run_id>/external_inputs/events_with_t0.txt"
+
+python -m mvp.experiment_offline_batch \
+  --batch-run-id <batch_run_id> \
+  --events-file "$EVENTS_FILE" \
+  --t0-catalog "$T0_CATALOG" \
+  --mode-filter "(2,2,0)"
+```
+
 ## Quality gates (auditoría de eventos)
 
 En auditorías LOSC/t0, usa siempre estas listas como puertas de calidad antes de correr batch pesado:

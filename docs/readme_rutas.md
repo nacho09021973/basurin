@@ -132,9 +132,14 @@ Si eso no coincide con el árbol real donde está `RUN_VALID/verdict.json`, el s
 
 - `runs/<audit>/experiment/losc_quality/losc_event_quality.csv`
 - `runs/<audit>/experiment/losc_quality/approved_events.txt`
-- `runs/<audit>/experiment/losc_quality/t0_catalog_gwosc_v2.json`
+- `runs/<run_id>/experiment/losc_quality/t0_catalog_gwosc_v2.json` *(ruta canónica)*
 - `runs/<audit>/experiment/losc_quality/gwosc_ready_events.txt`
+- `runs/<prep_run_id>/external_inputs/events_with_t0.txt` *(lista derivada para batch offline)*
 - `runs/<batch>/experiment/offline_batch/results.csv`
+
+Propósito de `t0_catalog_gwosc_v2.json`: catálogo `event_id -> t0_gps` para experimentos offline/batch (por ejemplo `experiment_offline_batch --t0-catalog ...`), tratado como input externo gobernado dentro de `runs/`.
+
+Gobernanza: tanto el catálogo t0 como artefactos derivados (por ejemplo `events_with_t0.txt`) deben vivir bajo `runs/<run_id>/...`; está prohibido escribir fuera del árbol de runs auditable.
 
 Nota: `RUN_VALID` es un directorio; el veredicto canónico siempre vive en `RUN_VALID/verdict.json`.
 
