@@ -357,6 +357,35 @@ CONTRACTS: dict[str, StageContract] = {
         upstream_stages=["s5_aggregate"],
         check_run_valid=True,
     ),
+    "experiment_gwtc_posteriors_fetch": StageContract(
+        name="experiment_gwtc_posteriors_fetch",
+        required_inputs=[
+        ],
+        external_inputs=[
+            "gwtc_posteriors",
+        ],
+        produced_outputs=[
+            "outputs/validated_posteriors.json",
+        ],
+        upstream_stages=[],
+        check_run_valid=True,
+    ),
+    "experiment_area_theorem": StageContract(
+        name="experiment_area_theorem",
+        required_inputs=[
+        ],
+        external_inputs=[
+            "gwtc_posteriors",
+            "batch220_intersection",
+            "batch221_intersection",
+        ],
+        produced_outputs=[
+            "outputs/per_event.csv",
+            "outputs/summary.json",
+        ],
+        upstream_stages=[],
+        check_run_valid=True,
+    ),
 }
 
 
