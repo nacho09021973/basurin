@@ -49,16 +49,23 @@ def _format_missing_t0_message(
     window_catalog_path: Path,
     sources_attempted: dict[str, Any],
     reason: str | None = None,
+    stable_paths: bool = False,
 ) -> str:
     error_code = "missing_t0_gps_offline" if offline else "missing_t0_gps"
-    window_catalog_display = _stable_path(str(window_catalog_path))
+    window_catalog_display = str(window_catalog_path)
+    sources_attempted_display = dict(sources_attempted)
+    if stable_paths:
+        window_catalog_display = _stable_path(window_catalog_display) or window_catalog_display
+        for key in ("catalog_path", "legacy_windows_path", "run_cache_path"):
+            if key in sources_attempted_display:
+                sources_attempted_display[key] = _stable_path(sources_attempted_display.get(key))
     parts = [
         f"{error_code}: event_id={event_id}",
         f"window_catalog={window_catalog_display}",
     ]
     if reason:
         parts.append(reason)
-    parts.append(f"sources_attempted={json.dumps(sources_attempted, sort_keys=True)}")
+    parts.append(f"sources_attempted={json.dumps(sources_attempted_display, sort_keys=True)}")
     return "; ".join(parts)
 
 def _ensure_window_meta_contract(ctx: Any, artifacts: dict[str, Path], strain_path: Path) -> None:
@@ -158,6 +165,7 @@ def _resolve_t0_gps(
     *,
     offline: bool = False,
     run_dir: Path | None = None,
+    stable_error_paths: bool = False,
 ) -> tuple[float, str, dict[str, Any], bool]:
     canonical_event_id = _canonical_event_id(event_id)
     lookup_keys = [event_id]
@@ -169,10 +177,10 @@ def _resolve_t0_gps(
     if run_dir is not None:
         run_cache_path = str(run_dir / "external_inputs" / "gwosc" / "event_time" / f"{event_id}.json")
     sources_attempted: dict[str, Any] = {
-        "catalog_path": _stable_path(str(window_catalog_path)) if window_catalog_path is not None else None,
+        "catalog_path": str(window_catalog_path) if window_catalog_path is not None else None,
         "metadata_path": str(metadata_path),
-        "legacy_windows_path": _stable_path(str(window_catalog_path)) if window_catalog_path is not None else None,
-        "run_cache_path": _stable_path(run_cache_path),
+        "legacy_windows_path": str(window_catalog_path) if window_catalog_path is not None else None,
+        "run_cache_path": run_cache_path,
         "online_fetch_enabled": (not offline),
         "offline": bool(offline),
         "keys_checked": list(lookup_keys),
@@ -244,6 +252,7 @@ def _resolve_t0_gps(
                 window_catalog_path=window_catalog_path,
                 sources_attempted=sources_attempted,
                 reason=OFFLINE_T0_ERROR,
+                stable_paths=stable_error_paths,
             )
         )
 
@@ -317,6 +326,7 @@ def main() -> int:
             Path(args.window_catalog),
             offline=bool(args.offline),
             run_dir=ctx.run_dir,
+            stable_error_paths=bool(args.offline),
         )
         event_id_lookup_key = str(t0_details.get("lookup_key", args.event_id))
         gwosc_cache_path: str | None = None
