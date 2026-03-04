@@ -59,6 +59,9 @@ def _format_missing_t0_message(
         for key in ("catalog_path", "legacy_windows_path", "run_cache_path"):
             if key in sources_attempted_display:
                 sources_attempted_display[key] = _stable_path(sources_attempted_display.get(key))
+    if offline and stable_paths:
+        sources_str = json.dumps(sources_attempted_display, sort_keys=True)
+        return f"{OFFLINE_T0_ERROR}; sources_attempted={sources_str}"
     parts = [
         f"{error_code}: event_id={event_id}",
         f"window_catalog={window_catalog_display}",
@@ -485,7 +488,10 @@ def main() -> int:
     except SystemExit:
         raise
     except Exception as exc:
-        abort(ctx, str(exc))
+        try:
+            abort(ctx, str(exc))
+        except SystemExit:
+            pass
         return 2
 
 
