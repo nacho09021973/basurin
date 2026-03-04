@@ -635,6 +635,31 @@ def _json_strictify(value: Any) -> Any:
     return value
 
 
+
+
+def _estimate_spectral_compat(
+    strain: np.ndarray,
+    fs: float,
+    band: tuple[float, float],
+    *,
+    spectral_kerr_band: bool,
+    f220_kerr_hz: float,
+    spectral_band_width_factor: float,
+    spectral_min_half_width_hz: float,
+) -> dict[str, Any]:
+    kwargs = {
+        "kerr_centered_band": spectral_kerr_band,
+        "kerr_f220_hz": f220_kerr_hz,
+        "band_width_factor": spectral_band_width_factor,
+        "min_half_width_hz": spectral_min_half_width_hz,
+    }
+    try:
+        return estimate_ringdown_spectral(strain, fs, band, **kwargs)
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return estimate_ringdown_spectral(strain, fs, band)
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=f"MVP {STAGE}: estimate f, tau, Q")
     ap.add_argument("--run", default=None)
@@ -729,14 +754,14 @@ def main() -> int:
                             f"t0_scan first offset leaves too few samples ({strain.size})"
                         )
                 if args.method == "spectral_lorentzian":
-                    est = estimate_ringdown_spectral(
+                    est = _estimate_spectral_compat(
                         strain,
                         fs,
                         (args.band_low, args.band_high),
-                        kerr_centered_band=bool(args.spectral_kerr_band),
-                        kerr_f220_hz=f220_kerr_hz,
-                        band_width_factor=float(args.spectral_band_width_factor),
-                        min_half_width_hz=float(args.spectral_min_half_width_hz),
+                        spectral_kerr_band=bool(args.spectral_kerr_band),
+                        f220_kerr_hz=f220_kerr_hz,
+                        spectral_band_width_factor=float(args.spectral_band_width_factor),
+                        spectral_min_half_width_hz=float(args.spectral_min_half_width_hz),
                     )
                     if not est.get("fit_success", True):
                         spectral_fallbacks.append(det)
@@ -919,14 +944,14 @@ def main() -> int:
                     if shift >= raw_strain.size - 16:
                         off_per_det.append({"success": False})
                         continue
-                    est_off = estimate_ringdown_spectral(
+                    est_off = _estimate_spectral_compat(
                         raw_strain[shift:],
                         fs_det,
                         (args.band_low, args.band_high),
-                        kerr_centered_band=bool(args.spectral_kerr_band),
-                        kerr_f220_hz=f220_kerr_hz,
-                        band_width_factor=float(args.spectral_band_width_factor),
-                        min_half_width_hz=float(args.spectral_min_half_width_hz),
+                        spectral_kerr_band=bool(args.spectral_kerr_band),
+                        f220_kerr_hz=f220_kerr_hz,
+                        spectral_band_width_factor=float(args.spectral_band_width_factor),
+                        spectral_min_half_width_hz=float(args.spectral_min_half_width_hz),
                     )
                     est_off["detector"] = det
                     off_per_det.append(est_off)
