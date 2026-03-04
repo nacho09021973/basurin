@@ -33,6 +33,7 @@ from basurin_io import sha256_file, write_json_atomic
 
 STAGE = "s2_ringdown_window"
 DEFAULT_WINDOW_CATALOG = Path(__file__).resolve().parent / "assets" / "window_catalog_v1.json"
+OFFLINE_T0_ERROR = "missing_t0_gps_offline: unable to resolve t0_gps from local sources"
 
 def _ensure_window_meta_contract(ctx: Any, artifacts: dict[str, Path], strain_path: Path) -> None:
     ctx.outputs_dir.mkdir(parents=True, exist_ok=True)
@@ -173,11 +174,8 @@ def _resolve_t0_gps(
         t0_gps, source = metadata
         return t0_gps, source, {"lookup_key": event_id}, False
 
-    attempted = [f"window_catalog={window_catalog_path}", f"metadata=docs/ringdown/event_metadata/{event_id}_metadata.json"]
     if offline:
-        raise RuntimeError(
-            f"missing_t0_gps_offline: event_id={event_id!r}; sources_attempted={attempted}"
-        )
+        raise RuntimeError(OFFLINE_T0_ERROR)
 
     effective_run_dir = run_dir if run_dir is not None else Path("runs") / "_s2_tmp"
     t0_gps, source, fetched = _read_or_create_gwosc_cache(effective_run_dir, event_id)
@@ -289,6 +287,7 @@ def main() -> int:
         window_status: dict[str, dict[str, Any]] = {}
         window_errors: list[str] = []
         n_out = 0
+        any_t0_clipped = False
         for det in detectors:
             strain = np.asarray(data[det], dtype=np.float64)
             if strain.ndim != 1:
@@ -298,6 +297,17 @@ def main() -> int:
 
             i_start = int(round((t_start_gps - gps_start) * fs))
             n_out = int(round(args.duration_s * fs))
+            t_start_det = t_start_gps
+            t0_det = t0_gps
+
+            if args.clip_window and strain.size > 0:
+                i_start_clamped = max(0, min(i_start, int(strain.size) - 1))
+                if i_start_clamped != i_start:
+                    any_t0_clipped = True
+                    i_start = i_start_clamped
+                    t_start_det = gps_start + (i_start / fs)
+                    t0_det = t_start_det - args.dt_start_s
+
             i_end = i_start + n_out
             if i_start < 0 or i_end > strain.size:
                 err = f"Window out of range for {det}: i_start={i_start}, i_end={i_end}, n={strain.size}"
@@ -313,6 +323,11 @@ def main() -> int:
                     i_end_clipped = max(0, min(i_end, int(strain.size)))
                     status.update({
                         "clipped": True,
+                        "t0_clipped": bool(t0_det != t0_gps),
+                        "t0_gps_original": float(t0_gps),
+                        "t0_gps_used": float(t0_det),
+                        "t_start_gps_original": float(t_start_gps),
+                        "t_start_gps_used": float(t_start_det),
                         "i_start_clipped": i_start_clipped,
                         "i_end_clipped": i_end_clipped,
                         "clip_left_samples": max(0, -i_start),
@@ -350,6 +365,9 @@ def main() -> int:
                 "i_end": i_end,
                 "n": int(strain.size),
                 "clipped": False,
+                "t0_clipped": bool(t0_det != t0_gps),
+                "t0_gps_original": float(t0_gps),
+                "t0_gps_used": float(t0_det),
             }
 
         window_meta = {
@@ -362,6 +380,7 @@ def main() -> int:
             "t_start_gps": t_start_gps, "t_end_gps": t_end_gps,
             "sample_rate_hz": fs, "detectors": detectors, "n_samples": n_out,
             "clip_window": bool(args.clip_window),
+            "t0_clipped": bool(any_t0_clipped),
             "window_status": window_status,
         }
         meta_path = ctx.outputs_dir / "window_meta.json"
