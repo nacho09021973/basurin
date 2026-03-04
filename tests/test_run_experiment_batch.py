@@ -156,3 +156,54 @@ def test_offline_batch_prioriza_window_catalog_sobre_alias_t0_catalog(tmp_path, 
     wc_idx = s2_cmd.index("--window-catalog")
     assert s2_cmd[wc_idx + 1] == str(window_catalog)
     assert "--offline" in s2_cmd
+
+
+def test_offline_batch_pasa_mode_filter_a_s4(tmp_path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs_root"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    events_file = tmp_path / "events.txt"
+    events_file.write_text("GW150914\n", encoding="utf-8")
+
+    t0_catalog = tmp_path / "t0_catalog.json"
+    t0_catalog.write_text("{}\n", encoding="utf-8")
+
+    atlas = tmp_path / "atlas.json"
+    atlas.write_text("{}\n", encoding="utf-8")
+
+    recorded_cmds: list[list[str]] = []
+
+    def _fake_run_cmd(cmd: list[str], *, env: dict[str, str]) -> None:
+        recorded_cmds.append(cmd)
+
+    monkeypatch.setattr(offline_batch, "_run_cmd", _fake_run_cmd)
+    monkeypatch.setattr(offline_batch, "_event_run_id", lambda event_id: "mvp_GW150914_real_offline_20260304T000000Z")
+    monkeypatch.setattr(offline_batch, "_read_len_compatible", lambda out_root, run_id: 1)
+
+    rc = offline_batch.main(
+        [
+            "--batch-run-id",
+            "batch_test",
+            "--events-file",
+            str(events_file),
+            "--window-catalog",
+            str(t0_catalog),
+            "--atlas-path",
+            str(atlas),
+            "--mode-filter",
+            "(2,2,0)",
+            "--max-events",
+            "1",
+        ]
+    )
+
+    assert rc == 0
+
+    s4_cmd = next(cmd for cmd in recorded_cmds if "mvp.s4_geometry_filter" in cmd)
+    mf_idx = s4_cmd.index("--mode-filter")
+    assert s4_cmd[mf_idx + 1] == "(2,2,0)"
+
+    results_csv = runs_root / "batch_test" / "experiment" / "offline_batch" / "results.csv"
+    with results_csv.open("r", encoding="utf-8", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    assert rows[0]["mode_filter"] == "(2,2,0)"
