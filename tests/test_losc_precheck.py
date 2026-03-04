@@ -1,0 +1,79 @@
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("numpy")
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = REPO_ROOT / "tools" / "losc_precheck.py"
+
+
+def _run(args: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), *args],
+        cwd=str(cwd or REPO_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_losc_precheck_pass(tmp_path: Path) -> None:
+    event_dir = tmp_path / "losc" / "GW150914"
+    event_dir.mkdir(parents=True)
+    (event_dir / "H-H1_GWOSC.hdf5").write_bytes(b"h1")
+    (event_dir / "L-L1_GWOSC.h5").write_bytes(b"l1")
+
+    proc = _run(["--event-id", "GW150914", "--losc-root", str(tmp_path / "losc")])
+    out = proc.stdout + proc.stderr
+
+    assert proc.returncode == 0, out
+    assert "LOSC_ROOT_EFFECTIVE=" in out
+    assert "EVENT_DIR=" in out
+    assert "h5_count=2" in out
+    assert "match_count_H1=1" in out
+    assert "match_count_L1=1" in out
+
+
+def test_losc_precheck_fail_includes_actionable_diagnostics(tmp_path: Path) -> None:
+    event_dir = tmp_path / "losc" / "GW190521"
+    event_dir.mkdir(parents=True)
+    (event_dir / "weird_name_a.h5").write_bytes(b"x")
+
+    proc = _run(["--event-id", "GW190521", "--losc-root", str(tmp_path / "losc")])
+    out = proc.stdout + proc.stderr
+
+    assert proc.returncode == 2, out
+    assert "LOSC_ROOT_EFFECTIVE=" in out
+    assert "EVENT_DIR=" in out
+    assert "h5_count=1" in out
+    assert "match_count_H1=0" in out
+    assert "match_count_L1=0" in out
+    assert "rama B" in out
+
+
+def test_losc_precheck_subprocess_is_read_only_and_cwd_independent(tmp_path: Path) -> None:
+    losc_root = tmp_path / "external" / "losc"
+    event_dir = losc_root / "GW170104"
+    event_dir.mkdir(parents=True)
+    (event_dir / "H1.h5").write_bytes(b"h1")
+    (event_dir / "L1.hdf5").write_bytes(b"l1")
+
+    run_cwd = tmp_path / "cwd"
+    run_cwd.mkdir()
+
+    before = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file())
+    proc = _run(["--event-id", "GW170104", "--losc-root", str(losc_root)], cwd=run_cwd)
+    after = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file())
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert before == after
+
