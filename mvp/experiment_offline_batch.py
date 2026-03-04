@@ -39,6 +39,7 @@ class EventResult:
     status: str
     len_compatible: int
     epsilon_used: float
+    mode_filter: str
     error_stage: str
     error_message_short: str
 
@@ -104,7 +105,24 @@ def _build_stage_commands(
     window_catalog_path: Path,
     atlas_path: Path,
     epsilon: float,
+    mode_filter: str | None,
 ) -> list[tuple[str, list[str]]]:
+    s4_cmd = [
+        python_exe,
+        "-m",
+        "mvp.s4_geometry_filter",
+        "--run",
+        run_id,
+        "--atlas-path",
+        str(atlas_path),
+        "--epsilon",
+        str(float(epsilon)),
+        "--metric",
+        "mahalanobis_log",
+    ]
+    if mode_filter is not None:
+        s4_cmd.extend(["--mode-filter", mode_filter])
+
     return [
         (
             "s1_fetch_strain",
@@ -138,19 +156,7 @@ def _build_stage_commands(
         ("s3_ringdown_estimates", [python_exe, "-m", "mvp.s3_ringdown_estimates", "--run", run_id]),
         (
             "s4_geometry_filter",
-            [
-                python_exe,
-                "-m",
-                "mvp.s4_geometry_filter",
-                "--run",
-                run_id,
-                "--atlas-path",
-                str(atlas_path),
-                "--epsilon",
-                str(float(epsilon)),
-                "--metric",
-                "mahalanobis_log",
-            ],
+            s4_cmd,
         ),
         ("s6_information_geometry", [python_exe, "-m", "mvp.s6_information_geometry", "--run", run_id]),
         (
@@ -168,6 +174,7 @@ def _execute_event(
     atlas_path: Path,
     epsilon_default: float,
     epsilon_fallback: float,
+    mode_filter: str | None,
     env: dict[str, str],
 ) -> EventResult:
     run_id = _event_run_id(event_id)
@@ -181,6 +188,7 @@ def _execute_event(
             window_catalog_path=window_catalog_path,
             atlas_path=atlas_path,
             epsilon=epsilon_default,
+            mode_filter=mode_filter,
         ):
             _run_cmd(cmd, env=env)
 
@@ -195,6 +203,7 @@ def _execute_event(
                     window_catalog_path=window_catalog_path,
                     atlas_path=atlas_path,
                     epsilon=epsilon_fallback,
+                    mode_filter=mode_filter,
                 )[3][1],
                 env=env,
             )
@@ -211,6 +220,7 @@ def _execute_event(
             status="PASS",
             len_compatible=int(len_compatible),
             epsilon_used=epsilon_used,
+            mode_filter=mode_filter or "",
             error_stage="",
             error_message_short="",
         )
@@ -221,6 +231,7 @@ def _execute_event(
             status="FAIL",
             len_compatible=0,
             epsilon_used=epsilon_used,
+            mode_filter=mode_filter or "",
             error_stage="subprocess",
             error_message_short=f"exit={exc.returncode}",
         )
@@ -231,6 +242,7 @@ def _execute_event(
             status="FAIL",
             len_compatible=0,
             epsilon_used=epsilon_used,
+            mode_filter=mode_filter or "",
             error_stage="runtime",
             error_message_short=str(exc)[:160],
         )
@@ -247,6 +259,7 @@ def _write_results_csv(results: list[EventResult], path: Path) -> None:
                 "status",
                 "len_compatible",
                 "epsilon_used",
+                "mode_filter",
                 "error_stage",
                 "error_message_short",
             ]
@@ -259,6 +272,7 @@ def _write_results_csv(results: list[EventResult], path: Path) -> None:
                     row.status,
                     row.len_compatible,
                     row.epsilon_used,
+                    row.mode_filter,
                     row.error_stage,
                     row.error_message_short,
                 ]
@@ -274,6 +288,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--atlas-path", default=DEFAULT_ATLAS_PATH)
     ap.add_argument("--epsilon-default", type=float, default=0.3)
     ap.add_argument("--epsilon-fallback", type=float, default=1200.0)
+    ap.add_argument("--mode-filter", default=None)
     ap.add_argument("--max-events", type=int, default=None)
     return ap
 
@@ -322,6 +337,7 @@ def main(argv: list[str] | None = None) -> int:
                 atlas_path=atlas_path,
                 epsilon_default=args.epsilon_default,
                 epsilon_fallback=args.epsilon_fallback,
+                mode_filter=args.mode_filter,
                 env=env,
             )
         )
@@ -341,6 +357,7 @@ def main(argv: list[str] | None = None) -> int:
             "atlas_path": str(atlas_path),
             "epsilon_default": float(args.epsilon_default),
             "epsilon_fallback": float(args.epsilon_fallback),
+            "mode_filter": args.mode_filter,
             "max_events": args.max_events,
         },
         "inputs": [

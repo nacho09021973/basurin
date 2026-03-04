@@ -64,6 +64,31 @@ def _load_atlas(atlas_path: Path) -> list[dict[str, Any]]:
     return entries
 
 
+def _mode_to_string(mode_value: Any) -> str:
+    if isinstance(mode_value, (list, tuple)):
+        return f"({','.join(str(part) for part in mode_value)})"
+    return str(mode_value)
+
+
+def _filter_atlas_by_mode(
+    atlas_entries: list[dict[str, Any]],
+    mode_filter: str | None,
+) -> list[dict[str, Any]]:
+    if mode_filter is None:
+        return atlas_entries
+
+    filtered = [
+        entry
+        for entry in atlas_entries
+        if _mode_to_string((entry.get("metadata") or {}).get("mode")) == mode_filter
+    ]
+    if not filtered:
+        raise ValueError(
+            f"Atlas filter produced zero entries for mode_filter={mode_filter!r}"
+        )
+    return filtered
+
+
 def _normalize_metric(
     metric: str | None,
     metric_params: dict[str, Any] | None,
@@ -483,6 +508,11 @@ def main() -> int:
     ap.add_argument("--stage-name", default=STAGE)
     ap.add_argument("--atlas-path", required=True)
     ap.add_argument("--epsilon", type=float, default=None)
+    ap.add_argument(
+        "--mode-filter",
+        default=None,
+        help='Filter atlas entries by exact metadata.mode string (example: "(2,2,0)")',
+    )
     ap.add_argument("--metric", choices=["euclidean_log", "mahalanobis_log"], default=None)
     ap.add_argument(
         "--estimates-path", default=None,
@@ -507,6 +537,7 @@ def main() -> int:
         "stage_name": args.stage_name,
         "atlas_path": str(atlas_path),
         "epsilon_cli": args.epsilon,
+        "mode_filter": args.mode_filter,
         "estimates_path_override": args.estimates_path,
     })
 
@@ -599,7 +630,7 @@ def main() -> int:
         ctx.params["epsilon"] = threshold
         ctx.params["metric"] = metric_name
 
-        atlas = _load_atlas(atlas_path)
+        atlas = _filter_atlas_by_mode(_load_atlas(atlas_path), args.mode_filter)
         result = compute_compatible_set(
             f_obs,
             Q_obs,
@@ -610,6 +641,7 @@ def main() -> int:
         )
         result["event_id"] = estimates.get("event_id", "unknown")
         result["run_id"] = args.run
+        result["mode_filter"] = args.mode_filter
 
         _ok, _errs = validate_compatible_set(
             result,
