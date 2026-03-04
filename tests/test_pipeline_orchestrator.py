@@ -656,3 +656,33 @@ def test_run_multi_event_creates_run_valid_for_agg_run(
 
     rv_path = runs_root / "agg_rv_test" / "RUN_VALID" / "verdict.json"
     assert rv_path.exists(), "RUN_VALID was not created for the aggregate run"
+
+
+def test_pipeline_single_cli_prioritizes_window_catalog_over_t0_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runs_root = _make_runs_root(tmp_path)
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    captured: dict[str, Any] = {}
+
+    def fake_run_single_event(*args: Any, **kwargs: Any) -> tuple[int, str]:
+        captured.update(kwargs)
+        return 0, "run_ok"
+
+    monkeypatch.setattr(pipeline, "run_single_event", fake_run_single_event)
+    monkeypatch.setattr(sys, "argv", [
+        "pipeline.py",
+        "single",
+        "--event-id",
+        "GW150914",
+        "--atlas-path",
+        "fake_atlas.json",
+        "--window-catalog",
+        "catalogs/window.json",
+        "--t0-catalog",
+        "catalogs/t0.json",
+    ])
+
+    rc = pipeline.main()
+
+    assert rc == 0
+    assert captured["t0_catalog"] == "catalogs/window.json"

@@ -101,7 +101,7 @@ def _build_stage_commands(
     python_exe: str,
     event_id: str,
     run_id: str,
-    t0_catalog: Path,
+    window_catalog_path: Path,
     atlas_path: Path,
     epsilon: float,
 ) -> list[tuple[str, list[str]]]:
@@ -131,7 +131,7 @@ def _build_stage_commands(
                 "--event-id",
                 event_id,
                 "--window-catalog",
-                str(t0_catalog),
+                str(window_catalog_path),
                 "--offline",
             ],
         ),
@@ -164,7 +164,7 @@ def _execute_event(
     *,
     out_root: Path,
     event_id: str,
-    t0_catalog: Path,
+    window_catalog_path: Path,
     atlas_path: Path,
     epsilon_default: float,
     epsilon_fallback: float,
@@ -178,7 +178,7 @@ def _execute_event(
             python_exe=sys.executable,
             event_id=event_id,
             run_id=run_id,
-            t0_catalog=t0_catalog,
+            window_catalog_path=window_catalog_path,
             atlas_path=atlas_path,
             epsilon=epsilon_default,
         ):
@@ -192,7 +192,7 @@ def _execute_event(
                     python_exe=sys.executable,
                     event_id=event_id,
                     run_id=run_id,
-                    t0_catalog=t0_catalog,
+                    window_catalog_path=window_catalog_path,
                     atlas_path=atlas_path,
                     epsilon=epsilon_fallback,
                 )[3][1],
@@ -269,7 +269,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Batch offline-first runner over GWOSC-ready events")
     ap.add_argument("--batch-run-id", required=True)
     ap.add_argument("--events-file", default=DEFAULT_EVENTS_FILE)
-    ap.add_argument("--t0-catalog", default=DEFAULT_T0_CATALOG)
+    ap.add_argument("--window-catalog", default=None)
+    ap.add_argument("--t0-catalog", default=None)
     ap.add_argument("--atlas-path", default=DEFAULT_ATLAS_PATH)
     ap.add_argument("--epsilon-default", type=float, default=0.3)
     ap.add_argument("--epsilon-fallback", type=float, default=1200.0)
@@ -284,13 +285,14 @@ def main(argv: list[str] | None = None) -> int:
     validate_run_id(args.batch_run_id, out_root)
 
     events_file = Path(args.events_file).expanduser().resolve()
-    t0_catalog = Path(args.t0_catalog).expanduser().resolve()
+    window_catalog_cli = args.window_catalog if args.window_catalog is not None else args.t0_catalog
+    window_catalog_path = Path(window_catalog_cli or DEFAULT_T0_CATALOG).expanduser().resolve()
     atlas_path = Path(args.atlas_path).expanduser().resolve()
 
-    if not t0_catalog.exists():
+    if not window_catalog_path.exists():
         raise SystemExit(
             "ERROR: missing required input. "
-            f"expected path: {t0_catalog}. "
+            f"expected path: {window_catalog_path}. "
             "upstream regenerate command: "
             "python -m mvp.audit_gwosc_losc_quality --run-id audit_gwosc_t0_20260304T115440Z"
         )
@@ -316,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
             _execute_event(
                 out_root=out_root,
                 event_id=event_id,
-                t0_catalog=t0_catalog,
+                window_catalog_path=window_catalog_path,
                 atlas_path=atlas_path,
                 epsilon_default=args.epsilon_default,
                 epsilon_fallback=args.epsilon_fallback,
@@ -335,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
         "version": "v1",
         "parameters": {
             "events_file": str(events_file),
-            "t0_catalog": str(t0_catalog),
+            "window_catalog": str(window_catalog_path),
             "atlas_path": str(atlas_path),
             "epsilon_default": float(args.epsilon_default),
             "epsilon_fallback": float(args.epsilon_fallback),
@@ -343,7 +345,11 @@ def main(argv: list[str] | None = None) -> int:
         },
         "inputs": [
             {"label": "events_file", "path": str(events_file), "sha256": sha256_file(events_file)},
-            {"label": "t0_catalog", "path": str(t0_catalog), "sha256": sha256_file(t0_catalog)},
+            {
+                "label": "window_catalog",
+                "path": str(window_catalog_path),
+                "sha256": sha256_file(window_catalog_path),
+            },
             {"label": "atlas_path", "path": str(atlas_path), "sha256": sha256_file(atlas_path)},
         ],
         "outputs": [

@@ -91,10 +91,10 @@ python -m mvp.pipeline single \
   --run-id "${RUN_ID}" \
   --atlas-default \
   --offline-s2 \
-  --t0-catalog "runs/audit_gwosc_t0_*/experiment/losc_quality/t0_catalog_gwosc_v2.json"
+  --window-catalog "runs/audit_gwosc_t0_*/experiment/losc_quality/t0_catalog_gwosc_v2.json"
 ```
 
-> Si no existe catálogo t0 aún, puedes lanzar sin `--t0-catalog`. Cuando exista, úsalo para mantener el flujo offline-first.
+> Si no existe catálogo t0 aún, puedes lanzar sin `--window-catalog`. Cuando exista, úsalo para mantener el flujo offline-first. (Alias soportado: `--t0-catalog`)
 
 ---
 

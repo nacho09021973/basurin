@@ -78,7 +78,7 @@ def test_offline_batch_invoca_s2_offline_y_escribe_csv_en_runs_root(tmp_path, mo
             "batch_test",
             "--events-file",
             str(events_file),
-            "--t0-catalog",
+            "--window-catalog",
             str(t0_catalog),
             "--atlas-path",
             str(atlas),
@@ -106,3 +106,53 @@ def test_offline_batch_invoca_s2_offline_y_escribe_csv_en_runs_root(tmp_path, mo
     summary_path = runs_root / "batch_test" / "experiment" / "offline_batch" / "stage_summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary["results"]["n_events"] == 1
+
+
+def test_offline_batch_prioriza_window_catalog_sobre_alias_t0_catalog(tmp_path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs_root"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    events_file = tmp_path / "events.txt"
+    events_file.write_text("GW150914\n", encoding="utf-8")
+
+    window_catalog = tmp_path / "window_catalog.json"
+    window_catalog.write_text("{}\n", encoding="utf-8")
+
+    t0_catalog = tmp_path / "t0_catalog.json"
+    t0_catalog.write_text("{}\n", encoding="utf-8")
+
+    atlas = tmp_path / "atlas.json"
+    atlas.write_text("{}\n", encoding="utf-8")
+
+    recorded_cmds: list[list[str]] = []
+
+    def _fake_run_cmd(cmd: list[str], *, env: dict[str, str]) -> None:
+        recorded_cmds.append(cmd)
+
+    monkeypatch.setattr(offline_batch, "_run_cmd", _fake_run_cmd)
+    monkeypatch.setattr(offline_batch, "_event_run_id", lambda event_id: "mvp_GW150914_real_offline_20260304T000000Z")
+    monkeypatch.setattr(offline_batch, "_read_len_compatible", lambda out_root, run_id: 1)
+
+    rc = offline_batch.main(
+        [
+            "--batch-run-id",
+            "batch_test",
+            "--events-file",
+            str(events_file),
+            "--window-catalog",
+            str(window_catalog),
+            "--t0-catalog",
+            str(t0_catalog),
+            "--atlas-path",
+            str(atlas),
+            "--max-events",
+            "1",
+        ]
+    )
+
+    assert rc == 0
+
+    s2_cmd = next(cmd for cmd in recorded_cmds if "mvp.s2_ringdown_window" in cmd)
+    wc_idx = s2_cmd.index("--window-catalog")
+    assert s2_cmd[wc_idx + 1] == str(window_catalog)
+    assert "--offline" in s2_cmd
