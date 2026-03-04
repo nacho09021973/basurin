@@ -131,7 +131,7 @@ def _resolve_t0_gps(
     *,
     offline: bool = False,
     run_dir: Path | None = None,
-) -> tuple[float, str, str]:
+) -> tuple[float, str, dict[str, Any], bool]:
     canonical_event_id = _canonical_event_id(event_id)
     lookup_keys = [event_id]
     if canonical_event_id != event_id:
@@ -151,22 +151,27 @@ def _resolve_t0_gps(
                     continue
                 t0_ref = w.get("t0_ref", {})
                 if "value_gps" in t0_ref:
-                    return float(t0_ref["value_gps"]), str(window_catalog_path), str(w.get("event_id"))
+                    return (
+                        float(t0_ref["value_gps"]),
+                        str(window_catalog_path),
+                        {"lookup_key": str(w.get("event_id"))},
+                        False,
+                    )
 
             # Schema A: {"GW190521": {"t0_gps": 1242442967.4}}
             for lookup_key in lookup_keys:
                 if lookup_key in catalog and isinstance(catalog[lookup_key], dict) and "t0_gps" in catalog[lookup_key]:
-                    return float(catalog[lookup_key]["t0_gps"]), str(window_catalog_path), lookup_key
+                    return float(catalog[lookup_key]["t0_gps"]), str(window_catalog_path), {"lookup_key": lookup_key}, False
 
             # Schema B: {"GW190521": 1242442967.4}
             for lookup_key in lookup_keys:
                 if lookup_key in catalog and isinstance(catalog[lookup_key], (int, float)):
-                    return float(catalog[lookup_key]), str(window_catalog_path), lookup_key
+                    return float(catalog[lookup_key]), str(window_catalog_path), {"lookup_key": lookup_key}, False
 
     metadata = _resolve_t0_gps_from_local_metadata(event_id)
     if metadata is not None:
         t0_gps, source = metadata
-        return t0_gps, source, event_id
+        return t0_gps, source, {"lookup_key": event_id}, False
 
     attempted = [f"window_catalog={window_catalog_path}", f"metadata=docs/ringdown/event_metadata/{event_id}_metadata.json"]
     if offline:
@@ -175,8 +180,8 @@ def _resolve_t0_gps(
         )
 
     effective_run_dir = run_dir if run_dir is not None else Path("runs") / "_s2_tmp"
-    t0_gps, source, _fetched = _read_or_create_gwosc_cache(effective_run_dir, event_id)
-    return t0_gps, source, event_id
+    t0_gps, source, fetched = _read_or_create_gwosc_cache(effective_run_dir, event_id)
+    return t0_gps, source, {"lookup_key": event_id, "gwosc_cache_path": source}, (not fetched)
 
 
 def main() -> int:
@@ -239,13 +244,17 @@ def main() -> int:
     try:
         import numpy as np
 
-        t0_gps, t0_source, event_id_lookup_key = _resolve_t0_gps(
+        t0_gps, t0_source, t0_details, t0_used_cache = _resolve_t0_gps(
             args.event_id,
             Path(args.window_catalog),
             offline=bool(args.offline),
             run_dir=ctx.run_dir,
         )
+        event_id_lookup_key = str(t0_details.get("lookup_key", args.event_id))
         gwosc_cache_path: str | None = None
+        t0_gwosc_cache = t0_details.get("gwosc_cache_path")
+        if isinstance(t0_gwosc_cache, str):
+            gwosc_cache_path = t0_gwosc_cache
         t0_source_path = Path(t0_source)
         if t0_source_path.exists() and t0_source_path.is_absolute():
             try:
@@ -346,6 +355,8 @@ def main() -> int:
         window_meta = {
             "event_id": args.event_id, "t0_gps": t0_gps, "t0_source": t0_source,
             "event_id_lookup_key": event_id_lookup_key,
+            "t0_details": t0_details,
+            "t0_used_cache": bool(t0_used_cache),
             "gwosc_cache_path": gwosc_cache_path,
             "dt_start_s": args.dt_start_s, "duration_s": args.duration_s,
             "t_start_gps": t_start_gps, "t_end_gps": t_end_gps,
