@@ -35,6 +35,25 @@ STAGE = "s2_ringdown_window"
 DEFAULT_WINDOW_CATALOG = Path(__file__).resolve().parent / "assets" / "window_catalog_v1.json"
 OFFLINE_T0_ERROR = "missing_t0_gps_offline: unable to resolve t0_gps from local sources"
 
+
+def _format_missing_t0_message(
+    *,
+    event_id: str,
+    offline: bool,
+    window_catalog_path: Path,
+    sources_attempted: dict[str, Any],
+    reason: str | None = None,
+) -> str:
+    error_code = "missing_t0_gps_offline" if offline else "missing_t0_gps"
+    parts = [
+        f"{error_code}: event_id={event_id}",
+        f"window_catalog={window_catalog_path}",
+    ]
+    if reason:
+        parts.append(reason)
+    parts.append(f"sources_attempted={json.dumps(sources_attempted, sort_keys=True)}")
+    return "; ".join(parts)
+
 def _ensure_window_meta_contract(ctx: Any, artifacts: dict[str, Path], strain_path: Path) -> None:
     ctx.outputs_dir.mkdir(parents=True, exist_ok=True)
     meta_path = ctx.outputs_dir / "window_meta.json"
@@ -138,6 +157,20 @@ def _resolve_t0_gps(
     if canonical_event_id != event_id:
         lookup_keys.append(canonical_event_id)
 
+    metadata_path = Path("docs/ringdown/event_metadata") / f"{event_id}_metadata.json"
+    run_cache_path: str | None = None
+    if run_dir is not None:
+        run_cache_path = str(run_dir / "external_inputs" / "gwosc" / "event_time" / f"{event_id}.json")
+    sources_attempted: dict[str, Any] = {
+        "catalog_path": str(window_catalog_path) if window_catalog_path is not None else None,
+        "metadata_path": str(metadata_path),
+        "legacy_windows_path": str(window_catalog_path) if window_catalog_path is not None else None,
+        "run_cache_path": run_cache_path,
+        "online_fetch_enabled": (not offline),
+        "offline": bool(offline),
+        "keys_checked": list(lookup_keys),
+    }
+
     if window_catalog_path.exists():
         with open(window_catalog_path, "r", encoding="utf-8") as f:
             catalog = json.load(f)
@@ -145,10 +178,14 @@ def _resolve_t0_gps(
 
         if isinstance(catalog, dict):
             # Legacy schema: {"windows": [{"event_id": ..., "t0_ref": {"value_gps": ...}}]}
+            legacy_event_ids: list[str] = []
             for w in catalog.get("windows", []):
                 if not isinstance(w, dict):
                     continue
-                if w.get("event_id") not in lookup_keys:
+                legacy_event_id = w.get("event_id")
+                if isinstance(legacy_event_id, str):
+                    legacy_event_ids.append(legacy_event_id)
+                if legacy_event_id not in lookup_keys:
                     continue
                 t0_ref = w.get("t0_ref", {})
                 if "value_gps" in t0_ref:
@@ -157,6 +194,24 @@ def _resolve_t0_gps(
                         str(window_catalog_path),
                         {"lookup_key": str(w.get("event_id"))},
                         False,
+                    )
+
+            if isinstance(catalog.get("windows"), list) and legacy_event_ids:
+                requested = lookup_keys[0]
+                if requested not in legacy_event_ids:
+                    raise RuntimeError(
+                        _format_missing_t0_message(
+                            event_id=event_id,
+                            offline=offline,
+                            window_catalog_path=window_catalog_path,
+                            sources_attempted=sources_attempted,
+                            reason=(
+                                "legacy_windows_event_mismatch: "
+                                f"requested_event_id={requested}, "
+                                f"available_event_ids={legacy_event_ids}, "
+                                f"path={window_catalog_path}"
+                            ),
+                        )
                     )
 
             # Schema A: {"GW190521": {"t0_gps": 1242442967.4}}
@@ -175,7 +230,15 @@ def _resolve_t0_gps(
         return t0_gps, source, {"lookup_key": event_id}, False
 
     if offline:
-        raise RuntimeError(OFFLINE_T0_ERROR)
+        raise RuntimeError(
+            _format_missing_t0_message(
+                event_id=event_id,
+                offline=True,
+                window_catalog_path=window_catalog_path,
+                sources_attempted=sources_attempted,
+                reason=OFFLINE_T0_ERROR,
+            )
+        )
 
     effective_run_dir = run_dir if run_dir is not None else Path("runs") / "_s2_tmp"
     t0_gps, source, fetched = _read_or_create_gwosc_cache(effective_run_dir, event_id)
