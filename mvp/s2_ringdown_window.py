@@ -36,6 +36,12 @@ DEFAULT_WINDOW_CATALOG = Path(__file__).resolve().parent / "assets" / "window_ca
 OFFLINE_T0_ERROR = "missing_t0_gps_offline: unable to resolve t0_gps from local sources"
 
 
+def _stable_path(p: str | None) -> str | None:
+    if not p:
+        return None
+    return Path(p).name
+
+
 def _format_missing_t0_message(
     *,
     event_id: str,
@@ -45,9 +51,10 @@ def _format_missing_t0_message(
     reason: str | None = None,
 ) -> str:
     error_code = "missing_t0_gps_offline" if offline else "missing_t0_gps"
+    window_catalog_display = _stable_path(str(window_catalog_path))
     parts = [
         f"{error_code}: event_id={event_id}",
-        f"window_catalog={window_catalog_path}",
+        f"window_catalog={window_catalog_display}",
     ]
     if reason:
         parts.append(reason)
@@ -162,10 +169,10 @@ def _resolve_t0_gps(
     if run_dir is not None:
         run_cache_path = str(run_dir / "external_inputs" / "gwosc" / "event_time" / f"{event_id}.json")
     sources_attempted: dict[str, Any] = {
-        "catalog_path": str(window_catalog_path) if window_catalog_path is not None else None,
+        "catalog_path": _stable_path(str(window_catalog_path)) if window_catalog_path is not None else None,
         "metadata_path": str(metadata_path),
-        "legacy_windows_path": str(window_catalog_path) if window_catalog_path is not None else None,
-        "run_cache_path": run_cache_path,
+        "legacy_windows_path": _stable_path(str(window_catalog_path)) if window_catalog_path is not None else None,
+        "run_cache_path": _stable_path(run_cache_path),
         "online_fetch_enabled": (not offline),
         "offline": bool(offline),
         "keys_checked": list(lookup_keys),
