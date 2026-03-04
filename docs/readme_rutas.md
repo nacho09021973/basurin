@@ -108,7 +108,6 @@ python mvp/s1_fetch_strain.py \
 
 **Nota de gobernanza**: `data/losc/...` es input externo. El árbol auditable del run empieza en `runs/<RUN_ID>/...`.
 
----
 
 ## 0) Regla de oro (léela primero)
 
@@ -400,5 +399,4 @@ runs/<RUN_ID>/experiment/t0_sweep_full_seed<seed>/outputs/t0_sweep_full_results.
 
 Si falta ese directorio/JSON, el oráculo imprime la ruta esperada exacta y el comando para regenerar el sweep (`phase=run`).
 
-=======
 ## Codex
