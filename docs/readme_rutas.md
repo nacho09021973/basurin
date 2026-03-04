@@ -56,6 +56,12 @@ find "runs/$RUN_ID" -type f \
 
 > **STOP**: no continúes si este precheck falla.
 
+Precheck read-only recomendado (script canónico):
+
+```bash
+python tools/losc_precheck.py --event-id "$EVENT_ID" --losc-root data/losc
+```
+
 ```bash
 EVENT_ID=GW150914
 echo "data/losc -> $(readlink -f data/losc 2>/dev/null || echo '(no symlink)')"

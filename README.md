@@ -564,7 +564,7 @@ Todo cambio debe cerrar un ciclo completo: **Inputs deterministas → Estimació
 **Regla soberana:**
 
 * `RUN_VALID` es la **única puerta** hacia downstream.
-* Si `RUN_VALID != PASS` o falta `runs/<run_id>/RUN_VALID/verdict.json`, ningún stage downstream puede correr.
+* Si `runs/<run_id>/RUN_VALID/verdict.json` no existe o su `verdict != PASS`, ningún stage downstream puede correr.
 * Si un stage falla, el run **no existe** a efectos downstream (fail-fast).
 
 **Criterio de aceptación:**
@@ -667,7 +667,7 @@ Todo cambio debe cerrar un ciclo completo: **Inputs deterministas → Estimació
 
 **Criterio de aceptación:**
 
-* Si falla preflight, no se crea `runs/<run_id>/` (o se crea y queda `RUN_VALID=FAIL` con razón explícita).
+* Si falla preflight, no se crea `runs/<run_id>/` (o se crea y queda `RUN_VALID/verdict.json` con `verdict=FAIL` y razón explícita).
 
 ---
 
