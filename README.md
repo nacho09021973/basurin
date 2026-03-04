@@ -89,6 +89,49 @@ Nota Bash importante:
 
 ## Ejecución básica
 
+## Quickstart: Online vs Offline-first
+
+### Path A — Online (resolución en tiempo real)
+
+```bash
+python -m mvp.pipeline single \
+  --event-id GW150914 \
+  --atlas-default
+```
+
+### Path B — Offline-first (recomendado para batch)
+
+1) Genera auditoría LOSC/t0 y catálogo de eventos listos:
+
+```bash
+AUDIT_RUN="audit_gwosc_t0_$(date -u +%Y%m%dT%H%M%SZ)"
+
+python -m mvp.experiment_losc_quality \
+  --run "$AUDIT_RUN" \
+  --gwosc-api-version v2 \
+  --batch-gwosc \
+  --write-t0-catalog
+```
+
+2) Ejecuta pipeline consumiendo catálogo t0 cuando exista:
+
+```bash
+python -m mvp.pipeline single \
+  --event-id GW150914 \
+  --atlas-default \
+  --offline-s2 \
+  --t0-catalog "runs/${AUDIT_RUN}/experiment/losc_quality/t0_catalog_gwosc_v2.json"
+```
+
+## Quality gates (auditoría de eventos)
+
+En auditorías LOSC/t0, usa siempre estas listas como puertas de calidad antes de correr batch pesado:
+
+- `runs/<audit>/experiment/losc_quality/approved_events.txt`
+- `runs/<audit>/experiment/losc_quality/gwosc_ready_events.txt`
+
+Recomendación práctica: prioriza la intersección `approved_events ∩ gwosc_ready_events` para minimizar fallos por metadatos incompletos en ejecución online.
+
 ### Prerrequisitos mínimos del entorno Python
 
 Antes de ejecutar `pipeline.py` o cualquier stage del MVP, valida que estén disponibles
