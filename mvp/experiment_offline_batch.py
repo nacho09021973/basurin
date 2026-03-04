@@ -44,6 +44,10 @@ class EventResult:
     error_message_short: str
 
 
+class CompatibleSetSchemaError(ValueError):
+    """Raised when s4 compatible_set.json is missing or has an unexpected schema."""
+
+
 def _utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -83,18 +87,30 @@ def _run_cmd(cmd: list[str], *, env: dict[str, str]) -> None:
 
 
 def _read_len_compatible(out_root: Path, run_id: str) -> int:
-    ranked_path = (
-        out_root / run_id / "s6b_information_geometry_ranked" / "outputs" / "ranked_geometries.json"
-    )
-    if not ranked_path.exists():
-        raise FileNotFoundError(f"ranked output missing: {ranked_path}")
+    compatible_path = out_root / run_id / "s4_geometry_filter" / "outputs" / "compatible_set.json"
+    if not compatible_path.exists():
+        raise CompatibleSetSchemaError(f"compatible_set missing: {compatible_path}")
 
-    payload = json.loads(ranked_path.read_text(encoding="utf-8"))
-    raw = payload.get("len_compatible", payload.get("n_compatible", 0))
-    try:
-        return int(raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"invalid len_compatible in {ranked_path}: {raw!r}") from exc
+    payload = json.loads(compatible_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise CompatibleSetSchemaError(f"invalid compatible_set schema in {compatible_path}: expected dict")
+
+    if "n_compatible" in payload:
+        raw_n_compatible = payload["n_compatible"]
+        try:
+            return int(raw_n_compatible)
+        except (TypeError, ValueError) as exc:
+            raise CompatibleSetSchemaError(
+                f"invalid n_compatible in {compatible_path}: {raw_n_compatible!r}"
+            ) from exc
+
+    compatible_geometries = payload.get("compatible_geometries")
+    if isinstance(compatible_geometries, list):
+        return len(compatible_geometries)
+
+    raise CompatibleSetSchemaError(
+        f"unexpected compatible_set schema in {compatible_path}: expected 'n_compatible' or list 'compatible_geometries'"
+    )
 
 
 def _build_stage_commands(
@@ -234,6 +250,17 @@ def _execute_event(
             mode_filter=mode_filter or "",
             error_stage="subprocess",
             error_message_short=f"exit={exc.returncode}",
+        )
+    except (CompatibleSetSchemaError, OSError, json.JSONDecodeError) as exc:
+        return EventResult(
+            event_id=event_id,
+            run_id=run_id,
+            status="FAIL",
+            len_compatible=0,
+            epsilon_used=epsilon_used,
+            mode_filter=mode_filter or "",
+            error_stage="s4_geometry_filter",
+            error_message_short=f"{type(exc).__name__}: {exc}"[:160],
         )
     except Exception as exc:
         return EventResult(

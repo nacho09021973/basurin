@@ -207,3 +207,101 @@ def test_offline_batch_pasa_mode_filter_a_s4(tmp_path, monkeypatch) -> None:
     with results_csv.open("r", encoding="utf-8", newline="") as fh:
         rows = list(csv.DictReader(fh))
     assert rows[0]["mode_filter"] == "(2,2,0)"
+
+
+def test_offline_batch_usa_n_compatible_de_s4_en_results_csv(tmp_path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs_root"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    events_file = tmp_path / "events.txt"
+    events_file.write_text("GW170817\n", encoding="utf-8")
+
+    t0_catalog = tmp_path / "t0_catalog.json"
+    t0_catalog.write_text("{}\n", encoding="utf-8")
+
+    atlas = tmp_path / "atlas.json"
+    atlas.write_text("{}\n", encoding="utf-8")
+
+    run_id = "mvp_GW170817_real_offline_20260304T000000Z"
+    compatible_path = runs_root / run_id / "s4_geometry_filter" / "outputs" / "compatible_set.json"
+    compatible_path.parent.mkdir(parents=True, exist_ok=True)
+    compatible_path.write_text(
+        json.dumps({"n_compatible": 156, "compatible_geometries": list(range(156))}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(offline_batch, "_run_cmd", lambda cmd, *, env: None)
+    monkeypatch.setattr(offline_batch, "_event_run_id", lambda event_id: run_id)
+
+    rc = offline_batch.main(
+        [
+            "--batch-run-id",
+            "batch_test",
+            "--events-file",
+            str(events_file),
+            "--window-catalog",
+            str(t0_catalog),
+            "--atlas-path",
+            str(atlas),
+            "--epsilon-default",
+            "2500",
+            "--max-events",
+            "1",
+        ]
+    )
+
+    assert rc == 0
+    results_csv = runs_root / "batch_test" / "experiment" / "offline_batch" / "results.csv"
+    with results_csv.open("r", encoding="utf-8", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+
+    assert rows[0]["event_id"] == "GW170817"
+    assert rows[0]["status"] == "PASS"
+    assert rows[0]["len_compatible"] == "156"
+    assert rows[0]["epsilon_used"] == "2500.0"
+
+
+def test_offline_batch_reporta_fail_si_compatible_set_es_invalido(tmp_path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs_root"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    events_file = tmp_path / "events.txt"
+    events_file.write_text("GW170817\n", encoding="utf-8")
+
+    t0_catalog = tmp_path / "t0_catalog.json"
+    t0_catalog.write_text("{}\n", encoding="utf-8")
+
+    atlas = tmp_path / "atlas.json"
+    atlas.write_text("{}\n", encoding="utf-8")
+
+    run_id = "mvp_GW170817_real_offline_20260304T000000Z"
+    compatible_path = runs_root / run_id / "s4_geometry_filter" / "outputs" / "compatible_set.json"
+    compatible_path.parent.mkdir(parents=True, exist_ok=True)
+    compatible_path.write_text(json.dumps({"compatible": []}), encoding="utf-8")
+
+    monkeypatch.setattr(offline_batch, "_run_cmd", lambda cmd, *, env: None)
+    monkeypatch.setattr(offline_batch, "_event_run_id", lambda event_id: run_id)
+
+    rc = offline_batch.main(
+        [
+            "--batch-run-id",
+            "batch_test",
+            "--events-file",
+            str(events_file),
+            "--window-catalog",
+            str(t0_catalog),
+            "--atlas-path",
+            str(atlas),
+            "--max-events",
+            "1",
+        ]
+    )
+
+    assert rc == 0
+    results_csv = runs_root / "batch_test" / "experiment" / "offline_batch" / "results.csv"
+    with results_csv.open("r", encoding="utf-8", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+
+    assert rows[0]["status"] == "FAIL"
+    assert rows[0]["error_stage"] == "s4_geometry_filter"
+    assert "CompatibleSetSchemaError" in rows[0]["error_message_short"]
