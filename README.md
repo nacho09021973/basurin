@@ -382,6 +382,12 @@ git branch -r
 
 ## Experimentos (`t0_sweep_full`) e inventario por fases
 
+Guías de experimentos documentadas:
+
+- `docs/manual_experimento_1.md`
+- `docs/readme_experiment_2.md`
+- `docs/readme_experiment_4.md` (batch offline-first con `t0`, `mode_filter` y calibración de `epsilon` en `s4_geometry_filter` con `metric=mahalanobis_log`)
+
 - `mvp/experiment_t0_sweep_full.py`: **recomendado para escala/producción**, contract-first con fases `run`/`inventory`/`finalize`.
 - `mvp/experiment_t0_sweep.py`: herramienta **DEV/INTEGRATION** para sanity-check rápido; no contract-first, no inventory/finalize, no aislamiento por subrun. **No usar para conteos oficiales**.
 
