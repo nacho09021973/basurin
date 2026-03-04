@@ -462,6 +462,8 @@ def run_single_event(
     with_t0_sweep: bool = False,
     local_hdf5: list[str] | None = None,
     offline: bool = False,
+    offline_s2: bool = False,
+    t0_catalog: str | None = None,
     estimator: str = "spectral",
 ) -> tuple[int, str]:
     """Run full pipeline for a single event. Returns (exit_code, run_id)."""
@@ -547,6 +549,10 @@ def run_single_event(
     ]
     if offline:
         s2_args.append("--offline")
+    if offline_s2:
+        s2_args.append("--offline")
+    if t0_catalog:
+        s2_args.extend(["--window-catalog", str(t0_catalog)])
     rc = _run_stage("s2_ringdown_window.py", s2_args, "s2_ringdown_window", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         _set_run_valid_verdict(out_root, run_id, "FAIL", f"s2_ringdown_window failed: exit={rc}")
@@ -1008,6 +1014,18 @@ def main() -> int:
     )
     sp_single.add_argument("--offline", action="store_true", default=False)
     sp_single.add_argument(
+        "--offline-s2",
+        action="store_true",
+        default=False,
+        help="Pass --offline only to s2_ringdown_window",
+    )
+    sp_single.add_argument(
+        "--t0-catalog",
+        default=None,
+        metavar="PATH",
+        help="Pass PATH as --window-catalog to s2_ringdown_window",
+    )
+    sp_single.add_argument(
         "--estimator", choices=["hilbert", "spectral", "dual"], default="spectral",
         
         help="Estimator to use for s3: spectral (default), hilbert (legacy), or dual (both + gate)",
@@ -1143,6 +1161,8 @@ def main() -> int:
             with_t0_sweep=args.with_t0_sweep,
             local_hdf5=args.local_hdf5,
             offline=args.offline,
+            offline_s2=args.offline_s2,
+            t0_catalog=args.t0_catalog,
             estimator=args.estimator,
         )
         return rc

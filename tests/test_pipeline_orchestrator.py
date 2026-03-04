@@ -372,6 +372,47 @@ def test_run_single_event_writes_timeline_on_abort(
     assert "ended_utc" in tl
 
 
+def test_run_single_event_passes_offline_s2_and_t0_catalog_to_s2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_root = _make_runs_root(tmp_path)
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    captured_s2_args: list[str] = []
+
+    def fake_run_stage(
+        script: str,
+        args: list[str],
+        label: str,
+        out_root: Path,
+        run_id: str,
+        timeline: dict[str, Any],
+        stage_timeout_s: float | None = None,
+    ) -> int:
+        if label == "s2_ringdown_window":
+            captured_s2_args.extend(args)
+            return 0
+        if label == "s3_ringdown_estimates":
+            return 1
+        return 0
+
+    monkeypatch.setattr(pipeline, "_run_stage", fake_run_stage)
+
+    rc, _ = run_single_event(
+        "GW150914",
+        "fake_atlas.json",
+        run_id="offline_s2_run",
+        offline_s2=True,
+        t0_catalog="catalogs/t0.json",
+    )
+
+    assert rc != 0
+    assert "--offline" in captured_s2_args
+    assert "--window-catalog" in captured_s2_args
+    wc_idx = captured_s2_args.index("--window-catalog")
+    assert captured_s2_args[wc_idx + 1] == "catalogs/t0.json"
+
+
 def test_run_single_event_marks_run_valid_fail_when_s2_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
