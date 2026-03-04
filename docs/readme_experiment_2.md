@@ -49,6 +49,30 @@ find "data/losc/${EVENT_ID}" -type f \( -iname '*H1*.h5' -o -iname '*H1*.hdf5' -
 
 ---
 
+## Offline-first (recomendado)
+
+Para reducir fallos por resolución dinámica de metadatos en GWOSC, usa un flujo **batch + catálogo t0** antes del orquestador.
+
+Artefactos esperados de auditoría t0 (en run de auditoría):
+- `runs/audit_gwosc_t0_*/experiment/losc_quality/t0_catalog_gwosc_v2.json`
+- `runs/audit_gwosc_t0_*/experiment/losc_quality/gwosc_ready_events.txt`
+
+### Receta para generar artefactos batch (GWOSC API v2)
+
+```bash
+AUDIT_RUN="audit_gwosc_t0_$(date -u +%Y%m%dT%H%M%SZ)"
+
+python -m mvp.experiment_losc_quality \
+  --run "$AUDIT_RUN" \
+  --gwosc-api-version v2 \
+  --batch-gwosc \
+  --write-t0-catalog
+```
+
+Con ese preprocesado, el orquestador consume un catálogo ya “curado” y evita errores típicos tipo **"missing gps keys"** al resolver eventos en caliente.
+
+---
+
 ## Run ID (determinista)
 Crea un run_id nuevo por ejecución:
 ```bash
@@ -62,8 +86,15 @@ echo "$RUN_ID"
 > Nota: el orquestador requiere atlas; usa `--atlas-default` si está soportado por `mvp.pipeline`.
 
 ```bash
-python -m mvp.pipeline single --event-id "${EVENT_ID}" --run-id "${RUN_ID}" --atlas-default
+python -m mvp.pipeline single \
+  --event-id "${EVENT_ID}" \
+  --run-id "${RUN_ID}" \
+  --atlas-default \
+  --offline-s2 \
+  --t0-catalog "runs/audit_gwosc_t0_*/experiment/losc_quality/t0_catalog_gwosc_v2.json"
 ```
+
+> Si no existe catálogo t0 aún, puedes lanzar sin `--t0-catalog`. Cuando exista, úsalo para mantener el flujo offline-first.
 
 ---
 

@@ -126,6 +126,14 @@ Si eso no coincide con el árbol real donde está `RUN_VALID/verdict.json`, el s
 - `runs/<run_id>/<stage>/outputs/`: artefactos producidos por stages. Deben convivir con `manifest.json` y `stage_summary.json`, incluyendo hashes SHA256.
 - `runs/<run_id>/experiment/<name>/`: espacio para experimentos; no debe mutar artefactos canónicos de stages ya emitidos.
 
+### Rutas de auditoría LOSC/t0 y batch offline
+
+- `runs/<audit>/experiment/losc_quality/losc_event_quality.csv`
+- `runs/<audit>/experiment/losc_quality/approved_events.txt`
+- `runs/<audit>/experiment/losc_quality/t0_catalog_gwosc_v2.json`
+- `runs/<audit>/experiment/losc_quality/gwosc_ready_events.txt`
+- `runs/<batch>/experiment/offline_batch/results.csv`
+
 Verificación mínima (contract-first, tratable/auditable):
 
 ```bash
