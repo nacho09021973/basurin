@@ -64,7 +64,13 @@ def _format_missing_t0_message(
         f"window_catalog={window_catalog_display}",
     ]
     if reason:
-        parts.append(reason)
+        normalized_reason = reason.strip()
+        for prefix in ("missing_t0_gps_offline:", "missing_t0_gps:"):
+            if normalized_reason.startswith(prefix):
+                normalized_reason = normalized_reason[len(prefix):].strip()
+                break
+        if normalized_reason:
+            parts.append(normalized_reason)
     parts.append(f"sources_attempted={json.dumps(sources_attempted_display, sort_keys=True)}")
     return "; ".join(parts)
 
