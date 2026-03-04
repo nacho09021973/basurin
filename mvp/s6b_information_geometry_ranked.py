@@ -32,6 +32,55 @@ def _atlas_index(row: dict[str, Any], fallback: int) -> int:
     return fallback
 
 
+def _load_atlas_index_map(run_dir: Path) -> dict[str, int]:
+    stage_summary_path = run_dir / "s4_geometry_filter" / "stage_summary.json"
+    try:
+        stage_summary = json.loads(stage_summary_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # pragma: no cover - covered by CLI test via return code.
+        raise RuntimeError(
+            "No se pudo leer/parsing "
+            f"{stage_summary_path}. Regenera upstream con: "
+            f"python -m mvp.s4_geometry_filter --run {run_dir.name}. Error: {exc}"
+        ) from exc
+
+    atlas_path_raw = stage_summary.get("parameters", {}).get("atlas_path")
+    if not isinstance(atlas_path_raw, str) or not atlas_path_raw.strip():
+        raise RuntimeError(
+            "Falta parameters.atlas_path en "
+            f"{stage_summary_path}. Regenera upstream con: "
+            f"python -m mvp.s4_geometry_filter --run {run_dir.name}"
+        )
+
+    atlas_path = Path(atlas_path_raw)
+    try:
+        atlas_payload = json.loads(atlas_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError(
+            f"No se pudo leer/parsing atlas en {atlas_path}. "
+            f"Ruta obtenida de {stage_summary_path}. Error: {exc}"
+        ) from exc
+
+    if isinstance(atlas_payload, list):
+        entries = atlas_payload
+    elif isinstance(atlas_payload, dict):
+        entries = atlas_payload.get("entries", [])
+    else:
+        entries = []
+
+    if not isinstance(entries, list):
+        raise RuntimeError(f"Atlas inválido en {atlas_path}: se esperaba lista o dict con clave 'entries'.")
+
+    atlas_index_map: dict[str, int] = {}
+    for idx, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            continue
+        gid = entry.get("id") or entry.get("geometry_id") or entry.get("name")
+        if gid is None:
+            continue
+        atlas_index_map[str(gid)] = idx
+    return atlas_index_map
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=f"MVP {STAGE}: export ranked geometries")
     ap.add_argument("--run", required=True)
@@ -51,6 +100,7 @@ def main() -> int:
     try:
         compat = json.loads(compatible_path.read_text(encoding="utf-8"))
         curvature = json.loads(curvature_path.read_text(encoding="utf-8"))
+        atlas_index_map = _load_atlas_index_map(ctx.run_dir)
 
         reranked = curvature.get("reranked_geometries", [])
         if not isinstance(reranked, list):
@@ -65,10 +115,11 @@ def main() -> int:
             if not isinstance(d_conf, (int, float)) or not math.isfinite(float(d_conf)):
                 continue
             score = -float(d_conf)
+            gid = row.get("geometry_id")
             ranked_rows.append({
-                "atlas_index": _atlas_index(row, idx),
+                "atlas_index": atlas_index_map.get(str(gid), _atlas_index(row, idx)),
                 "score": score,
-                "geometry_id": row.get("geometry_id"),
+                "geometry_id": gid,
             })
 
         ranked_rows.sort(key=lambda r: (-r["score"], r["atlas_index"]))
@@ -87,7 +138,7 @@ def main() -> int:
             }
 
         compatible_rows = [
-            {"atlas_index": row["atlas_index"], "score": row["score"]}
+            {"atlas_index": row["atlas_index"], "score": row["score"], "geometry_id": row.get("geometry_id")}
             for row in ranked_rows
             if str(row.get("geometry_id")) in compatible_ids and row["score"] >= float(args.compat_score_threshold)
         ]
@@ -97,7 +148,10 @@ def main() -> int:
             "event_id": curvature.get("event_id", compat.get("event_id", "unknown")),
             "atlas_id": compat.get("atlas_id", "unknown"),
             "n_atlas": int(compat.get("n_atlas", len(reranked))),
-            "ranked": [{"atlas_index": r["atlas_index"], "score": r["score"]} for r in ranked_rows],
+            "ranked": [
+                {"atlas_index": r["atlas_index"], "score": r["score"], "geometry_id": r.get("geometry_id")}
+                for r in ranked_rows
+            ],
             "compatible": compatible_rows,
             "compatibility_criterion": {
                 "name": "s4_geometry_filter_membership_and_score",
