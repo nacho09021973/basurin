@@ -118,12 +118,19 @@ python -m mvp.experiment_losc_quality \
 ```bash
 python -m mvp.pipeline single \
   --event-id GW150914 \
+  --run-id <RUN_ID> \
   --atlas-default \
   --offline-s2 \
   --window-catalog "runs/${AUDIT_RUN}/experiment/losc_quality/t0_catalog_gwosc_v2.json"
 ```
 
 > Alias soportado: `--t0-catalog`.
+
+### Batch offline-first (recomendado)
+
+```bash
+python -m mvp.experiment_offline_batch --batch-run-id <BATCH_RUN_ID> --window-catalog "runs/${AUDIT_RUN}/experiment/losc_quality/t0_catalog_gwosc_v2.json" --events-file "runs/${AUDIT_RUN}/experiment/losc_quality/approved_events.txt"
+```
 
 ## Quality gates (auditoría de eventos)
 

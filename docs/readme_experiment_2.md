@@ -57,6 +57,11 @@ Artefactos esperados de auditoría t0 (en run de auditoría):
 - `runs/audit_gwosc_t0_*/experiment/losc_quality/t0_catalog_gwosc_v2.json`
 - `runs/audit_gwosc_t0_*/experiment/losc_quality/gwosc_ready_events.txt`
 
+### Fuentes de calidad
+- `approved_events.txt` (eventos con H1/L1 completos)
+- `gwosc_ready_events.txt` (eventos con t0 disponible vía GWOSC API v2 precomputado)
+- `t0_catalog_gwosc_v2.json` (mapeo `event_id -> t0_gps`)
+
 ### Receta para generar artefactos batch (GWOSC API v2)
 
 ```bash
@@ -86,12 +91,18 @@ echo "$RUN_ID"
 > Nota: el orquestador requiere atlas; usa `--atlas-default` si está soportado por `mvp.pipeline`.
 
 ```bash
+python -m mvp.pipeline single --event-id <EV> --run-id <RUN> --atlas-default --offline-s2 --window-catalog <t0_catalog.json>
+```
+
+Ejemplo con variables:
+
+```bash
 python -m mvp.pipeline single \
   --event-id "${EVENT_ID}" \
   --run-id "${RUN_ID}" \
   --atlas-default \
   --offline-s2 \
-  --window-catalog "runs/audit_gwosc_t0_*/experiment/losc_quality/t0_catalog_gwosc_v2.json"
+  --window-catalog "runs/${AUDIT_RUN}/experiment/losc_quality/t0_catalog_gwosc_v2.json"
 ```
 
 > Si no existe catálogo t0 aún, puedes lanzar sin `--window-catalog`. Cuando exista, úsalo para mantener el flujo offline-first. (Alias soportado: `--t0-catalog`)
@@ -129,6 +140,9 @@ python -c "import json; p=f'runs/${RUN_ID}/s6b_information_geometry_ranked/outpu
 
 ---
 
+## Caso `len_compatible=0`
+Si `len_compatible`/`n_compatible` es `0`, rerun de `s4` con `--epsilon 1200` y regeneración de `s6b`.
+
 ## Si `n_compatible == 0`: tuning mínimo (s4) con epsilon
 Síntoma típico: `compatible_geometries=[]` porque el umbral (`threshold_d2`) es demasiado estricto.
 
@@ -145,7 +159,7 @@ python -c "import json; p=f'runs/${RUN_ID}/s4_geometry_filter/stage_summary.json
 
 Rerun (ejemplo: `epsilon=1200`, ajusta según el rango de d2):
 ```bash
-python -m mvp.s4_geometry_filter --run "${RUN_ID}" --atlas-path "/home/ignac/work/basurin/docs/ringdown/atlas/atlas_berti_v2.json" --epsilon 1200 --metric mahalanobis_log
+python -m mvp.s4_geometry_filter --run "${RUN_ID}" --atlas-path "<atlas_path_resuelto_del_run>" --epsilon 1200 --metric mahalanobis_log
 ```
 
 > Importante: este stage **no** acepta `--event-id` y **requiere** `--atlas-path`.

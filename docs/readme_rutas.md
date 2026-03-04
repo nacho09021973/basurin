@@ -136,6 +136,8 @@ Si eso no coincide con el árbol real donde está `RUN_VALID/verdict.json`, el s
 - `runs/<audit>/experiment/losc_quality/gwosc_ready_events.txt`
 - `runs/<batch>/experiment/offline_batch/results.csv`
 
+Nota: `RUN_VALID` es un directorio; el veredicto canónico siempre vive en `RUN_VALID/verdict.json`.
+
 Verificación mínima (contract-first, tratable/auditable):
 
 ```bash
