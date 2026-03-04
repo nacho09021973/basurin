@@ -22,36 +22,47 @@ from mvp.contracts import abort, check_inputs, finalize, init_stage, log_stage_p
 STAGE = "s6b_information_geometry_ranked"
 
 
-def _load_atlas_index_map(ctx: Any) -> tuple[dict[str, int], str]:
-    s4_summary_path = ctx.run_dir / "s4_geometry_filter" / "stage_summary.json"
-    if not s4_summary_path.exists():
-        abort(
-            ctx,
-            "Missing required inputs: "
-            f"s4_stage_summary: {s4_summary_path}; "
-            f"to regenerate upstream run: python -m mvp.s4_geometry_filter --run {ctx.run_id}",
-        )
+def _load_atlas_index_map(ctx: Any, atlas_path_arg: str | None) -> tuple[dict[str, int], str]:
+    if atlas_path_arg:
+        atlas_path = Path(atlas_path_arg).expanduser().resolve()
+        if not atlas_path.exists():
+            abort(
+                ctx,
+                "Missing required inputs: "
+                f"atlas_path: {atlas_path}; "
+                "to regenerate upstream run: python -m mvp.s4_geometry_filter --run "
+                f"{ctx.run_id}",
+            )
+    else:
+        s4_summary_path = ctx.run_dir / "s4_geometry_filter" / "stage_summary.json"
+        if not s4_summary_path.exists():
+            abort(
+                ctx,
+                "Missing required inputs: "
+                f"s4_stage_summary: {s4_summary_path}; "
+                f"to regenerate upstream run: python -m mvp.s4_geometry_filter --run {ctx.run_id}",
+            )
 
-    s4_summary = json.loads(s4_summary_path.read_text(encoding="utf-8"))
-    atlas_path_raw = s4_summary.get("parameters", {}).get("atlas_path")
-    if not isinstance(atlas_path_raw, str) or not atlas_path_raw.strip():
-        abort(
-            ctx,
-            f"Missing atlas_path in {s4_summary_path} at parameters.atlas_path. "
-            f"to regenerate upstream run: python -m mvp.s4_geometry_filter --run {ctx.run_id}",
-        )
+        s4_summary = json.loads(s4_summary_path.read_text(encoding="utf-8"))
+        atlas_path_raw = s4_summary.get("parameters", {}).get("atlas_path")
+        if not isinstance(atlas_path_raw, str) or not atlas_path_raw.strip():
+            abort(
+                ctx,
+                f"Missing atlas_path in {s4_summary_path} at parameters.atlas_path. "
+                f"to regenerate upstream run: python -m mvp.s4_geometry_filter --run {ctx.run_id}",
+            )
 
-    atlas_path = Path(atlas_path_raw)
-    if not atlas_path.is_absolute():
-        atlas_path = (ctx.run_dir / atlas_path).resolve()
-    if not atlas_path.exists():
-        abort(
-            ctx,
-            "Missing required inputs: "
-            f"atlas_from_s4: {atlas_path}; "
-            f"from {s4_summary_path}; "
-            f"to regenerate upstream run: python -m mvp.s4_geometry_filter --run {ctx.run_id}",
-        )
+        atlas_path = Path(atlas_path_raw)
+        if not atlas_path.is_absolute():
+            atlas_path = (ctx.run_dir / atlas_path).resolve()
+        if not atlas_path.exists():
+            abort(
+                ctx,
+                "Missing required inputs: "
+                f"atlas_from_s4: {atlas_path}; "
+                f"from {s4_summary_path}; "
+                f"to regenerate upstream run: python -m mvp.s4_geometry_filter --run {ctx.run_id}",
+            )
 
     atlas_payload = json.loads(atlas_path.read_text(encoding="utf-8"))
     if isinstance(atlas_payload, dict):
@@ -78,6 +89,7 @@ def _load_atlas_index_map(ctx: Any) -> tuple[dict[str, int], str]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=f"MVP {STAGE}: export ranked geometries")
     ap.add_argument("--run", required=True)
+    ap.add_argument("--atlas-path", default=None)
     ap.add_argument("--top-k", type=int, default=50)
     ap.add_argument("--compat-score-threshold", type=float, default=-1.0e18)
     args = ap.parse_args()
@@ -95,7 +107,7 @@ def main() -> int:
         compat = json.loads(compatible_path.read_text(encoding="utf-8"))
         curvature = json.loads(curvature_path.read_text(encoding="utf-8"))
 
-        atlas_index_map, atlas_path_used = _load_atlas_index_map(ctx)
+        atlas_index_map, atlas_path_used = _load_atlas_index_map(ctx, args.atlas_path)
         ctx.params["atlas_path"] = atlas_path_used
 
         reranked = curvature.get("reranked_geometries", [])
