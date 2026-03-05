@@ -147,37 +147,72 @@ def _build_weighted_af_samples(path220: Path, path221: Path) -> dict[str, Any]:
     ranked220 = data220.get("ranked_all", []) if isinstance(data220, dict) else []
     ranked221 = data221.get("ranked_all", []) if isinstance(data221, dict) else []
 
-    bykey220 = {_phys_key(r): r for r in compat220 if isinstance(r, dict) and _phys_key(r) is not None}
-    bykey221 = {_phys_key(r): r for r in compat221 if isinstance(r, dict) and _phys_key(r) is not None}
-    support = sorted(set(bykey220).intersection(bykey221))
-
-    w220 = {
-        _phys_key(r): float(r["delta_lnL"])
+    delta220_by_gid = {
+        str(r["geometry_id"]): float(r["delta_lnL"])
         for r in ranked220
-        if isinstance(r, dict) and _phys_key(r) is not None and _as_float(r.get("delta_lnL")) is not None
+        if isinstance(r, dict) and r.get("geometry_id") is not None and _as_float(r.get("delta_lnL")) is not None
     }
-    w221 = {
-        _phys_key(r): float(r["delta_lnL"])
+    delta221_by_gid = {
+        str(r["geometry_id"]): float(r["delta_lnL"])
         for r in ranked221
-        if isinstance(r, dict) and _phys_key(r) is not None and _as_float(r.get("delta_lnL")) is not None
+        if isinstance(r, dict) and r.get("geometry_id") is not None and _as_float(r.get("delta_lnL")) is not None
     }
 
-    if not w220:
+    if not delta220_by_gid:
         sample_keys = sorted(list(ranked220[0].keys())) if ranked220 and isinstance(ranked220[0], dict) else []
         raise ValueError(f"MISSING_DELTA_LNL path={path220} source=ranked_all keys(sample)={sample_keys}")
-    if not w221:
+    if not delta221_by_gid:
         sample_keys = sorted(list(ranked221[0].keys())) if ranked221 and isinstance(ranked221[0], dict) else []
         raise ValueError(f"MISSING_DELTA_LNL path={path221} source=ranked_all keys(sample)={sample_keys}")
+
+    def _enrich_with_delta(compat: list[Any], delta_by_gid: dict[str, float]) -> tuple[list[dict[str, Any]], int]:
+        enriched: list[dict[str, Any]] = []
+        dropped = 0
+        for row in compat:
+            if not isinstance(row, dict):
+                dropped += 1
+                continue
+            gid = row.get("geometry_id")
+            if gid is None:
+                dropped += 1
+                continue
+            delta = delta_by_gid.get(str(gid))
+            if delta is None:
+                dropped += 1
+                continue
+            out_row = dict(row)
+            out_row["delta_lnL"] = float(delta)
+            enriched.append(out_row)
+        return enriched, dropped
+
+    def _best_by_phys(enriched: list[dict[str, Any]]) -> dict[tuple[str, str, float, float], dict[str, Any]]:
+        best: dict[tuple[str, str, float, float], dict[str, Any]] = {}
+        for row in enriched:
+            key = _phys_key(row)
+            if key is None:
+                continue
+            if key not in best or float(row["delta_lnL"]) > float(best[key]["delta_lnL"]):
+                best[key] = row
+        return best
+
+    enriched220, dropped220 = _enrich_with_delta(compat220, delta220_by_gid)
+    enriched221, dropped221 = _enrich_with_delta(compat221, delta221_by_gid)
+
+    best220 = _best_by_phys(enriched220)
+    best221 = _best_by_phys(enriched221)
+    support = sorted(set(best220).intersection(best221))
 
     samples: list[dict[str, float]] = []
     dropped_missing_weight = 0
     for key in support:
-        dlnl220 = w220.get(key)
-        dlnl221 = w221.get(key)
-        if dlnl220 is None or dlnl221 is None:
+        geom220 = best220.get(key)
+        geom221 = best221.get(key)
+        if geom220 is None or geom221 is None:
             dropped_missing_weight += 1
             continue
-        geom = bykey220.get(key) or bykey221.get(key) or {}
+        dlnl220 = float(geom220["delta_lnL"])
+        dlnl221 = float(geom221["delta_lnL"])
+        geom = geom220 or geom221 or {}
         af = _af_value(geom)
         if af is None:
             continue
@@ -187,12 +222,22 @@ def _build_weighted_af_samples(path220: Path, path221: Path) -> dict[str, Any]:
         return {
             "status": "AF_EMPTY" if not support else "MISSING_DELTA_LNL",
             "samples": [],
-            "n220": len(bykey220),
-            "n221": len(bykey221),
+            "n220": len(best220),
+            "n221": len(best221),
             "n_support": len(support),
             "n_intersection": len(support),
             "n_used": 0,
             "n_dropped_missing_weight": dropped_missing_weight,
+            "n_ranked_all_220": len(ranked220),
+            "n_ranked_all_221": len(ranked221),
+            "n_compat_220": len(compat220) if isinstance(compat220, list) else 0,
+            "n_compat_221": len(compat221) if isinstance(compat221, list) else 0,
+            "n_enriched_220": len(enriched220),
+            "n_enriched_221": len(enriched221),
+            "n_dropped_missing_gid_or_weight_220": dropped220,
+            "n_dropped_missing_gid_or_weight_221": dropped221,
+            "n_support_phys": len(support),
+            "join_policy": "ranked_all.geometry_id -> compatible_geometries.geometry_id; reduce=max_delta_per_phys; combine=delta220+delta221",
             "weight_source": "ranked_all.delta_lnL",
             "weight_reduce": "sum",
         }
@@ -200,12 +245,22 @@ def _build_weighted_af_samples(path220: Path, path221: Path) -> dict[str, Any]:
     return {
         "status": "OK",
         "samples": samples,
-        "n220": len(bykey220),
-        "n221": len(bykey221),
+        "n220": len(best220),
+        "n221": len(best221),
         "n_support": len(support),
         "n_intersection": len(support),
         "n_used": len(samples),
         "n_dropped_missing_weight": dropped_missing_weight,
+        "n_ranked_all_220": len(ranked220),
+        "n_ranked_all_221": len(ranked221),
+        "n_compat_220": len(compat220) if isinstance(compat220, list) else 0,
+        "n_compat_221": len(compat221) if isinstance(compat221, list) else 0,
+        "n_enriched_220": len(enriched220),
+        "n_enriched_221": len(enriched221),
+        "n_dropped_missing_gid_or_weight_220": dropped220,
+        "n_dropped_missing_gid_or_weight_221": dropped221,
+        "n_support_phys": len(support),
+        "join_policy": "ranked_all.geometry_id -> compatible_geometries.geometry_id; reduce=max_delta_per_phys; combine=delta220+delta221",
         "weight_source": "ranked_all.delta_lnL",
         "weight_reduce": "sum",
     }
@@ -357,6 +412,16 @@ def run_experiment(
                 "n_support": af_pack["n_support"],
                 "n_used": af_pack["n_used"],
                 "n_dropped_missing_weight": af_pack["n_dropped_missing_weight"],
+                "n_ranked_all_220": af_pack["n_ranked_all_220"],
+                "n_ranked_all_221": af_pack["n_ranked_all_221"],
+                "n_compat_220": af_pack["n_compat_220"],
+                "n_compat_221": af_pack["n_compat_221"],
+                "n_enriched_220": af_pack["n_enriched_220"],
+                "n_enriched_221": af_pack["n_enriched_221"],
+                "n_dropped_missing_gid_or_weight_220": af_pack["n_dropped_missing_gid_or_weight_220"],
+                "n_dropped_missing_gid_or_weight_221": af_pack["n_dropped_missing_gid_or_weight_221"],
+                "n_support_phys": af_pack["n_support_phys"],
+                "join_policy": af_pack["join_policy"],
                 "weight_source": af_pack["weight_source"],
                 "weight_reduce": af_pack["weight_reduce"],
             }
