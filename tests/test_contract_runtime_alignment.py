@@ -70,6 +70,17 @@ def test_s4_stage_summary_records_actual_overridden_estimates_input(tmp_path: Pa
     inp = {row["label"]: row for row in summary["inputs"]}
     assert inp["estimates"]["path"] == "s3_spectral_estimates/outputs/spectral_estimates.json"
 
+    params = summary["parameters"]
+    assert "threshold_mode" in params
+    assert "threshold_params" in params
+
+    results = summary["results"]
+    assert "informative_status" in results
+    assert "d2_quantiles" in results
+
+    manifest = json.loads((run_dir / "s4_geometry_filter" / "manifest.json").read_text(encoding="utf-8"))
+    assert "compatible_set" in manifest["hashes"]
+
 
 def test_s6_cli_exposes_estimates_path_override() -> None:
     src = Path("mvp/s6_information_geometry.py").read_text(encoding="utf-8")

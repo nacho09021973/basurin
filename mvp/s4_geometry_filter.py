@@ -16,7 +16,7 @@ for _cand in [_here.parents[0], _here.parents[1]]:
             sys.path.insert(0, str(_cand))
         break
 
-from mvp.contracts import abort, check_inputs, finalize, init_stage
+from mvp.contracts import abort, check_inputs, finalize, init_stage, log_stage_paths
 from mvp.distance_metrics import (
     euclidean_log,
     get_metric,
@@ -751,6 +751,7 @@ def main() -> int:
                     verdict="FAIL",
                     extra_summary={"error": _reason},
                 )
+                log_stage_paths(ctx)
                 return 0
 
         if args.delta_lnL_220 < 0 or args.delta_lnL_221 < 0:
@@ -792,6 +793,8 @@ def main() -> int:
             )
             threshold_params = {"delta_lnL": delta_value, "source_flag": delta_source}
 
+        ctx.params["threshold_params"] = threshold_params
+
         result = compute_compatible_set(
             f_obs,
             Q_obs,
@@ -825,13 +828,20 @@ def main() -> int:
             results={
                 "n_atlas": result["n_atlas"],
                 "n_compatible": result["n_compatible"],
+                "acceptance_fraction": (float(result["n_compatible"]) / float(result["n_atlas"])) if result["n_atlas"] > 0 else 0.0,
                 "bits_excluded": result["bits_excluded"],
                 "metric": result["metric"],
+                "threshold_mode": result.get("threshold_mode"),
+                "threshold_params": result.get("threshold_params"),
+                "epsilon": result.get("epsilon"),
                 "threshold_d2": result.get("threshold_d2"),
                 "d2_min": result.get("d2_min"),
+                "informative_status": (result.get("diagnostics") or {}).get("informative_status"),
+                "d2_quantiles": (result.get("diagnostics") or {}).get("d2_quantiles"),
                 "diagnostics": result.get("diagnostics"),
             },
         )
+        log_stage_paths(ctx)
         return 0
     except SystemExit:
         raise
