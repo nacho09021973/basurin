@@ -38,6 +38,9 @@ class EventResult:
     run_id: str
     status: str
     len_compatible: int
+    n_atlas: int
+    n_compatible: int
+    accept_frac: float | None
     epsilon_used: float
     mode_filter: str
     error_stage: str
@@ -86,7 +89,7 @@ def _run_cmd(cmd: list[str], *, env: dict[str, str]) -> None:
     subprocess.run(cmd, check=True, env=env)
 
 
-def _read_len_compatible(out_root: Path, run_id: str) -> int:
+def _read_compatible_stats(out_root: Path, run_id: str) -> tuple[int, int, float]:
     compatible_path = out_root / run_id / "s4_geometry_filter" / "outputs" / "compatible_set.json"
     if not compatible_path.exists():
         raise CompatibleSetSchemaError(f"compatible_set missing: {compatible_path}")
@@ -95,22 +98,36 @@ def _read_len_compatible(out_root: Path, run_id: str) -> int:
     if not isinstance(payload, dict):
         raise CompatibleSetSchemaError(f"invalid compatible_set schema in {compatible_path}: expected dict")
 
+    if "n_atlas" not in payload:
+        raise CompatibleSetSchemaError(f"missing n_atlas in {compatible_path}")
+
+    raw_n_atlas = payload["n_atlas"]
+    try:
+        n_atlas = int(raw_n_atlas)
+    except (TypeError, ValueError) as exc:
+        raise CompatibleSetSchemaError(f"invalid n_atlas in {compatible_path}: {raw_n_atlas!r}") from exc
+    if n_atlas <= 0:
+        raise CompatibleSetSchemaError(f"invalid n_atlas in {compatible_path}: expected > 0, got {n_atlas}")
+
     if "n_compatible" in payload:
         raw_n_compatible = payload["n_compatible"]
         try:
-            return int(raw_n_compatible)
+            n_compatible = int(raw_n_compatible)
         except (TypeError, ValueError) as exc:
             raise CompatibleSetSchemaError(
                 f"invalid n_compatible in {compatible_path}: {raw_n_compatible!r}"
             ) from exc
+    else:
+        compatible_geometries = payload.get("compatible_geometries")
+        if isinstance(compatible_geometries, list):
+            n_compatible = len(compatible_geometries)
+        else:
+            raise CompatibleSetSchemaError(
+                f"unexpected compatible_set schema in {compatible_path}: expected 'n_compatible' or list 'compatible_geometries'"
+            )
 
-    compatible_geometries = payload.get("compatible_geometries")
-    if isinstance(compatible_geometries, list):
-        return len(compatible_geometries)
-
-    raise CompatibleSetSchemaError(
-        f"unexpected compatible_set schema in {compatible_path}: expected 'n_compatible' or list 'compatible_geometries'"
-    )
+    accept_frac = float(n_compatible) / float(n_atlas)
+    return n_atlas, n_compatible, accept_frac
 
 
 def _build_stage_commands(
@@ -208,7 +225,8 @@ def _execute_event(
         ):
             _run_cmd(cmd, env=env)
 
-        len_compatible = _read_len_compatible(out_root, run_id)
+        n_atlas, n_compatible, accept_frac = _read_compatible_stats(out_root, run_id)
+        len_compatible = n_compatible
 
         if len_compatible == 0:
             _run_cmd(
@@ -227,7 +245,8 @@ def _execute_event(
                 [sys.executable, "-m", "mvp.s6b_information_geometry_ranked", "--run", run_id],
                 env=env,
             )
-            len_compatible = _read_len_compatible(out_root, run_id)
+            n_atlas, n_compatible, accept_frac = _read_compatible_stats(out_root, run_id)
+            len_compatible = n_compatible
             epsilon_used = float(epsilon_fallback)
 
         return EventResult(
@@ -235,6 +254,9 @@ def _execute_event(
             run_id=run_id,
             status="PASS",
             len_compatible=int(len_compatible),
+            n_atlas=int(n_atlas),
+            n_compatible=int(n_compatible),
+            accept_frac=float(accept_frac),
             epsilon_used=epsilon_used,
             mode_filter=mode_filter or "",
             error_stage="",
@@ -246,6 +268,9 @@ def _execute_event(
             run_id=run_id,
             status="FAIL",
             len_compatible=0,
+            n_atlas=0,
+            n_compatible=0,
+            accept_frac=None,
             epsilon_used=epsilon_used,
             mode_filter=mode_filter or "",
             error_stage="subprocess",
@@ -257,6 +282,9 @@ def _execute_event(
             run_id=run_id,
             status="FAIL",
             len_compatible=0,
+            n_atlas=0,
+            n_compatible=0,
+            accept_frac=None,
             epsilon_used=epsilon_used,
             mode_filter=mode_filter or "",
             error_stage="s4_geometry_filter",
@@ -268,6 +296,9 @@ def _execute_event(
             run_id=run_id,
             status="FAIL",
             len_compatible=0,
+            n_atlas=0,
+            n_compatible=0,
+            accept_frac=None,
             epsilon_used=epsilon_used,
             mode_filter=mode_filter or "",
             error_stage="runtime",
@@ -285,6 +316,9 @@ def _write_results_csv(results: list[EventResult], path: Path) -> None:
                 "run_id",
                 "status",
                 "len_compatible",
+                "n_atlas",
+                "n_compatible",
+                "accept_frac",
                 "epsilon_used",
                 "mode_filter",
                 "error_stage",
@@ -298,6 +332,9 @@ def _write_results_csv(results: list[EventResult], path: Path) -> None:
                     row.run_id,
                     row.status,
                     row.len_compatible,
+                    row.n_atlas,
+                    row.n_compatible,
+                    "" if row.accept_frac is None else row.accept_frac,
                     row.epsilon_used,
                     row.mode_filter,
                     row.error_stage,

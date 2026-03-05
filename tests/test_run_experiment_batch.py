@@ -70,7 +70,7 @@ def test_offline_batch_invoca_s2_offline_y_escribe_csv_en_runs_root(tmp_path, mo
     run_id = "mvp_GW150914_real_offline_20260304T000000Z"
     monkeypatch.setattr(offline_batch, "_run_cmd", _fake_run_cmd)
     monkeypatch.setattr(offline_batch, "_event_run_id", lambda event_id: run_id)
-    monkeypatch.setattr(offline_batch, "_read_len_compatible", lambda out_root, run_id: 1)
+    monkeypatch.setattr(offline_batch, "_read_compatible_stats", lambda out_root, run_id: (800, 1, 1 / 800))
 
     rc = offline_batch.main(
         [
@@ -131,7 +131,7 @@ def test_offline_batch_prioriza_window_catalog_sobre_alias_t0_catalog(tmp_path, 
 
     monkeypatch.setattr(offline_batch, "_run_cmd", _fake_run_cmd)
     monkeypatch.setattr(offline_batch, "_event_run_id", lambda event_id: "mvp_GW150914_real_offline_20260304T000000Z")
-    monkeypatch.setattr(offline_batch, "_read_len_compatible", lambda out_root, run_id: 1)
+    monkeypatch.setattr(offline_batch, "_read_compatible_stats", lambda out_root, run_id: (800, 1, 1 / 800))
 
     rc = offline_batch.main(
         [
@@ -178,7 +178,7 @@ def test_offline_batch_pasa_mode_filter_a_s4(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(offline_batch, "_run_cmd", _fake_run_cmd)
     monkeypatch.setattr(offline_batch, "_event_run_id", lambda event_id: "mvp_GW150914_real_offline_20260304T000000Z")
-    monkeypatch.setattr(offline_batch, "_read_len_compatible", lambda out_root, run_id: 1)
+    monkeypatch.setattr(offline_batch, "_read_compatible_stats", lambda out_root, run_id: (800, 1, 1 / 800))
 
     rc = offline_batch.main(
         [
@@ -226,7 +226,7 @@ def test_offline_batch_usa_n_compatible_de_s4_en_results_csv(tmp_path, monkeypat
     compatible_path = runs_root / run_id / "s4_geometry_filter" / "outputs" / "compatible_set.json"
     compatible_path.parent.mkdir(parents=True, exist_ok=True)
     compatible_path.write_text(
-        json.dumps({"n_compatible": 156, "compatible_geometries": list(range(156))}),
+        json.dumps({"n_atlas": 800, "n_compatible": 156, "compatible_geometries": list(range(156))}),
         encoding="utf-8",
     )
 
@@ -258,7 +258,42 @@ def test_offline_batch_usa_n_compatible_de_s4_en_results_csv(tmp_path, monkeypat
     assert rows[0]["event_id"] == "GW170817"
     assert rows[0]["status"] == "PASS"
     assert rows[0]["len_compatible"] == "156"
+    assert rows[0]["n_compatible"] == "156"
+    assert rows[0]["n_atlas"] == "800"
+    assert rows[0]["accept_frac"] == "0.195"
     assert rows[0]["epsilon_used"] == "2500.0"
+
+
+def test_read_compatible_stats_y_accept_frac(tmp_path) -> None:
+    runs_root = tmp_path / "runs_root"
+    run_id = "mvp_GW150914_real_offline_20260304T000000Z"
+    compatible_path = runs_root / run_id / "s4_geometry_filter" / "outputs" / "compatible_set.json"
+    compatible_path.parent.mkdir(parents=True, exist_ok=True)
+    compatible_path.write_text(
+        json.dumps({"n_atlas": 800, "n_compatible": 600, "compatible_geometries": list(range(600))}),
+        encoding="utf-8",
+    )
+
+    n_atlas, n_compatible, accept_frac = offline_batch._read_compatible_stats(runs_root, run_id)
+
+    assert n_atlas == 800
+    assert n_compatible == 600
+    assert accept_frac == 0.75
+
+
+def test_read_compatible_stats_fail_si_n_atlas_invalido(tmp_path) -> None:
+    runs_root = tmp_path / "runs_root"
+    run_id = "mvp_GW150914_real_offline_20260304T000000Z"
+    compatible_path = runs_root / run_id / "s4_geometry_filter" / "outputs" / "compatible_set.json"
+    compatible_path.parent.mkdir(parents=True, exist_ok=True)
+    compatible_path.write_text(json.dumps({"n_atlas": 0, "n_compatible": 12}), encoding="utf-8")
+
+    try:
+        offline_batch._read_compatible_stats(runs_root, run_id)
+    except offline_batch.CompatibleSetSchemaError as exc:
+        assert "invalid n_atlas" in str(exc)
+    else:
+        raise AssertionError("expected CompatibleSetSchemaError")
 
 
 def test_offline_batch_reporta_fail_si_compatible_set_es_invalido(tmp_path, monkeypatch) -> None:
@@ -303,5 +338,8 @@ def test_offline_batch_reporta_fail_si_compatible_set_es_invalido(tmp_path, monk
         rows = list(csv.DictReader(fh))
 
     assert rows[0]["status"] == "FAIL"
+    assert rows[0]["n_atlas"] == "0"
+    assert rows[0]["n_compatible"] == "0"
+    assert rows[0]["accept_frac"] == ""
     assert rows[0]["error_stage"] == "s4_geometry_filter"
     assert "CompatibleSetSchemaError" in rows[0]["error_message_short"]
