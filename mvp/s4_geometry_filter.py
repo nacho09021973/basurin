@@ -31,6 +31,7 @@ ALLOWED_STAGE_NAMES = {"s4_geometry_filter", "s4_spectral_geometry_filter"}
 CHI2_2DOF_95 = 5.991
 CHI2_2DOF_95_AUDIT = 5.9915
 CHI2_2DOF_997_AUDIT = 11.6183
+ALPHA_MAX = 0.80
 _UNSET = object()
 
 
@@ -339,6 +340,69 @@ def _add_mahalanobis_audit_fields(
     }
 
 
+def _quantile_linear(sorted_values: list[float], q: float) -> float | None:
+    if not sorted_values:
+        return None
+    if len(sorted_values) == 1:
+        return float(sorted_values[0])
+
+    pos = (len(sorted_values) - 1) * q
+    lo = int(math.floor(pos))
+    hi = int(math.ceil(pos))
+    if lo == hi:
+        return float(sorted_values[lo])
+
+    frac = pos - lo
+    return float(sorted_values[lo] + frac * (sorted_values[hi] - sorted_values[lo]))
+
+
+def _build_diagnostics(
+    *,
+    n_atlas: int,
+    n_compatible: int,
+    ranked_all: list[dict[str, Any]],
+    d2_min: float | None,
+) -> dict[str, Any]:
+    acceptance_fraction = (float(n_compatible) / float(n_atlas)) if n_atlas > 0 else 0.0
+
+    if n_compatible == 0:
+        informative_status = "EMPTY"
+    elif acceptance_fraction > ALPHA_MAX:
+        informative_status = "SATURATED"
+    else:
+        informative_status = "OK"
+
+    d2_values = sorted(
+        float(row["d2"])
+        for row in ranked_all
+        if isinstance(row.get("d2"), (int, float)) and math.isfinite(float(row["d2"]))
+    )
+
+    p10 = _quantile_linear(d2_values, 0.10)
+    p25 = _quantile_linear(d2_values, 0.25)
+    p50 = _quantile_linear(d2_values, 0.50)
+    p75 = _quantile_linear(d2_values, 0.75)
+    p90 = _quantile_linear(d2_values, 0.90)
+
+    d2_iqr = (p75 - p25) if (p75 is not None and p25 is not None) else None
+    d2_range = (p90 - d2_min) if (p90 is not None and isinstance(d2_min, (int, float))) else None
+
+    return {
+        "acceptance_fraction": acceptance_fraction,
+        "informative_status": informative_status,
+        "alpha_max": ALPHA_MAX,
+        "d2_quantiles": {
+            "p10": p10,
+            "p25": p25,
+            "p50": p50,
+            "p75": p75,
+            "p90": p90,
+        },
+        "d2_iqr": d2_iqr,
+        "d2_range": d2_range,
+    }
+
+
 def compute_compatible_set(
     f_obs: float,
     Q_obs: float,
@@ -498,6 +562,13 @@ def compute_compatible_set(
         out["distance"] = distance
         out["covariance_logspace"] = _coerce_covariance_for_output(params)
         _add_mahalanobis_audit_fields(out, fixed_theta0=fixed_theta0, theta0_source=theta0_source)
+
+    out["diagnostics"] = _build_diagnostics(
+        n_atlas=n_atlas,
+        n_compatible=n_compatible,
+        ranked_all=out.get("ranked_all", []),
+        d2_min=out.get("d2_min") if isinstance(out.get("d2_min"), (int, float)) else None,
+    )
 
     return out
 
@@ -666,6 +737,7 @@ def main() -> int:
                 "metric": result["metric"],
                 "threshold_d2": result.get("threshold_d2"),
                 "d2_min": result.get("d2_min"),
+                "diagnostics": result.get("diagnostics"),
             },
         )
         return 0
