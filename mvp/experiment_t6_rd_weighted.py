@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Non-canonical experiment: recompute RD per-event quantiles with likelihood weights."""
+"""Non-canonical experiment: recompute T6 dA/p_violate with RD weighting from batch compatible_set."""
 from __future__ import annotations
 
 import argparse
 import csv
 import json
 import math
+import random
 import shutil
 import sys
 import tempfile
@@ -14,25 +15,28 @@ from types import SimpleNamespace
 from typing import Any
 
 _here = Path(__file__).resolve()
-for _cand in [_here.parents[0], _here.parents[1]]:
-    if (_cand / "basurin_io.py").exists():
-        if str(_cand) not in sys.path:
-            sys.path.insert(0, str(_cand))
-        break
+for _cand in (_here.parents[0], _here.parents[1]):
+    if (_cand / "basurin_io.py").exists() and str(_cand) not in sys.path:
+        sys.path.insert(0, str(_cand))
 
 from basurin_io import require_run_valid, resolve_out_root, sha256_file, utc_now_iso, validate_run_id, write_json_atomic
 from mvp import contracts
 
 DEFAULT_OUT_NAME = "t6_rd_weighted"
 DEFAULT_IN_REL = "experiment/area_theorem/outputs/per_event_spinmag.csv"
+DEFAULT_BATCH_220 = "batch_with_t0_220_eps2500_fixlen_20260304T160054Z"
+DEFAULT_BATCH_221 = "batch_with_t0_221_eps2500_fixlen_20260304T160617Z"
+DEFAULT_BATCH_RESULTS = "experiment/offline_batch/outputs/results.csv"
+DEFAULT_S4_COMPATIBLE = "s4_geometry_filter/outputs/compatible_set.json"
+DEFAULT_IMR_JSON_RELPATH = "external_inputs/gwtc_posteriors"
 
 
 class InsufficientGranularityError(RuntimeError):
     pass
 
 
-def _canonical(path: str) -> str:
-    return path.strip().lower().replace("-", "_")
+def _canonical(s: str) -> str:
+    return s.strip().lower().replace("-", "_")
 
 
 def _find_column(columns: list[str], *candidates: str) -> str | None:
@@ -57,10 +61,7 @@ def _weighted_quantile(values: list[float], weights: list[float], q: float) -> f
     order = sorted(range(len(values)), key=lambda i: values[i])
     v = [values[i] for i in order]
     w = [weights[i] for i in order]
-    total = sum(w)
-    if total <= 0:
-        raise ValueError("sum of normalized weights must be > 0")
-    target = q * total
+    target = q * sum(w)
     csum = 0.0
     for val, wt in zip(v, w):
         csum += wt
@@ -69,77 +70,140 @@ def _weighted_quantile(values: list[float], weights: list[float], q: float) -> f
     return float(v[-1])
 
 
-def _discover_granular_candidates(run_dir: Path) -> list[Path]:
-    candidates: list[Path] = []
-    for pat in ["experiment/**/outputs/*.csv", "experiment/**/outputs/*.json", "**/outputs/*.csv", "**/outputs/*.json"]:
-        for path in sorted(run_dir.glob(pat)):
-            if path.name == "per_event_spinmag_rd_weighted.csv":
-                continue
-            if path.is_file():
-                candidates.append(path)
-    return candidates
-
-
-def _load_granular_samples(path: Path, weight_key: str) -> dict[str, list[dict[str, float]]]:
-    if path.suffix.lower() != ".csv":
-        return {}
-    with path.open("r", encoding="utf-8", newline="") as fh:
-        reader = csv.DictReader(fh)
-        if not reader.fieldnames:
-            return {}
-        cols = list(reader.fieldnames)
-        event_col = _find_column(cols, "event_id", "event", "event_name")
-        w_col = _find_column(cols, weight_key)
-        rd_col = _find_column(cols, "a_f_rd_sample", "a_f_rd", "af_rd", "a_f_rd_value")
-        if not event_col or not w_col or not rd_col:
-            return {}
-        events: dict[str, list[dict[str, float]]] = {}
-        for row in reader:
-            event = str(row.get(event_col, "")).strip()
-            w_raw = _as_float(row.get(w_col))
-            rd = _as_float(row.get(rd_col))
-            if not event or w_raw is None or rd is None:
-                continue
-            events.setdefault(event, []).append({"delta_lnL": w_raw, "a_f_rd": rd})
-        return events
+def _black_hole_area(m_solar: float, chi: float) -> float:
+    return 8.0 * math.pi * m_solar * m_solar * (1.0 + math.sqrt(1.0 - chi * chi))
 
 
 def _resolve_in_per_event(run_dir: Path, in_per_event: str | None) -> Path:
     if in_per_event:
         p = Path(in_per_event)
         return p if p.is_absolute() else (Path.cwd() / p).resolve()
-    default = run_dir / DEFAULT_IN_REL
-    if default.exists():
-        return default
-    raise FileNotFoundError(
-        "Input faltante para experimento. "
-        f"ruta esperada exacta: {default}. "
-        "comando exacto para regenerar upstream: "
-        f"python -m mvp.experiment_area_theorem --run-id {run_dir.name}"
-    )
+    return run_dir / DEFAULT_IN_REL
 
 
-def _compute_weights(delta: list[float], transform: str) -> list[float]:
-    if transform == "identity":
-        vals = delta
-    elif transform == "exp":
-        mx = max(delta)
-        vals = [math.exp(d - mx) for d in delta]
-    else:
-        raise ValueError(f"unknown weight transform: {transform}")
-    s = sum(vals)
-    if s <= 0:
-        raise ValueError("non-positive total weight")
-    return [v / s for v in vals]
+def _extract_rows(obj: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if isinstance(obj, dict):
+        if any(k in obj for k in ("family", "source", "M_solar", "chi", "Af", "delta_lnL")):
+            rows.append(obj)
+        for v in obj.values():
+            rows.extend(_extract_rows(v))
+    elif isinstance(obj, list):
+        for it in obj:
+            rows.extend(_extract_rows(it))
+    return rows
+
+
+def _phys_key(row: dict[str, Any]) -> tuple[str, str, float, float] | None:
+    fam = str(row.get("family", "")).strip().lower()
+    src = str(row.get("source", "")).strip().lower()
+    m = _as_float(row.get("M_solar"))
+    chi = _as_float(row.get("chi"))
+    if not fam or not src or m is None or chi is None:
+        return None
+    return (fam, src, m, chi)
+
+
+def _af_value(row: dict[str, Any]) -> float | None:
+    af = _as_float(row.get("Af"))
+    if af is not None:
+        return af
+    m = _as_float(row.get("M_solar"))
+    chi = _as_float(row.get("chi"))
+    if m is None or chi is None or abs(chi) >= 1:
+        return None
+    return _black_hole_area(m, chi)
+
+
+def _load_event_to_subrun(results_csv: Path) -> dict[str, str]:
+    with results_csv.open("r", encoding="utf-8", newline="") as fh:
+        reader = csv.DictReader(fh)
+        fields = list(reader.fieldnames or [])
+        if not fields:
+            raise ValueError(f"results.csv sin encabezados: {results_csv}")
+        ev_col = _find_column(fields, "event_id", "event", "event_name")
+        subrun_col = _find_column(fields, "subrun_id", "run_id", "child_run_id")
+        if not ev_col or not subrun_col:
+            raise ValueError(
+                "No se pudieron detectar columnas event/subrun en results.csv. "
+                f"ruta esperada exacta: {results_csv}. columnas disponibles: {fields}. "
+                "comando exacto para regenerar upstream: python -m mvp.experiment_offline_batch --batch-run-id <BATCH_RUN_ID>"
+            )
+        mapping: dict[str, str] = {}
+        for row in reader:
+            ev = str(row.get(ev_col, "")).strip()
+            sub = str(row.get(subrun_col, "")).strip()
+            if ev and sub:
+                mapping[ev] = sub
+        return mapping
+
+
+def _build_weighted_af_samples(path220: Path, path221: Path) -> dict[str, Any]:
+    data220 = json.loads(path220.read_text(encoding="utf-8"))
+    data221 = json.loads(path221.read_text(encoding="utf-8"))
+    rows220 = _extract_rows(data220)
+    rows221 = _extract_rows(data221)
+
+    bykey220 = {_phys_key(r): r for r in rows220 if _phys_key(r) is not None}
+    bykey221 = {_phys_key(r): r for r in rows221 if _phys_key(r) is not None}
+    common = sorted(set(bykey220).intersection(bykey221))
+    if not common:
+        return {"status": "AF_EMPTY", "samples": [], "n220": len(bykey220), "n221": len(bykey221), "n_intersection": 0}
+
+    samples: list[dict[str, float]] = []
+    for key in common:
+        r220 = bykey220[key]
+        dlnl = _as_float(r220.get("delta_lnL"))
+        if dlnl is None:
+            keys = sorted(list(r220.keys()))
+            raise ValueError(f"MISSING_DELTA_LNL in {path220}; keys={keys}")
+        af = _af_value(r220)
+        if af is None:
+            continue
+        samples.append({"af_rd": af, "delta_lnL": dlnl})
+    return {
+        "status": "OK" if samples else "AF_EMPTY",
+        "samples": samples,
+        "n220": len(bykey220),
+        "n221": len(bykey221),
+        "n_intersection": len(common),
+    }
+
+
+def _load_imr(path: Path) -> list[dict[str, float]]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    items = data.get("samples", data if isinstance(data, list) else [])
+    out: list[dict[str, float]] = []
+    for row in items:
+        m1 = _as_float(row.get("mass_1_source", row.get("m1_source")))
+        m2 = _as_float(row.get("mass_2_source", row.get("m2_source")))
+        a1 = _as_float(row.get("a_1", row.get("a1", row.get("chi1"))))
+        a2 = _as_float(row.get("a_2", row.get("a2", row.get("chi2"))))
+        if None in (m1, m2, a1, a2):
+            continue
+        out.append({"m1": float(m1), "m2": float(m2), "a1": abs(float(a1)), "a2": abs(float(a2))})
+    if not out:
+        raise ValueError(f"IMR JSON sin muestras utilizables: {path}")
+    return out
+
+
+def _compute_weights(delta: list[float]) -> list[float]:
+    mx = max(delta)
+    w = [math.exp(d - mx) for d in delta]
+    total = sum(w)
+    return [x / total for x in w]
 
 
 def run_experiment(
     run_id: str,
     in_per_event: str | None,
     out_name: str,
-    weight_key: str,
-    weight_transform: str,
     min_effective_samples: int,
+    batch_220: str | None = None,
+    batch_221: str | None = None,
+    batch_results_relpath: str = DEFAULT_BATCH_RESULTS,
+    s4_compatible_relpath: str = DEFAULT_S4_COMPATIBLE,
+    imr_json_root: str | None = None,
 ) -> dict[str, Any]:
     out_root = resolve_out_root("runs")
     validate_run_id(run_id, out_root)
@@ -157,79 +221,98 @@ def run_experiment(
 
     with in_csv.open("r", encoding="utf-8", newline="") as fh:
         reader = csv.DictReader(fh)
-        if not reader.fieldnames:
-            raise ValueError(f"per-event CSV sin encabezados: {in_csv}")
-        per_fields = list(reader.fieldnames)
+        per_fields = list(reader.fieldnames or [])
         per_rows = list(reader)
 
     event_col = _find_column(per_fields, "event_id", "event", "event_name")
-    rd_p10_col = _find_column(per_fields, "a_f_rd_p10", "af_rd_p10", "a_f_rd_q10")
-    rd_p50_col = _find_column(per_fields, "a_f_rd_p50", "af_rd_p50", "a_f_rd_q50")
-    rd_p90_col = _find_column(per_fields, "a_f_rd_p90", "af_rd_p90", "a_f_rd_q90")
+    d10_col = _find_column(per_fields, "dA_p10")
+    d50_col = _find_column(per_fields, "dA_p50")
+    d90_col = _find_column(per_fields, "dA_p90")
+    p_col = _find_column(per_fields, "p_violate")
+    nmc_col = _find_column(per_fields, "n_mc")
+    status_col = _find_column(per_fields, "status")
+    if not all([event_col, d10_col, d50_col, d90_col, p_col, nmc_col, status_col]):
+        raise ValueError(f"Columnas requeridas faltantes en {in_csv}; disponibles={per_fields}")
 
-    missing_cols = [name for name, col in {
-        "event_id": event_col,
-        "a_f_rd_p10": rd_p10_col,
-        "a_f_rd_p50": rd_p50_col,
-        "a_f_rd_p90": rd_p90_col,
-    }.items() if col is None]
-    if missing_cols:
-        raise ValueError(
-            f"Columnas requeridas faltantes en {in_csv}: {missing_cols}. "
-            f"columnas disponibles: {per_fields}"
-        )
+    for new_col in ("af_rd_p10", "af_rd_p50", "af_rd_p90", "ess_rd"):
+        if new_col not in per_fields:
+            per_fields.append(new_col)
 
-    granular_by_event: dict[str, list[dict[str, float]]] = {}
-    candidates = _discover_granular_candidates(run_dir)
-    for cand in candidates:
-        parsed = _load_granular_samples(cand, weight_key)
-        for ev, rows in parsed.items():
-            granular_by_event.setdefault(ev, []).extend(rows)
-
-    if not granular_by_event:
+    if not batch_220 or not batch_221:
         raise InsufficientGranularityError(
-            "INSUFFICIENT_INPUT_GRANULARITY: no se encontró artefacto granular por geometría "
-            f"con columnas '{weight_key}' y 'A_f^RD sample' bajo {run_dir}. "
-            "Se necesita un artefacto por-evento con filas por geometría que incluya "
-            "delta_lnL y (A_f^{RD} o M_f,chi_f RD) para reponderar. "
-            f"Candidatos detectados: {[str(p.relative_to(run_dir)) for p in candidates[:20]]}"
+            "INSUFFICIENT_INPUT_GRANULARITY: faltan --batch-220/--batch-221 y el CSV agregado no contiene granularidad RD. "
+            f"ruta esperada exacta: {run_dir / DEFAULT_IN_REL}. "
+            f"comando exacto para regenerar upstream: python -m mvp.experiment_offline_batch --batch-run-id {DEFAULT_BATCH_220}"
         )
 
+    require_run_valid(out_root, batch_220)
+    require_run_valid(out_root, batch_221)
+
+    map220 = _load_event_to_subrun(out_root / batch_220 / batch_results_relpath)
+    map221 = _load_event_to_subrun(out_root / batch_221 / batch_results_relpath)
+
+    imr_root = (run_dir / DEFAULT_IMR_JSON_RELPATH) if not imr_json_root else Path(imr_json_root)
+    if not imr_root.is_absolute():
+        imr_root = (Path.cwd() / imr_root).resolve()
+
+    rng = random.Random(7)
     event_summaries: list[dict[str, Any]] = []
     for row in per_rows:
         event = str(row[event_col]).strip()
-        samples = granular_by_event.get(event, [])
-        if not samples:
+        sub220 = map220.get(event)
+        sub221 = map221.get(event)
+        if not sub220 or not sub221:
             raise InsufficientGranularityError(
-                "INSUFFICIENT_INPUT_GRANULARITY: faltan muestras granulares para evento "
-                f"'{event}'. ruta esperada exacta: <run>/**/outputs/*.csv con {weight_key}, A_f^RD sample y event_id. "
-                "comando exacto para regenerar upstream: python -m mvp.experiment_area_theorem --run-id "
-                f"{run_id}"
+                f"No se pudo mapear evento={event} en results.csv. path220={out_root / batch_220 / batch_results_relpath}; "
+                f"path221={out_root / batch_221 / batch_results_relpath}; candidatos220={sorted(list(map220.keys()))[:20]}"
             )
 
-        deltas = [float(s["delta_lnL"]) for s in samples]
-        af_vals = [float(s["a_f_rd"]) for s in samples]
-        w = _compute_weights(deltas, weight_transform)
-        ess = (sum(w) ** 2) / sum((wi ** 2) for wi in w)
+        compat220 = out_root / sub220 / s4_compatible_relpath
+        compat221 = out_root / sub221 / s4_compatible_relpath
+        af_pack = _build_weighted_af_samples(compat220, compat221)
 
-        row[rd_p10_col] = f"{_weighted_quantile(af_vals, w, 0.10):.12g}"
-        row[rd_p50_col] = f"{_weighted_quantile(af_vals, w, 0.50):.12g}"
-        row[rd_p90_col] = f"{_weighted_quantile(af_vals, w, 0.90):.12g}"
+        if af_pack["status"] != "OK":
+            row[status_col] = "AF_EMPTY"
+            row["ess_rd"] = "0"
+            event_summaries.append({"event_id": event, **af_pack, "ess": 0.0, "policy": "CONSERVATIVE_SKIP"})
+            continue
 
-        band: list[str] = []
-        if ess < float(min_effective_samples):
-            band.append("rd_low_ess")
-        if str(row.get("mode_221_saturated", "")).strip().lower() in {"1", "true", "yes"}:
-            band.append("221_saturated")
+        deltas = [x["delta_lnL"] for x in af_pack["samples"]]
+        af_vals = [x["af_rd"] for x in af_pack["samples"]]
+        w = _compute_weights(deltas)
+        ess = (sum(w) ** 2) / sum((x * x) for x in w)
+
+        row["af_rd_p10"] = f"{_weighted_quantile(af_vals, w, 0.1):.12g}"
+        row["af_rd_p50"] = f"{_weighted_quantile(af_vals, w, 0.5):.12g}"
+        row["af_rd_p90"] = f"{_weighted_quantile(af_vals, w, 0.9):.12g}"
+        row["ess_rd"] = f"{ess:.12g}"
+
+        imr_samples = _load_imr(imr_root / f"{event}.json")
+        n_mc = int(float(row[nmc_col])) if str(row.get(nmc_col, "")).strip() else min(1000, len(imr_samples) * 4)
+        dA: list[float] = []
+        for _ in range(n_mc):
+            i = rng.randrange(len(imr_samples))
+            j = rng.randrange(len(af_vals))
+            pre = imr_samples[i]
+            a1 = _black_hole_area(pre["m1"], pre["a1"])
+            a2 = _black_hole_area(pre["m2"], pre["a2"])
+            dA.append(af_vals[j] - (a1 + a2))
+        dA.sort()
+        row[d10_col] = f"{dA[max(0, int(0.1 * (len(dA) - 1)))]:.12g}"
+        row[d50_col] = f"{dA[int(0.5 * (len(dA) - 1))]:.12g}"
+        row[d90_col] = f"{dA[int(0.9 * (len(dA) - 1))]:.12g}"
+        row[p_col] = f"{(sum(1 for x in dA if x < 0) / len(dA)):.12g}"
+        row[status_col] = "OK"
+
         event_summaries.append(
             {
                 "event_id": event,
-                "n_samples": len(samples),
                 "ess": ess,
-                "event_quality": {
-                    "policy": "INCLUDE_FOR_STRESS_TESTS" if ess < float(min_effective_samples) else "OK",
-                    "band": band,
-                },
+                "bands": ["rd_low_ess"] if ess < float(min_effective_samples) else [],
+                "policy": "INCLUDE_FOR_STRESS_TESTS" if ess < float(min_effective_samples) else "OK",
+                "n220": af_pack["n220"],
+                "n221": af_pack["n221"],
+                "n_intersection": af_pack["n_intersection"],
             }
         )
 
@@ -247,32 +330,26 @@ def run_experiment(
 
         out_summary = tmp_outputs / "summary.json"
         summary_payload = {
-            "schema_version": "experiment_t6_rd_weighted_v1",
+            "schema_version": "experiment_t6_rd_weighted_v2",
             "run_id": run_id,
             "source_per_event": str(in_csv),
-            "weight_key": weight_key,
-            "weight_transform": weight_transform,
-            "min_effective_samples": int(min_effective_samples),
-            "events": sorted(event_summaries, key=lambda x: x["event_id"]),
+            "batch_220": batch_220,
+            "batch_221": batch_221,
+            "batch_results_relpath": batch_results_relpath,
+            "s4_compatible_relpath": s4_compatible_relpath,
+            "imr_json_root": str(imr_root),
+            "per_event": sorted(event_summaries, key=lambda x: x["event_id"]),
         }
         write_json_atomic(out_summary, summary_payload)
 
         outputs = [out_csv, out_summary]
-        output_records = [
-            {
-                "path": str(p.relative_to(tmp_stage)),
-                "sha256": sha256_file(p),
-            }
-            for p in outputs
-        ]
+        output_records = [{"path": str(p.relative_to(tmp_stage)), "sha256": sha256_file(p)} for p in outputs]
         manifest = {
             "schema_version": "mvp_manifest_v1",
             "run_id": run_id,
             "created_utc": utc_now_iso(),
             "artifacts": output_records,
-            "inputs": [
-                {"path": str(in_csv), "sha256": sha256_file(in_csv)},
-            ],
+            "inputs": [{"path": str(in_csv), "sha256": sha256_file(in_csv)}],
         }
         write_json_atomic(tmp_stage / "manifest.json", manifest)
 
@@ -285,8 +362,8 @@ def run_experiment(
             "outputs": output_records,
             "metrics": {
                 "events": len(event_summaries),
-                "ess_min": min((e["ess"] for e in event_summaries), default=None),
-                "ess_max": max((e["ess"] for e in event_summaries), default=None),
+                "ess_min": min((e.get("ess", 0.0) for e in event_summaries), default=None),
+                "ess_max": max((e.get("ess", 0.0) for e in event_summaries), default=None),
             },
         }
         write_json_atomic(tmp_stage / "stage_summary.json", stage_summary)
@@ -296,23 +373,21 @@ def run_experiment(
         exp_dir.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(tmp_stage), str(exp_dir))
 
-    ctx = SimpleNamespace(
-        out_root=out_root,
-        stage_dir=exp_dir,
-        outputs_dir=exp_dir / "outputs",
-    )
-    contracts.log_stage_paths(ctx)
+    contracts.log_stage_paths(SimpleNamespace(out_root=out_root, stage_dir=exp_dir, outputs_dir=exp_dir / "outputs"))
     return summary_payload
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="Recompute per-event RD quantiles with likelihood weighting")
+    ap = argparse.ArgumentParser(description="Recompute T6 with RD weighted Af from compatible_set intersection")
     ap.add_argument("--run-id", required=True, help="Run ID")
-    ap.add_argument("--in-per-event", default=None, help="Input per-event CSV (default from area_theorem experiment)")
+    ap.add_argument("--in-per-event", default=None, help="Input per-event CSV")
     ap.add_argument("--out-name", default=DEFAULT_OUT_NAME)
-    ap.add_argument("--weight-key", default="delta_lnL")
-    ap.add_argument("--weight-transform", choices=["exp", "identity"], default="exp")
     ap.add_argument("--min-effective-samples", type=int, default=200)
+    ap.add_argument("--batch-220", default=DEFAULT_BATCH_220)
+    ap.add_argument("--batch-221", default=DEFAULT_BATCH_221)
+    ap.add_argument("--batch-results-relpath", default=DEFAULT_BATCH_RESULTS)
+    ap.add_argument("--s4-compatible-relpath", default=DEFAULT_S4_COMPATIBLE)
+    ap.add_argument("--imr-json-root", default=None, help="Default: runs/<run_id>/external_inputs/gwtc_posteriors")
     return ap
 
 
@@ -322,9 +397,12 @@ def main() -> int:
         run_id=args.run_id,
         in_per_event=args.in_per_event,
         out_name=args.out_name,
-        weight_key=args.weight_key,
-        weight_transform=args.weight_transform,
         min_effective_samples=args.min_effective_samples,
+        batch_220=args.batch_220,
+        batch_221=args.batch_221,
+        batch_results_relpath=args.batch_results_relpath,
+        s4_compatible_relpath=args.s4_compatible_relpath,
+        imr_json_root=args.imr_json_root,
     )
     return 0
 
