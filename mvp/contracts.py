@@ -299,6 +299,18 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         upstream_stages=["s3_ringdown_estimates", "s3b_multimode_estimates"],
     ),
+    "experiment_ex8_area_consistency": StageContract(
+        name="experiment_ex8_area_consistency",
+        required_inputs=[
+            "s3_ringdown_estimates/outputs/estimates.json",
+            "s3b_multimode_estimates/outputs/model_comparison.json",
+        ],
+        produced_outputs=[
+            "outputs/area_consistency.json",
+        ],
+        upstream_stages=["s3_ringdown_estimates", "s3b_multimode_estimates"],
+        check_run_valid=True,
+    ),
     "s4d_kerr_from_multimode": StageContract(
         name="s4d_kerr_from_multimode",
         required_inputs=[
