@@ -16,14 +16,15 @@ def _write_run_valid(run_dir: Path) -> None:
     write_json_atomic(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
 
 
-def _prepare_inputs(base_dir: Path, run_id: str) -> tuple[Path, Path]:
+def _prepare_inputs(base_dir: Path, run_id: str, atlas_entries: list[dict] | None = None) -> tuple[Path, Path]:
     run_dir = base_dir / run_id
     _write_run_valid(run_dir)
 
     atlas_path = base_dir / "atlas.json"
     write_json_atomic(
         atlas_path,
-        [
+        atlas_entries
+        or [
             {"geometry_id": "g1", "f_hz": 250.0, "Q": 3.14},
             {"geometry_id": "g2", "f_hz": 300.0, "Q": 4.00},
         ],
@@ -177,7 +178,11 @@ def test_s4_writes_ranked_all_full_artifact(monkeypatch, tmp_path: Path) -> None
     out_root = tmp_path / "runs"
     run_id = "run_s4_ranked_full"
     run_dir = out_root / run_id
-    atlas_path, _ = _prepare_inputs(out_root, run_id)
+    atlas_entries = [
+        {"geometry_id": f"g{i:03d}", "f_hz": 250.0 + (0.01 * i), "Q": 3.14 + (0.001 * i)}
+        for i in range(75)
+    ]
+    atlas_path, _ = _prepare_inputs(out_root, run_id, atlas_entries=atlas_entries)
 
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(out_root))
     monkeypatch.setattr(
@@ -200,7 +205,7 @@ def test_s4_writes_ranked_all_full_artifact(monkeypatch, tmp_path: Path) -> None
     compatible = json.loads((outputs_dir / "compatible_set.json").read_text(encoding="utf-8"))
     ranked_full = json.loads((outputs_dir / "ranked_all_full.json").read_text(encoding="utf-8"))
 
-    assert len(ranked_full) >= len(compatible["ranked_all"])
-    assert all("geometry_id" in row for row in ranked_full)
-    assert all(("delta_lnL" in row) or ("log_likelihood_rel" in row) for row in ranked_full)
-
+    assert len(compatible["ranked_all"]) == 50
+    assert len(ranked_full) == len(atlas_entries)
+    assert ranked_full[0]["geometry_id"]
+    assert "delta_lnL" in ranked_full[0]
