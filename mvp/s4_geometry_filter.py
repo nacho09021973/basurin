@@ -280,11 +280,11 @@ def _add_mahalanobis_audit_fields(
         if norm > 0.0:
             for row, w in zip(valid_rows, raw_weights):
                 row["posterior_weight"] = w / norm
-                row["delta_lnL"] = -0.5 * (row["d2"] - d2_min)
+                row["delta_lnL"] = _delta_lnL_from_d2(row["d2"], d2_min)
         else:
             for row in valid_rows:
                 row["posterior_weight"] = 0.0
-                row["delta_lnL"] = -0.5 * (row["d2"] - d2_min)
+                row["delta_lnL"] = _delta_lnL_from_d2(row["d2"], d2_min)
 
         posterior_sum = sum(float(row.get("posterior_weight", 0.0)) for row in ranked_rows)
         if abs(posterior_sum - 1.0) > 1e-9 and norm > 0.0:
@@ -403,6 +403,43 @@ def _build_diagnostics(
     }
 
 
+def _delta_lnL_from_d2(d2: float, d2_min: float) -> float:
+    return -0.5 * (float(d2) - float(d2_min))
+
+
+def _resolve_delta_mode_threshold(
+    mode_filter: str | None,
+    atlas: list[dict[str, Any]],
+    *,
+    delta_lnL_220: float,
+    delta_lnL_221: float,
+) -> tuple[float, str]:
+    if mode_filter is not None:
+        normalized_mode = mode_filter.replace(" ", "")
+    else:
+        mode_candidates = {
+            _mode_to_string((entry.get("metadata") or {}).get("mode")).replace(" ", "")
+            for entry in atlas
+            if (entry.get("metadata") or {}).get("mode") is not None
+        }
+        if len(mode_candidates) != 1:
+            raise ValueError(
+                "threshold_mode=delta_lnL requires filtering a single mode (220 or 221); "
+                f"detected modes={sorted(mode_candidates)}"
+            )
+        normalized_mode = next(iter(mode_candidates))
+
+    if normalized_mode in {"(2,2,0)", "220"}:
+        return float(delta_lnL_220), "delta_lnL_220"
+    if normalized_mode in {"(2,2,1)", "221"}:
+        return float(delta_lnL_221), "delta_lnL_221"
+
+    raise ValueError(
+        "threshold_mode=delta_lnL only supports mode 220/221; "
+        f"mode_filter={mode_filter!r}"
+    )
+
+
 def compute_compatible_set(
     f_obs: float,
     Q_obs: float,
@@ -417,6 +454,8 @@ def compute_compatible_set(
     cov_logf_logQ: float | object = _UNSET,
     fixed_theta0: str | int | dict[str, Any] | None = None,
     theta0_source: str | None = None,
+    threshold_mode: str = "d2",
+    threshold_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     del legacy_labels  # kept for compatibility with older callers
 
@@ -424,6 +463,9 @@ def compute_compatible_set(
         raise ValueError("Observed f_hz and Q must be > 0")
 
     metric_name, params = _normalize_metric(metric, metric_params, sigma_logf, sigma_logQ, cov_logf_logQ)
+    if threshold_mode not in {"d2", "delta_lnL"}:
+        raise ValueError(f"Unsupported threshold_mode: {threshold_mode}")
+    threshold_params_out = dict(threshold_params or {})
 
     if metric_name == "mahalanobis_log":
         _validate_mahalanobis_params(params)
@@ -461,7 +503,7 @@ def compute_compatible_set(
                     "geometry_id": gid,
                     "distance": dist,
                     "d2": d2,
-                    "compatible": d2 <= epsilon,
+                    "compatible": False,
                     "f_hz": math.exp(lnf_atlas),
                     "Q": math.exp(lnQ_atlas),
                     "metadata": entry.get("metadata"),
@@ -472,7 +514,7 @@ def compute_compatible_set(
                 {
                     "geometry_id": gid,
                     "distance": dist,
-                    "compatible": dist <= epsilon,
+                    "compatible": False,
                     "f_hz": math.exp(lnf_atlas),
                     "Q": math.exp(lnQ_atlas),
                     "metadata": entry.get("metadata"),
@@ -505,9 +547,26 @@ def compute_compatible_set(
 
         if valid_likelihood_rows:
             max_log_likelihood = max(row["log_likelihood"] for row in valid_likelihood_rows)
+            d2_min = min(row["d2"] for row in valid_likelihood_rows)
             for row in results:
                 ll = row.get("log_likelihood")
                 row["delta_log_likelihood"] = ll - max_log_likelihood if isinstance(ll, (int, float)) else None
+                if isinstance(row.get("d2"), (int, float)):
+                    row["delta_lnL"] = _delta_lnL_from_d2(float(row["d2"]), d2_min)
+                else:
+                    row["delta_lnL"] = None
+
+            if threshold_mode == "delta_lnL":
+                delta_lnL_threshold = threshold_params_out.get("delta_lnL")
+                if delta_lnL_threshold is None:
+                    raise ValueError("threshold_mode=delta_lnL requires threshold_params['delta_lnL']")
+                delta_lnL_threshold = float(delta_lnL_threshold)
+                for row in results:
+                    row_delta = row.get("delta_lnL")
+                    row["compatible"] = isinstance(row_delta, (int, float)) and row_delta >= -delta_lnL_threshold
+            else:
+                for row in results:
+                    row["compatible"] = isinstance(row.get("d2"), (int, float)) and float(row["d2"]) <= epsilon
 
             best_row = min(valid_likelihood_rows, key=lambda row: row["d2"])
             n_excluded_2sigma = sum(math.sqrt(row["d2"]) > 2.0 for row in valid_likelihood_rows)
@@ -522,10 +581,12 @@ def compute_compatible_set(
         else:
             for row in results:
                 row["delta_log_likelihood"] = None
+                row["delta_lnL"] = None
     else:
         for row in results:
             row["log_likelihood"] = None
             row["delta_log_likelihood"] = None
+            row["compatible"] = row["distance"] <= epsilon
 
     compatible = [row for row in results if row["compatible"]]
 
@@ -549,6 +610,8 @@ def compute_compatible_set(
         "bits_excluded": bits_excluded,
         "bits_kl": bits_kl,
         "likelihood_stats": likelihood_stats,
+        "threshold_mode": threshold_mode,
+        "threshold_params": threshold_params_out,
     }
 
     if metric_name == "mahalanobis_log":
@@ -557,11 +620,16 @@ def compute_compatible_set(
         if isinstance(d2_min, (int, float)) and math.isfinite(d2_min) and d2_min >= 0:
             distance = float(math.sqrt(d2_min))
 
-        out["threshold_d2"] = epsilon
+        out["threshold_d2"] = epsilon if threshold_mode == "d2" else None
         out["d2_min"] = d2_min
         out["distance"] = distance
+        out["threshold_value_effective"] = (
+            epsilon if threshold_mode == "d2" else threshold_params_out.get("delta_lnL")
+        )
         out["covariance_logspace"] = _coerce_covariance_for_output(params)
         _add_mahalanobis_audit_fields(out, fixed_theta0=fixed_theta0, theta0_source=theta0_source)
+    else:
+        out["threshold_value_effective"] = epsilon
 
     out["diagnostics"] = _build_diagnostics(
         n_atlas=n_atlas,
@@ -579,6 +647,9 @@ def main() -> int:
     ap.add_argument("--stage-name", default=STAGE)
     ap.add_argument("--atlas-path", required=True)
     ap.add_argument("--epsilon", type=float, default=None)
+    ap.add_argument("--threshold-mode", choices=["d2", "delta_lnL"], default="d2")
+    ap.add_argument("--delta-lnL-220", type=float, default=0.0)
+    ap.add_argument("--delta-lnL-221", type=float, default=0.0)
     ap.add_argument(
         "--mode-filter",
         default=None,
@@ -608,6 +679,9 @@ def main() -> int:
         "stage_name": args.stage_name,
         "atlas_path": str(atlas_path),
         "epsilon_cli": args.epsilon,
+        "threshold_mode": args.threshold_mode,
+        "delta_lnL_220": args.delta_lnL_220,
+        "delta_lnL_221": args.delta_lnL_221,
         "mode_filter": args.mode_filter,
         "estimates_path_override": args.estimates_path,
     })
@@ -679,6 +753,9 @@ def main() -> int:
                 )
                 return 0
 
+        if args.delta_lnL_220 < 0 or args.delta_lnL_221 < 0:
+            abort(ctx, "delta_lnL thresholds must be >= 0 (--delta-lnL-220, --delta-lnL-221)")
+
         metric_name = args.metric or ("mahalanobis_log" if has_covariance else "euclidean_log")
         if metric_name == "mahalanobis_log" and not has_covariance:
             abort(
@@ -702,6 +779,19 @@ def main() -> int:
         ctx.params["metric"] = metric_name
 
         atlas = _filter_atlas_by_mode(_load_atlas(atlas_path), args.mode_filter)
+
+        threshold_params: dict[str, Any] = {}
+        if args.threshold_mode == "delta_lnL":
+            if metric_name != "mahalanobis_log":
+                abort(ctx, "threshold_mode=delta_lnL requires metric=mahalanobis_log")
+            delta_value, delta_source = _resolve_delta_mode_threshold(
+                args.mode_filter,
+                atlas,
+                delta_lnL_220=args.delta_lnL_220,
+                delta_lnL_221=args.delta_lnL_221,
+            )
+            threshold_params = {"delta_lnL": delta_value, "source_flag": delta_source}
+
         result = compute_compatible_set(
             f_obs,
             Q_obs,
@@ -709,6 +799,8 @@ def main() -> int:
             threshold,
             metric=metric_name,
             metric_params=params,
+            threshold_mode=args.threshold_mode,
+            threshold_params=threshold_params,
         )
         result["event_id"] = estimates.get("event_id", "unknown")
         result["run_id"] = args.run
