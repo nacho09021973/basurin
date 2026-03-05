@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+
+import pytest
 from pathlib import Path
 
 from basurin_io import write_json_atomic
@@ -188,3 +190,54 @@ def test_diagnostics_ok_status_and_determinism() -> None:
     assert diagnostics["d2_quantiles"]["p90"] is not None
 
     assert json.dumps(out_a, sort_keys=True) == json.dumps(out_b, sort_keys=True)
+
+
+def test_delta_lnl_threshold_selection_with_exact_boundary() -> None:
+    atlas = [
+        {"geometry_id": "g0", "f_hz": 250.0, "Q": 4.0},
+        {"geometry_id": "g1", "f_hz": 276.29272951891184, "Q": 4.0},
+        {"geometry_id": "g2", "f_hz": 305.3506895400425, "Q": 4.0}
+    ]
+
+    out = compute_compatible_set(
+        250.0,
+        4.0,
+        atlas,
+        0.0,
+        metric="mahalanobis_log",
+        metric_params={"sigma_logf": 0.1, "sigma_logQ": 0.2, "cov_logf_logQ": 0.0},
+        threshold_mode="delta_lnL",
+        threshold_params={"delta_lnL": 0.5, "source_flag": "delta_lnL_220"},
+    )
+
+    compatible_ids = {row["geometry_id"] for row in out["compatible_geometries"]}
+    assert compatible_ids == {"g0", "g1"}
+    row_by_id = {row["geometry_id"]: row for row in out["ranked_all"]}
+    assert row_by_id["g1"]["delta_lnL"] == pytest.approx(-0.5)
+    assert row_by_id["g1"]["compatible"] is True
+    assert row_by_id["g2"]["delta_lnL"] < -0.5
+    assert row_by_id["g2"]["compatible"] is False
+    assert out["threshold_d2"] is None
+    assert out["threshold_params"]["delta_lnL"] == pytest.approx(0.5)
+
+
+def test_threshold_mode_d2_regression_stability() -> None:
+    atlas = [
+        {"geometry_id": "g1", "f_hz": 250.0, "Q": 4.0},
+        {"geometry_id": "g2", "f_hz": 310.0, "Q": 6.0},
+        {"geometry_id": "g3", "f_hz": 350.0, "Q": 8.0},
+    ]
+    kwargs = {
+        "f_obs": 250.0,
+        "Q_obs": 4.0,
+        "atlas": atlas,
+        "epsilon": 5.991,
+        "metric": "mahalanobis_log",
+        "metric_params": {"sigma_logf": 0.1, "sigma_logQ": 0.2},
+    }
+
+    out_default = compute_compatible_set(**kwargs)
+    out_explicit = compute_compatible_set(**kwargs, threshold_mode="d2")
+
+    assert json.dumps(out_default, sort_keys=True) == json.dumps(out_explicit, sort_keys=True)
+
