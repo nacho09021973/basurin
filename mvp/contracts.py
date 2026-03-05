@@ -386,6 +386,21 @@ CONTRACTS: dict[str, StageContract] = {
         upstream_stages=[],
         check_run_valid=True,
     ),
+    "experiment/delta_lnL_sweep": StageContract(
+        name="experiment/delta_lnL_sweep",
+        required_inputs=[
+            "s3_ringdown_estimates/outputs/estimates.json",
+        ],
+        external_inputs=[
+            "atlas",
+        ],
+        produced_outputs=[
+            "outputs/delta_sweep.json",
+            "outputs/delta_sweep.tsv",
+        ],
+        upstream_stages=["s3_ringdown_estimates"],
+        check_run_valid=True,
+    ),
 }
 
 

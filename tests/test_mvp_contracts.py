@@ -47,7 +47,7 @@ class TestContractRegistry:
                        "s3_spectral_estimates", "experiment_geometry_evidence_vs_gr",
                        "experiment_ex3_golden_sweep", "experiment_ex4_spectral_exclusion",
                        "experiment_gwtc_posteriors_fetch", "experiment_area_theorem",
-                       "psd_extract"}
+                       "experiment/delta_lnL_sweep", "psd_extract"}
 
     def test_all_stages_registered(self):
         """Every MVP stage has a contract entry."""
