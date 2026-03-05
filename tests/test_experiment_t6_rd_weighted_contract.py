@@ -201,7 +201,7 @@ def test_missing_delta_lnl_in_ranked_all_fails_with_source(tmp_path: Path, monke
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match=r"MISSING_DELTA_LNL.*source=ranked_all"):
+    with pytest.raises(ValueError, match=r"MISSING_DELTA_LNL.*source=ranked_all_top50"):
         run_experiment(
             run_id="run_weighted_missing_delta",
             in_per_event=str(in_csv),
@@ -373,3 +373,74 @@ def test_ranked_all_limit_default_and_zero(tmp_path: Path, monkeypatch: pytest.M
     assert zero_event["n_ranked_all_221"] == 60
     assert zero_event["n_ranked_all_total_220"] == 60
     assert zero_event["n_ranked_all_total_221"] == 60
+
+
+def test_prefers_ranked_all_full_when_available(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    analysis = _mk_run(tmp_path, "run_weighted_full_source")
+    batch220 = _mk_run(tmp_path, "batch220_full_source")
+    batch221 = _mk_run(tmp_path, "batch221_full_source")
+    sub220 = _mk_run(tmp_path, "sub220_full_source")
+    sub221 = _mk_run(tmp_path, "sub221_full_source")
+
+    in_csv = analysis / "experiment" / "area_theorem" / "outputs" / "per_event_spinmag.csv"
+    _write_csv(
+        in_csv,
+        rows=[{"event_id": "E1", "status": "OK", "p_violate": "0", "dA_p10": "0", "dA_p50": "0", "dA_p90": "0", "n_mc": "10"}],
+        fields=["event_id", "status", "p_violate", "dA_p10", "dA_p50", "dA_p90", "n_mc"],
+    )
+
+    _write_csv(
+        batch220 / "experiment" / "offline_batch" / "outputs" / "results.csv",
+        rows=[{"event_id": "E1", "subrun_id": "sub220_full_source"}],
+        fields=["event_id", "subrun_id"],
+    )
+    _write_csv(
+        batch221 / "experiment" / "offline_batch" / "outputs" / "results.csv",
+        rows=[{"event_id": "E1", "subrun_id": "sub221_full_source"}],
+        fields=["event_id", "subrun_id"],
+    )
+
+    compat220 = {
+        "compatible_geometries": [{"geometry_id": "g220_55", "family": "kerr", "source": "berti", "M_solar": 65, "chi": 0.1, "Af": 1065}],
+        "ranked_all": [{"geometry_id": "g220_55", "delta_lnL": -55.0}],
+    }
+    compat221 = {
+        "compatible_geometries": [{"geometry_id": "g221_55", "family": "kerr", "source": "berti", "M_solar": 65, "chi": 0.1, "Af": 1065}],
+        "ranked_all": [{"geometry_id": "g221_55", "delta_lnL": -55.0}],
+    }
+
+    ranked220_full = [{"geometry_id": f"g220_{i}", "delta_lnL": float(-i)} for i in range(60)]
+    ranked221_full = [{"geometry_id": f"g221_{i}", "delta_lnL": 0.0} for i in range(60)]
+
+    (sub220 / "s4_geometry_filter" / "outputs").mkdir(parents=True, exist_ok=True)
+    (sub221 / "s4_geometry_filter" / "outputs").mkdir(parents=True, exist_ok=True)
+    (sub220 / "s4_geometry_filter" / "outputs" / "compatible_set.json").write_text(json.dumps(compat220), encoding="utf-8")
+    (sub221 / "s4_geometry_filter" / "outputs" / "compatible_set.json").write_text(json.dumps(compat221), encoding="utf-8")
+    (sub220 / "s4_geometry_filter" / "outputs" / "ranked_all_full.json").write_text(json.dumps(ranked220_full), encoding="utf-8")
+    (sub221 / "s4_geometry_filter" / "outputs" / "ranked_all_full.json").write_text(json.dumps(ranked221_full), encoding="utf-8")
+
+    (analysis / "external_inputs" / "gwtc_posteriors").mkdir(parents=True, exist_ok=True)
+    (analysis / "external_inputs" / "gwtc_posteriors" / "E1.json").write_text(
+        json.dumps({"samples": [{"mass_1_source": 10, "mass_2_source": 8, "a_1": 0.1, "a_2": 0.2}]}),
+        encoding="utf-8",
+    )
+
+    run_experiment(
+        run_id="run_weighted_full_source",
+        in_per_event=str(in_csv),
+        out_name="t6_rd_weighted_full_source",
+        min_effective_samples=1,
+        batch_220="batch220_full_source",
+        batch_221="batch221_full_source",
+    )
+
+    event = json.loads(
+        (analysis / "experiment" / "t6_rd_weighted_full_source" / "outputs" / "summary.json").read_text(encoding="utf-8")
+    )["per_event"][0]
+    assert event["weight_source"] == "ranked_all_full"
+    assert event["n_ranked_all_total_220"] == 60
+    assert event["n_ranked_all_total_221"] == 60
+    assert event["n_ranked_all_220"] == 60
+    assert event["n_ranked_all_221"] == 60
+

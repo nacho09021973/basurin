@@ -131,6 +131,7 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         produced_outputs=[
             "outputs/compatible_set.json",
+            "outputs/ranked_all_full.json",
         ],
         upstream_stages=["s3_ringdown_estimates"],
     ),
@@ -148,6 +149,7 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         produced_outputs=[
             "outputs/compatible_set.json",
+            "outputs/ranked_all_full.json",
         ],
         upstream_stages=["s3_ringdown_estimates"],
     ),

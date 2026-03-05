@@ -171,3 +171,36 @@ def test_s4_mode_filter_keeps_only_matching_mode(monkeypatch, tmp_path: Path) ->
     summary_path = run_dir / "s4_geometry_filter" / "stage_summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary["parameters"]["mode_filter"] == "(2,2,0)"
+
+
+def test_s4_writes_ranked_all_full_artifact(monkeypatch, tmp_path: Path) -> None:
+    out_root = tmp_path / "runs"
+    run_id = "run_s4_ranked_full"
+    run_dir = out_root / run_id
+    atlas_path, _ = _prepare_inputs(out_root, run_id)
+
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(out_root))
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "s4_geometry_filter.py",
+            "--run",
+            run_id,
+            "--atlas-path",
+            str(atlas_path),
+            "--epsilon",
+            "0.6",
+        ],
+    )
+
+    rc = s4_main()
+    assert rc == 0
+
+    outputs_dir = run_dir / "s4_geometry_filter" / "outputs"
+    compatible = json.loads((outputs_dir / "compatible_set.json").read_text(encoding="utf-8"))
+    ranked_full = json.loads((outputs_dir / "ranked_all_full.json").read_text(encoding="utf-8"))
+
+    assert len(ranked_full) >= len(compatible["ranked_all"])
+    assert all("geometry_id" in row for row in ranked_full)
+    assert all(("delta_lnL" in row) or ("log_likelihood_rel" in row) for row in ranked_full)
+

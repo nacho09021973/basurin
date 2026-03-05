@@ -456,6 +456,7 @@ def compute_compatible_set(
     theta0_source: str | None = None,
     threshold_mode: str = "d2",
     threshold_params: dict[str, Any] | None = None,
+    include_ranked_all_full: bool = False,
 ) -> dict[str, Any]:
     del legacy_labels  # kept for compatibility with older callers
 
@@ -613,6 +614,8 @@ def compute_compatible_set(
         "threshold_mode": threshold_mode,
         "threshold_params": threshold_params_out,
     }
+    if include_ranked_all_full:
+        out["ranked_all_full"] = [dict(row) for row in results]
 
     if metric_name == "mahalanobis_log":
         d2_min = min((row["d2"] for row in results), default=None)
@@ -804,6 +807,7 @@ def main() -> int:
             metric_params=params,
             threshold_mode=args.threshold_mode,
             threshold_params=threshold_params,
+            include_ranked_all_full=True,
         )
         result["event_id"] = estimates.get("event_id", "unknown")
         result["run_id"] = args.run
@@ -820,11 +824,17 @@ def main() -> int:
             )
 
         cs_path = ctx.outputs_dir / "compatible_set.json"
+        ranked_all_full_path = ctx.outputs_dir / "ranked_all_full.json"
+        ranked_all_full_rows = result.pop("ranked_all_full", None)
+        if not isinstance(ranked_all_full_rows, list):
+            abort(ctx, "Failed to build outputs/ranked_all_full.json from in-memory ranked_all")
+
+        write_json_atomic(ranked_all_full_path, ranked_all_full_rows)
         write_json_atomic(cs_path, result)
 
         finalize(
             ctx,
-            artifacts={"compatible_set": cs_path},
+            artifacts={"compatible_set": cs_path, "ranked_all_full": ranked_all_full_path},
             results={
                 "n_atlas": result["n_atlas"],
                 "n_compatible": result["n_compatible"],

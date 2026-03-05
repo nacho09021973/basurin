@@ -28,6 +28,8 @@ DEFAULT_BATCH_220 = "batch_with_t0_220_eps2500_fixlen_20260304T160054Z"
 DEFAULT_BATCH_221 = "batch_with_t0_221_eps2500_fixlen_20260304T160617Z"
 DEFAULT_BATCH_RESULTS = "experiment/offline_batch/outputs/results.csv"
 DEFAULT_S4_COMPATIBLE = "s4_geometry_filter/outputs/compatible_set.json"
+DEFAULT_S4_RANKED_FULL_JSON = "ranked_all_full.json"
+DEFAULT_S4_RANKED_FULL_CSV = "ranked_all_full.csv"
 DEFAULT_IMR_JSON_RELPATH = "external_inputs/gwtc_posteriors"
 
 
@@ -138,16 +140,43 @@ def _load_event_to_subrun(results_csv: Path) -> dict[str, str]:
         return mapping
 
 
+def _load_ranked_rows_with_source(compatible_set_path: Path, ranked_all_limit: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
+    data = json.loads(compatible_set_path.read_text(encoding="utf-8"))
+    ranked_all_from_compatible = data.get("ranked_all", []) if isinstance(data, dict) else []
+
+    outputs_dir = compatible_set_path.parent
+    ranked_full_json = outputs_dir / DEFAULT_S4_RANKED_FULL_JSON
+    ranked_full_csv = outputs_dir / DEFAULT_S4_RANKED_FULL_CSV
+
+    ranked_full: list[dict[str, Any]] = []
+    source = "ranked_all_top50"
+    if ranked_full_json.exists():
+        loaded = json.loads(ranked_full_json.read_text(encoding="utf-8"))
+        if not isinstance(loaded, list):
+            raise ValueError(f"Invalid ranked_all_full JSON (expected list): {ranked_full_json}")
+        ranked_full = [row for row in loaded if isinstance(row, dict)]
+        source = "ranked_all_full"
+    elif ranked_full_csv.exists():
+        with ranked_full_csv.open("r", encoding="utf-8", newline="") as fh:
+            ranked_full = [dict(row) for row in csv.DictReader(fh)]
+        source = "ranked_all_full"
+
+    if source == "ranked_all_full":
+        return ranked_full, ranked_full, source
+
+    ranked_top = ranked_all_from_compatible if ranked_all_limit == 0 else ranked_all_from_compatible[:ranked_all_limit]
+    return ranked_top, ranked_all_from_compatible, source
+
+
 def _build_weighted_af_samples(path220: Path, path221: Path, ranked_all_limit: int) -> dict[str, Any]:
     data220 = json.loads(path220.read_text(encoding="utf-8"))
     data221 = json.loads(path221.read_text(encoding="utf-8"))
 
     compat220 = data220.get("compatible_geometries", data220 if isinstance(data220, list) else [])
     compat221 = data221.get("compatible_geometries", data221 if isinstance(data221, list) else [])
-    ranked220_full = data220.get("ranked_all", []) if isinstance(data220, dict) else []
-    ranked221_full = data221.get("ranked_all", []) if isinstance(data221, dict) else []
-    ranked220 = ranked220_full if ranked_all_limit == 0 else ranked220_full[:ranked_all_limit]
-    ranked221 = ranked221_full if ranked_all_limit == 0 else ranked221_full[:ranked_all_limit]
+    ranked220, ranked220_full, source220 = _load_ranked_rows_with_source(path220, ranked_all_limit)
+    ranked221, ranked221_full, source221 = _load_ranked_rows_with_source(path221, ranked_all_limit)
+    effective_weight_source = "ranked_all_full" if source220 == "ranked_all_full" and source221 == "ranked_all_full" else "ranked_all_top50"
 
     delta220_by_gid = {
         str(r["geometry_id"]): float(r["delta_lnL"])
@@ -162,10 +191,10 @@ def _build_weighted_af_samples(path220: Path, path221: Path, ranked_all_limit: i
 
     if not delta220_by_gid:
         sample_keys = sorted(list(ranked220[0].keys())) if ranked220 and isinstance(ranked220[0], dict) else []
-        raise ValueError(f"MISSING_DELTA_LNL path={path220} source=ranked_all keys(sample)={sample_keys}")
+        raise ValueError(f"MISSING_DELTA_LNL path={path220} source={source220} keys(sample)={sample_keys}")
     if not delta221_by_gid:
         sample_keys = sorted(list(ranked221[0].keys())) if ranked221 and isinstance(ranked221[0], dict) else []
-        raise ValueError(f"MISSING_DELTA_LNL path={path221} source=ranked_all keys(sample)={sample_keys}")
+        raise ValueError(f"MISSING_DELTA_LNL path={path221} source={source221} keys(sample)={sample_keys}")
 
     def _enrich_with_delta(compat: list[Any], delta_by_gid: dict[str, float]) -> tuple[list[dict[str, Any]], int]:
         enriched: list[dict[str, Any]] = []
@@ -243,7 +272,9 @@ def _build_weighted_af_samples(path220: Path, path221: Path, ranked_all_limit: i
             "n_dropped_missing_gid_or_weight_221": dropped221,
             "n_support_phys": len(support),
             "join_policy": "ranked_all.geometry_id -> compatible_geometries.geometry_id; reduce=max_delta_per_phys; combine=delta220+delta221",
-            "weight_source": "ranked_all.delta_lnL",
+            "weight_source": effective_weight_source,
+            "weight_source_220": source220,
+            "weight_source_221": source221,
             "weight_reduce": "sum",
         }
 
@@ -269,7 +300,9 @@ def _build_weighted_af_samples(path220: Path, path221: Path, ranked_all_limit: i
         "n_dropped_missing_gid_or_weight_221": dropped221,
         "n_support_phys": len(support),
         "join_policy": "ranked_all.geometry_id -> compatible_geometries.geometry_id; reduce=max_delta_per_phys; combine=delta220+delta221",
-        "weight_source": "ranked_all.delta_lnL",
+        "weight_source": effective_weight_source,
+        "weight_source_220": source220,
+        "weight_source_221": source221,
         "weight_reduce": "sum",
     }
 
