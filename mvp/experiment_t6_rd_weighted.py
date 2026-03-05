@@ -138,14 +138,16 @@ def _load_event_to_subrun(results_csv: Path) -> dict[str, str]:
         return mapping
 
 
-def _build_weighted_af_samples(path220: Path, path221: Path) -> dict[str, Any]:
+def _build_weighted_af_samples(path220: Path, path221: Path, ranked_all_limit: int) -> dict[str, Any]:
     data220 = json.loads(path220.read_text(encoding="utf-8"))
     data221 = json.loads(path221.read_text(encoding="utf-8"))
 
     compat220 = data220.get("compatible_geometries", data220 if isinstance(data220, list) else [])
     compat221 = data221.get("compatible_geometries", data221 if isinstance(data221, list) else [])
-    ranked220 = data220.get("ranked_all", []) if isinstance(data220, dict) else []
-    ranked221 = data221.get("ranked_all", []) if isinstance(data221, dict) else []
+    ranked220_full = data220.get("ranked_all", []) if isinstance(data220, dict) else []
+    ranked221_full = data221.get("ranked_all", []) if isinstance(data221, dict) else []
+    ranked220 = ranked220_full if ranked_all_limit == 0 else ranked220_full[:ranked_all_limit]
+    ranked221 = ranked221_full if ranked_all_limit == 0 else ranked221_full[:ranked_all_limit]
 
     delta220_by_gid = {
         str(r["geometry_id"]): float(r["delta_lnL"])
@@ -230,6 +232,9 @@ def _build_weighted_af_samples(path220: Path, path221: Path) -> dict[str, Any]:
             "n_dropped_missing_weight": dropped_missing_weight,
             "n_ranked_all_220": len(ranked220),
             "n_ranked_all_221": len(ranked221),
+            "n_ranked_all_total_220": len(ranked220_full),
+            "n_ranked_all_total_221": len(ranked221_full),
+            "ranked_all_limit": ranked_all_limit,
             "n_compat_220": len(compat220) if isinstance(compat220, list) else 0,
             "n_compat_221": len(compat221) if isinstance(compat221, list) else 0,
             "n_enriched_220": len(enriched220),
@@ -253,6 +258,9 @@ def _build_weighted_af_samples(path220: Path, path221: Path) -> dict[str, Any]:
         "n_dropped_missing_weight": dropped_missing_weight,
         "n_ranked_all_220": len(ranked220),
         "n_ranked_all_221": len(ranked221),
+        "n_ranked_all_total_220": len(ranked220_full),
+        "n_ranked_all_total_221": len(ranked221_full),
+        "ranked_all_limit": ranked_all_limit,
         "n_compat_220": len(compat220) if isinstance(compat220, list) else 0,
         "n_compat_221": len(compat221) if isinstance(compat221, list) else 0,
         "n_enriched_220": len(enriched220),
@@ -300,10 +308,13 @@ def run_experiment(
     batch_results_relpath: str = DEFAULT_BATCH_RESULTS,
     s4_compatible_relpath: str = DEFAULT_S4_COMPATIBLE,
     imr_json_root: str | None = None,
+    ranked_all_limit: int = 50,
 ) -> dict[str, Any]:
     out_root = resolve_out_root("runs")
     validate_run_id(run_id, out_root)
     require_run_valid(out_root, run_id)
+    if ranked_all_limit < 0:
+        raise ValueError(f"--ranked-all-limit debe ser >= 0; recibido={ranked_all_limit}")
 
     run_dir = out_root / run_id
     in_csv = _resolve_in_per_event(run_dir, in_per_event)
@@ -365,7 +376,7 @@ def run_experiment(
 
         compat220 = out_root / sub220 / s4_compatible_relpath
         compat221 = out_root / sub221 / s4_compatible_relpath
-        af_pack = _build_weighted_af_samples(compat220, compat221)
+        af_pack = _build_weighted_af_samples(compat220, compat221, ranked_all_limit=ranked_all_limit)
 
         if af_pack["status"] != "OK":
             row[status_col] = str(af_pack["status"])
@@ -414,6 +425,9 @@ def run_experiment(
                 "n_dropped_missing_weight": af_pack["n_dropped_missing_weight"],
                 "n_ranked_all_220": af_pack["n_ranked_all_220"],
                 "n_ranked_all_221": af_pack["n_ranked_all_221"],
+                "n_ranked_all_total_220": af_pack["n_ranked_all_total_220"],
+                "n_ranked_all_total_221": af_pack["n_ranked_all_total_221"],
+                "ranked_all_limit": af_pack["ranked_all_limit"],
                 "n_compat_220": af_pack["n_compat_220"],
                 "n_compat_221": af_pack["n_compat_221"],
                 "n_enriched_220": af_pack["n_enriched_220"],
@@ -449,6 +463,7 @@ def run_experiment(
             "batch_results_relpath": batch_results_relpath,
             "s4_compatible_relpath": s4_compatible_relpath,
             "imr_json_root": str(imr_root),
+            "ranked_all_limit": ranked_all_limit,
             "per_event": sorted(event_summaries, key=lambda x: x["event_id"]),
         }
         write_json_atomic(out_summary, summary_payload)
@@ -499,6 +514,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--batch-results-relpath", default=DEFAULT_BATCH_RESULTS)
     ap.add_argument("--s4-compatible-relpath", default=DEFAULT_S4_COMPATIBLE)
     ap.add_argument("--imr-json-root", default=None, help="Default: runs/<run_id>/external_inputs/gwtc_posteriors")
+    ap.add_argument("--ranked-all-limit", type=int, default=50, help="Max ranked_all entries per event (0 = no limit)")
     return ap
 
 
@@ -514,6 +530,7 @@ def main() -> int:
         batch_results_relpath=args.batch_results_relpath,
         s4_compatible_relpath=args.s4_compatible_relpath,
         imr_json_root=args.imr_json_root,
+        ranked_all_limit=args.ranked_all_limit,
     )
     return 0
 
