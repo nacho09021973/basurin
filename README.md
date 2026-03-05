@@ -388,6 +388,19 @@ Guías de experimentos documentadas:
 - `docs/readme_experiment_2.md`
 - `docs/readme_experiment_4.md` (batch offline-first con `t0`, `mode_filter` y calibración de `epsilon` en `s4_geometry_filter` con `metric=mahalanobis_log`)
 
+### Semántica mínima de `s4_geometry_filter` (evitar sobre-interpretación)
+
+- En `metric=mahalanobis_log`, `d²` debe leerse como **score operativo** (mínimo sobre atlas discreto + \(\Sigma\) estimada en runtime), **no** como un \(\chi^2\) calibrado para significancia estadística.
+- Interpretación de estados por evento en batch:
+  - `EMPTY`: no hubo candidatos evaluables para decidir compatibilidad.
+  - `SATURATED`: el score queda en régimen no informativo/saturado para decidir exclusión/compatibilidad fina.
+    **No** significa “compatibilidad alta”.
+  - `OK`: hubo evaluación informativa y la decisión de compatibilidad se interpreta con el umbral operativo.
+- Umbral recomendado cuando se usa comparación relativa por modo: `threshold_mode=delta_lnL`.
+  Flags explícitas disponibles en CLI de `s4`:
+  - `--delta-lnL-220`
+  - `--delta-lnL-221`
+
 - `mvp/experiment_t0_sweep_full.py`: **recomendado para escala/producción**, contract-first con fases `run`/`inventory`/`finalize`.
 - `mvp/experiment_t0_sweep.py`: herramienta **DEV/INTEGRATION** para sanity-check rápido; no contract-first, no inventory/finalize, no aislamiento por subrun. **No usar para conteos oficiales**.
 
