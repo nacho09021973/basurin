@@ -199,10 +199,6 @@ def _resolve_local_hdf5_mappings(items: list[str], event_id: str | None) -> dict
     return local_by_det
 
 
-def _collect_hdf5_candidates(event_dir: Path, det: str) -> list[Path]:
-    return match_hdf5_files(event_dir).get(det, [])
-
-
 def match_hdf5_files(event_dir: Path) -> dict[str, list[Path]]:
     """Return deterministic HDF5 matches for an event directory.
 

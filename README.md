@@ -503,6 +503,14 @@ Nota sobre subruns por seed: el experimento crea árboles por semilla para aisla
 
 > **STOP**: no continúes con `s1` (ni con ningún stage downstream) si este precheck falla.
 
+Precheck read-only recomendado (script canónico):
+
+```bash
+python tools/losc_precheck.py --event-id GW150914 --losc-root data/losc
+```
+
+Precheck manual equivalente (bash):
+
 ```bash
 EVENT_ID=GW150914
 echo "data/losc -> $(readlink -f data/losc 2>/dev/null || echo '(no symlink)')"

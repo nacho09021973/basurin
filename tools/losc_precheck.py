@@ -7,6 +7,12 @@ from pathlib import Path
 
 
 def match_hdf5_files(event_dir: Path) -> dict[str, list[Path]]:
+    """Standalone copy of mvp.s1_fetch_strain.match_hdf5_files.
+
+    Kept here to avoid importing the full s1 module (and its deps)
+    from a lightweight diagnostic tool.  Any change to the matching
+    logic must be mirrored in mvp/s1_fetch_strain.py.
+    """
     try:
         all_files = [
             p for p in event_dir.iterdir()
