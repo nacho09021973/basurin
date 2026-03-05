@@ -79,18 +79,28 @@ def test_batch_intersection_weighted_quantiles_and_artifacts(tmp_path: Path, mon
     )
 
     c220 = {
-        "items": [
-            {"family": "kerr", "source": "berti", "M_solar": 10, "chi": 0.1, "Af": 1000, "delta_lnL": 0.0},
-            {"family": "kerr", "source": "berti", "M_solar": 11, "chi": 0.2, "Af": 1100, "delta_lnL": -1.0},
-            {"family": "kerr", "source": "berti", "M_solar": 12, "chi": 0.3, "Af": 1200, "delta_lnL": -2.0},
-        ]
-    }
-    c221 = {
-        "items": [
+        "compatible_geometries": [
             {"family": "kerr", "source": "berti", "M_solar": 10, "chi": 0.1, "Af": 1000},
             {"family": "kerr", "source": "berti", "M_solar": 11, "chi": 0.2, "Af": 1100},
             {"family": "kerr", "source": "berti", "M_solar": 12, "chi": 0.3, "Af": 1200},
-        ]
+        ],
+        "ranked_all": [
+            {"family": "kerr", "source": "berti", "M_solar": 10, "chi": 0.1, "delta_lnL": 0.0},
+            {"family": "kerr", "source": "berti", "M_solar": 11, "chi": 0.2, "delta_lnL": -1.0},
+            {"family": "kerr", "source": "berti", "M_solar": 12, "chi": 0.3, "delta_lnL": -2.0},
+        ],
+    }
+    c221 = {
+        "compatible_geometries": [
+            {"family": "kerr", "source": "berti", "M_solar": 10, "chi": 0.1, "Af": 1000},
+            {"family": "kerr", "source": "berti", "M_solar": 11, "chi": 0.2, "Af": 1100},
+            {"family": "kerr", "source": "berti", "M_solar": 12, "chi": 0.3, "Af": 1200},
+        ],
+        "ranked_all": [
+            {"family": "kerr", "source": "berti", "M_solar": 10, "chi": 0.1, "delta_lnL": 0.0},
+            {"family": "kerr", "source": "berti", "M_solar": 11, "chi": 0.2, "delta_lnL": 0.0},
+            {"family": "kerr", "source": "berti", "M_solar": 12, "chi": 0.3, "delta_lnL": 0.0},
+        ],
     }
     (sub220 / "s4_geometry_filter" / "outputs").mkdir(parents=True, exist_ok=True)
     (sub221 / "s4_geometry_filter" / "outputs").mkdir(parents=True, exist_ok=True)
@@ -144,3 +154,59 @@ def test_batch_intersection_weighted_quantiles_and_artifacts(tmp_path: Path, mon
     )
     assert first_csv_sha == sha256_file(out_csv)
     assert first_summary_sha == sha256_file(out_summary)
+
+
+def test_missing_delta_lnl_in_ranked_all_fails_with_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    analysis = _mk_run(tmp_path, "run_weighted_missing_delta")
+    batch220 = _mk_run(tmp_path, "batch220_missing")
+    batch221 = _mk_run(tmp_path, "batch221_missing")
+    sub220 = _mk_run(tmp_path, "sub220_missing")
+    sub221 = _mk_run(tmp_path, "sub221_missing")
+
+    in_csv = analysis / "experiment" / "area_theorem" / "outputs" / "per_event_spinmag.csv"
+    _write_csv(
+        in_csv,
+        rows=[{"event_id": "E1", "status": "OK", "p_violate": "0", "dA_p10": "0", "dA_p50": "0", "dA_p90": "0", "n_mc": "50"}],
+        fields=["event_id", "status", "p_violate", "dA_p10", "dA_p50", "dA_p90", "n_mc"],
+    )
+
+    _write_csv(
+        batch220 / "experiment" / "offline_batch" / "outputs" / "results.csv",
+        rows=[{"event_id": "E1", "subrun_id": "sub220_missing"}],
+        fields=["event_id", "subrun_id"],
+    )
+    _write_csv(
+        batch221 / "experiment" / "offline_batch" / "outputs" / "results.csv",
+        rows=[{"event_id": "E1", "subrun_id": "sub221_missing"}],
+        fields=["event_id", "subrun_id"],
+    )
+
+    c220 = {
+        "compatible_geometries": [{"family": "kerr", "source": "berti", "M_solar": 10, "chi": 0.1, "Af": 1000}],
+        "ranked_all": [{"family": "kerr", "source": "berti", "M_solar": 10, "chi": 0.1}],
+    }
+    c221 = {
+        "compatible_geometries": [{"family": "kerr", "source": "berti", "M_solar": 10, "chi": 0.1, "Af": 1000}],
+        "ranked_all": [{"family": "kerr", "source": "berti", "M_solar": 10, "chi": 0.1, "delta_lnL": 0.0}],
+    }
+    (sub220 / "s4_geometry_filter" / "outputs").mkdir(parents=True, exist_ok=True)
+    (sub221 / "s4_geometry_filter" / "outputs").mkdir(parents=True, exist_ok=True)
+    (sub220 / "s4_geometry_filter" / "outputs" / "compatible_set.json").write_text(json.dumps(c220), encoding="utf-8")
+    (sub221 / "s4_geometry_filter" / "outputs" / "compatible_set.json").write_text(json.dumps(c221), encoding="utf-8")
+
+    (analysis / "external_inputs" / "gwtc_posteriors").mkdir(parents=True, exist_ok=True)
+    (analysis / "external_inputs" / "gwtc_posteriors" / "E1.json").write_text(
+        json.dumps({"samples": [{"mass_1_source": 10, "mass_2_source": 8, "a_1": 0.1, "a_2": 0.2}]}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"MISSING_DELTA_LNL.*source=ranked_all"):
+        run_experiment(
+            run_id="run_weighted_missing_delta",
+            in_per_event=str(in_csv),
+            out_name="t6_rd_weighted",
+            min_effective_samples=2,
+            batch_220="batch220_missing",
+            batch_221="batch221_missing",
+        )

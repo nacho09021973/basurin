@@ -141,32 +141,73 @@ def _load_event_to_subrun(results_csv: Path) -> dict[str, str]:
 def _build_weighted_af_samples(path220: Path, path221: Path) -> dict[str, Any]:
     data220 = json.loads(path220.read_text(encoding="utf-8"))
     data221 = json.loads(path221.read_text(encoding="utf-8"))
-    rows220 = _extract_rows(data220)
-    rows221 = _extract_rows(data221)
 
-    bykey220 = {_phys_key(r): r for r in rows220 if _phys_key(r) is not None}
-    bykey221 = {_phys_key(r): r for r in rows221 if _phys_key(r) is not None}
-    common = sorted(set(bykey220).intersection(bykey221))
-    if not common:
-        return {"status": "AF_EMPTY", "samples": [], "n220": len(bykey220), "n221": len(bykey221), "n_intersection": 0}
+    compat220 = data220.get("compatible_geometries", data220 if isinstance(data220, list) else [])
+    compat221 = data221.get("compatible_geometries", data221 if isinstance(data221, list) else [])
+    ranked220 = data220.get("ranked_all", []) if isinstance(data220, dict) else []
+    ranked221 = data221.get("ranked_all", []) if isinstance(data221, dict) else []
+
+    bykey220 = {_phys_key(r): r for r in compat220 if isinstance(r, dict) and _phys_key(r) is not None}
+    bykey221 = {_phys_key(r): r for r in compat221 if isinstance(r, dict) and _phys_key(r) is not None}
+    support = sorted(set(bykey220).intersection(bykey221))
+
+    w220 = {
+        _phys_key(r): float(r["delta_lnL"])
+        for r in ranked220
+        if isinstance(r, dict) and _phys_key(r) is not None and _as_float(r.get("delta_lnL")) is not None
+    }
+    w221 = {
+        _phys_key(r): float(r["delta_lnL"])
+        for r in ranked221
+        if isinstance(r, dict) and _phys_key(r) is not None and _as_float(r.get("delta_lnL")) is not None
+    }
+
+    if not w220:
+        sample_keys = sorted(list(ranked220[0].keys())) if ranked220 and isinstance(ranked220[0], dict) else []
+        raise ValueError(f"MISSING_DELTA_LNL path={path220} source=ranked_all keys(sample)={sample_keys}")
+    if not w221:
+        sample_keys = sorted(list(ranked221[0].keys())) if ranked221 and isinstance(ranked221[0], dict) else []
+        raise ValueError(f"MISSING_DELTA_LNL path={path221} source=ranked_all keys(sample)={sample_keys}")
 
     samples: list[dict[str, float]] = []
-    for key in common:
-        r220 = bykey220[key]
-        dlnl = _as_float(r220.get("delta_lnL"))
-        if dlnl is None:
-            keys = sorted(list(r220.keys()))
-            raise ValueError(f"MISSING_DELTA_LNL in {path220}; keys={keys}")
-        af = _af_value(r220)
+    dropped_missing_weight = 0
+    for key in support:
+        dlnl220 = w220.get(key)
+        dlnl221 = w221.get(key)
+        if dlnl220 is None or dlnl221 is None:
+            dropped_missing_weight += 1
+            continue
+        geom = bykey220.get(key) or bykey221.get(key) or {}
+        af = _af_value(geom)
         if af is None:
             continue
-        samples.append({"af_rd": af, "delta_lnL": dlnl})
+        samples.append({"af_rd": af, "delta_lnL": dlnl220 + dlnl221})
+
+    if not samples:
+        return {
+            "status": "AF_EMPTY" if not support else "MISSING_DELTA_LNL",
+            "samples": [],
+            "n220": len(bykey220),
+            "n221": len(bykey221),
+            "n_support": len(support),
+            "n_intersection": len(support),
+            "n_used": 0,
+            "n_dropped_missing_weight": dropped_missing_weight,
+            "weight_source": "ranked_all.delta_lnL",
+            "weight_reduce": "sum",
+        }
+
     return {
-        "status": "OK" if samples else "AF_EMPTY",
+        "status": "OK",
         "samples": samples,
         "n220": len(bykey220),
         "n221": len(bykey221),
-        "n_intersection": len(common),
+        "n_support": len(support),
+        "n_intersection": len(support),
+        "n_used": len(samples),
+        "n_dropped_missing_weight": dropped_missing_weight,
+        "weight_source": "ranked_all.delta_lnL",
+        "weight_reduce": "sum",
     }
 
 
@@ -272,7 +313,7 @@ def run_experiment(
         af_pack = _build_weighted_af_samples(compat220, compat221)
 
         if af_pack["status"] != "OK":
-            row[status_col] = "AF_EMPTY"
+            row[status_col] = str(af_pack["status"])
             row["ess_rd"] = "0"
             event_summaries.append({"event_id": event, **af_pack, "ess": 0.0, "policy": "CONSERVATIVE_SKIP"})
             continue
@@ -313,6 +354,11 @@ def run_experiment(
                 "n220": af_pack["n220"],
                 "n221": af_pack["n221"],
                 "n_intersection": af_pack["n_intersection"],
+                "n_support": af_pack["n_support"],
+                "n_used": af_pack["n_used"],
+                "n_dropped_missing_weight": af_pack["n_dropped_missing_weight"],
+                "weight_source": af_pack["weight_source"],
+                "weight_reduce": af_pack["weight_reduce"],
             }
         )
 
