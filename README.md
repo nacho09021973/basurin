@@ -186,49 +186,37 @@ Para modo local con `--local-hdf5`, añade además `h5py` a la verificación.
 
 ## Descarga manual rápida de strain (GWOSC) para modo offline
 
-En algunos entornos, `s1_fetch_strain` puede tardar o colgarse cuando `gwpy` intenta resolver/descargar desde GWOSC. Cuando pase eso, usa descarga directa y deja los HDF5 en caché local para ejecución offline reproducible.
+Usa esta ruta solo cuando `data/losc/<EVENT_ID>/` no existe o está vacía, o cuando quieras precargar caché para batch offline. El objetivo no es "consumir una API concreta", sino dejar HDF5 válidos de H1/L1 en `data/losc/<EVENT_ID>/` y validar con precheck.
 
-**Requisitos de shell**: `curl`, `jq`, `aria2c`, `sha256sum`.
+**Requisitos de shell**: `curl`, `sha256sum` (opcional: `aria2c` para descarga paralela).
 
 ```bash
 EVENT_ID="GW190521_030229"
 OUT_DIR="data/losc/$EVENT_ID"
 mkdir -p "$OUT_DIR"
 
-# 1) Resolver versión correcta del evento (última detail_url)
-DETAIL_URL="$(curl -fsSL "https://gwosc.org/api/v2/events/${EVENT_ID}" \
-  | jq -r '.events[0].versions[-1].detail_url')"
-
-# 2) Extraer URLs H1/L1 para strain-files (duration=32, file-format=hdf5)
-H1_URL="$(curl -fsSL "$DETAIL_URL" | jq -r '
-  .strain[]
-  | select(.detector=="H1")
-  | .files[]
-  | select(.format=="hdf5" and .duration==32)
-  | .download_url' | head -n 1)"
-L1_URL="$(curl -fsSL "$DETAIL_URL" | jq -r '
-  .strain[]
-  | select(.detector=="L1")
-  | .files[]
-  | select(.format=="hdf5" and .duration==32)
-  | .download_url' | head -n 1)"
-
+# 1) Copia desde GWOSC/LOSC las URLs directas de los 2 ficheros HDF5 (H1 y L1)
+H1_URL="<URL_DIRECTA_H1.hdf5>"
+L1_URL="<URL_DIRECTA_L1.hdf5>"
 test -n "$H1_URL" && test -n "$L1_URL"
 
-# 3) Descargar ambos archivos en cache local (external input read-only)
-aria2c -x 8 -s 8 -d "$OUT_DIR" "$H1_URL" "$L1_URL"
+# 2) Descarga conservadora (sin depender de estructura JSON de la API)
+curl -fL "$H1_URL" -o "$OUT_DIR/$(basename "$H1_URL")"
+curl -fL "$L1_URL" -o "$OUT_DIR/$(basename "$L1_URL")"
 
-# 4) Verificación mínima contract-first (integridad y auditabilidad)
-ls -lh "$OUT_DIR"/*.hdf5
-sha256sum "$OUT_DIR"/*.hdf5
+# 3) Verificación mínima contract-first
+ls -lh "$OUT_DIR"/*.{h5,hdf5} 2>/dev/null
+sha256sum "$OUT_DIR"/*.{h5,hdf5} 2>/dev/null
+
+# 4) Validación canónica antes de s1
+python tools/losc_precheck.py --event-id "$EVENT_ID" --losc-root data/losc
 ```
 
-Ejemplo real validado para `GW190521_030229`:
+Si tu entorno permite `aria2c`, puedes reemplazar los dos `curl` por:
 
-- H1: `https://gwosc.org/eventapi/json/GWTC-2.1-confident/GW190521/v4/H-H1_GWOSC_16KHZ_R1-1242442952-32.hdf5`
-- L1: `https://gwosc.org/eventapi/json/GWTC-2.1-confident/GW190521/v4/L-L1_GWOSC_16KHZ_R1-1242442952-32.hdf5`
-- SHA256 H1 observado: `2761bf5eaffc2c9bc8620e82dcd4e91423f631c6374454172e63894364445ad4`
-- SHA256 L1: calcular con `sha256sum` tras descarga.
+```bash
+aria2c -x 8 -s 8 -d "$OUT_DIR" "$H1_URL" "$L1_URL"
+```
 
 ### Ejecutar `s1_fetch_strain` offline con HDF5 ya presentes en `data/losc`
 
@@ -239,6 +227,7 @@ Si no activas virtualenv con `source .venv/bin/activate`, usa siempre `.venv/bin
   --run <RUN_ID> \
   --event-id <EVENT_ID> \
   --offline \
+  --hdf5-root data/losc \
   --reuse-if-present
 ```
 
@@ -516,6 +505,15 @@ Nota sobre subruns por seed: el experimento crea árboles por semilla para aisla
 
 > **STOP**: no continúes con `s1` (ni con ningún stage downstream) si este precheck falla.
 
+Decisión rápida (A/B/C) antes de continuar:
+
+1. **Caché presente y válida**: `data/losc/<EVENT_ID>/` existe y el precheck encuentra H1+L1.  
+   Acción: continuar con `s1_fetch_strain` en offline/reuse.
+2. **Caché presente pero naming no casable**: hay `.h5/.hdf5`, pero no matchean `H1/L1`.  
+   Acción: crear symlinks `H1.h5` y `L1.h5`, repetir precheck.
+3. **Caché ausente o vacía**: falta `data/losc/<EVENT_ID>/` o no contiene HDF5 válidos.  
+   Acción: poblar `data/losc/<EVENT_ID>/` (ver sección "Descarga manual rápida de strain"), luego repetir precheck.
+
 Precheck read-only recomendado (script canónico):
 
 ```bash
@@ -537,7 +535,7 @@ test "$L1_MATCHES" -ge 1 || { echo "ERROR: falta al menos 1 archivo L1 (.h5/.hdf
 echo "total h5/hdf5:"; find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*.h5' -o -iname '*.hdf5' \) | wc -l
 ```
 
-Resolución rápida en 2 ramas:
+Resolución rápida en 3 ramas:
 
 - **Caso A (mount/symlink)**: `data/losc` no apunta a la caché real.
   - Reapunta con **una sola** estrategia recomendada por el equipo (symlink o bind mount) para que `data/losc/<EVENT_ID>/...` exista y sea visible.
@@ -547,6 +545,13 @@ Resolución rápida en 2 ramas:
 ```bash
 ln -sf "<archivo_real_H1>.h5" "data/losc/$EVENT_ID/H1.h5"
 ln -sf "<archivo_real_L1>.h5" "data/losc/$EVENT_ID/L1.h5"
+```
+
+- **Caso C (carpeta ausente o vacía)**: no existe `data/losc/<EVENT_ID>/` o no hay HDF5 utilizables.
+  - Pobla primero `data/losc/<EVENT_ID>/` con H1/L1 (procedimiento canónico en "Descarga manual rápida de strain"), luego ejecuta de nuevo:
+
+```bash
+python tools/losc_precheck.py --event-id "$EVENT_ID" --losc-root data/losc
 ```
 
 Ejemplo recomendado:

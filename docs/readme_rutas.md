@@ -97,63 +97,39 @@ find "runs/$RUN_ID" -type f \
 
 # HDF5 (LOSC/GWOSC) en 10 segundos (para que s1 no aborte)
 
-**Regla**: los HDF5 externos viven como input *solo lectura* en:
+Ruta canónica (input externo *read-only*):
 
 `data/losc/<EVENT_ID>/`
 
-## Precheck LOSC (canónico)
-
-> **STOP**: no continúes si este precheck falla.
-
-Precheck read-only recomendado (script canónico):
+Precheck canónico:
 
 ```bash
 python tools/losc_precheck.py --event-id "$EVENT_ID" --losc-root data/losc
 ```
 
-```bash
-EVENT_ID=GW150914
-echo "data/losc -> $(readlink -f data/losc 2>/dev/null || echo '(no symlink)')"
-test -d "data/losc/$EVENT_ID" || { echo "ERROR: falta data/losc/$EVENT_ID (cache no montada/visible)"; exit 2; }
-H1_MATCHES="$(find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*H1*.h5' -o -iname '*H1*.hdf5' \) | wc -l)"
-L1_MATCHES="$(find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*L1*.h5' -o -iname '*L1*.hdf5' \) | wc -l)"
-echo "H1 matches: ${H1_MATCHES}"
-echo "L1 matches: ${L1_MATCHES}"
-test "$H1_MATCHES" -ge 1 || { echo "ERROR: falta al menos 1 archivo H1 (.h5/.hdf5) en data/losc/$EVENT_ID"; exit 2; }
-test "$L1_MATCHES" -ge 1 || { echo "ERROR: falta al menos 1 archivo L1 (.h5/.hdf5) en data/losc/$EVENT_ID"; exit 2; }
-echo "total h5/hdf5:"; find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*.h5' -o -iname '*.hdf5' \) | wc -l
-```
-
-
-### Resolución en 2 ramas (sin salir del contrato)
+Decisión rápida A/B/C:
 
 - **Caso A (mount/symlink roto o mal apuntado)**: `data/losc` no apunta a la caché real.
   - Reapunta `data/losc` con la estrategia estándar del equipo (symlink o bind mount).
 - **Caso B (naming)**: hay `.h5/.hdf5`, pero no casan con H1/L1.
   - Crea symlinks casables `H1.h5` y `L1.h5` dentro del evento, sin renombrar originales:
+- **Caso C (carpeta inexistente o vacía)**: `data/losc/<EVENT_ID>/` no existe o no tiene HDF5 válidos.
+  - Pobla primero `data/losc/<EVENT_ID>/` con H1/L1.
+  - Repite `tools/losc_precheck.py`.
+  - Solo después corre `s1_fetch_strain`.
 
 ```bash
 ln -sf "<archivo_real_H1>.h5" "data/losc/$EVENT_ID/H1.h5"
 ln -sf "<archivo_real_L1>.h5" "data/losc/$EVENT_ID/L1.h5"
 ```
 
-**Solo después del precheck PASS**, ejecuta `s1` con rutas explícitas.
-
-Ejemplo (copy/paste):
+**Solo después del precheck PASS**, continúa offline con `s1` (ejemplo corto):
 
 ```bash
-RUN_ID="mvp_${EVENT_ID}_real_local_$(date -u +%Y%m%dT%H%M%SZ)"
-H1="/ruta/a/data/losc/$EVENT_ID/H-H1_...hdf5"
-L1="/ruta/a/data/losc/$EVENT_ID/L-L1_...hdf5"
-
-python mvp/s1_fetch_strain.py \
-  --run "$RUN_ID" \
-  --event-id "$EVENT_ID" \
-  --detectors H1,L1 \
-  --duration-s 32.0 \
-  --local-hdf5 "H1=$H1" \
-  --local-hdf5 "L1=$L1"
+python mvp/s1_fetch_strain.py --run <run_id> --event-id <EVENT_ID> --detectors H1,L1 --hdf5-root data/losc --reuse-if-present
 ```
+
+Procedimiento completo de bootstrap/descarga/poblado: ver `README.md` en la sección "Descarga manual rápida de strain (GWOSC) para modo offline".
 
 **Nota de gobernanza**: `data/losc/...` es input externo. El árbol auditable del run empieza en `runs/<RUN_ID>/...`.
 
@@ -464,5 +440,4 @@ runs/<RUN_ID>/experiment/t0_sweep_full_seed<seed>/outputs/t0_sweep_full_results.
 ```
 
 Si falta ese directorio/JSON, el oráculo imprime la ruta esperada exacta y el comando para regenerar el sweep (`phase=run`)
-
 
