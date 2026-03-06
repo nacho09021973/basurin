@@ -204,6 +204,21 @@ def _load_s3_band(path: Path, *, window_meta: dict[str, Any] | None) -> tuple[fl
     )
 
 
+def _load_s3_selected_t0_offset_ms(path: Path) -> float:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    selected = payload.get("t0_selected")
+    if not isinstance(selected, dict):
+        return 0.0
+    value = selected.get("offset_ms")
+    if isinstance(value, bool):
+        return 0.0
+    if isinstance(value, (int, float)):
+        off = float(value)
+        if math.isfinite(off) and off >= 0.0:
+            return off
+    return 0.0
+
+
 def compute_robust_stability(samples: list[tuple[float, float]]) -> dict[str, float | None]:
     if not samples:
         return {
@@ -808,6 +823,7 @@ def build_results_payload(
     flags: list[str],
     *,
     model_comparison: dict[str, Any] | None = None,
+    t0_offset_ms_from_s3: float = 0.0,
 ) -> dict[str, Any]:
     verdict = "OK" if mode_220_ok else "INSUFFICIENT_DATA"
     messages: list[str] = []
@@ -827,10 +843,14 @@ def build_results_payload(
         )
         results["quality_gates"] = {"two_mode_preferred": two_mode_preferred}
 
+    source: dict[str, Any] = {"stage": "s2_ringdown_window", "window": window_meta}
+    if t0_offset_ms_from_s3 > 0.0:
+        source["t0_offset_ms_from_s3"] = float(t0_offset_ms_from_s3)
+
     return {
         "schema_version": "multimode_estimates_v1",
         "run_id": run_id,
-        "source": {"stage": "s2_ringdown_window", "window": window_meta},
+        "source": source,
         "modes_target": TARGET_MODES,
         "results": results,
         "modes": [mode_220, mode_221],
@@ -1065,6 +1085,15 @@ def main() -> int:
             optional={"s2_window_meta": window_meta_path},
         )
         signal, fs = _load_signal_from_npz(npz_path, window_meta=window_meta)
+        selected_t0_offset_ms = _load_s3_selected_t0_offset_ms(s3_estimates_path)
+        applied_t0_offset_ms = 0.0
+        if selected_t0_offset_ms > 0.0:
+            shift = int(round((selected_t0_offset_ms / 1000.0) * fs))
+            if 0 < shift < signal.size - 16:
+                signal = signal[shift:]
+                applied_t0_offset_ms = selected_t0_offset_ms
+            else:
+                global_flags.append("s3_t0_selected_offset_out_of_range")
 
         if args.method == "spectral_two_pass":
             est_220 = lambda sig, sr: _estimate_220_spectral(sig, sr, band_low=band_low, band_high=band_high)
@@ -1117,6 +1146,7 @@ def main() -> int:
             ok_221,
             global_flags + flags_220 + flags_221,
             model_comparison=model_comparison,
+            t0_offset_ms_from_s3=applied_t0_offset_ms,
         )
 
         out_path = ctx.outputs_dir / "multimode_estimates.json"

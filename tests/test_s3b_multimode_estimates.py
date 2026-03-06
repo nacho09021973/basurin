@@ -639,6 +639,40 @@ def _write_minimal_s2_inputs(run_root: Path, run_id: str) -> None:
     )
 
 
+def test_cli_applies_t0_selected_offset_from_s3(tmp_path: Path) -> None:
+    run_id = "subrun_004"
+    tmp_runs = tmp_path / "subruns_root"
+    _write_minimal_s2_inputs(tmp_runs, run_id)
+
+    s3_estimates_path = tmp_runs / run_id / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+    estimates = json.loads(s3_estimates_path.read_text(encoding="utf-8"))
+    estimates["t0_selected"] = {"offset_ms": 20.0, "criterion": "bic"}
+    s3_estimates_path.write_text(json.dumps(estimates), encoding="utf-8")
+
+    repo_root = Path(__file__).resolve().parents[1]
+    cmd = [
+        sys.executable,
+        str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
+        "--runs-root",
+        str(tmp_runs),
+        "--run-id",
+        run_id,
+        "--n-bootstrap",
+        "8",
+        "--seed",
+        "101",
+    ]
+    env = os.environ.copy()
+    env.pop("BASURIN_RUNS_ROOT", None)
+
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+
+    output_path = tmp_runs / run_id / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["source"]["t0_offset_ms_from_s3"] == 20.0
+
+
 def test_cli_runs_root_writes_under_explicit_root_only(tmp_path: Path) -> None:
     run_id = "subrun_001"
     tmp_runs = tmp_path / "subruns_root"

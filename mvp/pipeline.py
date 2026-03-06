@@ -24,6 +24,7 @@ Abort semantics:
 from __future__ import annotations
 
 import json
+import math
 import os
 import platform
 import subprocess
@@ -328,7 +329,27 @@ def _run_optional_experiment_t0_sweep(
     run_id: str,
     timeline: dict[str, Any],
     stage_timeout_s: float | None,
-) -> None:
+) -> float | None:
+    def _parse_best_t0_ms(path: Path) -> float | None:
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        best = (
+            payload.get("summary", {})
+            .get("best_point", {})
+            .get("t0_ms")
+        )
+        if isinstance(best, bool):
+            return None
+        if isinstance(best, (int, float)):
+            best_f = float(best)
+            if math.isfinite(best_f) and best_f >= 0.0:
+                return best_f
+        return None
+
     label = "experiment_t0_sweep"
     script = "mvp/experiment_t0_sweep.py"
     script_path = MVP_DIR / "experiment_t0_sweep.py"
@@ -348,16 +369,18 @@ def _run_optional_experiment_t0_sweep(
             "status": "SKIPPED",
             "message": "missing script",
             "best_effort": True,
+            "selected_t0_ms": None,
         })
         _write_timeline(out_root, run_id, timeline)
         print("[pipeline] WARNING: experiment_t0_sweep.py not found, skipping best-effort experiment", flush=True)
-        return
+        return None
 
     cmd = [sys.executable, "-m", "mvp.experiment_t0_sweep", "--run", run_id]
     stage_t0 = time.time()
     status = "OK"
     message = "completed"
     timed_out = False
+    selected_t0_ms: float | None = None
 
     try:
         proc = subprocess.run(
@@ -388,6 +411,17 @@ def _run_optional_experiment_t0_sweep(
         if stderr:
             message = f"{message}: {stderr}"
 
+    if status == "OK":
+        results_path = (
+            out_root
+            / run_id
+            / "experiment"
+            / "t0_sweep"
+            / "outputs"
+            / "t0_sweep_results.json"
+        )
+        selected_t0_ms = _parse_best_t0_ms(results_path)
+
     timeline["stages"].append({
         "stage": label,
         "label": label,
@@ -400,11 +434,22 @@ def _run_optional_experiment_t0_sweep(
         "status": status,
         "message": message,
         "best_effort": True,
+        "selected_t0_ms": selected_t0_ms,
     })
     _write_timeline(out_root, run_id, timeline)
 
     if status != "OK":
         print(f"[pipeline] WARNING: {label} failed (exit={rc}), continuing", flush=True)
+    elif selected_t0_ms is not None:
+        print(f"[pipeline] {label}: selected_t0_ms={selected_t0_ms}", flush=True)
+
+    return selected_t0_ms
+
+
+def _format_t0_scan_arg(offset_ms: float) -> str:
+    if float(offset_ms).is_integer():
+        return str(int(offset_ms))
+    return f"{offset_ms:.6f}".rstrip("0").rstrip(".")
 
 
 def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
@@ -797,15 +842,21 @@ def run_multimode_event(
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
 
+    selected_t0_ms: float | None = None
+    if with_t0_sweep:
+        selected_t0_ms = _run_optional_experiment_t0_sweep(
+            out_root, run_id, timeline, stage_timeout_s
+        )
+
     s3_args = ["--run", run_id, "--band-low", str(band_low), "--band-high", str(band_high)]
+    if selected_t0_ms is not None:
+        s3_args.extend(["--t0-scan-ms", _format_t0_scan_arg(selected_t0_ms)])
+
     rc = _run_stage("s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
-
-    if with_t0_sweep:
-        _run_optional_experiment_t0_sweep(out_root, run_id, timeline, stage_timeout_s)
 
     s3b_args = [
         "--run-id", run_id,

@@ -166,6 +166,61 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
             ])
             self.assertEqual(timeline["multimode_results"]["extraction_quality"], "INSUFFICIENT_DATA")
 
+    def test_multimode_with_t0_sweep_forwards_selected_offset_to_s3(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runs_root = Path(td) / "runs"
+            s3_calls: list[list[str]] = []
+
+            def fake_run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s=None):
+                stage_dir = out_root / run_id / label / "outputs"
+                stage_dir.mkdir(parents=True, exist_ok=True)
+
+                if label == "s3_ringdown_estimates":
+                    s3_calls.append(list(args))
+                if label == "s3b_multimode_estimates":
+                    (stage_dir / "multimode_estimates.json").write_text(
+                        json.dumps({"results": {"verdict": "INSUFFICIENT_DATA"}}),
+                        encoding="utf-8",
+                    )
+                if label == "s4c_kerr_consistency":
+                    (stage_dir / "kerr_consistency.json").write_text(
+                        json.dumps({"kerr_consistent": False, "d2_min": 12.34}),
+                        encoding="utf-8",
+                    )
+
+                timeline["stages"].append(
+                    {
+                        "stage": label,
+                        "script": script,
+                        "command": [script] + list(args),
+                        "started_utc": "now",
+                        "ended_utc": "now",
+                        "duration_s": 0.0,
+                        "returncode": 0,
+                        "timed_out": False,
+                    }
+                )
+                pipeline._write_timeline(out_root, run_id, timeline)
+                return 0
+
+            with mock.patch.dict("os.environ", {"BASURIN_RUNS_ROOT": str(runs_root)}, clear=False):
+                with mock.patch.object(pipeline, "_run_stage", side_effect=fake_run_stage):
+                    with mock.patch.object(pipeline, "_run_optional_experiment_t0_sweep", return_value=20.0) as sweep_mock:
+                        rc, _ = pipeline.run_multimode_event(
+                            event_id="GW150914",
+                            atlas_path="mvp/test_atlas_fixture.json",
+                            synthetic=True,
+                            duration_s=4.0,
+                            with_t0_sweep=True,
+                        )
+
+            self.assertEqual(rc, 0)
+            sweep_mock.assert_called_once()
+            self.assertEqual(len(s3_calls), 1)
+            self.assertIn("--t0-scan-ms", s3_calls[0])
+            idx = s3_calls[0].index("--t0-scan-ms")
+            self.assertEqual(s3_calls[0][idx + 1], "20")
+
     def test_multi_forwards_with_t0_sweep_to_each_event(self) -> None:
         calls = []
 
