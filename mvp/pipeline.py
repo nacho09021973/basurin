@@ -452,7 +452,16 @@ def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
         "chi_best": None,
         "d2_min": None,
         "extraction_quality": None,
+        "s4c_status": None,
+        "kerr_from_multimode_status": None,
+        "multimode_viability_class": None,
+        "multimode_viability_reasons": [],
     }
+
+    def _coerce_reason_list(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(v) for v in value]
 
     s4c_path = out_root / run_id / "s4c_kerr_consistency" / "outputs" / "kerr_consistency.json"
     try:
@@ -470,6 +479,13 @@ def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
                 break
         if "d2_min" in payload:
             results["d2_min"] = payload["d2_min"]
+        if payload.get("status") is not None:
+            results["s4c_status"] = payload.get("status")
+        source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+        source_class = source.get("multimode_viability_class")
+        if isinstance(source_class, str):
+            results["multimode_viability_class"] = source_class
+            results["multimode_viability_reasons"] = _coerce_reason_list(source.get("multimode_viability_reasons"))
 
     s3b_path = out_root / run_id / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
     try:
@@ -481,6 +497,36 @@ def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
             results["extraction_quality"] = payload_s3b["results"].get("verdict")
         elif payload_s3b.get("extraction_quality") is not None:
             results["extraction_quality"] = payload_s3b.get("extraction_quality")
+
+    s3b_summary_path = out_root / run_id / "s3b_multimode_estimates" / "stage_summary.json"
+    if s3b_summary_path.exists():
+        try:
+            payload_s3b_summary = json.loads(s3b_summary_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"[pipeline] WARNING: cannot parse {s3b_summary_path}: {exc}", flush=True)
+        else:
+            viability = payload_s3b_summary.get("multimode_viability")
+            if isinstance(viability, dict):
+                viability_class = viability.get("class")
+                if isinstance(viability_class, str):
+                    results["multimode_viability_class"] = viability_class
+                    results["multimode_viability_reasons"] = _coerce_reason_list(viability.get("reasons"))
+
+    s4d_path = out_root / run_id / "s4d_kerr_from_multimode" / "outputs" / "kerr_from_multimode.json"
+    if s4d_path.exists():
+        try:
+            payload_s4d = json.loads(s4d_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"[pipeline] WARNING: cannot parse {s4d_path}: {exc}", flush=True)
+        else:
+            if payload_s4d.get("status") is not None:
+                results["kerr_from_multimode_status"] = payload_s4d.get("status")
+            viability = payload_s4d.get("multimode_viability")
+            if isinstance(viability, dict):
+                viability_class = viability.get("class")
+                if isinstance(viability_class, str):
+                    results["multimode_viability_class"] = viability_class
+                    results["multimode_viability_reasons"] = _coerce_reason_list(viability.get("reasons"))
 
     return results
 
@@ -790,6 +836,10 @@ def run_multimode_event(
             "chi_best": None,
             "d2_min": None,
             "extraction_quality": None,
+            "s4c_status": None,
+            "kerr_from_multimode_status": None,
+            "multimode_viability_class": None,
+            "multimode_viability_reasons": [],
         },
     }
     _write_timeline(out_root, run_id, timeline)

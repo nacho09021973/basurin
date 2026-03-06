@@ -75,6 +75,78 @@ class TestMultimodeWiring(unittest.TestCase):
 
 
 class TestMultimodePipelineBehavior(unittest.TestCase):
+    def test_parse_multimode_results_tracks_viability_and_s4d_status(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runs_root = Path(td) / "runs"
+            run_id = "parse_multimode_status"
+            run_dir = runs_root / run_id
+
+            s4c_out = run_dir / "s4c_kerr_consistency" / "outputs"
+            s4c_out.mkdir(parents=True, exist_ok=True)
+            (s4c_out / "kerr_consistency.json").write_text(
+                json.dumps(
+                    {
+                        "status": "SKIPPED_MULTIMODE_GATE",
+                        "kerr_consistent": None,
+                        "d2_min": 12.34,
+                        "source": {
+                            "multimode_viability_class": "RINGDOWN_NONINFORMATIVE",
+                            "multimode_viability_reasons": [
+                                "rel_iqr_f220=0.833 > 0.5: fundamental frequency poorly constrained"
+                            ],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            s3b_out = run_dir / "s3b_multimode_estimates" / "outputs"
+            s3b_out.mkdir(parents=True, exist_ok=True)
+            (s3b_out / "multimode_estimates.json").write_text(
+                json.dumps({"results": {"verdict": "INSUFFICIENT_DATA"}}),
+                encoding="utf-8",
+            )
+            (run_dir / "s3b_multimode_estimates" / "stage_summary.json").write_text(
+                json.dumps(
+                    {
+                        "multimode_viability": {
+                            "class": "RINGDOWN_NONINFORMATIVE",
+                            "reasons": [
+                                "rel_iqr_f220=0.833 > 0.5: fundamental frequency poorly constrained"
+                            ],
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            s4d_out = run_dir / "s4d_kerr_from_multimode" / "outputs"
+            s4d_out.mkdir(parents=True, exist_ok=True)
+            (s4d_out / "kerr_from_multimode.json").write_text(
+                json.dumps(
+                    {
+                        "status": "SKIPPED_MULTIMODE_GATE",
+                        "multimode_viability": {
+                            "class": "RINGDOWN_NONINFORMATIVE",
+                            "reasons": [
+                                "rel_iqr_f220=0.833 > 0.5: fundamental frequency poorly constrained"
+                            ],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            parsed = pipeline._parse_multimode_results(runs_root, run_id)
+
+            self.assertEqual(parsed["s4c_status"], "SKIPPED_MULTIMODE_GATE")
+            self.assertEqual(parsed["kerr_from_multimode_status"], "SKIPPED_MULTIMODE_GATE")
+            self.assertEqual(parsed["multimode_viability_class"], "RINGDOWN_NONINFORMATIVE")
+            self.assertEqual(
+                parsed["multimode_viability_reasons"],
+                ["rel_iqr_f220=0.833 > 0.5: fundamental frequency poorly constrained"],
+            )
+
     def test_single_with_t0_sweep_missing_script_is_best_effort(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             runs_root = Path(td) / "runs"

@@ -4,6 +4,7 @@ Gaps addressed (from test_coverage_proposal.md Gap 5):
   - _read_json:                valid JSON dict, non-dict JSON raises ValueError
   - Stage output schema:       kerr_consistency.json has required keys
   - kerr_consistent logic:     n_compatible > 0 → True; n_compatible == 0 → False
+  - Multimode gate semantics:  non-informative multimode input -> kerr_consistent=None + skip status
   - Missing optional inputs:   runs without compatible_set.json (optional path)
   - CLI abort:                 missing required inputs → non-zero exit code
 
@@ -105,7 +106,12 @@ def _write_estimates(runs_root: Path, run_id: str, payload: dict | None = None) 
     return path
 
 
-def _write_multimode(runs_root: Path, run_id: str, payload: dict | None = None) -> Path:
+def _write_multimode(
+    runs_root: Path,
+    run_id: str,
+    payload: dict | None = None,
+    stage_summary_payload: dict | None = None,
+) -> Path:
     out = runs_root / run_id / "s3b_multimode_estimates" / "outputs"
     out.mkdir(parents=True, exist_ok=True)
     path = out / "multimode_estimates.json"
@@ -115,9 +121,11 @@ def _write_multimode(runs_root: Path, run_id: str, payload: dict | None = None) 
             "run_id": run_id,
             "results": {"verdict": "PASS", "modes": {}},
         }
+    if stage_summary_payload is None:
+        stage_summary_payload = {"stage": "s3b_multimode_estimates", "verdict": "PASS"}
     path.write_text(json.dumps(payload), encoding="utf-8")
     (runs_root / run_id / "s3b_multimode_estimates" / "stage_summary.json").write_text(
-        json.dumps({"stage": "s3b_multimode_estimates", "verdict": "PASS"}), encoding="utf-8"
+        json.dumps(stage_summary_payload), encoding="utf-8"
     )
     return path
 
@@ -170,6 +178,8 @@ def test_s4c_output_has_required_schema_keys(tmp_path: Path) -> None:
 
     r = _run_s4c(runs_root, run_id)
     assert r.returncode == 0, f"s4c failed (rc={r.returncode}):\n{r.stderr}"
+    for key in ("OUT_ROOT=", "STAGE_DIR=", "OUTPUTS_DIR=", "STAGE_SUMMARY=", "MANIFEST="):
+        assert key in r.stdout, f"Missing canonical stage path log: {key}"
 
     out = _load_output(runs_root, run_id)
     for key in ("schema_version", "run_id", "event_id", "kerr_consistent", "d2_min", "chi_best", "source"):
@@ -240,6 +250,58 @@ def test_s4c_d2_min_propagated_from_compatible_set(tmp_path: Path) -> None:
 
     out = _load_output(runs_root, run_id)
     assert abs(out["d2_min"] - 0.0512) < 1e-9
+
+
+def test_s4c_skips_when_multimode_gate_is_noninformative(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "test_s4c_skip_noninfo"
+    _make_run_valid(runs_root, run_id)
+    _write_estimates(runs_root, run_id)
+    _write_multimode(
+        runs_root,
+        run_id,
+        stage_summary_payload={
+            "stage": "s3b_multimode_estimates",
+            "verdict": "PASS",
+            "multimode_viability": {
+                "class": "RINGDOWN_NONINFORMATIVE",
+                "reasons": ["rel_iqr_f220=0.833 > 0.5: fundamental frequency poorly constrained"],
+                "metrics": {"rel_iqr_f220": 0.833},
+            },
+        },
+    )
+    _write_compatible_set(runs_root, run_id, n_compatible=9, d2_min=0.001)
+
+    r = _run_s4c(runs_root, run_id)
+    assert r.returncode == 0, f"s4c failed:\n{r.stderr}"
+
+    out = _load_output(runs_root, run_id)
+    assert out["status"] == "SKIPPED_MULTIMODE_GATE"
+    assert out["kerr_consistent"] is None
+    assert out["source"]["multimode_viability_class"] == "RINGDOWN_NONINFORMATIVE"
+    assert out["source"]["multimode_viability_reasons"] == [
+        "rel_iqr_f220=0.833 > 0.5: fundamental frequency poorly constrained"
+    ]
+
+
+def test_s4c_aborts_on_invalid_multimode_viability_class(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "test_s4c_bad_viability_class"
+    _make_run_valid(runs_root, run_id)
+    _write_estimates(runs_root, run_id)
+    _write_multimode(
+        runs_root,
+        run_id,
+        stage_summary_payload={
+            "stage": "s3b_multimode_estimates",
+            "verdict": "PASS",
+            "multimode_viability": {"class": "BAD_CLASS", "reasons": []},
+        },
+    )
+
+    r = _run_s4c(runs_root, run_id)
+    assert r.returncode != 0, "Expected non-zero exit for invalid multimode_viability.class"
+    assert "multimode_viability.class" in r.stderr
 
 
 # ---------------------------------------------------------------------------
