@@ -45,7 +45,7 @@ def test_existing_contracts_unchanged() -> None:
     assert CONTRACTS["s4_geometry_filter"].required_inputs == [
         "s3_ringdown_estimates/outputs/estimates.json",
     ]
-    assert CONTRACTS["s4_geometry_filter"].produced_outputs == ["outputs/compatible_set.json"]
+    assert CONTRACTS["s4_geometry_filter"].produced_outputs == ["outputs/compatible_set.json", "outputs/ranked_all_full.json"]
     assert CONTRACTS["s3_ringdown_estimates"].upstream_stages == ["s2_ringdown_window"]
     assert CONTRACTS["s6_information_geometry"].upstream_stages == [
         "s3_ringdown_estimates",
