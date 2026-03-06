@@ -105,3 +105,54 @@ def test_experiment_t0_sweep_quiet_has_no_stderr(tmp_path: Path) -> None:
     proc = subprocess.run(cmd, cwd=repo, env=env, check=False, capture_output=True)
     assert proc.returncode == 0, proc.stderr.decode("utf-8", errors="replace")
     assert proc.stderr == b""
+
+
+def test_experiment_t0_sweep_restricts_grid_using_preflight_viable_domain(tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    runs_root = tmp_path / "runs"
+    run_id = "test_t0_sweep_preflight_grid"
+    _write_min_run(runs_root, run_id)
+
+    preflight_dir = runs_root / run_id / "preflight_viability" / "outputs"
+    preflight_dir.mkdir(parents=True, exist_ok=True)
+    (preflight_dir / "preflight_viability.json").write_text(
+        json.dumps(
+            {
+                "alpha_safety": 2.5,
+                "source_params": {"rho_total": 4.0},
+                "current_config": {"T_s": 0.06},
+                "modes": {
+                    "220": {
+                        "qnm_params": {
+                            "tau_s": 0.01,
+                            "Q": 20.0,
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["BASURIN_RUNS_ROOT"] = str(runs_root)
+
+    cmd = [
+        sys.executable,
+        "mvp/experiment_t0_sweep.py",
+        "--run-id",
+        run_id,
+        "--t0-grid-ms",
+        "0,3,8,15",
+        "--mode",
+        "single",
+    ]
+
+    proc = subprocess.run(cmd, cwd=repo, env=env, check=False, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+
+    out_json = runs_root / run_id / "experiment" / "t0_sweep" / "outputs" / "t0_sweep_results.json"
+    payload = json.loads(out_json.read_text(encoding="utf-8"))
+    assert payload["grid"]["t0_offsets_ms"] == [3, 8, 15]
+    assert payload["grid"]["restriction"]["reason"] == "RESTRICTED_TO_VIABLE_DOMAIN"
+    assert payload["summary"]["n_points"] == 3
