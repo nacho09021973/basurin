@@ -115,6 +115,7 @@ class TestAntiRegression:
     def test_s4_geometry_filter_outputs(self):
         assert CONTRACTS["s4_geometry_filter"].produced_outputs == [
             "outputs/compatible_set.json",
+            "outputs/ranked_all_full.json",
         ]
 
     def test_s3_ringdown_estimates_upstream(self):
@@ -151,7 +152,7 @@ class TestAntiRegression:
 class TestContractCount:
     def test_total_contracts_is_10(self):
         """Registry includes oracle precheck + FASE 4/5 + s4 spectral variant + experiments."""
-        assert len(CONTRACTS) == 24
+        assert len(CONTRACTS) == 25
 
 
 # ── Test 4: DAG integrity with new stages ────────────────────────────────
