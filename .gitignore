@@ -41,3 +41,6 @@ gw_data_32s/
 
 # local GW cache (never commit)
 gw_data_32s/
+
+# Datos locales no versionables
+gw_events/

@@ -166,15 +166,18 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
             ])
             self.assertEqual(timeline["multimode_results"]["extraction_quality"], "INSUFFICIENT_DATA")
 
-    def test_multimode_with_t0_sweep_forwards_selected_offset_to_s3(self) -> None:
+    def test_multimode_with_t0_sweep_reinjects_selected_offset_to_s2(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             runs_root = Path(td) / "runs"
+            s2_calls: list[list[str]] = []
             s3_calls: list[list[str]] = []
 
             def fake_run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s=None):
                 stage_dir = out_root / run_id / label / "outputs"
                 stage_dir.mkdir(parents=True, exist_ok=True)
 
+                if label == "s2_ringdown_window":
+                    s2_calls.append(list(args))
                 if label == "s3_ringdown_estimates":
                     s3_calls.append(list(args))
                 if label == "s3b_multimode_estimates":
@@ -216,10 +219,13 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
 
             self.assertEqual(rc, 0)
             sweep_mock.assert_called_once()
+            self.assertEqual(len(s2_calls), 2)
+            first_dt_idx = s2_calls[0].index("--dt-start-s")
+            second_dt_idx = s2_calls[1].index("--dt-start-s")
+            self.assertEqual(s2_calls[0][first_dt_idx + 1], "0.003")
+            self.assertEqual(s2_calls[1][second_dt_idx + 1], "0.023")
             self.assertEqual(len(s3_calls), 1)
-            self.assertIn("--t0-scan-ms", s3_calls[0])
-            idx = s3_calls[0].index("--t0-scan-ms")
-            self.assertEqual(s3_calls[0][idx + 1], "20")
+            self.assertNotIn("--t0-scan-ms", s3_calls[0])
 
     def test_multi_forwards_with_t0_sweep_to_each_event(self) -> None:
         calls = []

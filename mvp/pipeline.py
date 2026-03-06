@@ -446,12 +446,6 @@ def _run_optional_experiment_t0_sweep(
     return selected_t0_ms
 
 
-def _format_t0_scan_arg(offset_ms: float) -> str:
-    if float(offset_ms).is_integer():
-        return str(int(offset_ms))
-    return f"{offset_ms:.6f}".rstrip("0").rstrip(".")
-
-
 def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
     results: dict[str, Any] = {
         "kerr_consistent": None,
@@ -847,10 +841,36 @@ def run_multimode_event(
         selected_t0_ms = _run_optional_experiment_t0_sweep(
             out_root, run_id, timeline, stage_timeout_s
         )
+        if selected_t0_ms is not None and selected_t0_ms > 0.0:
+            selected_dt_start_s = dt_start_s + (selected_t0_ms / 1000.0)
+            s2_selected_args = [
+                "--run", run_id, "--event-id", event_id,
+                "--dt-start-s", str(selected_dt_start_s),
+                "--duration-s", str(window_duration_s),
+            ]
+            if offline:
+                s2_selected_args.append("--offline")
+            rc = _run_stage(
+                "s2_ringdown_window.py",
+                s2_selected_args,
+                "s2_ringdown_window",
+                out_root,
+                run_id,
+                timeline,
+                stage_timeout_s,
+            )
+            if rc != 0:
+                _set_run_valid_verdict(
+                    out_root,
+                    run_id,
+                    "FAIL",
+                    f"s2_ringdown_window(selected_t0_ms={selected_t0_ms}) failed: exit={rc}",
+                )
+                timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+                _write_timeline(out_root, run_id, timeline)
+                return rc, run_id
 
     s3_args = ["--run", run_id, "--band-low", str(band_low), "--band-high", str(band_high)]
-    if selected_t0_ms is not None:
-        s3_args.extend(["--t0-scan-ms", _format_t0_scan_arg(selected_t0_ms)])
 
     rc = _run_stage("s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
