@@ -16,4 +16,5 @@ def test_contract_s4d_kerr_from_multimode_minimal():
     assert sc.produced_outputs == [
         "outputs/kerr_from_multimode.json",
         "outputs/kerr_from_multimode_diagnostics.json",
+        "outputs/kerr_extraction.json",
     ]

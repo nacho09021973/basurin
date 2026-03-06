@@ -241,6 +241,7 @@ CONTRACTS: dict[str, StageContract] = {
         produced_outputs=[
             "outputs/brunete_metrics.json",
             "outputs/psd_derivatives.json",
+            "outputs/brunete_curvature.json",
             "stage_summary.json",
             "manifest.json",
         ],
@@ -320,6 +321,7 @@ CONTRACTS: dict[str, StageContract] = {
         produced_outputs=[
             "outputs/kerr_from_multimode.json",
             "outputs/kerr_from_multimode_diagnostics.json",
+            "outputs/kerr_extraction.json",
         ],
         upstream_stages=["s3b_multimode_estimates"],
     ),

@@ -393,6 +393,103 @@ def _extract_mode_inverse_sigma(multimode: dict[str, Any], label: str) -> tuple[
     raise ValueError(f"Mode {label} not found in multimode_estimates.modes")
 
 
+
+
+def _sigma_from_quantiles(node: dict[str, Any]) -> float:
+    p10 = float(node["p10"])
+    p90 = float(node["p90"])
+    return max((p90 - p10) / 2.5631031311, 1e-12)
+
+
+def _invert_kerr_from_freqs(f220_hz: float, f221_hz: float) -> tuple[float, float]:
+    from mvp.kerr_qnm_fits import kerr_qnm
+
+    if f220_hz <= 0 or f221_hz <= 0:
+        raise ValueError("f220/f221 must be positive")
+    ratio_target = f221_hz / f220_hz
+
+    lo = A_MIN
+    hi = A_MAX
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        q220 = kerr_qnm(50.0, mid, (2, 2, 0)).f_hz
+        q221 = kerr_qnm(50.0, mid, (2, 2, 1)).f_hz
+        ratio_mid = q221 / q220
+        if ratio_mid < ratio_target:
+            lo = mid
+        else:
+            hi = mid
+    chi = max(A_MIN, min(A_MAX, 0.5 * (lo + hi)))
+    f220_unit = kerr_qnm(1.0, chi, (2, 2, 0)).f_hz
+    m_final = f220_unit / f220_hz
+    return float(m_final), float(chi)
+
+
+def _extract_kerr_with_covariance(multimode: dict[str, Any]) -> dict[str, Any]:
+    from mvp.kerr_qnm_fits import kerr_qnm
+
+    q220 = _extract_mode_quantiles(multimode, "220")
+    q221 = _extract_mode_quantiles(multimode, "221")
+
+    f220 = float(q220["f_hz"]["p50"])
+    tau220 = float(q220["tau_s"]["p50"])
+    f221 = float(q221["f_hz"]["p50"])
+    tau221 = float(q221["tau_s"]["p50"])
+
+    sf220 = _sigma_from_quantiles(q220["f_hz"])
+    st220 = _sigma_from_quantiles(q220["tau_s"])
+    sf221 = _sigma_from_quantiles(q221["f_hz"])
+    st221 = _sigma_from_quantiles(q221["tau_s"])
+
+    cov_220_221 = 0.0
+    cov_node = multimode.get("cov_220_221")
+    if isinstance(cov_node, (int, float)) and math.isfinite(float(cov_node)):
+        cov_220_221 = float(cov_node)
+
+    m0, chi0 = _invert_kerr_from_freqs(f220, f221)
+
+    def state_from_obs(x_f220: float, x_f221: float) -> tuple[float, float]:
+        return _invert_kerr_from_freqs(x_f220, x_f221)
+
+    drel = 1e-4
+    df220 = max(abs(f220) * drel, 1e-9)
+    df221 = max(abs(f221) * drel, 1e-9)
+    mp, cp = state_from_obs(f220 + df220, f221)
+    mm, cm = state_from_obs(f220 - df220, f221)
+    dmdf220 = (mp - mm) / (2.0 * df220)
+    dcdf220 = (cp - cm) / (2.0 * df220)
+
+    mp, cp = state_from_obs(f220, f221 + df221)
+    mm, cm = state_from_obs(f220, f221 - df221)
+    dmdf221 = (mp - mm) / (2.0 * df221)
+    dcdf221 = (cp - cm) / (2.0 * df221)
+
+    var_m = (dmdf220**2) * (sf220**2) + (dmdf221**2) * (sf221**2) + 2.0 * dmdf220 * dmdf221 * cov_220_221
+    var_chi = (dcdf220**2) * (sf220**2) + (dcdf221**2) * (sf221**2) + 2.0 * dcdf220 * dcdf221 * cov_220_221
+    cov_m_chi = dmdf220 * dcdf220 * (sf220**2) + dmdf221 * dcdf221 * (sf221**2) + (dmdf220 * dcdf221 + dmdf221 * dcdf220) * cov_220_221
+
+    q221_pred = kerr_qnm(m0, chi0, (2, 2, 1))
+    delta_f221 = f221 - q221_pred.f_hz
+    delta_tau221_ms = 1e3 * (tau221 - q221_pred.tau_s)
+
+    consistency_score = float(math.sqrt((delta_f221 / max(sf221, 1e-12)) ** 2 + ((tau221 - q221_pred.tau_s) / max(st221, 1e-12)) ** 2))
+
+    return {
+        "M_final_Msun": float(m0),
+        "chi_final": float(chi0),
+        "sigma_M": float(math.sqrt(max(var_m, 0.0))),
+        "sigma_chi": float(math.sqrt(max(var_chi, 0.0))),
+        "cov_M_chi": float(cov_m_chi),
+        "delta_f221_Hz": float(delta_f221),
+        "delta_tau221_ms": float(delta_tau221_ms),
+        "consistency_score": consistency_score,
+        "aux_input": {
+            "f_220": f220, "sigma_f220": sf220, "tau_220": tau220, "sigma_tau220": st220,
+            "f_221": f221, "sigma_f221": sf221, "tau_221": tau221, "sigma_tau221": st221,
+            "cov_220_221": cov_220_221,
+        },
+    }
+
 def _execute(ctx: StageContext) -> dict[str, Path]:
     if not isinstance(ctx.params, dict) or not ctx.params:
         ctx.params = _base_params()
@@ -444,6 +541,20 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
                 "multimode_viability": viability,
             },
         }
+        kerr_extract = {
+            "schema_name": "kerr_extraction",
+            "schema_version": "mvp_kerr_extraction_v1",
+            "verdict": viability_class,
+            "M_final_Msun": None,
+            "chi_final": None,
+            "sigma_M": None,
+            "sigma_chi": None,
+            "cov_M_chi": None,
+            "delta_f221_Hz": None,
+            "delta_tau221_ms": None,
+            "consistency_score": None,
+        }
+        kerr_extract_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_extraction.json", kerr_extract)
         kerr_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode.json", skip_payload)
         diag_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode_diagnostics.json", diag_payload)
         ctx.params.update(
@@ -457,6 +568,7 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
         return {
             "kerr_from_multimode": kerr_path,
             "kerr_from_multimode_diagnostics": diag_path,
+            "kerr_extraction": kerr_extract_path,
         }
 
     model_comparison = (
@@ -701,6 +813,14 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
     kerr_payload["consistency"]["value"] = delta
     kerr_payload["consistency"]["pass"] = bool(delta is not None and delta <= 0.1)
 
+    extraction_core = _extract_kerr_with_covariance(multimode)
+    kerr_extraction_payload = {
+        "schema_name": "kerr_extraction",
+        "schema_version": "mvp_kerr_extraction_v1",
+        **{k: v for k, v in extraction_core.items() if k != "aux_input"},
+        "verdict": "PASS",
+    }
+
     diagnostics_payload = {
         "schema_name": "kerr_from_multimode_diagnostics",
         "schema_version": "mvp_kerr_from_multimode_diagnostics_v1",
@@ -755,12 +875,14 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
 
     kerr_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode.json", kerr_payload)
     diag_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode_diagnostics.json", diagnostics_payload)
+    kerr_extraction_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_extraction.json", kerr_extraction_payload)
 
     log_stage_paths(ctx)
 
     return {
         "kerr_from_multimode": kerr_path,
         "kerr_from_multimode_diagnostics": diag_path,
+        "kerr_extraction": kerr_extraction_path,
     }
 
 
