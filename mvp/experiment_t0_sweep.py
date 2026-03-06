@@ -39,7 +39,7 @@ from mvp.s3b_multimode_estimates import (
     _estimate_221_from_signal,
     evaluate_mode,
 )
-from mvp.preflight_viability import viable_t0_domain
+from mvp.preflight_viability import restrict_grid_with_preflight
 
 EXPERIMENT_STAGE = "experiment/t0_sweep"
 RESULTS_NAME = "t0_sweep_results.json"
@@ -72,48 +72,7 @@ def _parse_grid(args: argparse.Namespace) -> list[int]:
 
 
 def _restrict_grid_with_preflight(run_dir: Path, grid: list[int]) -> tuple[list[int], dict[str, Any] | None]:
-    preflight_path = run_dir / "preflight_viability" / "outputs" / "preflight_viability.json"
-    if not preflight_path.exists():
-        return grid, None
-
-    payload = json.loads(preflight_path.read_text(encoding="utf-8"))
-    mode_220 = (payload.get("modes") or {}).get("220") or {}
-    qnm = mode_220.get("qnm_params") or {}
-    source_params = payload.get("source_params") or {}
-    current_cfg = payload.get("current_config") or {}
-
-    tau_s = float(qnm.get("tau_s", 0.0))
-    q_value = float(qnm.get("Q", 0.0))
-    rho_total = float(source_params.get("rho_total", 0.0))
-    T_s = float(current_cfg.get("T_s", 0.0))
-    alpha = float(payload.get("alpha_safety", 2.5))
-
-    domain = viable_t0_domain(
-        tau_s=tau_s,
-        Q=q_value,
-        rho_total=rho_total,
-        T_s=T_s,
-        alpha_safety=alpha,
-    )
-    if domain["domain_empty"]:
-        return [], {
-            "source": str(preflight_path),
-            "reason": "DOMAIN_EMPTY",
-            "domain": domain,
-            "original_grid_ms": [int(x) for x in grid],
-            "filtered_grid_ms": [],
-        }
-
-    t0_min_ms = int(math.ceil(float(domain["t0_min_s"]) * 1000.0))
-    t0_max_ms = int(math.floor(float(domain["t0_max_s"]) * 1000.0))
-    restricted = [int(x) for x in grid if t0_min_ms <= int(x) <= t0_max_ms]
-    return restricted, {
-        "source": str(preflight_path),
-        "reason": "RESTRICTED_TO_VIABLE_DOMAIN",
-        "domain": domain,
-        "original_grid_ms": [int(x) for x in grid],
-        "filtered_grid_ms": restricted,
-    }
+    return restrict_grid_with_preflight(run_dir, grid)
 
 
 def _pick_detector(outputs_dir: Path, detector: str) -> tuple[str, Path]:

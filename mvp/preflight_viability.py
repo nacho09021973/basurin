@@ -19,7 +19,9 @@ Reference: docs/metodologia_informatividad_predictiva.md
 """
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 from typing import Any
 
 from mvp.kerr_qnm_fits import kerr_qnm, QNMResult
@@ -505,3 +507,53 @@ def _suggested_grid(t0_min_s: float, t0_max_s: float, n_points: int = 7) -> list
     step = max(1, int((t0_max_ms - t0_min_ms) / (n_points - 1)))
     grid = list(range(int(math.ceil(t0_min_ms)), int(t0_max_ms) + 1, step))
     return grid[:n_points]
+
+
+def restrict_grid_with_preflight(run_dir: Path, grid: list[int]) -> tuple[list[int], dict[str, Any] | None]:
+    """Filter a t0 grid (in ms) to the viable domain from a preflight artifact.
+
+    Returns the filtered grid and a metadata dict, or ``(grid, None)`` if the
+    preflight artifact is absent (backward-compatible no-op).
+    """
+    preflight_path = run_dir / "preflight_viability" / "outputs" / "preflight_viability.json"
+    if not preflight_path.exists():
+        return grid, None
+
+    payload = json.loads(preflight_path.read_text(encoding="utf-8"))
+    mode_220 = (payload.get("modes") or {}).get("220") or {}
+    qnm = mode_220.get("qnm_params") or {}
+    source_params = payload.get("source_params") or {}
+    current_cfg = payload.get("current_config") or {}
+
+    tau_s = float(qnm.get("tau_s", 0.0))
+    q_value = float(qnm.get("Q", 0.0))
+    rho_total = float(source_params.get("rho_total", 0.0))
+    T_s = float(current_cfg.get("T_s", 0.0))
+    alpha = float(payload.get("alpha_safety", 2.5))
+
+    domain = viable_t0_domain(
+        tau_s=tau_s,
+        Q=q_value,
+        rho_total=rho_total,
+        T_s=T_s,
+        alpha_safety=alpha,
+    )
+    if domain["domain_empty"]:
+        return [], {
+            "source": str(preflight_path),
+            "reason": "DOMAIN_EMPTY",
+            "domain": domain,
+            "original_grid_ms": [int(x) for x in grid],
+            "filtered_grid_ms": [],
+        }
+
+    t0_min_ms = int(math.ceil(float(domain["t0_min_s"]) * 1000.0))
+    t0_max_ms = int(math.floor(float(domain["t0_max_s"]) * 1000.0))
+    restricted = [int(x) for x in grid if t0_min_ms <= int(x) <= t0_max_ms]
+    return restricted, {
+        "source": str(preflight_path),
+        "reason": "RESTRICTED_TO_VIABLE_DOMAIN",
+        "domain": domain,
+        "original_grid_ms": [int(x) for x in grid],
+        "filtered_grid_ms": restricted,
+    }
