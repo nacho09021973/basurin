@@ -324,6 +324,65 @@ def _run_stage(
     return returncode if not timed_out else 124  # 124 = timeout convention
 
 
+def _run_preflight_viability(
+    out_root: Path,
+    run_id: str,
+    event_id: str,
+    dt_start_s: float,
+    window_duration_s: float,
+    timeline: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Run Fisher-based preflight viability check (pure computation, no subprocess).
+
+    Emits preflight_viability.json in runs/<run_id>/preflight_viability/outputs/.
+    Returns the preflight result dict, or None if event is not in catalog.
+    """
+    try:
+        from mvp.gwtc_events import get_event
+        from mvp.preflight_viability import preflight_viability
+    except ImportError:
+        print("[pipeline] WARNING: preflight_viability not available, skipping", flush=True)
+        return None
+
+    event_params = get_event(event_id)
+    if event_params is None:
+        print(f"[pipeline] preflight: event {event_id} not in GWTC catalog, skipping preflight", flush=True)
+        return None
+
+    rho_ringdown = event_params.get("snr_network", 0.0) * 0.33
+    result = preflight_viability(
+        event_id=event_id,
+        m_final_msun=event_params["m_final_msun"],
+        chi_final=event_params["chi_final"],
+        rho_total=rho_ringdown,
+        t0_s=dt_start_s,
+        T_s=window_duration_s,
+    )
+
+    preflight_dir = out_root / run_id / "preflight_viability" / "outputs"
+    preflight_dir.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(preflight_dir / "preflight_viability.json", result)
+
+    verdict = result.get("overall_verdict", "UNKNOWN")
+    print(f"[pipeline] preflight viability: {verdict} (event={event_id})", flush=True)
+    mode_220 = result.get("modes", {}).get("220", {})
+    if mode_220:
+        print(
+            f"[pipeline] preflight 220: eta={mode_220.get('eta', 0):.6f}, "
+            f"rho_eff={mode_220.get('rho_eff', 0):.3f}, "
+            f"Q*rho={mode_220.get('Q_x_rho_eff', 0):.3f}, "
+            f"rel_iqr_pred={mode_220.get('rel_iqr_predicted', 0):.3f}, "
+            f"t0_max={mode_220.get('t0_max_s', 0)*1000:.1f}ms",
+            flush=True,
+        )
+    timeline["preflight_viability"] = {
+        "verdict": verdict,
+        "t0_max_220_ms": (result.get("recommended_config") or {}).get("t0_max_220_s", 0) * 1000,
+    }
+    _write_timeline(out_root, run_id, timeline)
+    return result
+
+
 def _run_optional_experiment_t0_sweep(
     out_root: Path,
     run_id: str,
@@ -886,6 +945,11 @@ def run_multimode_event(
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
 
+    # Preflight viability check (Fisher-based, pure computation)
+    preflight_result = _run_preflight_viability(
+        out_root, run_id, event_id, dt_start_s, window_duration_s, timeline,
+    )
+
     selected_t0_ms: float | None = None
     if with_t0_sweep:
         selected_t0_ms = _run_optional_experiment_t0_sweep(
@@ -893,6 +957,16 @@ def run_multimode_event(
         )
         if selected_t0_ms is not None and selected_t0_ms > 0.0:
             selected_dt_start_s = dt_start_s + (selected_t0_ms / 1000.0)
+            # Validate selected t0 against preflight domain
+            if preflight_result is not None:
+                t0_max_s = (preflight_result.get("recommended_config") or {}).get("t0_max_220_s", None)
+                if t0_max_s is not None and selected_dt_start_s > t0_max_s:
+                    print(
+                        f"[pipeline] WARNING: t0_sweep selected dt_start_s={selected_dt_start_s:.4f} "
+                        f"exceeds preflight t0_max={t0_max_s:.4f}s for mode 220; "
+                        f"run may be non-informative",
+                        flush=True,
+                    )
             s2_selected_args = [
                 "--run", run_id, "--event-id", event_id,
                 "--dt-start-s", str(selected_dt_start_s),
