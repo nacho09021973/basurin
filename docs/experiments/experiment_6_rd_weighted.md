@@ -36,7 +36,8 @@ Para cada fila de `results.csv`, se resuelve el `run_id` del evento y se leen:
 
 - `runs/<SUBRUN>/s4_geometry_filter/outputs/compatible_set.json`
 - `runs/<SUBRUN>/s4_geometry_filter/outputs/ranked_all_full.json` (si existe)
-  - fallback: `runs/<SUBRUN>/s4_geometry_filter/outputs/ranked_all.json` (p.ej. top50) si `ranked_all_full.json` no existe
+  - fallback 1: `runs/<SUBRUN>/s4_geometry_filter/outputs/ranked_all_full.csv` (si existe)
+  - fallback 2: campo embebido `ranked_all` dentro de `compatible_set.json` (top-N según `ranked_all_limit`, top50 por defecto)
 
 ---
 
@@ -46,7 +47,8 @@ Para cada fila de `results.csv`, se resuelve el `run_id` del evento y se leen:
 Se enriquece cada geometría compatible con un peso procedente del ranking (si existe):
 
 - Join key:
-  - `ranked_all_full[*].geometry_id  -> compatible_geometries[*].geometry_id`
+  - `ranked_all_full[*].geometry_id -> compatible_geometries[*].geometry_id`
+  - fallback: `compatible_set.ranked_all[*].geometry_id -> compatible_geometries[*].geometry_id`
 
 ### 3.2 Intersección multi-modo (igualdad exacta por phys_key)
 Definimos el identificador físico exacto:
