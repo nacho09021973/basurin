@@ -55,8 +55,17 @@ def test_s4d_smoke_minimal(tmp_path: Path) -> None:
     out_dir = stage_dir / "outputs"
     assert (out_dir / "kerr_from_multimode.json").exists()
     assert (out_dir / "kerr_from_multimode_diagnostics.json").exists()
+    assert (out_dir / "kerr_extraction.json").exists()
     assert (stage_dir / "stage_summary.json").exists()
     assert (stage_dir / "manifest.json").exists()
+
+    extraction = json.loads((out_dir / "kerr_extraction.json").read_text(encoding="utf-8"))
+    assert extraction.get("schema_name") == "kerr_extraction"
+    assert extraction.get("verdict") in {"PASS", "NONINFORMATIVE"}
+    assert "M_final_Msun" in extraction
+    assert "chi_final" in extraction
+    assert "sigma_M" in extraction
+    assert "sigma_chi" in extraction
 
     summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
     params = summary.get("parameters", {})

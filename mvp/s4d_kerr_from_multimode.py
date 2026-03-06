@@ -228,6 +228,72 @@ def _build_grid() -> tuple[list[float], list[float], list[float], list[float], l
     return grid_m, grid_a, lnf_220, lntau_220, lnf_221, lntau_221
 
 
+def _invert_kerr_from_freqs(
+    f_220_hz: float,
+    f_221_hz: float,
+    grid_m: list[float],
+    grid_a: list[float],
+    lnf_220: list[float],
+    lnf_221: list[float],
+) -> tuple[float, float]:
+    """Find (M, a) that minimises squared log-frequency residuals for modes 220 and 221.
+
+    Uses only frequencies (not damping times) for a fast, deterministic nearest-grid lookup.
+    Returns (M_solar, a_dimensionless).
+    """
+    t220 = math.log(f_220_hz)
+    t221 = math.log(f_221_hz)
+    best_i = 0
+    best_e = float("inf")
+    for i in range(len(grid_m)):
+        r220 = lnf_220[i] - t220
+        r221 = lnf_221[i] - t221
+        e = r220 * r220 + r221 * r221
+        if e < best_e:
+            best_e = e
+            best_i = i
+    return float(grid_m[best_i]), float(grid_a[best_i])
+
+
+def _extract_kerr_with_covariance(
+    f_220_hz: float,
+    f_221_hz: float,
+    sigma_f220: float,
+    sigma_f221: float,
+    grid_m: list[float],
+    grid_a: list[float],
+    lnf_220: list[float],
+    lnf_221: list[float],
+) -> tuple[float, float, float, float, float]:
+    """Propagate frequency uncertainties to (M, a) uncertainties via finite-difference Jacobian.
+
+    Returns (M, a, sigma_M, sigma_a, cov_M_a).
+    """
+    M0, a0 = _invert_kerr_from_freqs(f_220_hz, f_221_hz, grid_m, grid_a, lnf_220, lnf_221)
+
+    df220 = max(sigma_f220 * 1e-3, f_220_hz * 1e-4)
+    df221 = max(sigma_f221 * 1e-3, f_221_hz * 1e-4)
+
+    M_p220, a_p220 = _invert_kerr_from_freqs(f_220_hz + df220, f_221_hz, grid_m, grid_a, lnf_220, lnf_221)
+    M_m220, a_m220 = _invert_kerr_from_freqs(f_220_hz - df220, f_221_hz, grid_m, grid_a, lnf_220, lnf_221)
+    dM_df220 = (M_p220 - M_m220) / (2.0 * df220)
+    da_df220 = (a_p220 - a_m220) / (2.0 * df220)
+
+    M_p221, a_p221 = _invert_kerr_from_freqs(f_220_hz, f_221_hz + df221, grid_m, grid_a, lnf_220, lnf_221)
+    M_m221, a_m221 = _invert_kerr_from_freqs(f_220_hz, f_221_hz - df221, grid_m, grid_a, lnf_220, lnf_221)
+    dM_df221 = (M_p221 - M_m221) / (2.0 * df221)
+    da_df221 = (a_p221 - a_m221) / (2.0 * df221)
+
+    var_M = (dM_df220 * sigma_f220) ** 2 + (dM_df221 * sigma_f221) ** 2
+    var_a = (da_df220 * sigma_f220) ** 2 + (da_df221 * sigma_f221) ** 2
+    cov_M_a = (dM_df220 * da_df220 * sigma_f220 ** 2
+               + dM_df221 * da_df221 * sigma_f221 ** 2)
+
+    sigma_M = math.sqrt(max(var_M, 0.0))
+    sigma_a = math.sqrt(max(var_a, 0.0))
+    return M0, a0, sigma_M, sigma_a, cov_M_a
+
+
 def _best_idx_joint(
     obs: dict[str, dict[str, float]],
     lnf_220: list[float],
@@ -446,6 +512,25 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
         }
         kerr_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode.json", skip_payload)
         diag_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode_diagnostics.json", diag_payload)
+        extraction_skip_payload = {
+            "schema_name": "kerr_extraction",
+            "schema_version": "mvp_kerr_extraction_v1",
+            "json_strict": True,
+            "created_utc": _utc_now_z(),
+            "run_id": ctx.run_id,
+            "stage": STAGE,
+            "verdict": "SKIPPED_MULTIMODE_GATE",
+            "multimode_viability": viability,
+            "M_final_Msun": None,
+            "chi_final": None,
+            "sigma_M": None,
+            "sigma_chi": None,
+            "cov_M_chi": None,
+            "delta_f221_Hz": None,
+            "delta_tau221_ms": None,
+            "consistency_score": None,
+        }
+        extraction_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_extraction.json", extraction_skip_payload)
         ctx.params.update(
             {
                 "multimode_viability_class": viability_class,
@@ -457,6 +542,7 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
         return {
             "kerr_from_multimode": kerr_path,
             "kerr_from_multimode_diagnostics": diag_path,
+            "kerr_extraction": extraction_path,
         }
 
     model_comparison = (
@@ -756,11 +842,60 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
     kerr_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode.json", kerr_payload)
     diag_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode_diagnostics.json", diagnostics_payload)
 
+    # Compute kerr_extraction.json: point-estimate Kerr inversion with covariance propagation.
+    f220_med = float(q220["f_hz"]["p50"])
+    f221_med = float(q221["f_hz"]["p50"])
+    tau220_med = float(q220["tau_s"]["p50"])
+    tau221_med = float(q221["tau_s"]["p50"])
+    sigma_f220 = max(float(q220["f_hz"]["p90"]) - float(q220["f_hz"]["p10"]), f220_med * 1e-6) / 2.0
+    sigma_f221 = max(float(q221["f_hz"]["p90"]) - float(q221["f_hz"]["p10"]), f221_med * 1e-6) / 2.0
+
+    M_ext, a_ext, sigma_M, sigma_a, cov_M_a = _extract_kerr_with_covariance(
+        f220_med, f221_med, sigma_f220, sigma_f221, grid_m, grid_a, lnf_220, lnf_221
+    )
+
+    # Compute residuals: predicted f_221 and tau_221 from extracted (M, a) vs observed.
+    delta_f221_Hz: float | None = None
+    delta_tau221_ms: float | None = None
+    consistency_score: float | None = None
+    try:
+        from mvp.kerr_qnm_fits import kerr_qnm
+        predicted_221 = kerr_qnm(M_ext, a_ext, (2, 2, 1))
+        delta_f221_Hz = float(predicted_221.f_hz - f221_med)
+        delta_tau221_ms = float((predicted_221.tau_s - tau221_med) * 1e3)
+        consistency_score = float(
+            math.sqrt((delta_f221_Hz / max(f221_med, 1.0)) ** 2
+                      + (delta_tau221_ms / max(abs(tau221_med * 1e3), 1e-6)) ** 2)
+        )
+    except Exception:
+        pass
+
+    extraction_payload = {
+        "schema_name": "kerr_extraction",
+        "schema_version": "mvp_kerr_extraction_v1",
+        "json_strict": True,
+        "created_utc": _utc_now_z(),
+        "run_id": ctx.run_id,
+        "stage": STAGE,
+        "verdict": "PASS" if (consistency_score is not None and math.isfinite(consistency_score)) else "NONINFORMATIVE",
+        "M_final_Msun": M_ext,
+        "chi_final": a_ext,
+        "sigma_M": sigma_M,
+        "sigma_chi": sigma_a,
+        "cov_M_chi": cov_M_a,
+        "delta_f221_Hz": delta_f221_Hz,
+        "delta_tau221_ms": delta_tau221_ms,
+        "consistency_score": consistency_score,
+        "method": "finite_diff_jacobian_from_grid_inversion",
+    }
+    extraction_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_extraction.json", extraction_payload)
+
     log_stage_paths(ctx)
 
     return {
         "kerr_from_multimode": kerr_path,
         "kerr_from_multimode_diagnostics": diag_path,
+        "kerr_extraction": extraction_path,
     }
 
 
