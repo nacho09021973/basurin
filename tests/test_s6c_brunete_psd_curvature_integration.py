@@ -515,3 +515,26 @@ def test_s6c_regimes_sigma_and_chi_psd_are_decoupled(tmp_path: Path) -> None:
 
     assert row["regime_sigma"] == "perturbative"
     assert row["regime_chi_psd"] == "elevated"
+
+
+def test_s6c_flat_psd_gives_omega_near_unity(tmp_path: Path) -> None:
+    runs_root, run_id, run_dir = _prepare_run(tmp_path)
+    write_json_atomic(run_dir / "external_inputs" / "psd_model.json", {"schema_version":"mvp_psd_model_v1","models":{"H1":{"frequencies_hz":[20.0+i for i in range(200)],"psd_values":[1.0 for _ in range(200)]}}})
+    proc = _run_stage(run_id=run_id, runs_root=runs_root)
+    assert proc.returncode == 0, proc.stderr
+    curv = json.loads((run_dir / "s6c_brunete_psd_curvature" / "outputs" / "brunete_curvature.json").read_text(encoding="utf-8"))
+    assert abs(curv["omega_conformal_factor"] - 1.0) <= 0.05
+
+
+def test_s6c_peaked_psd_flags_contamination_and_pd_metric(tmp_path: Path) -> None:
+    runs_root, run_id, run_dir = _prepare_run(tmp_path)
+    freqs = [20.0 + i for i in range(800)]
+    vals = [1.0 + 15.0 * math.exp(-((f - 100.0) ** 2) / (2.0 * 10.0 * 10.0)) for f in freqs]
+    write_json_atomic(run_dir / "external_inputs" / "psd_model.json", {"schema_version":"mvp_psd_model_v1","models":{"H1":{"frequencies_hz":freqs,"psd_values":vals}}})
+    proc = _run_stage(run_id=run_id, runs_root=runs_root)
+    assert proc.returncode == 0, proc.stderr
+    curv = json.loads((run_dir / "s6c_brunete_psd_curvature" / "outputs" / "brunete_curvature.json").read_text(encoding="utf-8"))
+    assert curv["psd_contamination_flag"] == "PSD_DOMINATED"
+    g = curv["curvature_psd_2x2"]
+    det = g[0][0]*g[1][1] - g[0][1]*g[1][0]
+    assert g[0][0] > 0 and g[1][1] > 0 and det > 0

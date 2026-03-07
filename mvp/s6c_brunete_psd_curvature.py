@@ -19,9 +19,115 @@ for _cand in [_here.parents[0], _here.parents[1]]:
 
 from basurin_io import require_run_valid, resolve_out_root, validate_run_id, write_json_atomic
 from mvp.brunete.core import J0_J1, chi_psd, curvature_KR, psd_log_derivatives_polyfit, sigma
-from mvp.contracts import abort, check_inputs, finalize, init_stage
+from mvp.contracts import abort, check_inputs, finalize, init_stage, log_stage_paths
 
 STAGE = "s6c_brunete_psd_curvature"
+
+
+def extract_psd_from_strain(strain: list[float], fs: float, T_s: float) -> tuple[list[float], list[float]]:
+    if fs <= 0 or T_s <= 0:
+        raise ValueError("fs y T_s deben ser positivos")
+    n = max(16, int(fs * T_s))
+    data = [float(x) for x in strain[:n]]
+    if not data:
+        raise ValueError("strain vacío")
+    try:
+        from scipy.signal import welch  # type: ignore
+
+        freqs, psd = welch(data, fs=fs, nperseg=min(1024, len(data)), return_onesided=True, scaling="density")
+        return [float(f) for f in freqs if 20.0 <= float(f) <= 2048.0], [float(p) for f, p in zip(freqs, psd) if 20.0 <= float(f) <= 2048.0]
+    except Exception:
+        # fallback deterministic periodogram one-sided
+        nfft = len(data)
+        two_pi = 2.0 * math.pi
+        freqs = []
+        vals = []
+        for k in range(nfft // 2 + 1):
+            re = 0.0
+            im = 0.0
+            for t, x in enumerate(data):
+                ang = two_pi * k * t / nfft
+                re += x * math.cos(ang)
+                im -= x * math.sin(ang)
+            p = (re * re + im * im) / (fs * nfft)
+            f = k * fs / nfft
+            if 20.0 <= f <= 2048.0:
+                freqs.append(float(f))
+                vals.append(float(max(p, 1e-30)))
+        return freqs, vals
+
+
+def _interp_linear(xs: list[float], ys: list[float], x: float) -> float:
+    if x <= xs[0]:
+        return float(ys[0])
+    if x >= xs[-1]:
+        return float(ys[-1])
+    for i in range(len(xs) - 1):
+        if xs[i] <= x <= xs[i + 1]:
+            t = (x - xs[i]) / (xs[i + 1] - xs[i])
+            return float((1 - t) * ys[i] + t * ys[i + 1])
+    return float(ys[-1])
+
+
+def compute_psd_conformal_factor(f0: float, tau: float, S_n_func) -> dict[str, float]:
+    if f0 <= 0 or tau <= 0:
+        raise ValueError("f0/tau inválidos")
+
+    def _h2(f: float, x_f0: float, x_tau: float) -> float:
+        w = 1.0 / max(x_tau, 1e-12)
+        return 1.0 / (((f - x_f0) ** 2) + w * w)
+
+    fmin = max(20.0, 0.2 * f0)
+    fmax = min(2048.0, 3.0 * f0)
+    n = 400
+    df = (fmax - fmin) / n
+    num = 0.0
+    den = 0.0
+    for i in range(n + 1):
+        f = fmin + i * df
+        h2 = _h2(f, f0, tau)
+        sn = max(float(S_n_func(f)), 1e-30)
+        num += h2 / sn
+        den += h2
+    omega = (num * df) / max(den * df, 1e-30)
+
+    rel = 1e-4
+    df0 = max(f0 * rel, 1e-6)
+    dt = max(tau * rel, 1e-9)
+    # finite-diff without recursion helper
+    def _omega(xf0: float, xtau: float) -> float:
+        nn = 0.0
+        dd = 0.0
+        for j in range(n + 1):
+            ff = fmin + j * df
+            h2 = _h2(ff, xf0, xtau)
+            nn += h2 / max(float(S_n_func(ff)), 1e-30)
+            dd += h2
+        return (nn * df) / max(dd * df, 1e-30)
+
+    domega_df0 = (_omega(f0 + df0, tau) - _omega(f0 - df0, tau)) / (2.0 * df0)
+    domega_dtau = (_omega(f0, tau + dt) - _omega(f0, tau - dt)) / (2.0 * dt)
+    return {"omega": float(omega), "domega_df0": float(domega_df0), "domega_dtau": float(domega_dtau)}
+
+
+def brunete_fisher_metric(f0: float, tau: float, S_n_func) -> list[list[float]]:
+    cf = compute_psd_conformal_factor(f0, tau, S_n_func)
+    omega = cf["omega"]
+    q = max(math.pi * f0 * tau, 1e-8)
+    o1q2 = 1.0 / (q * q)
+    # metric analytic surrogate with O(1/Q^2) corrections
+    g11 = omega * (1.0 / (f0 * f0)) * (1.0 + 0.5 * o1q2)
+    g22 = omega * (1.0 / (tau * tau)) * (1.0 + 1.5 * o1q2)
+    g12 = omega * (0.25 / (f0 * tau)) * o1q2
+    return [[float(g11), float(g12)], [float(g12), float(g22)]]
+
+
+def detect_psd_contamination(curvature_analytic: list[list[float]], curvature_psd: list[list[float]]) -> dict[str, Any]:
+    tr_a = curvature_analytic[0][0] + curvature_analytic[1][1]
+    tr_p = curvature_psd[0][0] + curvature_psd[1][1]
+    omega_ratio = float(tr_p / tr_a) if tr_a != 0 else 1.0
+    flag = "PSD_DOMINATED" if abs(omega_ratio - 1.0) > 0.15 else "PSD_CLEAN"
+    return {"ratio": omega_ratio, "flag": flag}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -412,6 +518,37 @@ def main() -> int:
             psd_explicit=psd_explicit,
         )
 
+        first = next((r for r in metrics_payload.get("metrics", []) if isinstance(r, dict) and r.get("f_hz") and r.get("tau_s")), None)
+        if first is None:
+            raise RuntimeError("No hay fila con f_hz/tau_s para construir curvatura PSD")
+        f0 = float(first["f_hz"])
+        tau = float(first["tau_s"])
+        freqs_raw, psd_raw = _extract_psd_arrays(psd_payload, str(first.get("detector", "H1")))
+        if not freqs_raw or not psd_raw:
+            raise RuntimeError("PSD vacío para construir curvatura")
+
+        def s_n_func(f: float) -> float:
+            return _interp_linear([float(x) for x in freqs_raw], [float(y) for y in psd_raw], float(f))
+
+        analytic = [[1.0 / (f0 * f0), 0.0], [0.0, 1.0 / (tau * tau)]]
+        psd_metric = brunete_fisher_metric(f0, tau, s_n_func)
+        contam = detect_psd_contamination(analytic, psd_metric)
+        ev_trace = psd_metric[0][0] + psd_metric[1][1]
+        ev_det = psd_metric[0][0] * psd_metric[1][1] - psd_metric[0][1] * psd_metric[1][0]
+        disc = max(ev_trace * ev_trace - 4.0 * ev_det, 0.0)
+        l1 = 0.5 * (ev_trace + math.sqrt(disc))
+        l2 = 0.5 * (ev_trace - math.sqrt(disc))
+        omega = compute_psd_conformal_factor(f0, tau, s_n_func)["omega"]
+        curvature_payload = {
+            "schema_version": "brunete_curvature_v1",
+            "omega_conformal_factor": float(omega),
+            "psd_contamination_flag": contam["flag"],
+            "curvature_analytic_2x2": analytic,
+            "curvature_psd_2x2": psd_metric,
+            "principal_curvatures_psd": [float(l1), float(l2)],
+            "ranking_score_psd": float(min(l1, l2)),
+        }
+
         metrics_path = ctx.outputs_dir / "brunete_metrics.json"
         deriv_path = ctx.outputs_dir / "psd_derivatives.json"
         curvature_path = ctx.outputs_dir / "brunete_curvature.json"
@@ -438,11 +575,7 @@ def main() -> int:
             },
         )
 
-        print(f"OUT_ROOT={ctx.out_root}")
-        print(f"STAGE_DIR={ctx.stage_dir}")
-        print(f"OUTPUTS_DIR={ctx.outputs_dir}")
-        print(f"STAGE_SUMMARY={ctx.stage_dir / 'stage_summary.json'}")
-        print(f"MANIFEST={ctx.stage_dir / 'manifest.json'}")
+        log_stage_paths(ctx)
         return 0
     except SystemExit:
         raise
