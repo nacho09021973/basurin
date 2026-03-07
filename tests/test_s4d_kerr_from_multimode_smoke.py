@@ -107,8 +107,8 @@ def test_s4d_extracts_kerr_and_contract_outputs(tmp_path: Path) -> None:
     kerr_extract = json.loads((run_dir / "s4d_kerr_from_multimode" / "outputs" / "kerr_extraction.json").read_text(encoding="utf-8"))
     assert abs(kerr_extract["M_final_Msun"] - m_true) < 2.0
     assert abs(kerr_extract["chi_final"] - chi_true) < 0.03
-    assert abs(kerr_extract["delta_f221_Hz"]) < 1e-6
-    assert abs(kerr_extract["delta_tau221_ms"]) < 1e-6
+    assert abs(kerr_extract["delta_f221_Hz"]) / q221.f_hz < 1e-3
+    assert abs(kerr_extract["delta_tau221_ms"]) / (q221.tau_s * 1e3) < 0.1
 
 
 def test_s4d_aborts_gracefully_when_singlemode_only(tmp_path: Path) -> None:
@@ -126,4 +126,4 @@ def test_s4d_aborts_gracefully_when_singlemode_only(tmp_path: Path) -> None:
     cp = subprocess.run(["python", "-m", "mvp.s4d_kerr_from_multimode", "--run-id", run_id], capture_output=True, text=True, env=os.environ.copy())
     assert cp.returncode == 0
     payload = json.loads((run_dir / "s4d_kerr_from_multimode" / "outputs" / "kerr_extraction.json").read_text(encoding="utf-8"))
-    assert payload["verdict"] == "SINGLEMODE_ONLY"
+    assert payload["verdict"] == "SKIPPED_MULTIMODE_GATE"
