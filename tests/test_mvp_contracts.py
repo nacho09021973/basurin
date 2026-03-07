@@ -41,6 +41,7 @@ class TestContractRegistry:
                        "s3b_multimode_estimates",
                        "s4_geometry_filter", "s4_spectral_geometry_filter", "s4b_spectral_curvature",
                        "s4c_kerr_consistency", "s4d_kerr_from_multimode",
+                       "s7_beyond_kerr_deviation_score",
                        "s5_aggregate", "s6_information_geometry", "s6b_information_geometry_3d",
                        "s6b_information_geometry_ranked",
                        "s6c_brunete_psd_curvature", "s6c_population_geometry",

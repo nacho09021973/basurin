@@ -189,3 +189,36 @@ def test_s4d_skips_multimode_when_viability_gate_blocks(tmp_path: Path, monkeypa
     extraction = json.loads((run_dir / "s4d_kerr_from_multimode" / "outputs" / "kerr_extraction.json").read_text(encoding="utf-8"))
     assert extraction["verdict"] == "SKIPPED_MULTIMODE_GATE"
     assert extraction["M_final_Msun"] is None
+
+
+def test_extract_kerr_with_covariance_core_uses_grid_inverter(monkeypatch) -> None:
+    calls = {"n": 0}
+
+    def _fake_invert(
+        f_220_hz: float,
+        f_221_hz: float,
+        grid_m: list[float],
+        grid_a: list[float],
+        lnf_220: list[float],
+        lnf_221: list[float],
+    ) -> tuple[float, float]:
+        calls["n"] += 1
+        return (70.0, 0.6)
+
+    monkeypatch.setattr(s4d, "_invert_kerr_from_freqs_grid", _fake_invert)
+
+    out = s4d._extract_kerr_with_covariance_core(
+        f_220_hz=200.0,
+        f_221_hz=300.0,
+        sigma_f220=2.0,
+        sigma_f221=3.0,
+        grid_m=[70.0, 71.0],
+        grid_a=[0.6, 0.61],
+        lnf_220=[1.0, 1.1],
+        lnf_221=[1.2, 1.3],
+    )
+
+    assert calls["n"] >= 5
+    assert len(out) == 5
+    assert out[0] == 70.0
+    assert out[1] == 0.6

@@ -1037,6 +1037,13 @@ def run_multimode_event(
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
 
+    s7_args = ["--run-id", run_id]
+    rc = _run_stage("s7_beyond_kerr_deviation_score.py", s7_args, "s7_beyond_kerr_deviation_score", out_root, run_id, timeline, stage_timeout_s)
+    if rc != 0:
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return rc, run_id
+
     timeline["multimode_results"] = _parse_multimode_results(out_root, run_id)
     timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
     _write_timeline(out_root, run_id, timeline)

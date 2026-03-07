@@ -248,10 +248,29 @@ def _build_brunete_curvature(
             "ranking_score_psd": ranking_score,
         })
 
+    legacy_first = detector_curvatures[0] if detector_curvatures else {}
+    legacy_flag = "PSD_DOMINATED" if psd_dominated_any else "PSD_OK"
+    if legacy_first.get("curvature_analytic_2x2") and legacy_first.get("curvature_psd_2x2"):
+        try:
+            legacy_diag = detect_psd_contamination(
+                legacy_first["curvature_analytic_2x2"],
+                legacy_first["curvature_psd_2x2"],
+            )
+            legacy_flag = str(legacy_diag.get("flag", legacy_flag))
+        except Exception:
+            pass
+
     return {
         "schema_version": "brunete_curvature_v1",
         "run_id": run_id,
         "psd_dominated": psd_dominated_any,
+        # Legacy top-level keys kept for backward-compat tests/consumers.
+        "omega_conformal_factor": legacy_first.get("omega_conformal_factor"),
+        "psd_contamination_flag": legacy_flag,
+        "curvature_analytic_2x2": legacy_first.get("curvature_analytic_2x2"),
+        "curvature_psd_2x2": legacy_first.get("curvature_psd_2x2"),
+        "principal_curvatures_psd": legacy_first.get("principal_curvatures_psd"),
+        "ranking_score_psd": legacy_first.get("ranking_score_psd"),
         "per_detector": detector_curvatures,
     }
 
@@ -518,36 +537,53 @@ def main() -> int:
             psd_explicit=psd_explicit,
         )
 
-        first = next((r for r in metrics_payload.get("metrics", []) if isinstance(r, dict) and r.get("f_hz") and r.get("tau_s")), None)
-        if first is None:
-            raise RuntimeError("No hay fila con f_hz/tau_s para construir curvatura PSD")
-        f0 = float(first["f_hz"])
-        tau = float(first["tau_s"])
-        freqs_raw, psd_raw = _extract_psd_arrays(psd_payload, str(first.get("detector", "H1")))
-        if not freqs_raw or not psd_raw:
-            raise RuntimeError("PSD vacío para construir curvatura")
+        if not isinstance(curvature_payload.get("per_detector"), list):
+            curvature_payload["per_detector"] = []
 
-        def s_n_func(f: float) -> float:
-            return _interp_linear([float(x) for x in freqs_raw], [float(y) for y in psd_raw], float(f))
+        first = next(
+            (
+                r
+                for r in metrics_payload.get("metrics", [])
+                if isinstance(r, dict) and r.get("f_hz") and r.get("tau_s")
+            ),
+            None,
+        )
+        if first is not None:
+            try:
+                f0 = float(first["f_hz"])
+                tau = float(first["tau_s"])
+                detector = str(first.get("detector", "H1"))
+                freqs_raw, psd_raw = _extract_psd_arrays(psd_payload, detector)
+                if freqs_raw and psd_raw:
+                    def s_n_func(f: float) -> float:
+                        return _interp_linear(
+                            [float(x) for x in freqs_raw],
+                            [float(y) for y in psd_raw],
+                            float(f),
+                        )
 
-        analytic = [[1.0 / (f0 * f0), 0.0], [0.0, 1.0 / (tau * tau)]]
-        psd_metric = brunete_fisher_metric(f0, tau, s_n_func)
-        contam = detect_psd_contamination(analytic, psd_metric)
-        ev_trace = psd_metric[0][0] + psd_metric[1][1]
-        ev_det = psd_metric[0][0] * psd_metric[1][1] - psd_metric[0][1] * psd_metric[1][0]
-        disc = max(ev_trace * ev_trace - 4.0 * ev_det, 0.0)
-        l1 = 0.5 * (ev_trace + math.sqrt(disc))
-        l2 = 0.5 * (ev_trace - math.sqrt(disc))
-        omega = compute_psd_conformal_factor(f0, tau, s_n_func)["omega"]
-        curvature_payload = {
-            "schema_version": "brunete_curvature_v1",
-            "omega_conformal_factor": float(omega),
-            "psd_contamination_flag": contam["flag"],
-            "curvature_analytic_2x2": analytic,
-            "curvature_psd_2x2": psd_metric,
-            "principal_curvatures_psd": [float(l1), float(l2)],
-            "ranking_score_psd": float(min(l1, l2)),
-        }
+                    analytic = [[1.0 / (f0 * f0), 0.0], [0.0, 1.0 / (tau * tau)]]
+                    psd_metric = brunete_fisher_metric(f0, tau, s_n_func)
+                    contam = detect_psd_contamination(analytic, psd_metric)
+                    ev_trace = psd_metric[0][0] + psd_metric[1][1]
+                    ev_det = psd_metric[0][0] * psd_metric[1][1] - psd_metric[0][1] * psd_metric[1][0]
+                    disc = max(ev_trace * ev_trace - 4.0 * ev_det, 0.0)
+                    l1 = 0.5 * (ev_trace + math.sqrt(disc))
+                    l2 = 0.5 * (ev_trace - math.sqrt(disc))
+                    omega = compute_psd_conformal_factor(f0, tau, s_n_func).get("omega")
+
+                    curvature_payload.update(
+                        {
+                            "omega_conformal_factor": float(omega) if omega is not None else None,
+                            "psd_contamination_flag": contam.get("flag", curvature_payload.get("psd_contamination_flag")),
+                            "curvature_analytic_2x2": analytic,
+                            "curvature_psd_2x2": psd_metric,
+                            "principal_curvatures_psd": [float(l1), float(l2)],
+                            "ranking_score_psd": float(min(l1, l2)),
+                        }
+                    )
+            except Exception:
+                pass
 
         metrics_path = ctx.outputs_dir / "brunete_metrics.json"
         deriv_path = ctx.outputs_dir / "psd_derivatives.json"
