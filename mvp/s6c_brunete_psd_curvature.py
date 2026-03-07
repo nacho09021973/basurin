@@ -248,10 +248,20 @@ def _build_brunete_curvature(
             "ranking_score_psd": ranking_score,
         })
 
+    legacy_first = detector_curvatures[0] if detector_curvatures else {}
+    legacy_flag = "PSD_DOMINATED" if psd_dominated_any else "PSD_OK"
+
     return {
         "schema_version": "brunete_curvature_v1",
         "run_id": run_id,
         "psd_dominated": psd_dominated_any,
+        # Legacy top-level keys kept for backward-compat tests/consumers.
+        "omega_conformal_factor": legacy_first.get("omega_conformal_factor"),
+        "psd_contamination_flag": legacy_flag,
+        "curvature_analytic_2x2": legacy_first.get("curvature_analytic_2x2"),
+        "curvature_psd_2x2": legacy_first.get("curvature_psd_2x2"),
+        "principal_curvatures_psd": legacy_first.get("principal_curvatures_psd"),
+        "ranking_score_psd": legacy_first.get("ranking_score_psd"),
         "per_detector": detector_curvatures,
     }
 
