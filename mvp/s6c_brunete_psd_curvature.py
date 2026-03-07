@@ -250,6 +250,15 @@ def _build_brunete_curvature(
 
     legacy_first = detector_curvatures[0] if detector_curvatures else {}
     legacy_flag = "PSD_DOMINATED" if psd_dominated_any else "PSD_OK"
+    if legacy_first.get("curvature_analytic_2x2") and legacy_first.get("curvature_psd_2x2"):
+        try:
+            legacy_diag = detect_psd_contamination(
+                legacy_first["curvature_analytic_2x2"],
+                legacy_first["curvature_psd_2x2"],
+            )
+            legacy_flag = str(legacy_diag.get("flag", legacy_flag))
+        except Exception:
+            pass
 
     return {
         "schema_version": "brunete_curvature_v1",
