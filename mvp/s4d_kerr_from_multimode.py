@@ -228,7 +228,7 @@ def _build_grid() -> tuple[list[float], list[float], list[float], list[float], l
     return grid_m, grid_a, lnf_220, lntau_220, lnf_221, lntau_221
 
 
-def _invert_kerr_from_freqs(
+def _invert_kerr_from_freqs_grid(
     f_220_hz: float,
     f_221_hz: float,
     grid_m: list[float],
@@ -255,7 +255,7 @@ def _invert_kerr_from_freqs(
     return float(grid_m[best_i]), float(grid_a[best_i])
 
 
-def _extract_kerr_with_covariance(
+def _extract_kerr_with_covariance_core(
     f_220_hz: float,
     f_221_hz: float,
     sigma_f220: float,
@@ -269,18 +269,18 @@ def _extract_kerr_with_covariance(
 
     Returns (M, a, sigma_M, sigma_a, cov_M_a).
     """
-    M0, a0 = _invert_kerr_from_freqs(f_220_hz, f_221_hz, grid_m, grid_a, lnf_220, lnf_221)
+    M0, a0 = _invert_kerr_from_freqs_grid(f_220_hz, f_221_hz, grid_m, grid_a, lnf_220, lnf_221)
 
     df220 = max(sigma_f220 * 1e-3, f_220_hz * 1e-4)
     df221 = max(sigma_f221 * 1e-3, f_221_hz * 1e-4)
 
-    M_p220, a_p220 = _invert_kerr_from_freqs(f_220_hz + df220, f_221_hz, grid_m, grid_a, lnf_220, lnf_221)
-    M_m220, a_m220 = _invert_kerr_from_freqs(f_220_hz - df220, f_221_hz, grid_m, grid_a, lnf_220, lnf_221)
+    M_p220, a_p220 = _invert_kerr_from_freqs_grid(f_220_hz + df220, f_221_hz, grid_m, grid_a, lnf_220, lnf_221)
+    M_m220, a_m220 = _invert_kerr_from_freqs_grid(f_220_hz - df220, f_221_hz, grid_m, grid_a, lnf_220, lnf_221)
     dM_df220 = (M_p220 - M_m220) / (2.0 * df220)
     da_df220 = (a_p220 - a_m220) / (2.0 * df220)
 
-    M_p221, a_p221 = _invert_kerr_from_freqs(f_220_hz, f_221_hz + df221, grid_m, grid_a, lnf_220, lnf_221)
-    M_m221, a_m221 = _invert_kerr_from_freqs(f_220_hz, f_221_hz - df221, grid_m, grid_a, lnf_220, lnf_221)
+    M_p221, a_p221 = _invert_kerr_from_freqs_grid(f_220_hz, f_221_hz + df221, grid_m, grid_a, lnf_220, lnf_221)
+    M_m221, a_m221 = _invert_kerr_from_freqs_grid(f_220_hz, f_221_hz - df221, grid_m, grid_a, lnf_220, lnf_221)
     dM_df221 = (M_p221 - M_m221) / (2.0 * df221)
     da_df221 = (a_p221 - a_m221) / (2.0 * df221)
 
@@ -970,7 +970,7 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
     sigma_f220 = max(float(q220["f_hz"]["p90"]) - float(q220["f_hz"]["p10"]), f220_med * 1e-6) / 2.0
     sigma_f221 = max(float(q221["f_hz"]["p90"]) - float(q221["f_hz"]["p10"]), f221_med * 1e-6) / 2.0
 
-    M_ext, a_ext, sigma_M, sigma_a, cov_M_a = _extract_kerr_with_covariance(
+    M_ext, a_ext, sigma_M, sigma_a, cov_M_a = _extract_kerr_with_covariance_core(
         f220_med, f221_med, sigma_f220, sigma_f221, grid_m, grid_a, lnf_220, lnf_221
     )
 
