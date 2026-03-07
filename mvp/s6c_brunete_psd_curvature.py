@@ -188,6 +188,74 @@ def _to_float(x: Any) -> float | None:
     return None
 
 
+def _build_brunete_curvature(
+    *,
+    run_id: str,
+    metrics_rows: list[dict[str, Any]],
+    chi_psd_threshold: float,
+) -> dict[str, Any]:
+    """Build the brunete_curvature.json summary artifact from per-detector metrics rows."""
+    detector_curvatures: list[dict[str, Any]] = []
+    psd_dominated_any = False
+
+    for row in metrics_rows:
+        det = row.get("detector", "unknown")
+        k_val = row.get("K")
+        r_val = row.get("R")
+        j0_val = row.get("J0")
+        j1_val = row.get("J1")
+        chi_val = row.get("chi_psd")
+        sigma_val = row.get("sigma")
+
+        # Analytic 2x2 curvature (flat-PSD limit): diagonal in (f, tau) using J0
+        curvature_analytic: list[list[float | None]] | None = None
+        if j0_val is not None and j1_val is not None:
+            curvature_analytic = [[j0_val, j1_val], [j1_val, j0_val]]
+
+        # PSD-corrected 2x2 curvature surrogate: use K on diagonal, J1 as off-diagonal
+        curvature_psd: list[list[float | None]] | None = None
+        principal_curvatures: list[float | None] | None = None
+        ranking_score: float | None = None
+        if k_val is not None and j1_val is not None and math.isfinite(float(k_val)) and math.isfinite(float(j1_val)):
+            k_f = float(k_val)
+            j1_f = float(j1_val)
+            r_f = float(r_val) if (r_val is not None and math.isfinite(float(r_val))) else k_f
+            curvature_psd = [[k_f, j1_f], [j1_f, r_f]]
+            # Eigenvalues of 2x2 symmetric matrix [[a,b],[b,c]]: λ = ((a+c) ± sqrt((a-c)²+4b²))/2
+            trace_half = (k_f + r_f) / 2.0
+            disc = math.sqrt(max(0.0, ((k_f - r_f) / 2.0) ** 2 + j1_f ** 2))
+            principal_curvatures = [trace_half + disc, trace_half - disc]
+            ranking_score = float(k_f * r_f - j1_f ** 2)  # determinant as scalar score
+
+        # PSD contamination: flag if chi_psd > threshold
+        contaminated = bool(chi_val is not None and chi_val > chi_psd_threshold)
+        if contaminated:
+            psd_dominated_any = True
+
+        # omega_conformal_factor: ratio of PSD-corrected to analytic curvature.
+        # Use sigma as a proxy: Ω ≈ 1 + sigma (leading-order PSD correction).
+        omega: float | None = None
+        if sigma_val is not None and math.isfinite(float(sigma_val)):
+            omega = 1.0 + float(sigma_val)
+
+        detector_curvatures.append({
+            "detector": det,
+            "omega_conformal_factor": omega,
+            "psd_contamination_flag": contaminated,
+            "curvature_analytic_2x2": curvature_analytic,
+            "curvature_psd_2x2": curvature_psd,
+            "principal_curvatures_psd": principal_curvatures,
+            "ranking_score_psd": ranking_score,
+        })
+
+    return {
+        "schema_version": "brunete_curvature_v1",
+        "run_id": run_id,
+        "psd_dominated": psd_dominated_any,
+        "per_detector": detector_curvatures,
+    }
+
+
 def _compute_payloads(
     *,
     run_id: str,
@@ -369,7 +437,14 @@ def _compute_payloads(
         "regime_sigma_counts": dict(regime_sigma),
         "regime_chi_psd_counts": dict(regime_chi),
     }
-    return psd_path, metrics_payload, deriv_payload, summary_stats, warning_records
+
+    curvature_payload = _build_brunete_curvature(
+        run_id=run_id,
+        metrics_rows=metrics_rows,
+        chi_psd_threshold=chi_psd_threshold,
+    )
+
+    return psd_path, metrics_payload, deriv_payload, summary_stats, warning_records, curvature_payload
 
 
 def main() -> int:
@@ -398,7 +473,7 @@ def main() -> int:
         validate_run_id(args.run, out_root)
         require_run_valid(out_root, args.run)
         run_dir = out_root / args.run
-        _, metrics_payload, _, _, _ = _compute_payloads(
+        _, metrics_payload, _, _, _, _ = _compute_payloads(
             run_id=args.run,
             run_dir=run_dir,
             mode=args.mode,
@@ -432,7 +507,7 @@ def main() -> int:
         psd_path, psd_payload = _pick_psd_payload(ctx.run_dir, psd_explicit)
         check_inputs(ctx, required, optional={"psd_model": psd_path})
 
-        _, metrics_payload, deriv_payload, summary_stats, warning_records = _compute_payloads(
+        _, metrics_payload, deriv_payload, summary_stats, warning_records, curvature_payload = _compute_payloads(
             run_id=args.run,
             run_dir=ctx.run_dir,
             mode=args.mode,

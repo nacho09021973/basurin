@@ -185,3 +185,7 @@ def test_s4d_skips_multimode_when_viability_gate_blocks(tmp_path: Path, monkeypa
     diag = json.loads((run_dir / "s4d_kerr_from_multimode" / "outputs" / "kerr_from_multimode_diagnostics.json").read_text(encoding="utf-8"))
     assert diag["diagnostics"]["multimode_evaluated"] is False
     assert "MULTIMODE_DUE_TO_GATE" in diag["diagnostics"]["skips"]
+
+    extraction = json.loads((run_dir / "s4d_kerr_from_multimode" / "outputs" / "kerr_extraction.json").read_text(encoding="utf-8"))
+    assert extraction["verdict"] == "SKIPPED_MULTIMODE_GATE"
+    assert extraction["M_final_Msun"] is None
