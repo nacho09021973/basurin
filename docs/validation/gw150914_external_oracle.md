@@ -83,7 +83,7 @@ Este documento **no sustituye** validación física completa, inferencia bayesia
 
 Rutas canónicas existentes en el repo para estos chequeos:
 
-- `runs/<run_id>/s4g_mode220_geometry_filter/outputs/mode220_filter.json`
+- `runs/<run_id>/s4g_mode220_geometry_filter/outputs/geometries_220.json`
 - `runs/<run_id>/s4h_mode221_geometry_filter/outputs/mode221_filter.json`
 - `runs/<run_id>/s4i_common_geometry_intersection/outputs/common_intersection.json`
 - `runs/<run_id>/s4j_hawking_area_filter/outputs/hawking_area_filter.json`
