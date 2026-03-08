@@ -57,7 +57,7 @@ from mvp.golden_geometry_spec import (
 
 STAGE = "s4g_mode220_geometry_filter"
 OBS_FILE_REL = "s4g_mode220_geometry_filter/inputs/mode220_obs.json"
-OUTPUT_FILE = "mode220_filter.json"
+OUTPUT_FILE = "geometries_220.json"
 
 # ---------------------------------------------------------------------------
 # Pure helpers (reusable by experiment)
@@ -113,8 +113,8 @@ def filter_mode220(
     sigma_tau_s: float,
     atlas_entries: list[dict[str, Any]],
     chi2_threshold: float,
-) -> list[str]:
-    """Return sorted list of geometry_ids whose mode-220 prediction passes chi2 < threshold.
+) -> "tuple[list[str], list[dict[str, Any]]]":
+    """Return (accepted_geometry_ids, accepted_geometries) for mode-220 chi2 < threshold.
 
     Parameters
     ----------
@@ -123,9 +123,14 @@ def filter_mode220(
     atlas_entries          : list of atlas entry dicts.
     chi2_threshold         : chi² cut-off (strict: chi2 < threshold).
 
+    Returns
+    -------
+    accepted_geometry_ids : sorted list of geometry_id strings that passed.
+    accepted_geometries   : list of full atlas entry dicts, ordered by geometry_id.
+
     This is a pure function; callers may scale sigmas before passing them in.
     """
-    passed: list[str] = []
+    passed: list[tuple[str, dict[str, Any]]] = []
     for entry in atlas_entries:
         gid = entry.get("geometry_id")
         if not isinstance(gid, str):
@@ -136,8 +141,11 @@ def filter_mode220(
         pred_f, pred_tau = pred
         chi2 = chi2_mode(obs_f_hz, obs_tau_s, pred_f, pred_tau, sigma_f_hz, sigma_tau_s)
         if passes_mode_threshold(chi2, chi2_threshold):
-            passed.append(gid)
-    return sorted(passed)
+            passed.append((gid, entry))
+    passed.sort(key=lambda t: t[0])
+    accepted_ids = [t[0] for t in passed]
+    accepted_entries = [t[1] for t in passed]
+    return accepted_ids, accepted_entries
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +200,10 @@ def main(argv: list[str] | None = None) -> int:
         sigma_tau_s = float(obs["sigma_tau_s"])
 
         atlas_entries = load_atlas_entries(atlas_path)
-        geometry_ids = filter_mode220(
+        n_geometries_scanned = sum(
+            1 for e in atlas_entries if extract_mode220_predictions(e) is not None
+        )
+        accepted_geometry_ids, accepted_geometries = filter_mode220(
             obs_f_hz=obs_f_hz,
             obs_tau_s=obs_tau_s,
             sigma_f_hz=sigma_f_hz,
@@ -200,8 +211,9 @@ def main(argv: list[str] | None = None) -> int:
             atlas_entries=atlas_entries,
             chi2_threshold=args.threshold_220,
         )
+        n_geometries_accepted = len(accepted_geometry_ids)
 
-        verdict = VERDICT_PASS if geometry_ids else VERDICT_NO_COMMON_GEOMETRIES
+        verdict = VERDICT_PASS if accepted_geometry_ids else VERDICT_NO_COMMON_GEOMETRIES
 
         payload: dict[str, Any] = {
             "schema_name": "golden_geometry_mode_filter",
@@ -216,8 +228,10 @@ def main(argv: list[str] | None = None) -> int:
             "sigma_tau_s": sigma_tau_s,
             "chi2_threshold": args.threshold_220,
             "atlas_path": str(atlas_path),
-            "geometry_ids": geometry_ids,
-            "n_passed": len(geometry_ids),
+            "n_geometries_scanned": n_geometries_scanned,
+            "n_geometries_accepted": n_geometries_accepted,
+            "accepted_geometry_ids": accepted_geometry_ids,
+            "accepted_geometries": accepted_geometries,
             "verdict": verdict,
         }
 
@@ -229,14 +243,14 @@ def main(argv: list[str] | None = None) -> int:
             "run_id": args.run_id,
             "mode": MODE_220,
             "chi2_threshold": args.threshold_220,
-            "n_atlas_mode220": sum(1 for e in atlas_entries if extract_mode220_predictions(e) is not None),
-            "n_passed": len(geometry_ids),
+            "n_geometries_scanned": n_geometries_scanned,
+            "n_geometries_accepted": n_geometries_accepted,
             "verdict": verdict,
         }
         stage_summary = write_stage_summary(stage_dir, summary)
         manifest = write_manifest(
             stage_dir,
-            {"mode220_filter": out_path, "stage_summary": stage_summary},
+            {"geometries_220": out_path, "stage_summary": stage_summary},
         )
 
         print(f"OUT_ROOT={out_root}")
@@ -244,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"OUTPUTS_DIR={outputs_dir}")
         print(f"STAGE_SUMMARY={stage_summary}")
         print(f"MANIFEST={manifest}")
-        print(f"[{STAGE}] n_passed={len(geometry_ids)} verdict={verdict}")
+        print(f"[{STAGE}] n_geometries_scanned={n_geometries_scanned} n_geometries_accepted={n_geometries_accepted} verdict={verdict}")
         return 0
 
     except KeyError as exc:

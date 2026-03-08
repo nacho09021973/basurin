@@ -305,7 +305,7 @@ def test_markdown_references_canonical_run_relative_paths(markdown_text):
 def test_markdown_artifact_paths_cover_all_five_stages(markdown_text):
     """Each of the five stage/experiment artifact basenames must appear in the markdown."""
     expected_filenames = [
-        "mode220_filter.json",
+        "geometries_220.json",
         "mode221_filter.json",
         "common_intersection.json",
         "hawking_area_filter.json",

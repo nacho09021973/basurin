@@ -349,6 +349,20 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         upstream_stages=["s2_ringdown_window"],
     ),
+    "s4g_mode220_geometry_filter": StageContract(
+        name="s4g_mode220_geometry_filter",
+        required_inputs=[
+            "s4g_mode220_geometry_filter/inputs/mode220_obs.json",
+        ],
+        external_inputs=[
+            "atlas",
+        ],
+        produced_outputs=[
+            "outputs/geometries_220.json",
+        ],
+        upstream_stages=[],
+        check_run_valid=True,
+    ),
     "experiment_geometry_evidence_vs_gr": StageContract(
         name="experiment_geometry_evidence_vs_gr",
         required_inputs=[
