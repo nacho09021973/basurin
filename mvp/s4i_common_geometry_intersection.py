@@ -1,17 +1,5 @@
 """s4i_common_geometry_intersection — Canonical stage: compute the intersection of
 geometry_ids that passed both the mode-220 and mode-221 filters.
-
-Reads:
-    <run_dir>/s4g_mode220_geometry_filter/outputs/mode220_filter.json
-    <run_dir>/s4h_mode221_geometry_filter/outputs/mode221_filter.json
-
-Output:
-    <run_dir>/s4i_common_geometry_intersection/outputs/common_intersection.json
-    <run_dir>/s4i_common_geometry_intersection/stage_summary.json
-    <run_dir>/s4i_common_geometry_intersection/manifest.json
-
-If mode-221 stage was SKIPPED (mode221 unavailable), the intersection falls back
-to the mode-220 set (no 221 constraint applied).
 """
 from __future__ import annotations
 
@@ -19,7 +7,6 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
 
 _here = Path(__file__).resolve()
 for _cand in [_here.parents[0], _here.parents[1]]:
@@ -28,14 +15,8 @@ for _cand in [_here.parents[0], _here.parents[1]]:
             sys.path.insert(0, str(_cand))
         break
 
-from basurin_io import (
-    resolve_out_root,
-    require_run_valid,
-    validate_run_id,
-    write_json_atomic,
-    write_manifest,
-    write_stage_summary,
-)
+from basurin_io import write_json_atomic
+from mvp.contracts import abort, check_inputs, finalize, init_stage, log_stage_paths
 from mvp.golden_geometry_spec import (
     VERDICT_NO_COMMON_GEOMETRIES,
     VERDICT_PASS,
@@ -44,33 +25,26 @@ from mvp.golden_geometry_spec import (
 )
 
 STAGE = "s4i_common_geometry_intersection"
-S4G_OUTPUT_REL = "s4g_mode220_geometry_filter/outputs/mode220_filter.json"
+S4G_OUTPUT_PRIMARY_REL = "s4g_mode220_geometry_filter/outputs/mode220_filter.json"
+S4G_OUTPUT_LEGACY_REL = "s4g_mode220_geometry_filter/outputs/geometries_220.json"
 S4H_OUTPUT_REL = "s4h_mode221_geometry_filter/outputs/mode221_filter.json"
 OUTPUT_FILE = "common_intersection.json"
 
 
-# ---------------------------------------------------------------------------
-# Pure helpers (reusable by experiment)
-# ---------------------------------------------------------------------------
-
-
-def compute_intersection(
-    ids_220: list[str],
-    ids_221: "list[str] | None",
-) -> list[str]:
-    """Return the sorted intersection of geometry_ids from mode 220 and mode 221.
-
-    If ids_221 is None (mode 221 unavailable), returns the mode-220 set as-is.
-    """
+def compute_intersection(ids_220: list[str], ids_221: "list[str] | None") -> list[str]:
     if ids_221 is None:
         return sorted(ids_220)
-    common = set(ids_220) & set(ids_221)
-    return sorted(common)
+    return sorted(set(ids_220) & set(ids_221))
 
 
-# ---------------------------------------------------------------------------
-# Stage entrypoint
-# ---------------------------------------------------------------------------
+def _read_ids(payload: dict) -> list[str]:
+    ids = payload.get("geometry_ids")
+    if isinstance(ids, list):
+        return [str(x) for x in ids]
+    ids = payload.get("accepted_geometry_ids")
+    if isinstance(ids, list):
+        return [str(x) for x in ids]
+    return []
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -78,30 +52,25 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--run-id", required=True)
     args = ap.parse_args(argv)
 
-    out_root = resolve_out_root("runs")
-    validate_run_id(args.run_id, out_root)
-    require_run_valid(out_root, args.run_id)
+    ctx = init_stage(args.run_id, STAGE)
 
-    run_dir = out_root / args.run_id
-    stage_dir = run_dir / STAGE
-    outputs_dir = stage_dir / "outputs"
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-
-    s4g_path = run_dir / S4G_OUTPUT_REL
-    s4h_path = run_dir / S4H_OUTPUT_REL
+    s4g_primary = ctx.run_dir / S4G_OUTPUT_PRIMARY_REL
+    s4g_legacy = ctx.run_dir / S4G_OUTPUT_LEGACY_REL
+    s4g_path = s4g_primary if s4g_primary.exists() else s4g_legacy
+    s4h_path = ctx.run_dir / S4H_OUTPUT_REL
 
     if not s4g_path.exists():
-        print(
-            f"ERROR: mode-220 filter output not found.\n"
-            f"  expected: {s4g_path}\n"
-            f"  Run s4g_mode220_geometry_filter first.",
-            file=sys.stderr,
+        abort(
+            ctx,
+            "mode-220 filter output not found. "
+            f"expected: {s4g_primary} (or legacy {s4g_legacy}). "
+            "Command to regenerate upstream: python -m mvp.s4g_mode220_geometry_filter --run-id <RUN_ID> --atlas-path <ATLAS_PATH>.",
         )
-        return 2
 
     try:
+        check_inputs(ctx, {"s4g_mode220": s4g_path}, optional={"s4h_mode221": s4h_path})
         s4g_data = json.loads(s4g_path.read_text(encoding="utf-8"))
-        ids_220: list[str] = s4g_data.get("geometry_ids", [])
+        ids_220 = _read_ids(s4g_data)
 
         ids_221: list[str] | None = None
         mode221_skipped = False
@@ -110,18 +79,14 @@ def main(argv: list[str] | None = None) -> int:
             if s4h_data.get("verdict") == VERDICT_SKIPPED_221_UNAVAILABLE:
                 mode221_skipped = True
             else:
-                ids_221 = s4h_data.get("geometry_ids", [])
+                ids_221 = _read_ids(s4h_data)
         else:
             mode221_skipped = True
 
         common_ids = compute_intersection(ids_220, ids_221)
+        verdict = VERDICT_PASS if common_ids else VERDICT_NO_COMMON_GEOMETRIES
 
-        if not common_ids:
-            verdict = VERDICT_NO_COMMON_GEOMETRIES
-        else:
-            verdict = VERDICT_PASS
-
-        payload: dict[str, Any] = {
+        payload = {
             "schema_name": "golden_geometry_common",
             "schema_version": "v1",
             "created_utc": _utc_now_iso(),
@@ -135,35 +100,28 @@ def main(argv: list[str] | None = None) -> int:
             "verdict": verdict,
         }
 
-        out_path = outputs_dir / OUTPUT_FILE
+        out_path = ctx.outputs_dir / OUTPUT_FILE
         write_json_atomic(out_path, payload)
-
-        summary = {
-            "stage": STAGE,
-            "run_id": args.run_id,
-            "n_geometries_220": len(ids_220),
-            "n_geometries_221": len(ids_221) if ids_221 is not None else None,
-            "mode221_skipped": mode221_skipped,
-            "n_common": len(common_ids),
-            "verdict": verdict,
-        }
-        stage_summary = write_stage_summary(stage_dir, summary)
-        manifest = write_manifest(
-            stage_dir,
-            {"common_intersection": out_path, "stage_summary": stage_summary},
+        finalize(
+            ctx,
+            artifacts={"common_intersection": out_path},
+            verdict="PASS",
+            results={
+                "n_geometries_220": len(ids_220),
+                "n_geometries_221": len(ids_221) if ids_221 is not None else None,
+                "mode221_skipped": mode221_skipped,
+                "n_common": len(common_ids),
+                "verdict": verdict,
+            },
         )
-
-        print(f"OUT_ROOT={out_root}")
-        print(f"STAGE_DIR={stage_dir}")
-        print(f"OUTPUTS_DIR={outputs_dir}")
-        print(f"STAGE_SUMMARY={stage_summary}")
-        print(f"MANIFEST={manifest}")
+        log_stage_paths(ctx)
         print(f"[{STAGE}] n_common={len(common_ids)} verdict={verdict}")
         return 0
-
+    except SystemExit:
+        raise
     except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 2
+        abort(ctx, str(exc))
+    return 2
 
 
 if __name__ == "__main__":
