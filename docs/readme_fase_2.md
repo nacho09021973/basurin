@@ -62,10 +62,9 @@ Verdicts: `VIABLE`, `MARGINAL`, `INVIABLE`, `DOMAIN_EMPTY`.
 - **`gwtc_quality_events.csv`**: tabla filtrada de eventos con calidad suficiente.
 - **`mvp/gwtc_events.py`**: lookup de parámetros por event_id.
 
-### 5. Herramientas de sincronización GWOSC
+### 5. Herramientas de descarga GWOSC/LOSC
 
-- **`tools/gwosc_sync_losc.py`**: descarga strain data de GWOSC/LOSC.
-- **`download_gw_events.py`**: script de descarga masiva de eventos.
+- **`tools/download_gw_events.py`**: script de descarga masiva de eventos y strain en `data/losc/<EVENT_ID>/`.
 
 ### 6. Correcciones de gates (`mvp/s3b_multimode_estimates.py`, `mvp/s4c_kerr_consistency.py`)
 
@@ -111,8 +110,7 @@ Nuevos:
   tests/test_multimode_wiring_unittest.py         — 13 tests de cableado
   gwtc_events_t0.json                             — Catálogo de eventos
   gwtc_quality_events.csv                         — Eventos filtrados
-  download_gw_events.py                           — Descarga de eventos
-  tools/gwosc_sync_losc.py                        — Sincronización GWOSC
+  tools/download_gw_events.py                     — Descarga de eventos + strain en data/losc
 
 Modificados:
   mvp/pipeline.py                                 — Integración del preflight

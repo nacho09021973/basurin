@@ -8,19 +8,18 @@ filtrando por calidad (SNR, p_astro, FAR) y guardando metadatos + strain data.
 Pensado para análisis de ringdown con BASURIN.
 
 Uso:
-    python download_gw_events.py                    # Solo metadata (CSV)
-    python download_gw_events.py --download          # Metadata + descarga strain
-    python download_gw_events.py --download --sr 16384  # Strain a 16kHz
-    python download_gw_events.py --snr-min 12        # Solo eventos con SNR >= 12
+    python tools/download_gw_events.py                      # Solo metadata (CSV/JSON)
+    python tools/download_gw_events.py --download           # Metadata + descarga strain
+    python tools/download_gw_events.py --download --losc-root data/losc
+    python tools/download_gw_events.py --download --sr 16384  # Strain a 16kHz
 
 Requisitos:
     pip install gwosc requests pandas
 """
 
 import argparse
+import hashlib
 import json
-import os
-import sys
 import time
 from pathlib import Path
 
@@ -175,18 +174,52 @@ def apply_quality_filters(df, snr_min, pastro_min, far_max, exclude_problematic)
     return df
 
 
-def download_strain_for_event(event_row, output_dir, sample_rate=4096, 
-                                duration=4096, fmt="hdf5"):
-    """Descarga los archivos de strain para un evento."""
+def _normalize_event_id(event_name: str) -> str:
+    """Map event names to canonical folder naming used under data/losc."""
+    return event_name.strip().replace(" ", "_")
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _write_sha256_sums(event_dir: Path) -> None:
+    h5_files = sorted(
+        [
+            p for p in event_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in {".h5", ".hdf5"}
+        ],
+        key=lambda p: p.name,
+    )
+    if not h5_files:
+        return
+    sums_path = event_dir / "SHA256SUMS.txt"
+    lines = [f"{_sha256_file(p)}  {p.name}\n" for p in h5_files]
+    sums_path.write_text("".join(lines), encoding="utf-8")
+
+
+def download_strain_for_event(
+    event_row,
+    losc_root,
+    sample_rate=4096,
+    duration=4096,
+    fmt="hdf5",
+):
+    """Descarga strain para un evento en data/losc/<EVENT_ID>/."""
     from gwosc.locate import get_event_urls
     
     event_name = event_row["event"]
-    event_dir = Path(output_dir) / event_name.replace(" ", "_")
+    event_id = _normalize_event_id(event_name)
+    event_dir = Path(losc_root) / event_id
     event_dir.mkdir(parents=True, exist_ok=True)
     
     downloaded = []
     
-    for det in ["H1", "L1", "V1"]:
+    for det in ["H1", "L1"]:
         try:
             urls = get_event_urls(
                 event_name, 
@@ -245,7 +278,8 @@ def download_strain_for_event(event_row, output_dir, sample_rate=4096,
                 downloaded.append(str(fpath))
             except Exception as e:
                 print(f"\n    [ERROR] {fname}: {e}")
-    
+
+    _write_sha256_sums(event_dir)
     return downloaded
 
 
@@ -270,7 +304,9 @@ def main():
     parser.add_argument("--format", default="hdf5", choices=["hdf5", "gwf"],
                         help="Formato de strain (default: hdf5)")
     parser.add_argument("--output-dir", default="gw_events",
-                        help="Directorio de salida (default: gw_events)")
+                        help="Directorio de metadatos (CSV/JSON) (default: gw_events)")
+    parser.add_argument("--losc-root", default="data/losc",
+                        help="Destino canónico de strain para pipeline (default: data/losc)")
     parser.add_argument("--catalogs", nargs="+", default=DEFAULT_CATALOGS,
                         help="Catálogos a consultar")
     parser.add_argument("--all-events", action="store_true",
@@ -354,6 +390,8 @@ def main():
     # =========================================================================
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    losc_root = Path(args.losc_root)
+    losc_root.mkdir(parents=True, exist_ok=True)
     
     csv_all = output_dir / "gwtc_all_events.csv"
     csv_filtered = output_dir / "gwtc_quality_events.csv"
@@ -395,20 +433,19 @@ def main():
     if args.download:
         print(f"\n{'=' * 60}")
         print(f"DESCARGANDO STRAIN DATA")
+        print(f"  LOSC root:  {losc_root}")
         print(f"  Sample rate: {args.sr} Hz")
         print(f"  Duración:    {args.duration} s")
         print(f"  Formato:     {args.format}")
         print(f"{'=' * 60}\n")
-        
-        strain_dir = output_dir / "strain"
-        
+
         for i, (_, row) in enumerate(df_filtered.iterrows()):
             event = row["event"]
             print(f"[{i+1}/{len(df_filtered)}] {event} (SNR={row['snr']:.1f}, "
                   f"GPS={row['GPS']})...")
             
             downloaded = download_strain_for_event(
-                row, strain_dir,
+                row, losc_root,
                 sample_rate=args.sr,
                 duration=args.duration,
                 fmt=args.format,
@@ -421,7 +458,7 @@ def main():
             
             time.sleep(0.3)
         
-        print(f"\nStrain data guardado en: {strain_dir}/")
+        print(f"\nStrain data guardado en: {losc_root}/<EVENT_ID>/")
     
     print("\n¡Listo!")
     return df_filtered
