@@ -62,11 +62,24 @@ def _canonical_event_id(event_id: str) -> str:
     return event_id.split("_", 1)[0] if "_" in event_id else event_id
 
 
-def _resolve_t0_gps(event_id: str, window_catalog_path: Path) -> tuple[float, str, str]:
+def _resolve_t0_gps(
+    event_id: str,
+    window_catalog_path: Path,
+    *,
+    include_lookup_key: bool = False,
+) -> tuple[float, str] | tuple[float, str, str]:
     canonical_event_id = _canonical_event_id(event_id)
     lookup_keys = [event_id]
     if canonical_event_id != event_id:
         lookup_keys.append(canonical_event_id)
+
+    def _pack(t0: float, source: str, lookup_key: str) -> tuple[float, str] | tuple[float, str, str]:
+        # Backward-compatible return shape:
+        # - canonical event IDs historically returned (t0, source)
+        # - alias lookups need (t0, source, lookup_key)
+        if include_lookup_key or lookup_key != event_id:
+            return (t0, source, lookup_key)
+        return (t0, source)
 
     if window_catalog_path.exists():
         with open(window_catalog_path, "r", encoding="utf-8") as f:
@@ -82,17 +95,17 @@ def _resolve_t0_gps(event_id: str, window_catalog_path: Path) -> tuple[float, st
                     continue
                 t0_ref = w.get("t0_ref", {})
                 if "value_gps" in t0_ref:
-                    return float(t0_ref["value_gps"]), str(window_catalog_path), str(w.get("event_id"))
+                    return _pack(float(t0_ref["value_gps"]), str(window_catalog_path), str(w.get("event_id")))
 
             # Schema A: {"GW190521": {"t0_gps": 1242442967.4}}
             for lookup_key in lookup_keys:
                 if lookup_key in catalog and isinstance(catalog[lookup_key], dict) and "t0_gps" in catalog[lookup_key]:
-                    return float(catalog[lookup_key]["t0_gps"]), str(window_catalog_path), lookup_key
+                    return _pack(float(catalog[lookup_key]["t0_gps"]), str(window_catalog_path), lookup_key)
 
             # Schema B: {"GW190521": 1242442967.4}
             for lookup_key in lookup_keys:
                 if lookup_key in catalog and isinstance(catalog[lookup_key], (int, float)):
-                    return float(catalog[lookup_key]), str(window_catalog_path), lookup_key
+                    return _pack(float(catalog[lookup_key]), str(window_catalog_path), lookup_key)
 
         canonical_detail = ""
         if canonical_event_id != event_id:
@@ -109,7 +122,7 @@ def _resolve_t0_gps(event_id: str, window_catalog_path: Path) -> tuple[float, st
             meta = json.load(f)
         for key in ("t_coalescence_gps", "t0_ref_gps", "GPS"):
             if key in meta:
-                return float(meta[key]), str(meta_path), event_id
+                return _pack(float(meta[key]), str(meta_path), event_id)
     canonical_detail = ""
     if canonical_event_id != event_id:
         canonical_detail = f"; canonical_event_id={canonical_event_id!r}"
@@ -172,7 +185,11 @@ def main() -> int:
     try:
         import numpy as np
 
-        t0_gps, t0_source, event_id_lookup_key = _resolve_t0_gps(args.event_id, Path(args.window_catalog))
+        t0_gps, t0_source, event_id_lookup_key = _resolve_t0_gps(
+            args.event_id,
+            Path(args.window_catalog),
+            include_lookup_key=True,
+        )
         t_start_gps = t0_gps + args.dt_start_s
         t_end_gps = t_start_gps + args.duration_s
 

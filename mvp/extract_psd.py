@@ -60,8 +60,9 @@ def extract_psd(
     """
     from scipy.signal import welch
 
-    nperseg = min(len(strain), int(nperseg_s * fs))
-    nperseg = max(nperseg, 64)
+    # Keep the historical floor when possible, but avoid nperseg > len(strain)
+    # warnings on very short inputs.
+    nperseg = min(len(strain), max(64, int(nperseg_s * fs)))
     noverlap = int(nperseg * overlap)
 
     freqs, psd = welch(

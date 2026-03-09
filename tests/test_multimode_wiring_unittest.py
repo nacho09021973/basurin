@@ -159,10 +159,15 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
 
             self.assertEqual(rc, 0)
             timeline = json.loads((runs_root / run_id / "pipeline_timeline.json").read_text(encoding="utf-8"))
-            self.assertEqual([s["stage"] for s in timeline["stages"]], [
+            stages = [s["stage"] for s in timeline["stages"]]
+            expected_prefix = [
                 "s0_oracle_mvp", "s1_fetch_strain", "s2_ringdown_window", "s3_ringdown_estimates",
                 "s3b_multimode_estimates", "s4_geometry_filter", "s4c_kerr_consistency",
-            ])
+            ]
+            self.assertEqual(stages[:len(expected_prefix)], expected_prefix)
+            # Newer pipeline variants append s4d_kerr_from_multimode after s4c.
+            if len(stages) > len(expected_prefix):
+                self.assertEqual(stages[len(expected_prefix):], ["s4d_kerr_from_multimode"])
             self.assertEqual(timeline["multimode_results"]["extraction_quality"], "INSUFFICIENT_DATA")
 
     def test_multi_forwards_with_t0_sweep_to_each_event(self) -> None:

@@ -40,40 +40,113 @@ def _relpath_under(root: Path, p: Path) -> str:
         return p.as_posix()
 
 
-def _extract_compatible_geometry_ids(payload: dict[str, Any], source_path: Path) -> list[str]:
-    """Extract compatible geometry IDs from canonical compatible_set schema only."""
-    required_keys = {"schema_version", "event_id", "compatible_geometry_ids"}
+def _extract_compatible_geometry_ids(
+    payload: dict[str, Any],
+    source_path: Path | None = None,
+    *,
+    strict_canonical: bool | None = None,
+) -> list[str] | set[str]:
+    """Extract compatible geometry IDs from canonical and legacy compatible_set schemas.
+
+    Supported keys:
+    - canonical: compatible_geometry_ids
+    - legacy: compatible_geometries, compatible_entries, compatible_ids
+    """
+
+    if strict_canonical is None:
+        strict_canonical = source_path is not None
+
+    source_label = source_path.as_posix() if source_path is not None else "<memory>"
     present_keys = sorted(payload.keys())
 
     def _schema_error(reason: str) -> RuntimeError:
         return RuntimeError(
             "Invalid compatible_set schema at "
-            f"{source_path.as_posix()}: {reason}. "
-            f"Present keys={present_keys}. "
-            "Expected canonical schema keys: "
-            "['compatible_geometry_ids', 'event_id', 'schema_version'] with "
-            "additionalProperties=false. "
-            "Hint: include 'schema_version': 1 and regenerate upstream with "
-            f"`python -m mvp.s4_geometry_filter --run {source_path.parts[-5]} --atlas-path <atlas.json>`"
+            f"{source_label}: {reason}. Present keys={present_keys}."
         )
 
-    if set(payload.keys()) != required_keys:
-        raise _schema_error("unexpected keys or missing required keys")
+    def _coerce_gid(value: Any) -> str | None:
+        if isinstance(value, str):
+            gid = value.strip()
+            return gid if gid else None
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return str(int(value)) if isinstance(value, int) or float(value).is_integer() else str(value)
+        return None
 
-    if payload.get("schema_version") != 1:
-        raise _schema_error("'schema_version' must be integer 1")
+    ids: set[str] = set()
 
-    event_id = payload.get("event_id")
-    if not isinstance(event_id, str) or not event_id.strip():
-        raise _schema_error("'event_id' must be a non-empty string")
+    if strict_canonical:
+        required_keys = {"schema_version", "event_id", "compatible_geometry_ids"}
+        if set(payload.keys()) != required_keys:
+            raise _schema_error(
+                "unexpected keys or missing required keys; expected "
+                "['schema_version', 'event_id', 'compatible_geometry_ids']"
+            )
+        if payload.get("schema_version") != 1:
+            raise _schema_error("'schema_version' must be integer 1")
+        event_id = payload.get("event_id")
+        if not isinstance(event_id, str) or not event_id.strip():
+            raise _schema_error("'event_id' must be a non-empty string")
+        canonical_ids = payload.get("compatible_geometry_ids")
+        if not isinstance(canonical_ids, list):
+            raise _schema_error("'compatible_geometry_ids' must be an array")
+        for gid in canonical_ids:
+            coerced = _coerce_gid(gid)
+            if coerced is not None:
+                ids.add(coerced)
+        return sorted(ids)
 
-    ids = payload.get("compatible_geometry_ids")
-    if not isinstance(ids, list) or not ids:
-        raise _schema_error("'compatible_geometry_ids' must be a non-empty array")
-    if any(not isinstance(gid, str) or not gid.strip() for gid in ids):
-        raise _schema_error("'compatible_geometry_ids' must contain only non-empty strings")
+    # Canonical schema (v1)
+    canonical_ids = payload.get("compatible_geometry_ids")
+    if isinstance(canonical_ids, list):
+        for gid in canonical_ids:
+            coerced = _coerce_gid(gid)
+            if coerced is not None:
+                ids.add(coerced)
+        return ids
 
-    return sorted(set(ids))
+    # Legacy schema: [{"geometry_id": "...", "compatible": true}, ...]
+    legacy_rows = payload.get("compatible_geometries")
+    if isinstance(legacy_rows, list):
+        for row in legacy_rows:
+            if isinstance(row, dict):
+                if row.get("compatible") is False:
+                    continue
+                candidate = row.get("geometry_id", row.get("id"))
+                coerced = _coerce_gid(candidate)
+                if coerced is not None:
+                    ids.add(coerced)
+            else:
+                coerced = _coerce_gid(row)
+                if coerced is not None:
+                    ids.add(coerced)
+        return ids
+
+    # Alternate legacy forms.
+    entries_rows = payload.get("compatible_entries")
+    if isinstance(entries_rows, list):
+        for row in entries_rows:
+            if isinstance(row, dict):
+                candidate = row.get("geometry_id", row.get("id"))
+                coerced = _coerce_gid(candidate)
+            else:
+                coerced = _coerce_gid(row)
+            if coerced is not None:
+                ids.add(coerced)
+        return ids
+
+    ids_rows = payload.get("compatible_ids")
+    if isinstance(ids_rows, list):
+        for row in ids_rows:
+            coerced = _coerce_gid(row)
+            if coerced is not None:
+                ids.add(coerced)
+        return ids
+
+    raise _schema_error(
+        "no compatible geometry identifiers found in canonical or legacy keys "
+        "('compatible_geometry_ids', 'compatible_geometries', 'compatible_entries', 'compatible_ids')"
+    )
 
 
 def _parse_s6b_indices(rows: Any) -> list[int]:
@@ -649,7 +722,7 @@ def main() -> int:
             with open(p, "r", encoding="utf-8") as f:
                 cs = json.load(f)
 
-            extracted_ids = _extract_compatible_geometry_ids(cs, p)
+            extracted_ids = _extract_compatible_geometry_ids(cs, p, strict_canonical=False)
             if os.environ.get("BASURIN_DEBUG_S5"):
                 print(
                     f"[s5 debug] run={src} payload_keys={sorted(cs.keys())} extracted_ids={sorted(extracted_ids)}",

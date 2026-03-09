@@ -6,6 +6,7 @@ import argparse
 import json
 import math
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -520,6 +521,17 @@ def main() -> int:
     optional_inputs: dict[str, Path] = {}
     if args.estimates_path and estimates_path != default_estimates:
         optional_inputs["estimates_override_external"] = estimates_path
+
+        # Backward-compatible behavior:
+        # if estimates are explicitly overridden, avoid hard-failing on the default
+        # s3_ringdown_estimates path from the static contract.
+        required_inputs = [
+            p
+            for p in ctx.contract.required_inputs
+            if p != "s3_ringdown_estimates/outputs/estimates.json"
+        ]
+        if len(required_inputs) != len(ctx.contract.required_inputs):
+            ctx.contract = replace(ctx.contract, required_inputs=required_inputs)
 
     check_inputs(
         ctx,

@@ -322,7 +322,7 @@ def _write_preflight_report_or_abort(
                 "\nPrimero ejecuta s1_fetch_strain; los HDF5 externos deben estar en "
                 f"{repo_root / 'data' / 'losc' / '<EVENT_ID>'}/ ..."
                 f"\nEjemplo: {s1_cmd}"
-                f"\nComprobación: find {repo_root / 'data' / 'losc' / '<EVENT_ID>'} \( -iname '*.hdf5' -o -iname '*.h5' \) -type f"
+                f"\nComprobación: find {repo_root / 'data' / 'losc' / '<EVENT_ID>'} \\( -iname '*.hdf5' -o -iname '*.h5' \\) -type f"
             )
         print(msg, file=sys.stderr)
         raise SystemExit(2)
