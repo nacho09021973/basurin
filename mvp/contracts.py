@@ -365,7 +365,9 @@ CONTRACTS: dict[str, StageContract] = {
     ),
     "s4h_mode221_geometry_filter": StageContract(
         name="s4h_mode221_geometry_filter",
-        required_inputs=[],  # mode221_obs.json is optional (skip if absent)
+        required_inputs=[
+            # mode221_obs is optional; when absent the stage emits SKIPPED output.
+        ],
         external_inputs=[
             "atlas",
         ],
@@ -378,18 +380,19 @@ CONTRACTS: dict[str, StageContract] = {
     "s4i_common_geometry_intersection": StageContract(
         name="s4i_common_geometry_intersection",
         required_inputs=[
-            "s4g_mode220_geometry_filter/outputs/geometries_220.json",
+            "s4g_mode220_geometry_filter/outputs/mode220_filter.json",
         ],
         produced_outputs=[
             "outputs/common_intersection.json",
         ],
-        upstream_stages=["s4g_mode220_geometry_filter"],
+        upstream_stages=["s4g_mode220_geometry_filter", "s4h_mode221_geometry_filter"],
         check_run_valid=True,
     ),
     "s4j_hawking_area_filter": StageContract(
         name="s4j_hawking_area_filter",
         required_inputs=[
             "s4i_common_geometry_intersection/outputs/common_intersection.json",
+            # area_obs input is optional; when absent no area constraint is applied.
         ],
         produced_outputs=[
             "outputs/hawking_area_filter.json",

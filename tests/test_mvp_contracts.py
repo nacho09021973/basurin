@@ -49,7 +49,9 @@ class TestContractRegistry:
                        "experiment_ex3_golden_sweep", "experiment_ex4_spectral_exclusion",
                        "experiment_gwtc_posteriors_fetch", "experiment_area_theorem",
                        "experiment/delta_lnL_sweep", "psd_extract",
-                       "experiment_ex8_area_consistency"}
+                       "experiment_ex8_area_consistency",
+                       "s4g_mode220_geometry_filter", "s4h_mode221_geometry_filter",
+                       "s4i_common_geometry_intersection", "s4j_hawking_area_filter"}
 
     def test_all_stages_registered(self):
         """Every MVP stage has a contract entry."""

@@ -290,7 +290,7 @@ def _evaluate_single_scenario(
     st_220 = mode220["sigma_tau_s"] * sigma_scale
 
     try:
-        ids_220 = filter_mode220(
+        ids_220, _ = filter_mode220(
             obs_f_hz=mode220["obs_f_hz"],
             obs_tau_s=mode220["obs_tau_s"],
             sigma_f_hz=sf_220,
