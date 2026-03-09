@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import math
 import os
 import sys
@@ -23,6 +24,10 @@ STAGE = "s7_beyond_kerr_deviation_score"
 GR_THRESHOLD_90 = 4.605
 GR_THRESHOLD_99 = 9.210
 BNS_MAX_REMNANT_MASS_MSUN = 10.0
+BNS_MAX_REMNANT_MASS_MSUN_MIN = 5.0
+BNS_MAX_REMNANT_MASS_MSUN_MAX = 15.0
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now_z() -> str:
@@ -130,6 +135,7 @@ def _resolve_bns_mass_upper_bound_msun() -> float:
     """Resolve BNS remnant-mass upper bound from env with conservative default.
 
     BASURIN_BNS_MAX_REMNANT_MASS_MSUN can tune this threshold without changing code.
+    Recommended range: [5, 15] Msun. Values outside this range are clamped.
     """
     raw = os.environ.get("BASURIN_BNS_MAX_REMNANT_MASS_MSUN")
     if raw is None:
@@ -137,10 +143,39 @@ def _resolve_bns_mass_upper_bound_msun() -> float:
     try:
         bound = float(raw)
     except ValueError:
+        logger.warning(
+            "Ignoring invalid BASURIN_BNS_MAX_REMNANT_MASS_MSUN=%r; using default %.1f",
+            raw,
+            BNS_MAX_REMNANT_MASS_MSUN,
+        )
         return BNS_MAX_REMNANT_MASS_MSUN
     if not math.isfinite(bound) or bound <= 0.0:
+        logger.warning(
+            "Ignoring non-finite/out-of-domain BASURIN_BNS_MAX_REMNANT_MASS_MSUN=%r; using default %.1f",
+            raw,
+            BNS_MAX_REMNANT_MASS_MSUN,
+        )
         return BNS_MAX_REMNANT_MASS_MSUN
-    return bound
+    clamped = min(BNS_MAX_REMNANT_MASS_MSUN_MAX, max(BNS_MAX_REMNANT_MASS_MSUN_MIN, bound))
+    if clamped != bound:
+        logger.warning(
+            "Clamping BASURIN_BNS_MAX_REMNANT_MASS_MSUN from %.3f to %.3f (allowed range %.1f-%.1f)",
+            bound,
+            clamped,
+            BNS_MAX_REMNANT_MASS_MSUN_MIN,
+            BNS_MAX_REMNANT_MASS_MSUN_MAX,
+        )
+    return clamped
+
+
+def _validate_metadata_for_source_inference(metadata: dict[str, Any]) -> str | None:
+    preferred_families = metadata.get("preferred_families")
+    if preferred_families is not None and not isinstance(preferred_families, list):
+        return "preferred_families must be a list when present"
+    family_priors = metadata.get("family_priors")
+    if family_priors is not None and not isinstance(family_priors, dict):
+        return "family_priors must be an object when present"
+    return None
 
 
 def _infer_source_kind_from_metadata(metadata: dict[str, Any]) -> str | None:
@@ -183,9 +218,18 @@ def _astrophysical_consistency(*, M_final: float, metadata: dict[str, Any]) -> d
       "mass_upper_bound_msun": 10.0
     }
 
-    TODO: consider probabilistic consistency using upstream mass uncertainties
-    (e.g. P[M_final > bound] > threshold) instead of a hard cut.
+    TODO: migrate to probabilistic consistency with upstream uncertainties
+    (e.g. if s4d provides mu/sigma, evaluate P[M_final > bound] via Normal CDF
+    and compare against a confidence threshold) instead of a hard cut.
     """
+    metadata_validation_error = _validate_metadata_for_source_inference(metadata)
+    if metadata_validation_error is not None:
+        return {
+            "source_kind": None,
+            "status": "METADATA_INSUFFICIENT",
+            "reason": f"event metadata malformed for source inference: {metadata_validation_error}",
+            "mass_upper_bound_msun": None,
+        }
     source_kind = _classify_source_kind(_extract_source_class(metadata)) or _infer_source_kind_from_metadata(metadata)
     mass_upper_bound_msun = _resolve_bns_mass_upper_bound_msun()
     lookup_state = str(metadata.get("_metadata_lookup", "missing"))

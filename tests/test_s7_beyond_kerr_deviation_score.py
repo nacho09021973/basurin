@@ -292,6 +292,31 @@ def test_bns_mass_prior_is_configurable_from_env(tmp_path: Path, monkeypatch) ->
     assert payload["astrophysical_consistency"]["mass_upper_bound_msun"] == 5.0
 
 
+def test_bns_mass_prior_env_invalid_uses_default(monkeypatch) -> None:
+    monkeypatch.setenv("BASURIN_BNS_MAX_REMNANT_MASS_MSUN", "not-a-number")
+    assert s7._resolve_bns_mass_upper_bound_msun() == 10.0
+
+
+def test_bns_mass_prior_env_is_clamped(monkeypatch) -> None:
+    monkeypatch.setenv("BASURIN_BNS_MAX_REMNANT_MASS_MSUN", "1000.0")
+    assert s7._resolve_bns_mass_upper_bound_msun() == 15.0
+
+
+def test_not_applicable_when_metadata_lookup_not_requested() -> None:
+    payload = s7._astrophysical_consistency(M_final=68.0, metadata={"_metadata_lookup": "not_requested"})
+    assert payload["status"] == "NOT_APPLICABLE"
+    assert payload["source_kind"] is None
+
+
+def test_inconclusive_when_metadata_schema_is_malformed() -> None:
+    payload = s7._astrophysical_consistency(
+        M_final=11.0,
+        metadata={"preferred_families": "BNS_REMNANT", "_metadata_lookup": "found"},
+    )
+    assert payload["status"] == "METADATA_INSUFFICIENT"
+    assert "malformed" in payload["reason"]
+
+
 def test_inconclusive_when_event_metadata_is_insufficient(tmp_path: Path, monkeypatch) -> None:
     runs_root = tmp_path / "runs"
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
