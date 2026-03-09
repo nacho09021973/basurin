@@ -736,7 +736,7 @@ def main() -> int:
             with open(p, "r", encoding="utf-8") as f:
                 cs = json.load(f)
 
-            extracted_ids = _extract_compatible_geometry_ids(cs, p)
+            extracted_ids = _extract_compatible_geometry_ids(cs, p, strict_canonical=False)
             if os.environ.get("BASURIN_DEBUG_S5"):
                 print(
                     f"[s5 debug] run={src} payload_keys={sorted(cs.keys())} extracted_ids={sorted(extracted_ids)}",
