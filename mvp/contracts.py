@@ -241,6 +241,7 @@ CONTRACTS: dict[str, StageContract] = {
         produced_outputs=[
             "outputs/brunete_metrics.json",
             "outputs/psd_derivatives.json",
+            "outputs/brunete_curvature.json",
             "stage_summary.json",
             "manifest.json",
         ],
@@ -320,8 +321,20 @@ CONTRACTS: dict[str, StageContract] = {
         produced_outputs=[
             "outputs/kerr_from_multimode.json",
             "outputs/kerr_from_multimode_diagnostics.json",
+            "outputs/kerr_extraction.json",
         ],
         upstream_stages=["s3b_multimode_estimates"],
+    ),
+    "s7_beyond_kerr_deviation_score": StageContract(
+        name="s7_beyond_kerr_deviation_score",
+        required_inputs=[
+            "s4d_kerr_from_multimode/outputs/kerr_extraction.json",
+            "s3b_multimode_estimates/outputs/multimode_estimates.json",
+        ],
+        produced_outputs=[
+            "outputs/beyond_kerr_score.json",
+        ],
+        upstream_stages=["s4d_kerr_from_multimode", "s3b_multimode_estimates"],
     ),
     "s3_spectral_estimates": StageContract(
         name="s3_spectral_estimates",
@@ -335,6 +348,57 @@ CONTRACTS: dict[str, StageContract] = {
             "outputs/spectral_estimates.json",
         ],
         upstream_stages=["s2_ringdown_window"],
+    ),
+    "s4g_mode220_geometry_filter": StageContract(
+        name="s4g_mode220_geometry_filter",
+        required_inputs=[
+            "s4g_mode220_geometry_filter/inputs/mode220_obs.json",
+        ],
+        external_inputs=[
+            "atlas",
+        ],
+        produced_outputs=[
+            "outputs/geometries_220.json",
+        ],
+        upstream_stages=[],
+        check_run_valid=True,
+    ),
+    "s4h_mode221_geometry_filter": StageContract(
+        name="s4h_mode221_geometry_filter",
+        required_inputs=[
+            # mode221_obs is optional; when absent the stage emits SKIPPED output.
+        ],
+        external_inputs=[
+            "atlas",
+        ],
+        produced_outputs=[
+            "outputs/mode221_filter.json",
+        ],
+        upstream_stages=[],
+        check_run_valid=True,
+    ),
+    "s4i_common_geometry_intersection": StageContract(
+        name="s4i_common_geometry_intersection",
+        required_inputs=[
+            "s4g_mode220_geometry_filter/outputs/mode220_filter.json",
+        ],
+        produced_outputs=[
+            "outputs/common_intersection.json",
+        ],
+        upstream_stages=["s4g_mode220_geometry_filter", "s4h_mode221_geometry_filter"],
+        check_run_valid=True,
+    ),
+    "s4j_hawking_area_filter": StageContract(
+        name="s4j_hawking_area_filter",
+        required_inputs=[
+            "s4i_common_geometry_intersection/outputs/common_intersection.json",
+            # area_obs input is optional; when absent no area constraint is applied.
+        ],
+        produced_outputs=[
+            "outputs/hawking_area_filter.json",
+        ],
+        upstream_stages=["s4i_common_geometry_intersection"],
+        check_run_valid=True,
     ),
     "experiment_geometry_evidence_vs_gr": StageContract(
         name="experiment_geometry_evidence_vs_gr",

@@ -24,6 +24,39 @@ class FakeStrain:
 
 
 class TestExperimentT0SweepFullPaths(unittest.TestCase):
+    def test_restrict_grid_with_preflight_viable_domain(self) -> None:
+        exp = importlib.import_module("mvp.experiment_t0_sweep_full")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "runs" / "run_x"
+            preflight = run_dir / "preflight_viability" / "outputs"
+            preflight.mkdir(parents=True, exist_ok=True)
+            (preflight / "preflight_viability.json").write_text(
+                json.dumps(
+                    {
+                        "alpha_safety": 2.5,
+                        "source_params": {"rho_total": 4.0},
+                        "current_config": {"T_s": 0.06},
+                        "modes": {
+                            "220": {
+                                "qnm_params": {
+                                    "tau_s": 0.01,
+                                    "Q": 20.0,
+                                }
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            filtered, restriction = exp._restrict_grid_with_preflight(run_dir, [0, 3, 8, 15])
+            self.assertEqual(filtered, [3, 8, 15])
+            assert restriction is not None
+            self.assertEqual(restriction["reason"], "RESTRICTED_TO_VIABLE_DOMAIN")
+            self.assertEqual(restriction["original_grid_ms"], [0, 3, 8, 15])
+            self.assertEqual(restriction["filtered_grid_ms"], [3, 8, 15])
+
     def test_phase_run_uses_batch_root_env_for_run_valid_and_default_scan_root(self) -> None:
         exp = importlib.import_module("mvp.experiment_t0_sweep_full")
 

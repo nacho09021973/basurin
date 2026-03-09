@@ -113,7 +113,10 @@ class TestAntiRegression:
         ]
 
     def test_s4_geometry_filter_outputs(self):
-        assert "outputs/compatible_set.json" in CONTRACTS["s4_geometry_filter"].produced_outputs
+        assert CONTRACTS["s4_geometry_filter"].produced_outputs == [
+            "outputs/compatible_set.json",
+            "outputs/ranked_all_full.json",
+        ]
 
     def test_s3_ringdown_estimates_upstream(self):
         assert CONTRACTS["s3_ringdown_estimates"].upstream_stages == [
@@ -148,8 +151,8 @@ class TestAntiRegression:
 
 class TestContractCount:
     def test_total_contracts_is_10(self):
-        """Registry must not regress below the historical baseline contract count."""
-        assert len(CONTRACTS) >= 24
+        """Registry includes oracle precheck + FASE 4/5 + s4 spectral variant + experiments."""
+        assert len(CONTRACTS) == 30
 
 
 # ── Test 4: DAG integrity with new stages ────────────────────────────────
@@ -158,7 +161,7 @@ class TestContractCount:
 class TestDAGIntegrity:
     def test_new_upstream_references_valid(self):
         """All upstream_stages referenced by new contracts exist in CONTRACTS."""
-        for name in ("s3b_multimode_estimates", "s4c_kerr_consistency", "s4d_kerr_from_multimode"):
+        for name in ("s3b_multimode_estimates", "s4c_kerr_consistency", "s4d_kerr_from_multimode", "s7_beyond_kerr_deviation_score"):
             c = CONTRACTS[name]
             for upstream in c.upstream_stages:
                 assert upstream in CONTRACTS, (

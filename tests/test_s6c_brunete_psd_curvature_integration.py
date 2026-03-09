@@ -84,9 +84,21 @@ def test_s6c_brunete_golden_schema_tmp_runs_root(tmp_path: Path) -> None:
     outputs_dir = stage_dir / "outputs"
     metrics_path = outputs_dir / "brunete_metrics.json"
     deriv_path = outputs_dir / "psd_derivatives.json"
+    curvature_path = outputs_dir / "brunete_curvature.json"
 
     assert metrics_path.exists()
     assert deriv_path.exists()
+    assert curvature_path.exists()
+
+    curvature_payload = json.loads(curvature_path.read_text(encoding="utf-8"))
+    assert curvature_payload.get("schema_version") == "brunete_curvature_v1"
+    assert isinstance(curvature_payload.get("per_detector"), list)
+    assert len(curvature_payload["per_detector"]) == 1
+    det_entry = curvature_payload["per_detector"][0]
+    assert det_entry["detector"] == "H1"
+    assert "omega_conformal_factor" in det_entry
+    assert "psd_contamination_flag" in det_entry
+    assert isinstance(det_entry["psd_contamination_flag"], bool)
 
     metrics_payload = json.loads(metrics_path.read_text(encoding="utf-8"))
     deriv_payload = json.loads(deriv_path.read_text(encoding="utf-8"))
@@ -147,6 +159,7 @@ def test_s6c_brunete_golden_manifest_hashes(tmp_path: Path) -> None:
     expected = {
         "brunete_metrics": stage_dir / "outputs" / "brunete_metrics.json",
         "psd_derivatives": stage_dir / "outputs" / "psd_derivatives.json",
+        "brunete_curvature": stage_dir / "outputs" / "brunete_curvature.json",
         "stage_summary": stage_dir / "stage_summary.json",
     }
     for label, path in expected.items():
@@ -502,3 +515,26 @@ def test_s6c_regimes_sigma_and_chi_psd_are_decoupled(tmp_path: Path) -> None:
 
     assert row["regime_sigma"] == "perturbative"
     assert row["regime_chi_psd"] == "elevated"
+
+
+def test_s6c_flat_psd_gives_omega_near_unity(tmp_path: Path) -> None:
+    runs_root, run_id, run_dir = _prepare_run(tmp_path)
+    write_json_atomic(run_dir / "external_inputs" / "psd_model.json", {"schema_version":"mvp_psd_model_v1","models":{"H1":{"frequencies_hz":[20.0+i for i in range(200)],"psd_values":[1.0 for _ in range(200)]}}})
+    proc = _run_stage(run_id=run_id, runs_root=runs_root)
+    assert proc.returncode == 0, proc.stderr
+    curv = json.loads((run_dir / "s6c_brunete_psd_curvature" / "outputs" / "brunete_curvature.json").read_text(encoding="utf-8"))
+    assert abs(curv["omega_conformal_factor"] - 1.0) <= 0.05
+
+
+def test_s6c_peaked_psd_flags_contamination_and_pd_metric(tmp_path: Path) -> None:
+    runs_root, run_id, run_dir = _prepare_run(tmp_path)
+    freqs = [20.0 + i for i in range(800)]
+    vals = [1.0 + 15.0 * math.exp(-((f - 100.0) ** 2) / (2.0 * 10.0 * 10.0)) for f in freqs]
+    write_json_atomic(run_dir / "external_inputs" / "psd_model.json", {"schema_version":"mvp_psd_model_v1","models":{"H1":{"frequencies_hz":freqs,"psd_values":vals}}})
+    proc = _run_stage(run_id=run_id, runs_root=runs_root)
+    assert proc.returncode == 0, proc.stderr
+    curv = json.loads((run_dir / "s6c_brunete_psd_curvature" / "outputs" / "brunete_curvature.json").read_text(encoding="utf-8"))
+    assert curv["psd_contamination_flag"] == "PSD_DOMINATED"
+    g = curv["curvature_psd_2x2"]
+    det = g[0][0]*g[1][1] - g[0][1]*g[1][0]
+    assert g[0][0] > 0 and g[1][1] > 0 and det > 0

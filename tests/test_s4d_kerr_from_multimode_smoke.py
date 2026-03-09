@@ -55,8 +55,17 @@ def test_s4d_smoke_minimal(tmp_path: Path) -> None:
     out_dir = stage_dir / "outputs"
     assert (out_dir / "kerr_from_multimode.json").exists()
     assert (out_dir / "kerr_from_multimode_diagnostics.json").exists()
+    assert (out_dir / "kerr_extraction.json").exists()
     assert (stage_dir / "stage_summary.json").exists()
     assert (stage_dir / "manifest.json").exists()
+
+    extraction = json.loads((out_dir / "kerr_extraction.json").read_text(encoding="utf-8"))
+    assert extraction.get("schema_name") == "kerr_extraction"
+    assert extraction.get("verdict") in {"PASS", "NONINFORMATIVE"}
+    assert "M_final_Msun" in extraction
+    assert "chi_final" in extraction
+    assert "sigma_M" in extraction
+    assert "sigma_chi" in extraction
 
     summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
     params = summary.get("parameters", {})
@@ -66,3 +75,55 @@ def test_s4d_smoke_minimal(tmp_path: Path) -> None:
     assert params.get("gate", {}).get("name") == "KERR_GRID_SATURATION"
     assert params.get("n_accepted", 0) > 0
     assert "boundary_fraction" in params
+
+
+def test_s4d_extracts_kerr_and_contract_outputs(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    os.environ["BASURIN_RUNS_ROOT"] = str(runs_root)
+    run_id = "s4d_extract_pytest"
+    run_dir = runs_root / run_id
+    (run_dir / "RUN_VALID").mkdir(parents=True)
+    (run_dir / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}\n', encoding="utf-8")
+
+    from mvp.kerr_qnm_fits import kerr_qnm
+
+    m_true = 68.0
+    chi_true = 0.69
+    q220 = kerr_qnm(m_true, chi_true, (2, 2, 0))
+    q221 = kerr_qnm(m_true, chi_true, (2, 2, 1))
+
+    s3b_out = run_dir / "s3b_multimode_estimates" / "outputs"
+    s3b_out.mkdir(parents=True)
+    multimode = {"estimates": {"per_mode": {
+        "220": {"f_hz": {"p10": q220.f_hz*0.98, "p50": q220.f_hz, "p90": q220.f_hz*1.02}, "tau_s": {"p10": q220.tau_s*0.98, "p50": q220.tau_s, "p90": q220.tau_s*1.02}},
+        "221": {"f_hz": {"p10": q221.f_hz*0.98, "p50": q221.f_hz, "p90": q221.f_hz*1.02}, "tau_s": {"p10": q221.tau_s*0.98, "p50": q221.tau_s, "p90": q221.tau_s*1.02}},
+    }}, "modes": [{"label": "220", "Sigma": [[0.04,0.01],[0.01,0.09]]}, {"label": "221", "Sigma": [[0.04,0.01],[0.01,0.09]]}]}
+    (s3b_out / "multimode_estimates.json").write_text(json.dumps(multimode), encoding="utf-8")
+    (run_dir / "s3b_multimode_estimates" / "stage_summary.json").write_text(json.dumps({"multimode_viability": {"class": "MULTIMODE_OK", "reasons": []}}), encoding="utf-8")
+
+    cp = subprocess.run(["python", "-m", "mvp.s4d_kerr_from_multimode", "--run-id", run_id], capture_output=True, text=True, env=os.environ.copy())
+    assert cp.returncode == 0, cp.stderr
+
+    kerr_extract = json.loads((run_dir / "s4d_kerr_from_multimode" / "outputs" / "kerr_extraction.json").read_text(encoding="utf-8"))
+    assert abs(kerr_extract["M_final_Msun"] - m_true) < 2.0
+    assert abs(kerr_extract["chi_final"] - chi_true) < 0.03
+    assert abs(kerr_extract["delta_f221_Hz"]) / q221.f_hz < 1e-3
+    assert abs(kerr_extract["delta_tau221_ms"]) / (q221.tau_s * 1e3) < 0.1
+
+
+def test_s4d_aborts_gracefully_when_singlemode_only(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    os.environ["BASURIN_RUNS_ROOT"] = str(runs_root)
+    run_id = "s4d_gate_pytest"
+    run_dir = runs_root / run_id
+    (run_dir / "RUN_VALID").mkdir(parents=True)
+    (run_dir / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}\n', encoding="utf-8")
+    s3b_out = run_dir / "s3b_multimode_estimates" / "outputs"
+    s3b_out.mkdir(parents=True)
+    (s3b_out / "multimode_estimates.json").write_text(json.dumps({"estimates": {"per_mode": {}}, "modes": []}), encoding="utf-8")
+    (run_dir / "s3b_multimode_estimates" / "stage_summary.json").write_text(json.dumps({"multimode_viability": {"class": "SINGLEMODE_ONLY", "reasons": ["x"]}}), encoding="utf-8")
+
+    cp = subprocess.run(["python", "-m", "mvp.s4d_kerr_from_multimode", "--run-id", run_id], capture_output=True, text=True, env=os.environ.copy())
+    assert cp.returncode == 0
+    payload = json.loads((run_dir / "s4d_kerr_from_multimode" / "outputs" / "kerr_extraction.json").read_text(encoding="utf-8"))
+    assert payload["verdict"] == "SKIPPED_MULTIMODE_GATE"
