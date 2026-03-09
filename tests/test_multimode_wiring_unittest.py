@@ -22,6 +22,11 @@ class TestMultimodeWiring(unittest.TestCase):
                     json.dumps({"primary_family": "GR_KERR_BH", "families_to_run": ["GR_KERR_BH"]}),
                     encoding="utf-8",
                 )
+            if label == "s4e_kerr_ratio_filter":
+                (stage_dir / "ratio_filter_result.json").write_text(
+                    json.dumps({"kerr_consistency": {"Rf_consistent": True}, "diagnostics": {"informativity_class": "LOW"}, "filtering": {"n_ratio_compatible": 1}}),
+                    encoding="utf-8",
+                )
             timeline["stages"].append(
                 {
                     "stage": label,
@@ -234,6 +239,11 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                         json.dumps({"primary_family": "GR_KERR_BH", "families_to_run": ["GR_KERR_BH"]}),
                         encoding="utf-8",
                     )
+                if label == "s4e_kerr_ratio_filter":
+                    (stage_dir / "ratio_filter_result.json").write_text(
+                        json.dumps({"kerr_consistency": {"Rf_consistent": True}, "diagnostics": {"informativity_class": "MODERATE"}, "filtering": {"n_ratio_compatible": 4}}),
+                        encoding="utf-8",
+                    )
                 if label == "s8a_family_gr_kerr":
                     (stage_dir / "gr_kerr_family.json").write_text(
                         json.dumps({"status": "EVALUATED", "assessment": "SUPPORTED", "reason": "test"}),
@@ -271,7 +281,7 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                 "s0_oracle_mvp", "s1_fetch_strain", "s2_ringdown_window", "s3_ringdown_estimates",
                 "s3b_multimode_estimates", "s4_geometry_filter", "s4c_kerr_consistency",
                 "s4d_kerr_from_multimode", "s7_beyond_kerr_deviation_score",
-                "s8_family_router", "s8a_family_gr_kerr",
+                "s8_family_router", "s4e_kerr_ratio_filter", "s8a_family_gr_kerr",
             ]
             self.assertEqual(stages[:len(expected_prefix)], expected_prefix)
             self.assertEqual(timeline["multimode_results"]["kerr_consistent"], True)
@@ -279,6 +289,7 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
             self.assertEqual(timeline["multimode_results"]["d2_min"], 1.2)
             self.assertEqual(timeline["multimode_results"]["extraction_quality"], "INSUFFICIENT_DATA")
             self.assertEqual(timeline["multimode_results"]["primary_family"], "GR_KERR_BH")
+            self.assertEqual(timeline["multimode_results"]["ratio_rf_consistent"], True)
             self.assertEqual(
                 timeline["multimode_results"]["family_assessments"]["GR_KERR_BH"]["assessment"],
                 "SUPPORTED",
@@ -329,6 +340,11 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                 if label == "s8_family_router":
                     (stage_dir / "family_router.json").write_text(
                         json.dumps({"primary_family": "GR_KERR_BH", "families_to_run": ["GR_KERR_BH"]}),
+                        encoding="utf-8",
+                    )
+                if label == "s4e_kerr_ratio_filter":
+                    (stage_dir / "ratio_filter_result.json").write_text(
+                        json.dumps({"kerr_consistency": {"Rf_consistent": True}, "diagnostics": {"informativity_class": "LOW"}, "filtering": {"n_ratio_compatible": 2}}),
                         encoding="utf-8",
                     )
                 if label == "s8a_family_gr_kerr":

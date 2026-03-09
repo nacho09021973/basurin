@@ -152,7 +152,7 @@ class TestAntiRegression:
 class TestContractCount:
     def test_total_contracts_is_10(self):
         """Registry includes oracle precheck + FASE 4/5 + s4 spectral variant + experiments."""
-        assert len(CONTRACTS) == 33
+        assert len(CONTRACTS) == 35
 
 
 # ── Test 4: DAG integrity with new stages ────────────────────────────────
@@ -165,10 +165,12 @@ class TestDAGIntegrity:
             "s3b_multimode_estimates",
             "s4c_kerr_consistency",
             "s4d_kerr_from_multimode",
+            "s4e_kerr_ratio_filter",
             "s7_beyond_kerr_deviation_score",
             "s8_family_router",
             "s8a_family_gr_kerr",
             "s8b_family_bns",
+            "s8c_family_low_mass_bh_postmerger",
         ):
             c = CONTRACTS[name]
             for upstream in c.upstream_stages:

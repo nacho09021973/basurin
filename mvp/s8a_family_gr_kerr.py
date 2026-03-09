@@ -31,6 +31,7 @@ def _load_json_object(path: Path) -> dict[str, Any]:
 def assess_gr_kerr_family(
     *,
     router_payload: dict[str, Any],
+    ratio_filter: dict[str, Any],
     kerr_extraction: dict[str, Any],
     beyond_kerr_score: dict[str, Any],
 ) -> dict[str, Any]:
@@ -45,6 +46,11 @@ def assess_gr_kerr_family(
 
     score_verdict = str(beyond_kerr_score.get("verdict"))
     kerr_verdict = str(kerr_extraction.get("verdict"))
+    kerr_ratio = ratio_filter.get("kerr_consistency") if isinstance(ratio_filter.get("kerr_consistency"), dict) else {}
+    diagnostics = ratio_filter.get("diagnostics") if isinstance(ratio_filter.get("diagnostics"), dict) else {}
+    filtering = ratio_filter.get("filtering") if isinstance(ratio_filter.get("filtering"), dict) else {}
+    ratio_consistent = kerr_ratio.get("Rf_consistent")
+    informativity_class = diagnostics.get("informativity_class")
 
     if score_verdict == "GR_CONSISTENT" and kerr_extraction.get("M_final_Msun") is not None:
         assessment = "SUPPORTED"
@@ -59,6 +65,12 @@ def assess_gr_kerr_family(
         assessment = "INCONCLUSIVE"
         reason = "the multimode Kerr gate or deviation score is non-informative for this run"
 
+    if ratio_consistent is False and assessment == "SUPPORTED":
+        assessment = "TENSION"
+        reason = "Kerr inversion is viable, but the observed 221/220 ratio falls outside the Kerr reference band"
+    elif ratio_consistent is False and assessment == "TENSION":
+        reason = "Kerr inversion exists with tension and the observed 221/220 ratio is also Kerr-inconsistent"
+
     return {
         "status": "EVALUATED",
         "assessment": assessment,
@@ -66,6 +78,11 @@ def assess_gr_kerr_family(
         "router_primary_family": router_payload.get("primary_family"),
         "kerr_extraction_verdict": kerr_verdict,
         "beyond_kerr_verdict": score_verdict,
+        "ratio_filter_verdict": ratio_filter.get("verdict"),
+        "ratio_rf_consistent": ratio_consistent,
+        "ratio_informativity_class": informativity_class,
+        "n_ratio_compatible": filtering.get("n_ratio_compatible"),
+        "n_ratio_excluded": filtering.get("n_ratio_excluded"),
         "m_final_msun": kerr_extraction.get("M_final_Msun"),
         "chi_final": kerr_extraction.get("chi_final"),
         "chi2_kerr_2dof": beyond_kerr_score.get("chi2_kerr_2dof"),
@@ -79,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
 
     ctx = init_stage(args.run_id, STAGE)
     router_path = ctx.run_dir / "s8_family_router" / "outputs" / "family_router.json"
+    ratio_path = ctx.run_dir / "s4e_kerr_ratio_filter" / "outputs" / "ratio_filter_result.json"
     kerr_path = ctx.run_dir / "s4d_kerr_from_multimode" / "outputs" / "kerr_extraction.json"
     score_path = ctx.run_dir / "s7_beyond_kerr_deviation_score" / "outputs" / "beyond_kerr_score.json"
 
@@ -87,15 +105,18 @@ def main(argv: list[str] | None = None) -> int:
             ctx,
             {
                 "family_router": router_path,
+                "ratio_filter": ratio_path,
                 "kerr_extraction": kerr_path,
                 "beyond_kerr_score": score_path,
             },
         )
         router = _load_json_object(router_path)
+        ratio = _load_json_object(ratio_path)
         kerr = _load_json_object(kerr_path)
         score = _load_json_object(score_path)
         assessment = assess_gr_kerr_family(
             router_payload=router,
+            ratio_filter=ratio,
             kerr_extraction=kerr,
             beyond_kerr_score=score,
         )

@@ -250,3 +250,46 @@ def make_atlas_entry(
     if metadata:
         entry["metadata"] = metadata
     return entry
+
+
+def kerr_ratio_curve(chi_grid: list[float] | None = None, n_points: int = 200) -> dict[str, Any]:
+    """Tabulate Kerr ratios for the (2,2,1)/(2,2,0) pair.
+
+    The frequency ratio R_f = f_221 / f_220 = F_221 / F_220 is exactly
+    mass-independent in Kerr because the M scaling cancels. The same holds for
+    the quality-factor ratio R_Q = Q_221 / Q_220.
+    """
+    if chi_grid is None:
+        if n_points <= 1:
+            chi_grid = [0.0]
+        else:
+            chi_grid = [i * CHI_MAX / (n_points - 1) for i in range(n_points)]
+
+    out_chi: list[float] = []
+    rf_grid: list[float] = []
+    rq_grid: list[float] = []
+
+    for raw_chi in chi_grid:
+        chi = float(raw_chi)
+        f220 = kerr_omega_dimless(chi, (2, 2, 0))
+        f221 = kerr_omega_dimless(chi, (2, 2, 1))
+        q220 = kerr_Q(chi, (2, 2, 0))
+        q221 = kerr_Q(chi, (2, 2, 1))
+        if f220 == 0.0:
+            continue
+        out_chi.append(chi)
+        rf_grid.append(float(f221 / f220))
+        rq_grid.append(float(q221 / q220))
+
+    rf_min = min(rf_grid) if rf_grid else None
+    rf_max = max(rf_grid) if rf_grid else None
+    rq_min = min(rq_grid) if rq_grid else None
+    rq_max = max(rq_grid) if rq_grid else None
+    return {
+        "chi_grid": out_chi,
+        "Rf_grid": rf_grid,
+        "RQ_grid": rq_grid,
+        "Rf_range": {"min": rf_min, "max": rf_max},
+        "RQ_range": {"min": rq_min, "max": rq_max},
+        "n_points": len(out_chi),
+    }

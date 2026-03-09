@@ -325,6 +325,17 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         upstream_stages=["s3b_multimode_estimates"],
     ),
+    "s4e_kerr_ratio_filter": StageContract(
+        name="s4e_kerr_ratio_filter",
+        required_inputs=[
+            "s3b_multimode_estimates/outputs/multimode_estimates.json",
+            "s4_geometry_filter/outputs/compatible_set.json",
+        ],
+        produced_outputs=[
+            "outputs/ratio_filter_result.json",
+        ],
+        upstream_stages=["s3b_multimode_estimates", "s4_geometry_filter"],
+    ),
     "s7_beyond_kerr_deviation_score": StageContract(
         name="s7_beyond_kerr_deviation_score",
         required_inputs=[
@@ -354,13 +365,14 @@ CONTRACTS: dict[str, StageContract] = {
         name="s8a_family_gr_kerr",
         required_inputs=[
             "s8_family_router/outputs/family_router.json",
+            "s4e_kerr_ratio_filter/outputs/ratio_filter_result.json",
             "s4d_kerr_from_multimode/outputs/kerr_extraction.json",
             "s7_beyond_kerr_deviation_score/outputs/beyond_kerr_score.json",
         ],
         produced_outputs=[
             "outputs/gr_kerr_family.json",
         ],
-        upstream_stages=["s8_family_router", "s4d_kerr_from_multimode", "s7_beyond_kerr_deviation_score"],
+        upstream_stages=["s8_family_router", "s4e_kerr_ratio_filter", "s4d_kerr_from_multimode", "s7_beyond_kerr_deviation_score"],
     ),
     "s8b_family_bns": StageContract(
         name="s8b_family_bns",
@@ -377,6 +389,30 @@ CONTRACTS: dict[str, StageContract] = {
             "outputs/bns_family.json",
         ],
         upstream_stages=["s8_family_router", "s3b_multimode_estimates"],
+    ),
+    "s8c_family_low_mass_bh_postmerger": StageContract(
+        name="s8c_family_low_mass_bh_postmerger",
+        required_inputs=[
+            "s8_family_router/outputs/family_router.json",
+            "run_provenance.json",
+            "s3b_multimode_estimates/stage_summary.json",
+            "s4e_kerr_ratio_filter/outputs/ratio_filter_result.json",
+            "s4d_kerr_from_multimode/outputs/kerr_extraction.json",
+            "s7_beyond_kerr_deviation_score/outputs/beyond_kerr_score.json",
+        ],
+        external_inputs=[
+            "event_metadata",
+        ],
+        produced_outputs=[
+            "outputs/low_mass_bh_family.json",
+        ],
+        upstream_stages=[
+            "s8_family_router",
+            "s3b_multimode_estimates",
+            "s4e_kerr_ratio_filter",
+            "s4d_kerr_from_multimode",
+            "s7_beyond_kerr_deviation_score",
+        ],
     ),
     "s3_spectral_estimates": StageContract(
         name="s3_spectral_estimates",

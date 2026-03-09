@@ -25,11 +25,13 @@ from mvp.gwtc_events import get_event
 STAGE = "s8_family_router"
 FAMILY_GR_KERR = "GR_KERR_BH"
 FAMILY_BNS = "BNS_REMNANT"
-VALID_FAMILIES = {FAMILY_GR_KERR, FAMILY_BNS}
+FAMILY_LOW_MASS_BH = "LOW_MASS_BH_POSTMERGER"
+VALID_FAMILIES = {FAMILY_GR_KERR, FAMILY_BNS, FAMILY_LOW_MASS_BH}
 OUTPUT_FILE = "family_router.json"
 ROUTE_STAGE_BY_FAMILY = {
     FAMILY_GR_KERR: "s8a_family_gr_kerr",
     FAMILY_BNS: "s8b_family_bns",
+    FAMILY_LOW_MASS_BH: "s8c_family_low_mass_bh_postmerger",
 }
 
 
@@ -132,11 +134,11 @@ def route_family_candidates(
         routing_mode = "catalog_known_bbh"
         routing_reason = "event matches known BBH metadata/catalog"
     elif source_kind == "BNS" or has_multimessenger:
-        families = [FAMILY_BNS, FAMILY_GR_KERR]
+        families = [FAMILY_BNS, FAMILY_LOW_MASS_BH, FAMILY_GR_KERR]
         routing_mode = "metadata_bns_or_multimessenger"
         routing_reason = "event metadata indicates BNS or multimessenger counterpart"
     else:
-        families = [FAMILY_GR_KERR, FAMILY_BNS]
+        families = [FAMILY_GR_KERR, FAMILY_LOW_MASS_BH, FAMILY_BNS]
         routing_mode = "fallback_multi_family"
         routing_reason = "insufficient source-class metadata; evaluate multiple families"
 

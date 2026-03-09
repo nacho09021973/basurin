@@ -50,7 +50,9 @@ DEFAULT_ATLAS_PATH = Path("docs/ringdown/atlas/atlas_berti_v2.json")
 FAMILY_STAGE_MAP: dict[str, tuple[str, str]] = {
     "GR_KERR_BH": ("s8a_family_gr_kerr.py", "s8a_family_gr_kerr"),
     "BNS_REMNANT": ("s8b_family_bns.py", "s8b_family_bns"),
+    "LOW_MASS_BH_POSTMERGER": ("s8c_family_low_mass_bh_postmerger.py", "s8c_family_low_mass_bh_postmerger"),
 }
+KERR_LIKE_FAMILIES = {"GR_KERR_BH", "LOW_MASS_BH_POSTMERGER"}
 
 
 def _autodetect_losc_hdf5_mappings(event_id: str) -> list[str]:
@@ -608,9 +610,27 @@ def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
             if isinstance(families_to_run, list):
                 results["families_to_run"] = [str(v) for v in families_to_run]
 
+    ratio_path = out_root / run_id / "s4e_kerr_ratio_filter" / "outputs" / "ratio_filter_result.json"
+    if ratio_path.exists():
+        try:
+            payload_ratio = json.loads(ratio_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"[pipeline] WARNING: cannot parse {ratio_path}: {exc}", flush=True)
+        else:
+            consistency = payload_ratio.get("kerr_consistency")
+            diagnostics = payload_ratio.get("diagnostics")
+            filtering = payload_ratio.get("filtering")
+            if isinstance(consistency, dict):
+                results["ratio_rf_consistent"] = consistency.get("Rf_consistent")
+            if isinstance(diagnostics, dict):
+                results["ratio_informativity_class"] = diagnostics.get("informativity_class")
+            if isinstance(filtering, dict):
+                results["ratio_n_compatible"] = filtering.get("n_ratio_compatible")
+
     family_output_map = {
         "GR_KERR_BH": out_root / run_id / "s8a_family_gr_kerr" / "outputs" / "gr_kerr_family.json",
         "BNS_REMNANT": out_root / run_id / "s8b_family_bns" / "outputs" / "bns_family.json",
+        "LOW_MASS_BH_POSTMERGER": out_root / run_id / "s8c_family_low_mass_bh_postmerger" / "outputs" / "low_mass_bh_family.json",
     }
     for family, path in family_output_map.items():
         if not path.exists():
@@ -957,6 +977,9 @@ def run_multimode_event(
             "multimode_viability_reasons": [],
             "primary_family": None,
             "families_to_run": [],
+            "ratio_rf_consistent": None,
+            "ratio_informativity_class": None,
+            "ratio_n_compatible": None,
             "family_assessments": {},
         },
     }
@@ -1117,6 +1140,14 @@ def run_multimode_event(
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, run_id, timeline)
         return 2, run_id
+
+    if any(family in KERR_LIKE_FAMILIES for family in families_to_run):
+        s4e_args = ["--run-id", run_id]
+        rc = _run_stage("s4e_kerr_ratio_filter.py", s4e_args, "s4e_kerr_ratio_filter", out_root, run_id, timeline, stage_timeout_s)
+        if rc != 0:
+            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+            _write_timeline(out_root, run_id, timeline)
+            return rc, run_id
 
     for family in families_to_run:
         script, label = FAMILY_STAGE_MAP[family]
