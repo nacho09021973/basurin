@@ -42,12 +42,14 @@ for _cand in [_here.parents[0], _here.parents[1]]:
         break
 
 from basurin_io import (
-    resolve_out_root,
-    require_run_valid,
-    validate_run_id,
     write_json_atomic,
-    write_manifest,
-    write_stage_summary,
+)
+from mvp.contracts import (
+    init_stage,
+    check_inputs,
+    finalize,
+    abort,
+    log_stage_paths,
 )
 from mvp.golden_geometry_spec import (
     DEFAULT_AREA_TOLERANCE,
@@ -120,26 +122,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
 
-    out_root = resolve_out_root("runs")
-    validate_run_id(args.run_id, out_root)
-    require_run_valid(out_root, args.run_id)
+    ctx = init_stage(args.run_id, STAGE, params={
+        "area_tolerance": args.area_tolerance,
+    })
 
-    run_dir = out_root / args.run_id
-    stage_dir = run_dir / STAGE
-    outputs_dir = stage_dir / "outputs"
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-
-    s4i_path = run_dir / S4I_OUTPUT_REL
-    area_obs_path = run_dir / AREA_OBS_FILE_REL
+    s4i_path = ctx.run_dir / S4I_OUTPUT_REL
+    area_obs_path = ctx.run_dir / AREA_OBS_FILE_REL
 
     if not s4i_path.exists():
-        print(
-            f"ERROR: common intersection output not found.\n"
-            f"  expected: {s4i_path}\n"
-            f"  Run s4i_common_geometry_intersection first.",
-            file=sys.stderr,
-        )
-        return 2
+        abort(ctx, f"common intersection output not found: {s4i_path}. Run s4i_common_geometry_intersection first.")
+
+    inputs = check_inputs(ctx, {"s4i_common_intersection": s4i_path}, optional={"area_obs": area_obs_path})
 
     try:
         s4i_data = json.loads(s4i_path.read_text(encoding="utf-8"))
@@ -172,34 +165,22 @@ def main(argv: list[str] | None = None) -> int:
             "verdict": verdict,
         }
 
-        out_path = outputs_dir / OUTPUT_FILE
+        out_path = ctx.outputs_dir / OUTPUT_FILE
         write_json_atomic(out_path, payload)
 
-        summary = {
-            "stage": STAGE,
-            "run_id": args.run_id,
+        finalize(ctx, artifacts={"hawking_area_filter": out_path}, verdict=verdict, results={
             "area_tolerance": args.area_tolerance,
             "n_common_input": len(common_ids),
             "n_golden": len(golden_ids),
-            "verdict": verdict,
-        }
-        stage_summary = write_stage_summary(stage_dir, summary)
-        manifest = write_manifest(
-            stage_dir,
-            {"hawking_area_filter": out_path, "stage_summary": stage_summary},
-        )
-
-        print(f"OUT_ROOT={out_root}")
-        print(f"STAGE_DIR={stage_dir}")
-        print(f"OUTPUTS_DIR={outputs_dir}")
-        print(f"STAGE_SUMMARY={stage_summary}")
-        print(f"MANIFEST={manifest}")
+        })
+        log_stage_paths(ctx)
         print(f"[{STAGE}] n_golden={len(golden_ids)} verdict={verdict}")
         return 0
 
+    except SystemExit:
+        raise
     except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 2
+        abort(ctx, str(exc))
 
 
 if __name__ == "__main__":

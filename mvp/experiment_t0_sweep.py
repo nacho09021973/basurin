@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""DEV/INTEGRATION deterministic t0-sweep over existing s2 outputs.
+"""DEPRECATED (2026-03-09): DEV/INTEGRATION deterministic t0-sweep over existing s2 outputs.
+
+Use ``mvp/experiment_t0_sweep_full.py`` instead.
 
 This script is intentionally lightweight and does not implement the
 contract-first/inventory/finalize flow nor subrun isolation required for
@@ -7,6 +9,13 @@ official reproducible sweeps. For scalable/governed execution use
 ``mvp/experiment_t0_sweep_full.py``.
 """
 from __future__ import annotations
+
+import warnings
+warnings.warn(
+    "experiment_t0_sweep.py is DEPRECATED (2026-03-09). "
+    "Use experiment_t0_sweep_full.py instead.",
+    DeprecationWarning, stacklevel=2,
+)
 
 import argparse
 import json

@@ -37,12 +37,14 @@ for _cand in [_here.parents[0], _here.parents[1]]:
         break
 
 from basurin_io import (
-    resolve_out_root,
-    require_run_valid,
-    validate_run_id,
     write_json_atomic,
-    write_manifest,
-    write_stage_summary,
+)
+from mvp.contracts import (
+    init_stage,
+    check_inputs,
+    finalize,
+    abort,
+    log_stage_paths,
 )
 from mvp.golden_geometry_spec import (
     DEFAULT_MODE_CHI2_THRESHOLD_90,
@@ -138,23 +140,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
 
-    out_root = resolve_out_root("runs")
-    validate_run_id(args.run_id, out_root)
-    require_run_valid(out_root, args.run_id)
+    ctx = init_stage(args.run_id, STAGE, params={
+        "threshold_221": args.threshold_221,
+    })
 
-    run_dir = out_root / args.run_id
-    stage_dir = run_dir / STAGE
-    outputs_dir = stage_dir / "outputs"
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-
-    obs_path = run_dir / OBS_FILE_REL
+    obs_path = ctx.run_dir / OBS_FILE_REL
     atlas_path = Path(args.atlas_path)
     if not atlas_path.is_absolute():
         atlas_path = (Path.cwd() / atlas_path).resolve()
 
     if not atlas_path.exists():
-        print(f"ERROR: atlas not found: {atlas_path}", file=sys.stderr)
-        return 2
+        abort(ctx, f"atlas not found: {atlas_path}")
 
     # Mode 221 is optional: if the obs file is absent, record SKIPPED verdict.
     if not obs_path.exists():
@@ -175,27 +171,21 @@ def main(argv: list[str] | None = None) -> int:
             "n_passed": 0,
             "verdict": VERDICT_SKIPPED_221_UNAVAILABLE,
         }
-        out_path = outputs_dir / OUTPUT_FILE
+        out_path = ctx.outputs_dir / OUTPUT_FILE
         write_json_atomic(out_path, payload)
-        summary = {
-            "stage": STAGE,
-            "run_id": args.run_id,
-            "mode": MODE_221,
-            "verdict": VERDICT_SKIPPED_221_UNAVAILABLE,
-            "reason": f"mode221 obs file not found: {obs_path}",
-        }
-        stage_summary = write_stage_summary(stage_dir, summary)
-        manifest = write_manifest(
-            stage_dir,
-            {"mode221_filter": out_path, "stage_summary": stage_summary},
-        )
-        print(f"OUT_ROOT={out_root}")
-        print(f"STAGE_DIR={stage_dir}")
-        print(f"OUTPUTS_DIR={outputs_dir}")
-        print(f"STAGE_SUMMARY={stage_summary}")
-        print(f"MANIFEST={manifest}")
+        finalize(ctx, artifacts={"mode221_filter": out_path},
+                 verdict=VERDICT_SKIPPED_221_UNAVAILABLE, results={
+                     "mode": MODE_221,
+                     "reason": f"mode221 obs file not found: {obs_path}",
+                 })
+        log_stage_paths(ctx)
         print(f"[{STAGE}] verdict={VERDICT_SKIPPED_221_UNAVAILABLE}")
         return 0
+
+    inputs = check_inputs(ctx, {
+        "mode221_obs": obs_path,
+        "atlas": atlas_path,
+    })
 
     try:
         obs = json.loads(obs_path.read_text(encoding="utf-8"))
@@ -234,38 +224,25 @@ def main(argv: list[str] | None = None) -> int:
             "verdict": verdict,
         }
 
-        out_path = outputs_dir / OUTPUT_FILE
+        out_path = ctx.outputs_dir / OUTPUT_FILE
         write_json_atomic(out_path, payload)
 
-        summary = {
-            "stage": STAGE,
-            "run_id": args.run_id,
+        finalize(ctx, artifacts={"mode221_filter": out_path}, verdict=verdict, results={
             "mode": MODE_221,
             "chi2_threshold": args.threshold_221,
             "n_atlas_mode221": sum(1 for e in atlas_entries if extract_mode221_predictions(e) is not None),
             "n_passed": len(geometry_ids),
-            "verdict": verdict,
-        }
-        stage_summary = write_stage_summary(stage_dir, summary)
-        manifest = write_manifest(
-            stage_dir,
-            {"mode221_filter": out_path, "stage_summary": stage_summary},
-        )
-
-        print(f"OUT_ROOT={out_root}")
-        print(f"STAGE_DIR={stage_dir}")
-        print(f"OUTPUTS_DIR={outputs_dir}")
-        print(f"STAGE_SUMMARY={stage_summary}")
-        print(f"MANIFEST={manifest}")
+        })
+        log_stage_paths(ctx)
         print(f"[{STAGE}] n_passed={len(geometry_ids)} verdict={verdict}")
         return 0
 
+    except SystemExit:
+        raise
     except KeyError as exc:
-        print(f"ERROR: missing key in observations file: {exc}", file=sys.stderr)
-        return 2
+        abort(ctx, f"missing key in observations file: {exc}")
     except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 2
+        abort(ctx, str(exc))
 
 
 if __name__ == "__main__":
