@@ -21,6 +21,7 @@ from mvp.contracts import StageContext, abort, check_inputs, finalize, init_stag
 STAGE = "s7_beyond_kerr_deviation_score"
 GR_THRESHOLD_90 = 4.605
 GR_THRESHOLD_99 = 9.210
+BNS_MAX_REMNANT_MASS_MSUN = 10.0
 
 
 def _utc_now_z() -> str:
@@ -95,6 +96,87 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"Expected JSON object in {path}, got {type(payload).__name__}")
     return payload
+
+
+def _extract_source_class(metadata: dict[str, Any]) -> str | None:
+    for key in ("source_class", "event_class", "event_type", "source_type"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    classification = metadata.get("classification")
+    if isinstance(classification, dict):
+        for key in ("source_class", "event_class", "event_type"):
+            value = classification.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _classify_source_kind(source_class: str | None) -> str | None:
+    if source_class is None:
+        return None
+    token = source_class.strip().lower().replace("-", "_").replace(" ", "_")
+    if token in {"bns", "binary_neutron_star", "nsns"}:
+        return "BNS"
+    if token in {"bbh", "binary_black_hole"}:
+        return "BBH"
+    if token in {"nsbh", "neutron_star_black_hole"}:
+        return "NSBH"
+    return token.upper()
+
+
+def _load_event_metadata_for_run(run_dir: Path) -> dict[str, Any]:
+    run_provenance_path = run_dir / "run_provenance.json"
+    if not run_provenance_path.exists():
+        return {}
+    provenance = _load_json_object(run_provenance_path)
+    invocation = provenance.get("invocation")
+    if not isinstance(invocation, dict):
+        return {}
+    event_id = invocation.get("event_id")
+    if not isinstance(event_id, str) or not event_id.strip():
+        return {}
+    metadata_path = _here.parents[1] / "docs" / "ringdown" / "event_metadata" / f"{event_id}_metadata.json"
+    if not metadata_path.exists():
+        return {}
+    return _load_json_object(metadata_path)
+
+
+def _astrophysical_consistency(*, M_final: float, metadata: dict[str, Any]) -> dict[str, Any]:
+    source_kind = _classify_source_kind(_extract_source_class(metadata))
+    result = {
+        "source_kind": source_kind,
+        "status": "UNKNOWN",
+        "reason": "event metadata unavailable for astrophysical consistency checks",
+        "mass_upper_bound_msun": None,
+    }
+    if source_kind != "BNS":
+        if source_kind is None:
+            return result
+        return {
+            "source_kind": source_kind,
+            "status": "NOT_APPLICABLE",
+            "reason": "astrophysical remnant-mass sanity prior currently applied only to BNS events",
+            "mass_upper_bound_msun": None,
+        }
+
+    if M_final > BNS_MAX_REMNANT_MASS_MSUN:
+        return {
+            "source_kind": source_kind,
+            "status": "INCONSISTENT",
+            "reason": (
+                f"BNS prior violated: inferred Kerr remnant mass {M_final:.3f} Msun exceeds "
+                f"BNS_MAX_REMNANT_MASS_MSUN={BNS_MAX_REMNANT_MASS_MSUN:.1f}"
+            ),
+            "mass_upper_bound_msun": BNS_MAX_REMNANT_MASS_MSUN,
+        }
+
+    return {
+        "source_kind": source_kind,
+        "status": "CONSISTENT",
+        "reason": "BNS prior satisfied by Kerr remnant mass",
+        "mass_upper_bound_msun": BNS_MAX_REMNANT_MASS_MSUN,
+    }
 
 
 def _as_finite_float(value: Any, json_path: str) -> float:
@@ -205,6 +287,12 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
         or kerr.get("chi_final") is None
     ):
         score = _empty_score_payload("SKIPPED_S4D_GATE")
+        score["astrophysical_consistency"] = {
+            "source_kind": None,
+            "status": "NOT_APPLICABLE",
+            "reason": "Kerr extraction unavailable; astrophysical consistency was not evaluated",
+            "mass_upper_bound_msun": None,
+        }
     else:
         multimode = _load_json_object(multimode_path)
         try:
@@ -239,6 +327,11 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
             sigma_f221=observed["sigma_f221"],
             sigma_tau221=observed["sigma_tau221"],
         )
+        event_metadata = _load_event_metadata_for_run(ctx.run_dir)
+        astro_consistency = _astrophysical_consistency(M_final=M_final, metadata=event_metadata)
+        score["astrophysical_consistency"] = astro_consistency
+        if astro_consistency.get("status") == "INCONSISTENT":
+            score["verdict"] = "ASTRO_INCONSISTENT"
 
     payload = {
         "schema_name": "beyond_kerr_score",

@@ -86,6 +86,19 @@ def test_gr_kerr_family_is_inconclusive_without_geometric_support() -> None:
     assert "no surviving geometries" in payload["reason"]
 
 
+def test_gr_kerr_family_is_disfavored_for_astrophysical_inconsistency() -> None:
+    payload = assess_gr_kerr_family(
+        router_payload={"primary_family": FAMILY_GR_KERR, "families_to_run": [FAMILY_GR_KERR]},
+        ratio_filter={"verdict": "PASS", "kerr_consistency": {"Rf_consistent": True}, "diagnostics": {"informativity_class": "LOW"}, "filtering": {"n_input_geometries": 5, "n_ratio_compatible": 2, "n_ratio_excluded": 3, "n_ratio_not_applicable": 0}},
+        kerr_extraction={"verdict": "PASS", "M_final_Msun": 144.0, "chi_final": 0.96},
+        beyond_kerr_score={"verdict": "ASTRO_INCONSISTENT", "chi2_kerr_2dof": 0.15},
+    )
+
+    assert payload["status"] == "EVALUATED"
+    assert payload["assessment"] == "DISFAVORED"
+    assert "astrophysical" in payload["reason"].lower()
+
+
 def test_gr_kerr_family_is_disfavored_when_ratio_excludes_all_spin_geometries() -> None:
     payload = assess_gr_kerr_family(
         router_payload={"primary_family": FAMILY_GR_KERR, "families_to_run": [FAMILY_GR_KERR]},
