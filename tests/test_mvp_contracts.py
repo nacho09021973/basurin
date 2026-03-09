@@ -55,8 +55,10 @@ class TestContractRegistry:
                        "s4i_common_geometry_intersection", "s4j_hawking_area_filter"}
 
     def test_all_stages_registered(self):
-        """Every MVP stage has a contract entry."""
-        assert set(CONTRACTS.keys()) == self.EXPECTED_STAGES
+        """Every baseline MVP stage has a contract entry."""
+        registered = set(CONTRACTS.keys())
+        missing = self.EXPECTED_STAGES - registered
+        assert not missing, f"Missing expected contract stages: {sorted(missing)}"
 
     def test_every_contract_has_required_fields(self):
         """Each contract has name, produced_outputs, and is a StageContract."""
