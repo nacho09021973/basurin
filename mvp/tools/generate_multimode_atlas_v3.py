@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 MODE_SUFFIX_RE = re.compile(r"_l(\d+)m(\d+)n(\d+)$")
+PHYSICAL_ID_RE = re.compile(r"^(?P<family>[A-Za-z0-9]+)_M(?P<M>[0-9.]+)_a(?P<chi>[0-9.]+)")
 
 
 def _utc_now_iso() -> str:
@@ -32,6 +33,76 @@ def _utc_now_iso() -> str:
 
 def canonical_geometry_id(geometry_id: str) -> str:
     return MODE_SUFFIX_RE.sub("", geometry_id)
+
+
+def _coerce_finite_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        out = float(value)
+        if math.isfinite(out):
+            return out
+    return None
+
+
+def extract_physical_parameters(entry: dict[str, Any], canonical_id: str) -> dict[str, float]:
+    """Extract physically meaningful Kerr-like parameters from metadata or id.
+
+    The v2 atlases usually store dimensionless spin as ``chi`` in metadata,
+    while some other generators use ``spin``. Canonical ids also encode
+    ``_M..._a...`` where ``a`` is already the dimensionless spin used in this
+    repository.
+    """
+    meta = entry.get("metadata")
+    meta_dict = meta if isinstance(meta, dict) else {}
+
+    mass = _coerce_finite_float(meta_dict.get("M_solar"))
+    if mass is None:
+        mass = _coerce_finite_float(meta_dict.get("M_remnant_Msun"))
+
+    chi = _coerce_finite_float(meta_dict.get("chi"))
+    if chi is None:
+        chi = _coerce_finite_float(meta_dict.get("spin"))
+
+    match = PHYSICAL_ID_RE.match(canonical_id)
+    if match is not None:
+        if mass is None:
+            mass = float(match.group("M"))
+        if chi is None:
+            chi = float(match.group("chi"))
+
+    params: dict[str, float] = {}
+    if mass is not None:
+        params["M_solar"] = mass
+    if chi is not None:
+        params["chi"] = chi
+        params["a_over_m"] = chi
+        params["J_over_M2"] = chi
+
+    if chi is not None and abs(chi) <= 1.0 and is_kerr_like(entry, canonical_id):
+        root = math.sqrt(1.0 - chi * chi)
+        params["kerr_r_plus_over_M"] = 1.0 + root
+        params["kerr_area_over_M2"] = 8.0 * math.pi * (1.0 + root)
+
+    return params
+
+
+def is_kerr_like(entry: dict[str, Any], canonical_id: str) -> bool:
+    theory = str(entry.get("theory", ""))
+    meta = entry.get("metadata")
+    family = str(meta.get("family", "")) if isinstance(meta, dict) else ""
+    return theory == "GR_Kerr" or family == "kerr" or canonical_id.startswith("Kerr_")
+
+
+def validate_physical_parameters(entry: dict[str, Any], canonical_id: str, params: dict[str, float]) -> None:
+    """Reject super-extremal Kerr entries at atlas-build time."""
+    chi = params.get("chi")
+    if chi is None:
+        return
+    if is_kerr_like(entry, canonical_id) and abs(chi) > 1.0:
+        raise ValueError(
+            f"Invalid Kerr geometry {canonical_id}: |chi| must be <= 1, got {chi}"
+        )
 
 
 def detect_mode(entry: dict[str, Any]) -> str | None:
@@ -122,6 +193,8 @@ def build_multimode_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any
         seed = group["seed_entry"]
         modes: dict[str, dict[str, Any]] = group["modes"]
         source_ids: dict[str, str] = group["source_ids"]
+        physical = extract_physical_parameters(seed, canon)
+        validate_physical_parameters(seed, canon, physical)
 
         out_entry: dict[str, Any] = {
             "geometry_id": canon,
@@ -135,6 +208,17 @@ def build_multimode_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any
         out_entry["metadata"].pop("mode", None)
         out_entry["metadata"]["source_geometry_ids"] = source_ids
         out_entry["metadata"]["modes_available"] = sorted([m for m in modes.keys() if m != "raw"])
+        if physical:
+            out_entry["metadata"]["physical_parameters"] = physical
+
+        for key in ("M_solar", "chi", "a_over_m", "J_over_M2"):
+            if key in physical:
+                out_entry[key] = physical[key]
+        if "kerr_r_plus_over_M" in physical and "kerr_area_over_M2" in physical:
+            out_entry["kerr_horizon"] = {
+                "r_plus_over_M": physical["kerr_r_plus_over_M"],
+                "area_over_M2": physical["kerr_area_over_M2"],
+            }
 
         for mode_key in ("220", "221", "330"):
             e = modes.get(mode_key)
@@ -200,6 +284,8 @@ def main(argv: list[str] | None = None) -> int:
         for e in multimode_entries
         if isinstance(e.get("mode_220"), dict) and isinstance(e.get("mode_221"), dict)
     )
+    n_phys = sum(1 for e in multimode_entries if "chi" in e and "M_solar" in e)
+    n_kerr_horizon = sum(1 for e in multimode_entries if isinstance(e.get("kerr_horizon"), dict))
 
     payload = {
         "schema_version": "basurin_atlas_v3_multimode",
@@ -214,6 +300,12 @@ def main(argv: list[str] | None = None) -> int:
         "n_with_mode_220": n220,
         "n_with_mode_221": n221,
         "n_with_both_220_221": nboth,
+        "n_with_physical_parameters": n_phys,
+        "n_with_kerr_horizon_data": n_kerr_horizon,
+        "validation": {
+            "kerr_bound_enforced": True,
+            "physical_id_pattern": PHYSICAL_ID_RE.pattern,
+        },
         "entries": multimode_entries,
     }
 
@@ -231,6 +323,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"N_MODE220={n220}")
     print(f"N_MODE221={n221}")
     print(f"N_BOTH={nboth}")
+    print(f"N_PHYS={n_phys}")
+    print(f"N_KERR_HORIZON={n_kerr_horizon}")
     return 0
 
 
