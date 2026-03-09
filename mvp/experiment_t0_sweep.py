@@ -6,6 +6,13 @@ Legacy entrypoint kept for CLI stability. Canonical implementation is
 """
 from __future__ import annotations
 
+import warnings
+warnings.warn(
+    "experiment_t0_sweep.py is DEPRECATED (2026-03-09). "
+    "Use experiment_t0_sweep_full.py instead.",
+    DeprecationWarning, stacklevel=2,
+)
+
 import argparse
 import json
 import os

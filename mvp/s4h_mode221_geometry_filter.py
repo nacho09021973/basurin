@@ -98,6 +98,11 @@ def main(argv: list[str] | None = None) -> int:
     if not atlas_path.exists():
         abort(ctx, f"Atlas not found. expected: {atlas_path}. Command to regenerate upstream: provide --atlas-path <ATLAS_PATH>.")
 
+    inputs = check_inputs(ctx, {
+        "mode221_obs": obs_path,
+        "atlas": atlas_path,
+    })
+
     try:
         check_inputs(ctx, {"atlas": atlas_path}, optional={"mode221_obs": obs_path})
 

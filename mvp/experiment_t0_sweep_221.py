@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Experimento reproducible: barrido de t0 para auditar aparición del modo 221.
 
+VARIANTE mode-221: workflow ortogonal a experiment_t0_sweep_full.py.
+Mientras _full.py evalúa el modo fundamental (220) + oracle plateau,
+este script audita específicamente la aparición/desaparición del modo 221
+en función de t0. Re-ejecuta s2→s3b por cada punto del grid (el t0 shift
+afecta la ventana de ringdown). No es un duplicado funcional de _full.py.
+
 Escribe exclusivamente bajo:
   runs/<exp_run_id>/experiment/t0_sweep_221/
 
