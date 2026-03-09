@@ -259,3 +259,59 @@ def test_astro_consistency_not_applicable_for_bbh(tmp_path: Path, monkeypatch) -
     assert payload["verdict"] == "GR_CONSISTENT"
     assert payload["astrophysical_consistency"]["status"] == "NOT_APPLICABLE"
     assert payload["astrophysical_consistency"]["source_kind"] == "BBH"
+
+
+def test_bns_mass_prior_boundary_respects_equal_limit(tmp_path: Path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    run_id = "s7_astro_bns_boundary"
+    _seed_upstream(runs_root / run_id, m_final=10.0, chi_final=0.69, f_scale=1.0, tau_scale=1.0)
+    write_json_atomic(
+        runs_root / run_id / "run_provenance.json",
+        {"invocation": {"event_id": "GW170817"}},
+    )
+
+    _, _, payload = _run_execute_and_finalize(run_id)
+    assert payload["astrophysical_consistency"]["status"] == "CONSISTENT"
+    assert payload["astrophysical_consistency"]["mass_upper_bound_msun"] == 10.0
+
+
+def test_bns_mass_prior_is_configurable_from_env(tmp_path: Path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    monkeypatch.setenv("BASURIN_BNS_MAX_REMNANT_MASS_MSUN", "5.0")
+    run_id = "s7_astro_bns_custom_bound"
+    _seed_upstream(runs_root / run_id, m_final=6.0, chi_final=0.69, f_scale=1.0, tau_scale=1.0)
+    write_json_atomic(
+        runs_root / run_id / "run_provenance.json",
+        {"invocation": {"event_id": "GW170817"}},
+    )
+
+    _, _, payload = _run_execute_and_finalize(run_id)
+    assert payload["verdict"] == "ASTRO_INCONSISTENT"
+    assert payload["astrophysical_consistency"]["mass_upper_bound_msun"] == 5.0
+
+
+def test_inconclusive_when_event_metadata_is_insufficient(tmp_path: Path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    run_id = "s7_metadata_insufficient"
+    _seed_upstream(runs_root / run_id, m_final=68.0, chi_final=0.69, f_scale=1.0, tau_scale=1.0)
+    write_json_atomic(
+        runs_root / run_id / "run_provenance.json",
+        {"invocation": {"event_id": "GW_MISSING_METADATA"}},
+    )
+
+    _, _, payload = _run_execute_and_finalize(run_id)
+    assert payload["verdict"] == "INCONCLUSIVE"
+    assert payload["astrophysical_consistency"]["status"] == "METADATA_INSUFFICIENT"
+    assert payload["astrophysical_consistency"]["source_kind"] is None
+
+
+def test_prefers_family_priors_signal_for_bns_when_source_class_missing() -> None:
+    payload = s7._astrophysical_consistency(
+        M_final=11.0,
+        metadata={"family_priors": {"BNS_REMNANT": {"mass_msun_range": [2.0, 3.0]}}},
+    )
+    assert payload["source_kind"] == "BNS"
+    assert payload["status"] == "INCONSISTENT"

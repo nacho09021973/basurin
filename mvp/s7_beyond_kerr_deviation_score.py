@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -125,29 +126,77 @@ def _classify_source_kind(source_class: str | None) -> str | None:
     return token.upper()
 
 
+def _resolve_bns_mass_upper_bound_msun() -> float:
+    """Resolve BNS remnant-mass upper bound from env with conservative default.
+
+    BASURIN_BNS_MAX_REMNANT_MASS_MSUN can tune this threshold without changing code.
+    """
+    raw = os.environ.get("BASURIN_BNS_MAX_REMNANT_MASS_MSUN")
+    if raw is None:
+        return BNS_MAX_REMNANT_MASS_MSUN
+    try:
+        bound = float(raw)
+    except ValueError:
+        return BNS_MAX_REMNANT_MASS_MSUN
+    if not math.isfinite(bound) or bound <= 0.0:
+        return BNS_MAX_REMNANT_MASS_MSUN
+    return bound
+
+
+def _infer_source_kind_from_metadata(metadata: dict[str, Any]) -> str | None:
+    preferred_families = metadata.get("preferred_families")
+    if isinstance(preferred_families, list) and any(str(f) == "BNS_REMNANT" for f in preferred_families):
+        return "BNS"
+    family_priors = metadata.get("family_priors")
+    if isinstance(family_priors, dict) and "BNS_REMNANT" in family_priors:
+        return "BNS"
+    return None
+
+
 def _load_event_metadata_for_run(run_dir: Path) -> dict[str, Any]:
     run_provenance_path = run_dir / "run_provenance.json"
     if not run_provenance_path.exists():
-        return {}
+        return {"_metadata_lookup": "not_requested"}
     provenance = _load_json_object(run_provenance_path)
     invocation = provenance.get("invocation")
     if not isinstance(invocation, dict):
-        return {}
+        return {"_metadata_lookup": "not_requested"}
     event_id = invocation.get("event_id")
     if not isinstance(event_id, str) or not event_id.strip():
-        return {}
+        return {"_metadata_lookup": "not_requested"}
     metadata_path = _here.parents[1] / "docs" / "ringdown" / "event_metadata" / f"{event_id}_metadata.json"
     if not metadata_path.exists():
-        return {}
-    return _load_json_object(metadata_path)
+        return {"_metadata_lookup": "missing", "event_id": event_id}
+    metadata = _load_json_object(metadata_path)
+    metadata["_metadata_lookup"] = "found"
+    return metadata
 
 
 def _astrophysical_consistency(*, M_final: float, metadata: dict[str, Any]) -> dict[str, Any]:
-    source_kind = _classify_source_kind(_extract_source_class(metadata))
+    """Evaluate lightweight astrophysical priors.
+
+    Output schema example:
+    {
+      "source_kind": "BNS",
+      "status": "INCONSISTENT",
+      "reason": "BNS prior violated: inferred Kerr remnant mass ...",
+      "mass_upper_bound_msun": 10.0
+    }
+
+    TODO: consider probabilistic consistency using upstream mass uncertainties
+    (e.g. P[M_final > bound] > threshold) instead of a hard cut.
+    """
+    source_kind = _classify_source_kind(_extract_source_class(metadata)) or _infer_source_kind_from_metadata(metadata)
+    mass_upper_bound_msun = _resolve_bns_mass_upper_bound_msun()
+    lookup_state = str(metadata.get("_metadata_lookup", "missing"))
     result = {
         "source_kind": source_kind,
-        "status": "UNKNOWN",
-        "reason": "event metadata unavailable for astrophysical consistency checks",
+        "status": "NOT_APPLICABLE" if lookup_state == "not_requested" else "METADATA_INSUFFICIENT",
+        "reason": (
+            "event metadata lookup was not requested for this run"
+            if lookup_state == "not_requested"
+            else "event metadata is insufficient to classify source kind for astrophysical checks"
+        ),
         "mass_upper_bound_msun": None,
     }
     if source_kind != "BNS":
@@ -160,22 +209,22 @@ def _astrophysical_consistency(*, M_final: float, metadata: dict[str, Any]) -> d
             "mass_upper_bound_msun": None,
         }
 
-    if M_final > BNS_MAX_REMNANT_MASS_MSUN:
+    if M_final > mass_upper_bound_msun:
         return {
             "source_kind": source_kind,
             "status": "INCONSISTENT",
             "reason": (
                 f"BNS prior violated: inferred Kerr remnant mass {M_final:.3f} Msun exceeds "
-                f"BNS_MAX_REMNANT_MASS_MSUN={BNS_MAX_REMNANT_MASS_MSUN:.1f}"
+                f"BNS_MAX_REMNANT_MASS_MSUN={mass_upper_bound_msun:.1f}"
             ),
-            "mass_upper_bound_msun": BNS_MAX_REMNANT_MASS_MSUN,
+            "mass_upper_bound_msun": mass_upper_bound_msun,
         }
 
     return {
         "source_kind": source_kind,
         "status": "CONSISTENT",
         "reason": "BNS prior satisfied by Kerr remnant mass",
-        "mass_upper_bound_msun": BNS_MAX_REMNANT_MASS_MSUN,
+        "mass_upper_bound_msun": mass_upper_bound_msun,
     }
 
 
@@ -332,6 +381,8 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
         score["astrophysical_consistency"] = astro_consistency
         if astro_consistency.get("status") == "INCONSISTENT":
             score["verdict"] = "ASTRO_INCONSISTENT"
+        elif astro_consistency.get("status") == "METADATA_INSUFFICIENT":
+            score["verdict"] = "INCONCLUSIVE"
 
     payload = {
         "schema_name": "beyond_kerr_score",
