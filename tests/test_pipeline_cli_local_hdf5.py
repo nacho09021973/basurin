@@ -61,3 +61,17 @@ def test_single_atlas_default_missing_aborts_with_instruction(tmp_path):
     assert proc.returncode != 0
     assert "Atlas not found. Generate it by running: python mvp/generate_atlas_from_fits.py" in combined
     assert not (tmp_path / "runs").exists()
+
+
+def test_single_help_exposes_window_catalog_and_alias_flags():
+    proc = subprocess.run(
+        [sys.executable, str(PIPELINE), "single", "--help"],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+        check=False,
+    )
+
+    assert proc.returncode == 0
+    assert "--window-catalog" in proc.stdout
+    assert "--t0-catalog" in proc.stdout

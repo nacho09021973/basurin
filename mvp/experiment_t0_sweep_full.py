@@ -35,6 +35,7 @@ from basurin_io import (
     write_manifest,
     write_stage_summary,
 )
+from mvp.preflight_viability import restrict_grid_with_preflight
 
 EXPERIMENT_STAGE = "experiment/t0_sweep_full"
 RESULTS_NAME = "t0_sweep_full_results.json"
@@ -62,6 +63,10 @@ def _parse_grid(args: argparse.Namespace) -> list[int]:
     if stop < start:
         raise ValueError("--t0-stop-ms must be >= --t0-start-ms")
     return list(range(start, stop + 1, step))
+
+
+def _restrict_grid_with_preflight(run_dir: Path, grid: list[int]) -> tuple[list[int], dict[str, Any] | None]:
+    return restrict_grid_with_preflight(run_dir, grid)
 
 
 def _pick_detector(outputs_dir: Path, detector: str) -> tuple[str, Path]:
@@ -784,6 +789,7 @@ def run_t0_sweep_full(
         strain, fs = _load_npz(source_npz, window_meta)
         source_sha = sha256_file(source_npz)
         grid = _parse_grid(args)
+        grid, grid_restriction = _restrict_grid_with_preflight(base_run_dir, grid)
 
         python = sys.executable
         s2_script = str((_here.parent / "s2_ringdown_window.py").resolve())
@@ -970,6 +976,7 @@ def run_t0_sweep_full(
             "grid": {
                 "t0_offsets_ms": [int(x) for x in grid],
                 "interpreted_as": "offsets_from_s2_window_start_nonnegative_only",
+                "restriction": grid_restriction,
             },
             "summary": {
                 "n_points": len(points),

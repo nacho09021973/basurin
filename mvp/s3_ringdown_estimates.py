@@ -33,8 +33,40 @@ for _cand in [_here.parents[0], _here.parents[1]]:
 
 from mvp.contracts import init_stage, check_inputs, finalize, abort
 from basurin_io import write_json_atomic
+from mvp.gwtc_events import get_event
+from mvp.kerr_qnm_fits import kerr_qnm
 
 STAGE = "s3_ringdown_estimates"
+
+
+def _compute_kerr_centered_band(
+    *,
+    f220_kerr_hz: float,
+    width_factor: float,
+    min_half_width_hz: float,
+    q_ref: float,
+    f_min_floor_hz: float,
+) -> tuple[float, float, float]:
+    """Build deterministic Kerr-centered fitting band around f220."""
+    half_width_hz = max(float(min_half_width_hz), float(width_factor) * float(f220_kerr_hz) / float(q_ref))
+    f_low = max(float(f_min_floor_hz), float(f220_kerr_hz) - half_width_hz)
+    f_high = float(f220_kerr_hz) + half_width_hz
+    return f_low, f_high, half_width_hz
+
+
+def _resolve_f220_kerr_hz(event_id: str) -> float | None:
+    """Resolve Kerr f220 from catalog remnant mass/spin when available."""
+    evt = get_event(event_id)
+    if not evt:
+        return None
+    m_final = evt.get("m_final_msun")
+    chi_final = evt.get("chi_final")
+    if m_final is None or chi_final is None:
+        return None
+    qnm = kerr_qnm(float(m_final), float(chi_final), (2, 2, 0))
+    if not math.isfinite(qnm.f_hz):
+        return None
+    return float(qnm.f_hz)
 
 
 def estimate_ringdown_observables(
@@ -239,6 +271,13 @@ def estimate_ringdown_spectral(
     sample_rate: float,
     band_hz: tuple,
     nperseg: int | None = None,
+    kerr_centered_band: bool = False,
+    kerr_f220_hz: float | None = None,
+    band_width_factor: float = 5.0,
+    min_half_width_hz: float = 10.0,
+    q_ref: float = 12.0,
+    f_min_floor_hz: float = 10.0,
+    min_band_bins: int = 5,
 ) -> dict:
     """Spectral Lorentzian estimator for ringdown f, tau, Q.
 
@@ -278,6 +317,8 @@ def estimate_ringdown_spectral(
                 "n_fit_bins": 0,
             },
         },
+        "fit_failure_reason": None,
+        "spectral_band": None,
     }
 
     n = len(strain)
@@ -316,10 +357,58 @@ def estimate_ringdown_spectral(
         filtered, fs=sample_rate, window="boxcar", nfft=nfft, scaling="density",
     )
 
-    # Restrict to the ringdown band
-    band_mask = (freqs_full >= band_low) & (freqs_full <= band_high)
-    if np.sum(band_mask) < 5:
-        return dict(_nan_result)
+    effective_band_low = band_low
+    effective_band_high = band_high
+    half_width_hz = None
+    band_method = "fixed"
+    notes = "Lorentzian fit restricted to input band"
+    if kerr_centered_band and kerr_f220_hz is not None and math.isfinite(kerr_f220_hz):
+        effective_band_low, effective_band_high, half_width_hz = _compute_kerr_centered_band(
+            f220_kerr_hz=float(kerr_f220_hz),
+            width_factor=band_width_factor,
+            min_half_width_hz=min_half_width_hz,
+            q_ref=q_ref,
+            f_min_floor_hz=f_min_floor_hz,
+        )
+        effective_band_low = max(effective_band_low, band_low)
+        effective_band_high = min(effective_band_high, band_high)
+        band_method = "kerr_centered"
+        notes = "Lorentzian fit restricted to Kerr-centered band"
+
+    if effective_band_high <= effective_band_low:
+        out = dict(_nan_result)
+        out["fit_failure_reason"] = "invalid_effective_band"
+        out["spectral_band"] = {
+            "method": band_method,
+            "f220_kerr_hz": kerr_f220_hz,
+            "f_low_hz": effective_band_low,
+            "f_high_hz": effective_band_high,
+            "half_width_hz": half_width_hz,
+            "width_factor": band_width_factor,
+            "min_half_width_hz": min_half_width_hz,
+            "notes": notes,
+            "band_n_bins": 0,
+        }
+        return out
+
+    # Restrict to effective fitting band (Kerr-centered when enabled).
+    band_mask = (freqs_full >= effective_band_low) & (freqs_full <= effective_band_high)
+    band_n_bins = int(np.sum(band_mask))
+    if band_n_bins < min_band_bins:
+        out = dict(_nan_result)
+        out["fit_failure_reason"] = "INSUFFICIENT_DATA"
+        out["spectral_band"] = {
+            "method": band_method,
+            "f220_kerr_hz": kerr_f220_hz,
+            "f_low_hz": effective_band_low,
+            "f_high_hz": effective_band_high,
+            "half_width_hz": half_width_hz,
+            "width_factor": band_width_factor,
+            "min_half_width_hz": min_half_width_hz,
+            "notes": notes,
+            "band_n_bins": band_n_bins,
+        }
+        return out
 
     f_band = freqs_full[band_mask]
     psd_band = psd_full[band_mask]
@@ -355,8 +444,8 @@ def estimate_ringdown_spectral(
     sigma_fit = np.maximum(psd_fit, np.max(psd_fit) * 1e-6)
 
     p0 = [A_init, f0_init, tau_init]
-    bounds_low  = [0.0,    band_low,  1e-4]
-    bounds_high = [np.inf, band_high, 1.0]
+    bounds_low  = [0.0,    effective_band_low,  1e-4]
+    bounds_high = [np.inf, effective_band_high, 1.0]
 
     df_floor_hz = sample_rate / n   # Heisenberg floor: 1 / window_duration_s
     fit_success = False
@@ -414,9 +503,7 @@ def estimate_ringdown_spectral(
     if not fit_success:
         # Fallback: use hilbert_envelope and flag the failure
         try:
-            result = estimate_ringdown_observables(
-                strain, sample_rate, band_hz[0], band_hz[1]
-            )
+            result = estimate_ringdown_observables(strain, sample_rate, effective_band_low, effective_band_high)
             result["fit_success"] = False
             result["fit_residual"] = float("nan")
             result["rmse"] = None
@@ -434,9 +521,34 @@ def estimate_ringdown_spectral(
                     "n_fit_bins": n_obs,
                 },
             }
+            result["fit_failure_reason"] = "curve_fit_failed"
+            result["spectral_band"] = {
+                "method": band_method,
+                "f220_kerr_hz": kerr_f220_hz,
+                "f_low_hz": effective_band_low,
+                "f_high_hz": effective_band_high,
+                "half_width_hz": half_width_hz,
+                "width_factor": band_width_factor,
+                "min_half_width_hz": min_half_width_hz,
+                "notes": notes,
+                "band_n_bins": band_n_bins,
+            }
             return result
         except Exception:
-            return dict(_nan_result)
+            out = dict(_nan_result)
+            out["fit_failure_reason"] = "curve_fit_failed"
+            out["spectral_band"] = {
+                "method": band_method,
+                "f220_kerr_hz": kerr_f220_hz,
+                "f_low_hz": effective_band_low,
+                "f_high_hz": effective_band_high,
+                "half_width_hz": half_width_hz,
+                "width_factor": band_width_factor,
+                "min_half_width_hz": min_half_width_hz,
+                "notes": notes,
+                "band_n_bins": band_n_bins,
+            }
+            return out
 
     Q_fit = math.pi * f0_fit * tau_fit
 
@@ -475,6 +587,18 @@ def estimate_ringdown_spectral(
                 "n_fit_bins": n_obs,
             },
         },
+        "fit_failure_reason": None,
+        "spectral_band": {
+            "method": band_method,
+            "f220_kerr_hz": kerr_f220_hz,
+            "f_low_hz": effective_band_low,
+            "f_high_hz": effective_band_high,
+            "half_width_hz": half_width_hz,
+            "width_factor": band_width_factor,
+            "min_half_width_hz": min_half_width_hz,
+            "notes": notes,
+            "band_n_bins": band_n_bins,
+        },
     }
 
 
@@ -511,6 +635,31 @@ def _json_strictify(value: Any) -> Any:
     return value
 
 
+
+
+def _estimate_spectral_compat(
+    strain: np.ndarray,
+    fs: float,
+    band: tuple[float, float],
+    *,
+    spectral_kerr_band: bool,
+    f220_kerr_hz: float,
+    spectral_band_width_factor: float,
+    spectral_min_half_width_hz: float,
+) -> dict[str, Any]:
+    kwargs = {
+        "kerr_centered_band": spectral_kerr_band,
+        "kerr_f220_hz": f220_kerr_hz,
+        "band_width_factor": spectral_band_width_factor,
+        "min_half_width_hz": spectral_min_half_width_hz,
+    }
+    try:
+        return estimate_ringdown_spectral(strain, fs, band, **kwargs)
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return estimate_ringdown_spectral(strain, fs, band)
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=f"MVP {STAGE}: estimate f, tau, Q")
     ap.add_argument("--run", default=None)
@@ -530,6 +679,12 @@ def main() -> int:
                          "e.g. '0,1,2,3'")
     ap.add_argument("--t0-scan-criterion", default="bic", choices=["bic", "logl"],
                     help="Criterion to select t0 offset: bic=min(BIC), logl=max(logL)")
+    ap.add_argument("--spectral-kerr-band", action=argparse.BooleanOptionalAction, default=True,
+                    help="Enable Kerr-centered fit band for spectral_lorentzian (default: on)")
+    ap.add_argument("--spectral-band-width-factor", type=float, default=5.0,
+                    help="Half-width scale factor: max(min_half_width, width_factor*f220/Q_ref)")
+    ap.add_argument("--spectral-min-half-width-hz", type=float, default=10.0,
+                    help="Minimum half-width in Hz for Kerr-centered spectral band")
     args = ap.parse_args()
 
     run_id = args.run_id or args.run
@@ -548,6 +703,9 @@ def main() -> int:
         "method": args.method, "n_bootstrap": args.n_bootstrap,
         "t0_scan_ms": offsets_ms,
         "t0_scan_criterion": args.t0_scan_criterion,
+        "spectral_kerr_band": bool(args.spectral_kerr_band),
+        "spectral_band_width_factor": float(args.spectral_band_width_factor),
+        "spectral_min_half_width_hz": float(args.spectral_min_half_width_hz),
     })
 
     # Discover detector files
@@ -576,6 +734,10 @@ def main() -> int:
         per_detector: dict[str, Any] = {}
         valid: list[dict[str, float]] = []
         spectral_fallbacks: list[str] = []  # detectors that fell back to hilbert
+        band_bins: list[int] = []
+
+        event_id = str(window_meta.get("event_id", "unknown"))
+        f220_kerr_hz = _resolve_f220_kerr_hz(event_id)
 
         for det, path in det_files.items():
             data = np.load(path)
@@ -592,11 +754,22 @@ def main() -> int:
                             f"t0_scan first offset leaves too few samples ({strain.size})"
                         )
                 if args.method == "spectral_lorentzian":
-                    est = estimate_ringdown_spectral(
-                        strain, fs, (args.band_low, args.band_high)
+                    est = _estimate_spectral_compat(
+                        strain,
+                        fs,
+                        (args.band_low, args.band_high),
+                        spectral_kerr_band=bool(args.spectral_kerr_band),
+                        f220_kerr_hz=f220_kerr_hz,
+                        spectral_band_width_factor=float(args.spectral_band_width_factor),
+                        spectral_min_half_width_hz=float(args.spectral_min_half_width_hz),
                     )
                     if not est.get("fit_success", True):
                         spectral_fallbacks.append(det)
+                    band_info = est.get("spectral_band")
+                    if isinstance(band_info, dict):
+                        nb = band_info.get("band_n_bins")
+                        if isinstance(nb, (int, float)):
+                            band_bins.append(int(nb))
                     # Validate that we got usable estimates
                     if not (math.isfinite(est.get("f_hz", float("nan")))
                             and math.isfinite(est.get("tau_s", float("nan")))):
@@ -771,8 +944,14 @@ def main() -> int:
                     if shift >= raw_strain.size - 16:
                         off_per_det.append({"success": False})
                         continue
-                    est_off = estimate_ringdown_spectral(
-                        raw_strain[shift:], fs_det, (args.band_low, args.band_high)
+                    est_off = _estimate_spectral_compat(
+                        raw_strain[shift:],
+                        fs_det,
+                        (args.band_low, args.band_high),
+                        spectral_kerr_band=bool(args.spectral_kerr_band),
+                        f220_kerr_hz=f220_kerr_hz,
+                        spectral_band_width_factor=float(args.spectral_band_width_factor),
+                        spectral_min_half_width_hz=float(args.spectral_min_half_width_hz),
                     )
                     est_off["detector"] = det
                     off_per_det.append(est_off)
@@ -848,10 +1027,40 @@ def main() -> int:
                 "n_requested": args.n_bootstrap,
                 "method": "block_bootstrap",
             }
+        if args.method == "spectral_lorentzian":
+            first_band = None
+            for det_name in ("H1", "L1", "V1"):
+                b = per_detector.get(det_name, {}).get("spectral_band")
+                if isinstance(b, dict):
+                    first_band = b
+                    break
+            if first_band is not None:
+                estimates["spectral_band"] = first_band
         est_path = ctx.outputs_dir / "estimates.json"
         write_json_atomic(est_path, _json_strictify(estimates))
 
-        extra_summary: dict[str, Any] = {}
+        extra_summary: dict[str, Any] = {
+            "counts": {
+                "n_records": len(per_detector),
+                "n_band_insufficient_bins": int(sum(
+                    1
+                    for det in per_detector.values()
+                    if isinstance(det.get("fit_failure_reason"), str)
+                    and det.get("fit_failure_reason") == "INSUFFICIENT_DATA"
+                )),
+            },
+            "config": {
+                "spectral_kerr_band": bool(args.spectral_kerr_band),
+                "width_factor": float(args.spectral_band_width_factor),
+                "min_half_width_hz": float(args.spectral_min_half_width_hz),
+            },
+        }
+        if band_bins:
+            extra_summary["band_stats"] = {
+                "min_bins": int(min(band_bins)),
+                "median_bins": int(float(np.median(np.asarray(band_bins, dtype=np.float64)))),
+                "max_bins": int(max(band_bins)),
+            }
         if spectral_fallbacks:
             extra_summary["warnings"] = [
                 f"spectral_lorentzian curve_fit failed for {det}; "

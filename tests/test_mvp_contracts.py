@@ -41,15 +41,24 @@ class TestContractRegistry:
                        "s3b_multimode_estimates",
                        "s4_geometry_filter", "s4_spectral_geometry_filter", "s4b_spectral_curvature",
                        "s4c_kerr_consistency", "s4d_kerr_from_multimode",
+                       "s7_beyond_kerr_deviation_score",
                        "s5_aggregate", "s6_information_geometry", "s6b_information_geometry_3d",
                        "s6b_information_geometry_ranked",
-                       "s6c_population_geometry", "s3_spectral_estimates", "experiment_geometry_evidence_vs_gr"}
+                       "s6c_brunete_psd_curvature", "s6c_population_geometry",
+                       "s3_spectral_estimates", "s4g_mode220_geometry_filter",
+                       "experiment_geometry_evidence_vs_gr",
+                       "experiment_ex3_golden_sweep", "experiment_ex4_spectral_exclusion",
+                       "experiment_gwtc_posteriors_fetch", "experiment_area_theorem",
+                       "experiment/delta_lnL_sweep", "psd_extract",
+                       "experiment_ex8_area_consistency",
+                       "s4g_mode220_geometry_filter", "s4h_mode221_geometry_filter",
+                       "s4i_common_geometry_intersection", "s4j_hawking_area_filter"}
 
     def test_all_stages_registered(self):
-        """Every MVP stage has a contract entry."""
+        """Every baseline MVP stage has a contract entry."""
         registered = set(CONTRACTS.keys())
         missing = self.EXPECTED_STAGES - registered
-        assert not missing, f"Missing expected stages: {sorted(missing)}"
+        assert not missing, f"Missing expected contract stages: {sorted(missing)}"
 
     def test_every_contract_has_required_fields(self):
         """Each contract has name, produced_outputs, and is a StageContract."""

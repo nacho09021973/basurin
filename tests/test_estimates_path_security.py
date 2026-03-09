@@ -177,6 +177,18 @@ def test_s4_estimates_override_records_sha256(tmp_path: Path, monkeypatch: pytes
     atlas_path = tmp_path / "atlas.json"
     write_json_atomic(atlas_path, [{"geometry_id": "g1", "f_hz": 250.0, "Q": 3.14}])
 
+    # s3 default output is now a required_inputs contract field; create it so the
+    # contract check passes even when an override is provided.
+    default_estimates = run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+    write_json_atomic(
+        default_estimates,
+        {
+            "event_id": "EVT",
+            "combined": {"f_hz": 250.0, "Q": 3.14, "tau_s": 0.004},
+            "combined_uncertainty": {"sigma_logf": 0.1, "sigma_logQ": 0.2},
+        },
+    )
+
     estimates_rel = Path("s3_spectral_estimates/outputs/spectral_estimates.json")
     estimates_path = run_dir / estimates_rel
     write_json_atomic(

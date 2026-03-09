@@ -26,12 +26,23 @@ for _cand in [_here.parents[0], _here.parents[1]]:
             sys.path.insert(0, str(_cand))
         break
 
-from mvp.contracts import init_stage, check_inputs, finalize, abort
+from mvp.contracts import init_stage, check_inputs, finalize, abort, log_stage_paths
+from mvp.schemas import (
+    SchemaError,
+    extract_compatible_geometry_ids,
+    normalize_schema_version,
+    validate as validate_schema,
+)
 from basurin_io import sha256_file, utc_now_iso, write_json_atomic
 
 STAGE = "s5_aggregate"
-
-
+ALLOWED_MULTIMODE_VIABILITY_CLASSES = {
+    "MULTIMODE_OK",
+    "SINGLEMODE_ONLY",
+    "RINGDOWN_NONINFORMATIVE",
+}
+SINGLEMODE_FALLBACK_CLASS = "SINGLEMODE_ONLY"
+SINGLEMODE_FALLBACK_REASON = "MISSING_S3B_UPSTREAM"
 def _relpath_under(root: Path, p: Path) -> str:
     """Return POSIX path relative to root when possible, else absolute POSIX path."""
     try:
@@ -41,112 +52,53 @@ def _relpath_under(root: Path, p: Path) -> str:
 
 
 def _extract_compatible_geometry_ids(
-    payload: dict[str, Any],
-    source_path: Path | None = None,
-    *,
-    strict_canonical: bool | None = None,
-) -> list[str] | set[str]:
-    """Extract compatible geometry IDs from canonical and legacy compatible_set schemas.
+    payload: dict[str, Any], source_path: Path | None = None,
+) -> set[str]:
+    """Extract compatible geometry IDs via centralized schemas helpers."""
+    present_keys = sorted(payload.keys())
+    source_display = source_path.as_posix() if source_path is not None else "<unknown>"
 
-    Supported keys:
-    - canonical: compatible_geometry_ids
-    - legacy: compatible_geometries, compatible_entries, compatible_ids
-    """
+    try:
+        return extract_compatible_geometry_ids(payload)
+    except SchemaError as exc:
+        hint = ""
+        if source_path is not None and len(source_path.parts) >= 5:
+            hint = (
+                " Hint: regenerate upstream with "
+                f"`python -m mvp.s4_geometry_filter --run {source_path.parts[-5]} --atlas-path <atlas.json>`"
+            )
+        raise RuntimeError(
+            f"Invalid compatible_set schema at {source_display}: {exc}. "
+            f"Present keys={present_keys}.{hint}"
+        ) from exc
 
-    if strict_canonical is None:
-        strict_canonical = source_path is not None
 
-    source_label = source_path.as_posix() if source_path is not None else "<memory>"
+def _detect_compatible_set_schema(
+    payload: dict[str, Any], source_path: Path | None = None,
+) -> tuple[Any, str]:
+    """Validate and normalize compatible_set schema using centralized schemas helpers."""
+    source_display = source_path.as_posix() if source_path is not None else "<unknown>"
     present_keys = sorted(payload.keys())
 
-    def _schema_error(reason: str) -> RuntimeError:
-        return RuntimeError(
-            "Invalid compatible_set schema at "
-            f"{source_label}: {reason}. Present keys={present_keys}."
+    try:
+        errors = validate_schema("compatible_set", payload)
+    except SchemaError as exc:
+        raise RuntimeError(
+            f"Invalid compatible_set schema at {source_display}: {exc}. Present keys={present_keys}."
+        ) from exc
+
+    if errors:
+        raise RuntimeError(
+            f"Invalid compatible_set schema at {source_display}: {'; '.join(errors)}. "
+            f"Present keys={present_keys}."
         )
 
-    def _coerce_gid(value: Any) -> str | None:
-        if isinstance(value, str):
-            gid = value.strip()
-            return gid if gid else None
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return str(int(value)) if isinstance(value, int) or float(value).is_integer() else str(value)
-        return None
-
-    ids: set[str] = set()
-
-    if strict_canonical:
-        required_keys = {"schema_version", "event_id", "compatible_geometry_ids"}
-        if set(payload.keys()) != required_keys:
-            raise _schema_error(
-                "unexpected keys or missing required keys; expected "
-                "['schema_version', 'event_id', 'compatible_geometry_ids']"
-            )
-        if payload.get("schema_version") != 1:
-            raise _schema_error("'schema_version' must be integer 1")
-        event_id = payload.get("event_id")
-        if not isinstance(event_id, str) or not event_id.strip():
-            raise _schema_error("'event_id' must be a non-empty string")
-        canonical_ids = payload.get("compatible_geometry_ids")
-        if not isinstance(canonical_ids, list):
-            raise _schema_error("'compatible_geometry_ids' must be an array")
-        for gid in canonical_ids:
-            coerced = _coerce_gid(gid)
-            if coerced is not None:
-                ids.add(coerced)
-        return sorted(ids)
-
-    # Canonical schema (v1)
-    canonical_ids = payload.get("compatible_geometry_ids")
-    if isinstance(canonical_ids, list):
-        for gid in canonical_ids:
-            coerced = _coerce_gid(gid)
-            if coerced is not None:
-                ids.add(coerced)
-        return ids
-
-    # Legacy schema: [{"geometry_id": "...", "compatible": true}, ...]
-    legacy_rows = payload.get("compatible_geometries")
-    if isinstance(legacy_rows, list):
-        for row in legacy_rows:
-            if isinstance(row, dict):
-                if row.get("compatible") is False:
-                    continue
-                candidate = row.get("geometry_id", row.get("id"))
-                coerced = _coerce_gid(candidate)
-                if coerced is not None:
-                    ids.add(coerced)
-            else:
-                coerced = _coerce_gid(row)
-                if coerced is not None:
-                    ids.add(coerced)
-        return ids
-
-    # Alternate legacy forms.
-    entries_rows = payload.get("compatible_entries")
-    if isinstance(entries_rows, list):
-        for row in entries_rows:
-            if isinstance(row, dict):
-                candidate = row.get("geometry_id", row.get("id"))
-                coerced = _coerce_gid(candidate)
-            else:
-                coerced = _coerce_gid(row)
-            if coerced is not None:
-                ids.add(coerced)
-        return ids
-
-    ids_rows = payload.get("compatible_ids")
-    if isinstance(ids_rows, list):
-        for row in ids_rows:
-            coerced = _coerce_gid(row)
-            if coerced is not None:
-                ids.add(coerced)
-        return ids
-
-    raise _schema_error(
-        "no compatible geometry identifiers found in canonical or legacy keys "
-        "('compatible_geometry_ids', 'compatible_geometries', 'compatible_entries', 'compatible_ids')"
-    )
+    normalized = normalize_schema_version("compatible_set", payload)
+    detected = payload.get("schema_version", "legacy_without_schema_version")
+    normalized_schema = "compatible_set_v1"
+    if payload.get("schema_version") == normalized.get("schema_version"):
+        normalized_schema = "compatible_set_v1_canonical"
+    return detected, normalized_schema
 
 
 def _parse_s6b_indices(rows: Any) -> list[int]:
@@ -157,6 +109,56 @@ def _parse_s6b_indices(rows: Any) -> list[int]:
         if isinstance(row, dict) and isinstance(row.get("atlas_index"), int):
             out.append(int(row["atlas_index"]))
     return out
+
+
+def _event_id_from_source_run(run_id: str) -> str | None:
+    """Extract event_id from run_id in canonical format: mvp_<EVENT_ID>_<DATE>_<TIME>."""
+    if not isinstance(run_id, str) or not run_id.startswith("mvp_"):
+        return None
+    tokens = run_id.split("_")
+    if len(tokens) < 4:
+        return None
+    return "_".join(tokens[1:-2]) or None
+
+
+def _safe_event_id(run_id: str, payload_event_id: Any) -> str:
+    """Resolve event_id using source_run naming first, payload as fallback."""
+    from_run = _event_id_from_source_run(run_id)
+    if from_run:
+        return from_run
+    if isinstance(payload_event_id, str) and payload_event_id.strip():
+        return payload_event_id.strip()
+    return "unknown"
+
+
+def _compute_chi2_p_value(chi2_value: float, dof: int) -> tuple[float | None, str | None]:
+    """Compute χ² survival p-value with explicit reasons for null outputs."""
+    if dof <= 0:
+        return None, "dof=0"
+    if not isinstance(chi2_value, (int, float)) or not math.isfinite(float(chi2_value)):
+        return None, "invalid_chi2"
+
+    chi2_value = float(chi2_value)
+
+    try:
+        from scipy.stats import chi2 as scipy_chi2
+
+        p_value = float(scipy_chi2.sf(chi2_value, df=dof))
+        if math.isfinite(p_value):
+            return p_value, None
+        return None, "nan"
+    except Exception:
+        # Wilson–Hilferty approximation fallback (finite for dof>0 and chi2>=0).
+        x = max(0.0, chi2_value)
+        z_num = (x / dof) ** (1.0 / 3.0) - (1.0 - 2.0 / (9.0 * dof))
+        z_den = math.sqrt(2.0 / (9.0 * dof))
+        if z_den <= 0.0 or not math.isfinite(z_num) or not math.isfinite(z_den):
+            return None, "invalid_variance"
+        z = z_num / z_den
+        p_value = 0.5 * math.erfc(z / math.sqrt(2.0))
+        if not math.isfinite(p_value):
+            return None, "nan"
+        return min(1.0, max(0.0, p_value)), "approx_wilson_hilferty"
 
 
 
@@ -220,6 +222,8 @@ def aggregate_compatible_sets(
     use_s6b_mode = len(s6b_ready) > 0
 
     warnings: list[str] = []
+    viability_counts = {k: 0 for k in sorted(ALLOWED_MULTIMODE_VIABILITY_CLASSES)}
+    viability_event_run_ids = {k: [] for k in sorted(ALLOWED_MULTIMODE_VIABILITY_CLASSES)}
     if use_s6b_mode:
         ranked_sets = [set(src.get("ranked_indices", [])) for src in s6b_ready]
         compatible_sets = [set(src.get("compatible_indices", [])) for src in s6b_ready]
@@ -301,6 +305,11 @@ def aggregate_compatible_sets(
         return None
 
     for src in source_data:
+        viability_class = str(src.get("multimode_viability_class"))
+        if viability_class in viability_counts:
+            viability_counts[viability_class] += 1
+            viability_event_run_ids[viability_class].append(str(src.get("run_id")))
+
         metric = str(src.get("metric", ""))
         ranked_all = src.get("ranked_all", [])
         if top_k is None:
@@ -466,6 +475,10 @@ def aggregate_compatible_sets(
         "coverage_histogram": coverage_hist,
         "coverage_histogram_basis": "ranked_all",
         "warnings": warnings,
+        "multimode_viability": {
+            "counts": viability_counts,
+            "event_run_ids": viability_event_run_ids,
+        },
         "events": events,
     }
 
@@ -611,19 +624,11 @@ def compute_deviation_distribution(
                  for r in per_event_rows)
     n_events = len(per_event_rows)
 
-    # p-value from chi2 distribution with n_events DOF
-    try:
-        from scipy.stats import chi2 as scipy_chi2
-        p_value_f = float(scipy_chi2.sf(chi2_f, df=n_events))
-    except Exception:
-        # Approximation without scipy: use simple lookup
-        # chi2 sf ≈ 1 - CDF; for large chi2: p < 0.05
-        p_value_f = float("nan")
+    p_value_f, p_value_reason = _compute_chi2_p_value(chi2_f, n_events)
+    consistent_gr_95 = None if p_value_f is None else (p_value_f > 0.05)
 
-    consistent_gr_95 = (not math.isnan(p_value_f)) and (p_value_f > 0.05)
-
-    if math.isnan(p_value_f):
-        interpretation = "GR test inconclusive (scipy unavailable)"
+    if p_value_f is None:
+        interpretation = "GR test inconclusive"
     elif p_value_f > 0.05:
         interpretation = "GR consistent"
     elif p_value_f > 0.003:
@@ -645,6 +650,7 @@ def compute_deviation_distribution(
             "n_events": n_events,
             "chi2_GR": chi2_f,
             "p_value_GR": p_value_f,
+            "p_value_reason": p_value_reason,
             "consistent_GR_95": consistent_gr_95,
         },
         "interpretation": interpretation,
@@ -658,6 +664,11 @@ def main() -> int:
     ap.add_argument("--source-runs", required=True)
     ap.add_argument("--min-coverage", type=float, default=1.0)
     ap.add_argument("--top-k", type=int, default=50)
+    ap.add_argument(
+        "--require-multimode",
+        action="store_true",
+        help="Fail when {source_run}/s3b_multimode_estimates/stage_summary.json is missing.",
+    )
     ap.add_argument(
         "--catalog-path", default=None,
         help="Optional JSON catalog {event_id: {m_final_msun, chi_final}} for deviation analysis",
@@ -679,6 +690,7 @@ def main() -> int:
     ctx = init_stage(args.out_run, STAGE, params={
         "source_runs": source_runs, "min_coverage": args.min_coverage, "top_k": args.top_k,
         "catalog_path": args.catalog_path,
+        "require_multimode": bool(args.require_multimode),
     })
 
     # Load optional catalog for deviation analysis
@@ -693,22 +705,24 @@ def main() -> int:
             print(f"[s5] WARNING: could not load catalog {args.catalog_path}: {exc}",
                   file=sys.stderr, flush=True)
     else:
-        # Try to use built-in GWTC_EVENTS as default catalog
-        try:
-            from mvp.gwtc_events import GWTC_EVENTS
-            catalog = GWTC_EVENTS
-            print(f"[s5] Using built-in GWTC catalog ({len(catalog)} events)", flush=True)
-        except Exception:
-            pass
+        catalog = None
 
     # Collect and validate source files.
     source_paths: dict[str, Path] = {}
     ranked_paths: dict[str, Path] = {}
+    s3b_summary_paths: dict[str, Path] = {}
+    s3_summary_paths: dict[str, Path] = {}
     for src in source_runs:
         p = out_root / src / "s4_geometry_filter" / "outputs" / "compatible_set.json"
         source_paths[src] = p
         ranked_paths[src] = out_root / src / "s6b_information_geometry_ranked" / "outputs" / "ranked_geometries.json"
-    check_inputs(ctx, source_paths, optional=ranked_paths)
+        s3b_summary_paths[src] = out_root / src / "s3b_multimode_estimates" / "stage_summary.json"
+        s3_summary_paths[src] = out_root / src / "s3_ringdown_estimates" / "stage_summary.json"
+    check_inputs(
+        ctx,
+        source_paths,
+        optional={**ranked_paths, **s3b_summary_paths, **s3_summary_paths},
+    )
     # Keep metadata portable/auditable: prefer paths relative to runs_root for upstream inputs.
     for rec in ctx.inputs_record:
         label = rec.get("label", "")
@@ -784,7 +798,7 @@ def main() -> int:
                     continue
 
             source_data.append({
-                "run_id": src, "event_id": cs.get("event_id", "unknown"),
+                "run_id": src, "event_id": _safe_event_id(src, cs.get("event_id")),
                 "metric": cs.get("metric"),
                 "threshold_d2": cs.get("threshold_d2"),
                 "ranked_all": ranked_all,
@@ -799,7 +813,55 @@ def main() -> int:
                 "s6b_present": False,
                 "ranked_indices": [],
                 "compatible_indices": [],
+                "multimode_viability_class": None,
+                "compatible_set_schema": {},
             })
+            if "schema_version" in cs:
+                detected_schema, normalized_schema = _detect_compatible_set_schema(cs, p)
+            else:
+                detected_schema, normalized_schema = "legacy_without_schema_version", "legacy"
+            source_data[-1]["compatible_set_schema"] = {
+                "schema_detected": detected_schema,
+                "schema_normalized": normalized_schema,
+            }
+
+            s3b_summary_path = s3b_summary_paths[src]
+            s3_summary_path = s3_summary_paths[src]
+            if s3b_summary_path.exists():
+                s3b_summary = json.loads(s3b_summary_path.read_text(encoding="utf-8"))
+                mm_viability = s3b_summary.get("multimode_viability")
+                if not isinstance(mm_viability, dict):
+                    raise RuntimeError(
+                        f"Missing multimode_viability in {s3b_summary_path}; regenerate upstream with "
+                        f"python -m mvp.s3b_multimode_estimates --run-id {src}"
+                    )
+                mm_class = mm_viability.get("class")
+                if mm_class not in ALLOWED_MULTIMODE_VIABILITY_CLASSES:
+                    raise RuntimeError(
+                        f"Invalid multimode_viability.class={mm_class!r} in {s3b_summary_path}"
+                    )
+                source_data[-1]["multimode_viability_class"] = mm_class
+            else:
+                if args.require_multimode:
+                    raise RuntimeError(
+                        f"Missing required inputs: {s3b_summary_path} "
+                        f"(expected for --require-multimode); regenerate upstream with "
+                        f"python -m mvp.s3b_multimode_estimates --run-id {src}. "
+                        f"Fallback candidate detected: {s3_summary_path if s3_summary_path.exists() else 'none'}"
+                    )
+                if not s3_summary_path.exists():
+                    raise RuntimeError(
+                        f"Missing required inputs: {s3b_summary_path} (multimode) or {s3_summary_path} (single-mode fallback). "
+                        f"Regenerate upstream with python -m mvp.s3_ringdown_estimates --run-id {src} "
+                        f"or python -m mvp.s3b_multimode_estimates --run-id {src}."
+                    )
+                source_data[-1]["multimode_viability_class"] = SINGLEMODE_FALLBACK_CLASS
+                result_warnings = source_data[-1].setdefault("multimode_viability_fallback", {})
+                if isinstance(result_warnings, dict):
+                    result_warnings.update({
+                        "reasons": [SINGLEMODE_FALLBACK_REASON],
+                        "metrics": {},
+                    })
 
             ranked_path = ranked_paths[src]
             if ranked_path.exists():
@@ -812,6 +874,19 @@ def main() -> int:
                     pass
 
         result = aggregate_compatible_sets(source_data, args.min_coverage, top_k=args.top_k)
+        schema_rows = [
+            {
+                "run_id": str(src.get("run_id")),
+                "event_id": str(src.get("event_id")),
+                "schema_detected": src.get("compatible_set_schema", {}).get("schema_detected"),
+                "schema_normalized": src.get("compatible_set_schema", {}).get("schema_normalized"),
+            }
+            for src in source_data
+        ]
+        result["compatible_set_schema"] = {
+            "per_event": schema_rows,
+            "counts": dict(Counter(row["schema_normalized"] for row in schema_rows if row.get("schema_normalized"))),
+        }
 
         # Compute deviation distribution if catalog available
         deviation_analysis = compute_deviation_distribution(source_data, catalog)
@@ -824,18 +899,28 @@ def main() -> int:
                 combined = deviation_analysis.get("combined")
                 if isinstance(combined, dict):
                     combined["p_value_GR"] = None
+                    combined["p_value_reason"] = "no_common_compatible_geometries"
                     combined["consistent_GR_95"] = None
             result["deviation_analysis"] = deviation_analysis
             if deviation_analysis.get("combined"):
                 comb = deviation_analysis["combined"]
                 p_value = comb.get("p_value_GR")
+                p_reason = comb.get("p_value_reason")
                 p_text = "null" if p_value is None else f"{p_value:.3f}"
                 print(
                     f"[s5] GR test: δf_rel={comb['delta_f_rel']:.4f}±{comb['sigma_delta_f_rel']:.4f}, "
-                    f"χ²={comb['chi2_GR']:.2f}, p={p_text}, "
+                    f"χ²={comb['chi2_GR']:.2f}, p={p_text}, p_value_reason={p_reason}, "
                     f"consistent_GR_95={comb['consistent_GR_95']}",
                     flush=True,
                 )
+
+        for src in source_data:
+            if src.get("multimode_viability_class") == SINGLEMODE_FALLBACK_CLASS and src.get("multimode_viability_fallback"):
+                result.setdefault("warnings", []).append(
+                    f"{SINGLEMODE_FALLBACK_REASON}:{src['run_id']}"
+                )
+                mm_viability = result.setdefault("multimode_viability", {}).setdefault("per_event", {})
+                mm_viability[src["run_id"]] = src["multimode_viability_fallback"]
 
         agg_path = ctx.outputs_dir / "aggregate.json"
         write_json_atomic(agg_path, result)
@@ -861,11 +946,7 @@ def main() -> int:
             summary_results["consistent_GR_95"] = comb["consistent_GR_95"]
 
         finalize(ctx, artifacts={"aggregate": agg_path}, results=summary_results)
-        print(f"OUT_ROOT={ctx.out_root}")
-        print(f"STAGE_DIR={ctx.stage_dir}")
-        print(f"OUTPUTS_DIR={ctx.outputs_dir}")
-        print(f"STAGE_SUMMARY={ctx.stage_dir / 'stage_summary.json'}")
-        print(f"MANIFEST={ctx.stage_dir / 'manifest.json'}")
+        log_stage_paths(ctx)
         return 0
 
     except SystemExit:

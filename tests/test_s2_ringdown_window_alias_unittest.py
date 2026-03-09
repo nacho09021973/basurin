@@ -12,11 +12,11 @@ def test_resolve_t0_gps_accepts_alias_by_canonical_prefix(tmp_path: Path) -> Non
     catalog_path = tmp_path / "window_catalog_v1.json"
     catalog_path.write_text(json.dumps({"GW190521": {"t0_gps": 1242442967.4}}), encoding="utf-8")
 
-    t0_gps, t0_source, lookup_key = s2._resolve_t0_gps("GW190521_030229", catalog_path)
+    t0_gps, t0_source, details, _used_cache = s2._resolve_t0_gps("GW190521_030229", catalog_path)
 
     assert t0_gps == 1242442967.4
     assert t0_source == str(catalog_path)
-    assert lookup_key == "GW190521"
+    assert details["lookup_key"] == "GW190521"
 
 
 def test_main_persists_lookup_key_in_window_meta_for_alias(tmp_path: Path, monkeypatch) -> None:

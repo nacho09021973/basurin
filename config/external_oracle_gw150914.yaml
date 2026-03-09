@@ -1,0 +1,70 @@
+external_oracle:
+  event: GW150914
+  spec_version: v1
+  applies_to:
+    - s4g_mode220_geometry_filter
+    - s4h_mode221_geometry_filter
+    - s4i_common_geometry_intersection
+    - s4j_hawking_area_filter
+    - experiment_single_event_golden_robustness
+
+  references:
+    ringdown_optimistic:
+      - "Isi et al. 2019"
+    ringdown_conservative:
+      - "Carullo et al. 2019"
+      - "Correia et al. 2024"
+    area_law:
+      - "Cabero et al. 2018"
+      - "Correia & Capano 2024"
+    robustness_context:
+      - "Nelli et al. 2024"
+
+  checks:
+    s4g_mode220_geometry_filter:
+      pass:
+        - "n_geometries_accepted > 0"
+      warn:
+        - "n_geometries_accepted == 1"
+      fail:
+        - "n_geometries_accepted == 0"
+
+    s4h_mode221_geometry_filter:
+      pass:
+        - "n_geometries_accepted > 0"
+      warn:
+        - "n_geometries_accepted == 0"
+        - "n_geometries_accepted == 1"
+      fail:
+        - "internal_inconsistency_only"
+
+    s4i_common_geometry_intersection:
+      pass:
+        - "n_common_geometries > 1"
+      warn:
+        - "n_common_geometries == 1"
+        - "n_common_geometries == 0"
+      fail:
+        - "contract_or_payload_inconsistency_only"
+
+    s4j_hawking_area_filter:
+      pass:
+        - "n_golden_geometries > 0"
+      warn:
+        - "n_golden_geometries == 0 and n_common_geometries > 0"
+      fail:
+        - "systematic_negative_delta_area"
+
+    experiment_single_event_golden_robustness:
+      pass:
+        - 'robustness_verdict == "ROBUST_UNIQUE"'
+      warn:
+        - 'robustness_verdict == "UNSTABLE_UNIQUE"'
+        - 'robustness_verdict == "NOT_UNIQUE"'
+      fail:
+        - 'robustness_verdict == "NO_DATA"'
+
+  interpretation_notes:
+    - "PASS indicates external coherence compatible with published expectations for early validation."
+    - "WARN indicates scientifically interpretable but non-conclusive outcome."
+    - "FAIL indicates strong suspicion of contractual, numerical, or physical inconsistency requiring audit."

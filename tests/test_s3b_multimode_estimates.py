@@ -21,6 +21,7 @@ _MODULE = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MODULE)
 
 build_results_payload = _MODULE.build_results_payload
+classify_multimode_viability = _MODULE.classify_multimode_viability
 covariance_gate = _MODULE.covariance_gate
 compute_robust_stability = _MODULE.compute_robust_stability
 evaluate_mode = _MODULE.evaluate_mode
@@ -162,6 +163,40 @@ def test_main_populates_source_window_and_avoids_missing_flag(tmp_path: Path) ->
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["source"]["window"] == meta
     assert "missing_window_meta" not in payload["results"]["quality_flags"]
+
+    stage_summary = json.loads((tmp_runs / run_id / "s3b_multimode_estimates" / "stage_summary.json").read_text(encoding="utf-8"))
+    viability = stage_summary.get("multimode_viability")
+    assert viability["class"] in {"MULTIMODE_OK", "SINGLEMODE_ONLY", "RINGDOWN_NONINFORMATIVE"}
+    assert "metrics" in viability
+
+    systematics_gate = stage_summary.get("systematics_gate")
+    assert systematics_gate["schema_version"] == "systematics_gate_v1"
+    assert systematics_gate["verdict_auto"] in {"PASS", "FAIL", "NOT_AVAILABLE"}
+
+    science_evidence = stage_summary.get("science_evidence")
+    assert science_evidence["schema_version"] == "science_evidence_v1"
+    assert science_evidence["status"] in {"EVALUATED", "NOT_EVALUATED"}
+
+    annotations = stage_summary.get("annotations")
+    assert annotations["kerr_inconsistency_is_not_fail"] is True
+
+
+def test_classify_multimode_viability_is_conservative() -> None:
+    singlemode = classify_multimode_viability(
+        boundary_fraction=1.0,
+        valid_fraction_220=0.9,
+        valid_fraction_221=0.6,
+    )
+    assert singlemode["class"] == "SINGLEMODE_ONLY"
+    assert "BOUNDARY_FRACTION_HIGH" in singlemode["reasons"]
+
+    noninfo = classify_multimode_viability(
+        boundary_fraction=1.0,
+        valid_fraction_220=0.2,
+        valid_fraction_221=0.2,
+    )
+    assert noninfo["class"] == "RINGDOWN_NONINFORMATIVE"
+    assert "VALID_FRACTION_220_LOW" in noninfo["reasons"]
 
 
 
@@ -602,6 +637,40 @@ def _write_minimal_s2_inputs(run_root: Path, run_id: str) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def test_cli_applies_t0_selected_offset_from_s3(tmp_path: Path) -> None:
+    run_id = "subrun_004"
+    tmp_runs = tmp_path / "subruns_root"
+    _write_minimal_s2_inputs(tmp_runs, run_id)
+
+    s3_estimates_path = tmp_runs / run_id / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+    estimates = json.loads(s3_estimates_path.read_text(encoding="utf-8"))
+    estimates["t0_selected"] = {"offset_ms": 20.0, "criterion": "bic"}
+    s3_estimates_path.write_text(json.dumps(estimates), encoding="utf-8")
+
+    repo_root = Path(__file__).resolve().parents[1]
+    cmd = [
+        sys.executable,
+        str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
+        "--runs-root",
+        str(tmp_runs),
+        "--run-id",
+        run_id,
+        "--n-bootstrap",
+        "8",
+        "--seed",
+        "101",
+    ]
+    env = os.environ.copy()
+    env.pop("BASURIN_RUNS_ROOT", None)
+
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+
+    output_path = tmp_runs / run_id / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["source"]["t0_offset_ms_from_s3"] == 20.0
 
 
 def test_cli_runs_root_writes_under_explicit_root_only(tmp_path: Path) -> None:

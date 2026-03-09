@@ -195,6 +195,44 @@ def test_run_stage_nonzero_exit_propagated(
     assert rc == 2
 
 
+
+
+def test_run_stage_invokes_python_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_root = _make_runs_root(tmp_path)
+    run_id = "test_module_invocation"
+
+    captured: dict[str, Any] = {}
+
+    class _OkProc:
+        returncode = 0
+
+        def wait(self, timeout: float | None = None) -> None:
+            pass
+
+        def kill(self) -> None:
+            pass
+
+    def _fake_popen(cmd: list[str], *a: Any, **kw: Any) -> _OkProc:
+        captured["cmd"] = cmd
+        return _OkProc()
+
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+
+    timeline: dict[str, Any] = {"stages": []}
+    rc = _run_stage(
+        "s4d_kerr_from_multimode.py",
+        ["--run-id", run_id],
+        "s4d_kerr_from_multimode",
+        runs_root,
+        run_id,
+        timeline,
+    )
+
+    assert rc == 0
+    assert captured["cmd"][:3] == [sys.executable, "-m", "mvp.s4d_kerr_from_multimode"]
+
 def test_run_stage_appends_to_timeline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -332,6 +370,76 @@ def test_run_single_event_writes_timeline_on_abort(
     assert tl["run_id"] == run_id
     assert tl["event_id"] == "GW150914"
     assert "ended_utc" in tl
+
+
+def test_run_single_event_passes_offline_s2_and_t0_catalog_to_s2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_root = _make_runs_root(tmp_path)
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    captured_s2_args: list[str] = []
+
+    def fake_run_stage(
+        script: str,
+        args: list[str],
+        label: str,
+        out_root: Path,
+        run_id: str,
+        timeline: dict[str, Any],
+        stage_timeout_s: float | None = None,
+    ) -> int:
+        if label == "s2_ringdown_window":
+            captured_s2_args.extend(args)
+            return 0
+        if label == "s3_ringdown_estimates":
+            return 1
+        return 0
+
+    monkeypatch.setattr(pipeline, "_run_stage", fake_run_stage)
+
+    rc, _ = run_single_event(
+        "GW150914",
+        "fake_atlas.json",
+        run_id="offline_s2_run",
+        offline_s2=True,
+        t0_catalog="catalogs/t0.json",
+    )
+
+    assert rc != 0
+    assert "--offline" in captured_s2_args
+    assert "--window-catalog" in captured_s2_args
+    wc_idx = captured_s2_args.index("--window-catalog")
+    assert captured_s2_args[wc_idx + 1] == "catalogs/t0.json"
+
+
+def test_run_single_event_marks_run_valid_fail_when_s2_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_root = _make_runs_root(tmp_path)
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    def fake_run_stage(
+        script: str,
+        args: list[str],
+        label: str,
+        out_root: Path,
+        run_id: str,
+        timeline: dict[str, Any],
+        stage_timeout_s: float | None = None,
+    ) -> int:
+        if label == "s2_ringdown_window":
+            return 2
+        return 0
+
+    monkeypatch.setattr(pipeline, "_run_stage", fake_run_stage)
+
+    rc, run_id = run_single_event("GW150914", "fake_atlas.json", run_id="s2_fail_run")
+    assert rc == 2
+
+    verdict = json.loads((runs_root / run_id / "RUN_VALID" / "verdict.json").read_text(encoding="utf-8"))
+    assert verdict["verdict"] == "FAIL"
+    assert verdict["reason"] == "s2_ringdown_window failed: exit=2"
 
 
 def test_run_single_event_timeline_has_required_keys_on_success(
@@ -548,3 +656,33 @@ def test_run_multi_event_creates_run_valid_for_agg_run(
 
     rv_path = runs_root / "agg_rv_test" / "RUN_VALID" / "verdict.json"
     assert rv_path.exists(), "RUN_VALID was not created for the aggregate run"
+
+
+def test_pipeline_single_cli_prioritizes_window_catalog_over_t0_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runs_root = _make_runs_root(tmp_path)
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    captured: dict[str, Any] = {}
+
+    def fake_run_single_event(*args: Any, **kwargs: Any) -> tuple[int, str]:
+        captured.update(kwargs)
+        return 0, "run_ok"
+
+    monkeypatch.setattr(pipeline, "run_single_event", fake_run_single_event)
+    monkeypatch.setattr(sys, "argv", [
+        "pipeline.py",
+        "single",
+        "--event-id",
+        "GW150914",
+        "--atlas-path",
+        "fake_atlas.json",
+        "--window-catalog",
+        "catalogs/window.json",
+        "--t0-catalog",
+        "catalogs/t0.json",
+    ])
+
+    rc = pipeline.main()
+
+    assert rc == 0
+    assert captured["t0_catalog"] == "catalogs/window.json"

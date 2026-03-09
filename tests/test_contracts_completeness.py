@@ -13,6 +13,12 @@ def test_no_undocumented_dynamic_inputs() -> None:
     assert CONTRACTS["s3_spectral_estimates"].dynamic_inputs == [
         "s2_ringdown_window/outputs/{detector}_rd.npz",
     ]
+    assert CONTRACTS["s5_aggregate"].dynamic_inputs == [
+        "{source_run}/s4_geometry_filter/outputs/compatible_set.json",
+        "{source_run}/s3b_multimode_estimates/stage_summary.json",
+        "{source_run}/s3_ringdown_estimates/stage_summary.json",
+        "{source_run}/s6_information_geometry/outputs/curvature.json",
+    ]
 
 
 def test_dynamic_inputs_have_pattern() -> None:
@@ -39,7 +45,7 @@ def test_existing_contracts_unchanged() -> None:
     assert CONTRACTS["s4_geometry_filter"].required_inputs == [
         "s3_ringdown_estimates/outputs/estimates.json",
     ]
-    assert CONTRACTS["s4_geometry_filter"].produced_outputs == ["outputs/compatible_set.json"]
+    assert CONTRACTS["s4_geometry_filter"].produced_outputs == ["outputs/compatible_set.json", "outputs/ranked_all_full.json"]
     assert CONTRACTS["s3_ringdown_estimates"].upstream_stages == ["s2_ringdown_window"]
     assert CONTRACTS["s6_information_geometry"].upstream_stages == [
         "s3_ringdown_estimates",

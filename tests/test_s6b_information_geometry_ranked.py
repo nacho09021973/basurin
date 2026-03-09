@@ -36,9 +36,22 @@ def test_s6b_exports_ranked_non_empty(tmp_path: Path) -> None:
             {"geometry_id": "g2", "d_conformal": 0.3, "metadata": {"atlas_index": 2}},
         ],
     }), encoding="utf-8")
+    atlas_path = tmp_path / "atlas_fixture.json"
+    atlas_path.write_text(json.dumps([
+        {"id": "g0"},
+        {"id": "g1"},
+        {"id": "g2"},
+    ]), encoding="utf-8")
 
     env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
-    cmd = [sys.executable, str(MVP_DIR / "s6b_information_geometry_ranked.py"), "--run", run_id]
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s6b_information_geometry_ranked.py"),
+        "--run",
+        run_id,
+        "--atlas-path",
+        str(atlas_path),
+    ]
     proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, check=False, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
 
@@ -47,3 +60,5 @@ def test_s6b_exports_ranked_non_empty(tmp_path: Path) -> None:
     payload = json.loads(ranked_path.read_text(encoding="utf-8"))
     assert payload["ranked"]
     assert payload["compatible"]
+    assert payload["ranked"][0]["geometry_id"] == "g0"
+    assert payload["ranked"][0]["atlas_index"] == 0

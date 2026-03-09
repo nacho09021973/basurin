@@ -24,6 +24,7 @@ Abort semantics:
 from __future__ import annotations
 
 import json
+import math
 import os
 import platform
 import subprocess
@@ -49,22 +50,32 @@ DEFAULT_ATLAS_PATH = Path("docs/ringdown/atlas/atlas_berti_v2.json")
 
 
 def _autodetect_losc_hdf5_mappings(event_id: str) -> list[str]:
-    """Return canonical local LOSC mappings when both detectors are present."""
+    """Return local LOSC mappings when both detectors are present.
+
+    Selection is deterministic per detector:
+      1) largest file size
+      2) lexicographically largest file name (full path)
+    """
     losc_root = Path(os.environ.get("BASURIN_LOSC_ROOT", "data/losc"))
     event_root = losc_root / event_id
 
     def _pick(det: str) -> Path | None:
-        for ext in ("h5", "hdf5"):
-            candidate = event_root / f"{det}.{ext}"
-            if candidate.exists():
-                return candidate
-        return None
+        candidates = [
+            *event_root.glob(f"*{det}*.h5"),
+            *event_root.glob(f"*{det}*.hdf5"),
+        ]
+        files = [p for p in candidates if p.is_file()]
+        if not files:
+            return None
+        return sorted(files, key=lambda p: (p.stat().st_size, p.name), reverse=True)[0]
 
     h1 = _pick("H1")
     l1 = _pick("L1")
     if h1 is None or l1 is None:
         return []
-    return [f"H1={h1.as_posix()}", f"L1={l1.as_posix()}"]
+    h1_abs = h1.resolve()
+    l1_abs = l1.resolve()
+    return [f"H1={h1_abs.as_posix()}", f"L1={l1_abs.as_posix()}"]
 
 
 def _build_s1_fetch_args(
@@ -88,6 +99,23 @@ def _build_s1_fetch_args(
         args.extend(["--local-hdf5", mapping])
     if offline:
         args.append("--offline")
+    return args
+
+
+def _build_s0_oracle_args(
+    run_id: str,
+    event_id: str,
+    local_hdf5: list[str] | None,
+    offline: bool,
+) -> list[str]:
+    args = ["--run", run_id, "--event-id", event_id]
+    effective_local_hdf5 = list(local_hdf5 or [])
+    if offline:
+        args.append("--require-offline")
+        if not effective_local_hdf5:
+            effective_local_hdf5 = _autodetect_losc_hdf5_mappings(event_id)
+    for mapping in effective_local_hdf5:
+        args.extend(["--local-hdf5", mapping])
     return args
 
 
@@ -234,7 +262,8 @@ def _run_stage(
     timeline: dict[str, Any],
     stage_timeout_s: float | None = None,
 ) -> int:
-    cmd = [sys.executable, str(MVP_DIR / script)] + args
+    module = f"mvp.{Path(script).stem}"
+    cmd = [sys.executable, "-m", module] + args
     stage_started = datetime.now(timezone.utc).isoformat()
     stage_t0 = time.time()
     print(f"\n{'=' * 60}")
@@ -295,12 +324,91 @@ def _run_stage(
     return returncode if not timed_out else 124  # 124 = timeout convention
 
 
+def _run_preflight_viability(
+    out_root: Path,
+    run_id: str,
+    event_id: str,
+    dt_start_s: float,
+    window_duration_s: float,
+    timeline: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Run Fisher-based preflight viability check (pure computation, no subprocess).
+
+    Emits preflight_viability.json in runs/<run_id>/preflight_viability/outputs/.
+    Returns the preflight result dict, or None if event is not in catalog.
+    """
+    try:
+        from mvp.gwtc_events import get_event
+        from mvp.preflight_viability import preflight_viability
+    except ImportError:
+        print("[pipeline] WARNING: preflight_viability not available, skipping", flush=True)
+        return None
+
+    event_params = get_event(event_id)
+    if event_params is None:
+        print(f"[pipeline] preflight: event {event_id} not in GWTC catalog, skipping preflight", flush=True)
+        return None
+
+    rho_ringdown = event_params.get("snr_network", 0.0) * 0.33
+    result = preflight_viability(
+        event_id=event_id,
+        m_final_msun=event_params["m_final_msun"],
+        chi_final=event_params["chi_final"],
+        rho_total=rho_ringdown,
+        t0_s=dt_start_s,
+        T_s=window_duration_s,
+    )
+
+    preflight_dir = out_root / run_id / "preflight_viability" / "outputs"
+    preflight_dir.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(preflight_dir / "preflight_viability.json", result)
+
+    verdict = result.get("overall_verdict", "UNKNOWN")
+    print(f"[pipeline] preflight viability: {verdict} (event={event_id})", flush=True)
+    mode_220 = result.get("modes", {}).get("220", {})
+    if mode_220:
+        print(
+            f"[pipeline] preflight 220: eta={mode_220.get('eta', 0):.6f}, "
+            f"rho_eff={mode_220.get('rho_eff', 0):.3f}, "
+            f"Q*rho={mode_220.get('Q_x_rho_eff', 0):.3f}, "
+            f"rel_iqr_pred={mode_220.get('rel_iqr_predicted', 0):.3f}, "
+            f"t0_max={mode_220.get('t0_max_s', 0)*1000:.1f}ms",
+            flush=True,
+        )
+    timeline["preflight_viability"] = {
+        "verdict": verdict,
+        "t0_max_220_ms": (result.get("recommended_config") or {}).get("t0_max_220_s", 0) * 1000,
+    }
+    _write_timeline(out_root, run_id, timeline)
+    return result
+
+
 def _run_optional_experiment_t0_sweep(
     out_root: Path,
     run_id: str,
     timeline: dict[str, Any],
     stage_timeout_s: float | None,
-) -> None:
+) -> float | None:
+    def _parse_best_t0_ms(path: Path) -> float | None:
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        best = (
+            payload.get("summary", {})
+            .get("best_point", {})
+            .get("t0_ms")
+        )
+        if isinstance(best, bool):
+            return None
+        if isinstance(best, (int, float)):
+            best_f = float(best)
+            if math.isfinite(best_f) and best_f >= 0.0:
+                return best_f
+        return None
+
     label = "experiment_t0_sweep"
     script = "mvp/experiment_t0_sweep.py"
     script_path = MVP_DIR / "experiment_t0_sweep.py"
@@ -320,16 +428,18 @@ def _run_optional_experiment_t0_sweep(
             "status": "SKIPPED",
             "message": "missing script",
             "best_effort": True,
+            "selected_t0_ms": None,
         })
         _write_timeline(out_root, run_id, timeline)
         print("[pipeline] WARNING: experiment_t0_sweep.py not found, skipping best-effort experiment", flush=True)
-        return
+        return None
 
-    cmd = [sys.executable, str(script_path), "--run", run_id]
+    cmd = [sys.executable, "-m", "mvp.experiment_t0_sweep", "--run", run_id]
     stage_t0 = time.time()
     status = "OK"
     message = "completed"
     timed_out = False
+    selected_t0_ms: float | None = None
 
     try:
         proc = subprocess.run(
@@ -360,6 +470,17 @@ def _run_optional_experiment_t0_sweep(
         if stderr:
             message = f"{message}: {stderr}"
 
+    if status == "OK":
+        results_path = (
+            out_root
+            / run_id
+            / "experiment"
+            / "t0_sweep"
+            / "outputs"
+            / "t0_sweep_results.json"
+        )
+        selected_t0_ms = _parse_best_t0_ms(results_path)
+
     timeline["stages"].append({
         "stage": label,
         "label": label,
@@ -372,11 +493,16 @@ def _run_optional_experiment_t0_sweep(
         "status": status,
         "message": message,
         "best_effort": True,
+        "selected_t0_ms": selected_t0_ms,
     })
     _write_timeline(out_root, run_id, timeline)
 
     if status != "OK":
         print(f"[pipeline] WARNING: {label} failed (exit={rc}), continuing", flush=True)
+    elif selected_t0_ms is not None:
+        print(f"[pipeline] {label}: selected_t0_ms={selected_t0_ms}", flush=True)
+
+    return selected_t0_ms
 
 
 def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
@@ -385,7 +511,16 @@ def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
         "chi_best": None,
         "d2_min": None,
         "extraction_quality": None,
+        "s4c_status": None,
+        "kerr_from_multimode_status": None,
+        "multimode_viability_class": None,
+        "multimode_viability_reasons": [],
     }
+
+    def _coerce_reason_list(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(v) for v in value]
 
     s4c_path = out_root / run_id / "s4c_kerr_consistency" / "outputs" / "kerr_consistency.json"
     try:
@@ -403,6 +538,13 @@ def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
                 break
         if "d2_min" in payload:
             results["d2_min"] = payload["d2_min"]
+        if payload.get("status") is not None:
+            results["s4c_status"] = payload.get("status")
+        source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+        source_class = source.get("multimode_viability_class")
+        if isinstance(source_class, str):
+            results["multimode_viability_class"] = source_class
+            results["multimode_viability_reasons"] = _coerce_reason_list(source.get("multimode_viability_reasons"))
 
     s3b_path = out_root / run_id / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
     try:
@@ -414,6 +556,36 @@ def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
             results["extraction_quality"] = payload_s3b["results"].get("verdict")
         elif payload_s3b.get("extraction_quality") is not None:
             results["extraction_quality"] = payload_s3b.get("extraction_quality")
+
+    s3b_summary_path = out_root / run_id / "s3b_multimode_estimates" / "stage_summary.json"
+    if s3b_summary_path.exists():
+        try:
+            payload_s3b_summary = json.loads(s3b_summary_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"[pipeline] WARNING: cannot parse {s3b_summary_path}: {exc}", flush=True)
+        else:
+            viability = payload_s3b_summary.get("multimode_viability")
+            if isinstance(viability, dict):
+                viability_class = viability.get("class")
+                if isinstance(viability_class, str):
+                    results["multimode_viability_class"] = viability_class
+                    results["multimode_viability_reasons"] = _coerce_reason_list(viability.get("reasons"))
+
+    s4d_path = out_root / run_id / "s4d_kerr_from_multimode" / "outputs" / "kerr_from_multimode.json"
+    if s4d_path.exists():
+        try:
+            payload_s4d = json.loads(s4d_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"[pipeline] WARNING: cannot parse {s4d_path}: {exc}", flush=True)
+        else:
+            if payload_s4d.get("status") is not None:
+                results["kerr_from_multimode_status"] = payload_s4d.get("status")
+            viability = payload_s4d.get("multimode_viability")
+            if isinstance(viability, dict):
+                viability_class = viability.get("class")
+                if isinstance(viability_class, str):
+                    results["multimode_viability_class"] = viability_class
+                    results["multimode_viability_reasons"] = _coerce_reason_list(viability.get("reasons"))
 
     return results
 
@@ -434,6 +606,8 @@ def run_single_event(
     with_t0_sweep: bool = False,
     local_hdf5: list[str] | None = None,
     offline: bool = False,
+    offline_s2: bool = False,
+    t0_catalog: str | None = None,
     estimator: str = "spectral",
 ) -> tuple[int, str]:
     """Run full pipeline for a single event. Returns (exit_code, run_id)."""
@@ -482,11 +656,12 @@ def run_single_event(
     _write_timeline(out_root, run_id, timeline)
 
     # Stage 0: Oracle precheck (deterministic/offline-first)
-    s0_args = ["--run", run_id, "--event-id", event_id]
-    if offline:
-        s0_args.append("--require-offline")
-    for mapping in (local_hdf5 or []):
-        s0_args.extend(["--local-hdf5", mapping])
+    s0_args = _build_s0_oracle_args(
+        run_id=run_id,
+        event_id=event_id,
+        local_hdf5=local_hdf5,
+        offline=offline,
+    )
     rc = _run_stage("s0_oracle_mvp.py", s0_args, "s0_oracle_mvp", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         _set_run_valid_verdict(out_root, run_id, "FAIL", "s0_oracle_mvp precheck failed")
@@ -516,8 +691,15 @@ def run_single_event(
         "--dt-start-s", str(dt_start_s),
         "--duration-s", str(window_duration_s),
     ]
+    if offline:
+        s2_args.append("--offline")
+    if offline_s2:
+        s2_args.append("--offline")
+    if t0_catalog:
+        s2_args.extend(["--window-catalog", str(t0_catalog)])
     rc = _run_stage("s2_ringdown_window.py", s2_args, "s2_ringdown_window", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
+        _set_run_valid_verdict(out_root, run_id, "FAIL", f"s2_ringdown_window failed: exit={rc}")
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
@@ -713,15 +895,20 @@ def run_multimode_event(
             "chi_best": None,
             "d2_min": None,
             "extraction_quality": None,
+            "s4c_status": None,
+            "kerr_from_multimode_status": None,
+            "multimode_viability_class": None,
+            "multimode_viability_reasons": [],
         },
     }
     _write_timeline(out_root, run_id, timeline)
 
-    s0_args = ["--run", run_id, "--event-id", event_id]
-    if offline:
-        s0_args.append("--require-offline")
-    for mapping in (local_hdf5 or []):
-        s0_args.extend(["--local-hdf5", mapping])
+    s0_args = _build_s0_oracle_args(
+        run_id=run_id,
+        event_id=event_id,
+        local_hdf5=local_hdf5,
+        offline=offline,
+    )
     rc = _run_stage("s0_oracle_mvp.py", s0_args, "s0_oracle_mvp", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         _set_run_valid_verdict(out_root, run_id, "FAIL", "s0_oracle_mvp precheck failed")
@@ -749,21 +936,71 @@ def run_multimode_event(
         "--dt-start-s", str(dt_start_s),
         "--duration-s", str(window_duration_s),
     ]
+    if offline:
+        s2_args.append("--offline")
     rc = _run_stage("s2_ringdown_window.py", s2_args, "s2_ringdown_window", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
+        _set_run_valid_verdict(out_root, run_id, "FAIL", f"s2_ringdown_window failed: exit={rc}")
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
 
+    # Preflight viability check (Fisher-based, pure computation)
+    preflight_result = _run_preflight_viability(
+        out_root, run_id, event_id, dt_start_s, window_duration_s, timeline,
+    )
+
+    selected_t0_ms: float | None = None
+    if with_t0_sweep:
+        selected_t0_ms = _run_optional_experiment_t0_sweep(
+            out_root, run_id, timeline, stage_timeout_s
+        )
+        if selected_t0_ms is not None and selected_t0_ms > 0.0:
+            selected_dt_start_s = dt_start_s + (selected_t0_ms / 1000.0)
+            # Validate selected t0 against preflight domain
+            if preflight_result is not None:
+                t0_max_s = (preflight_result.get("recommended_config") or {}).get("t0_max_220_s", None)
+                if t0_max_s is not None and selected_dt_start_s > t0_max_s:
+                    print(
+                        f"[pipeline] WARNING: t0_sweep selected dt_start_s={selected_dt_start_s:.4f} "
+                        f"exceeds preflight t0_max={t0_max_s:.4f}s for mode 220; "
+                        f"run may be non-informative",
+                        flush=True,
+                    )
+            s2_selected_args = [
+                "--run", run_id, "--event-id", event_id,
+                "--dt-start-s", str(selected_dt_start_s),
+                "--duration-s", str(window_duration_s),
+            ]
+            if offline:
+                s2_selected_args.append("--offline")
+            rc = _run_stage(
+                "s2_ringdown_window.py",
+                s2_selected_args,
+                "s2_ringdown_window",
+                out_root,
+                run_id,
+                timeline,
+                stage_timeout_s,
+            )
+            if rc != 0:
+                _set_run_valid_verdict(
+                    out_root,
+                    run_id,
+                    "FAIL",
+                    f"s2_ringdown_window(selected_t0_ms={selected_t0_ms}) failed: exit={rc}",
+                )
+                timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+                _write_timeline(out_root, run_id, timeline)
+                return rc, run_id
+
     s3_args = ["--run", run_id, "--band-low", str(band_low), "--band-high", str(band_high)]
+
     rc = _run_stage("s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
-
-    if with_t0_sweep:
-        _run_optional_experiment_t0_sweep(out_root, run_id, timeline, stage_timeout_s)
 
     s3b_args = [
         "--run-id", run_id,
@@ -795,6 +1032,13 @@ def run_multimode_event(
     # Phase B: Kerr inference from multimode (canonical; does not replace s4/s4c)
     s4d_args = ["--run-id", run_id]
     rc = _run_stage("s4d_kerr_from_multimode.py", s4d_args, "s4d_kerr_from_multimode", out_root, run_id, timeline, stage_timeout_s)
+    if rc != 0:
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return rc, run_id
+
+    s7_args = ["--run-id", run_id]
+    rc = _run_stage("s7_beyond_kerr_deviation_score.py", s7_args, "s7_beyond_kerr_deviation_score", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, run_id, timeline)
@@ -972,6 +1216,24 @@ def main() -> int:
     )
     sp_single.add_argument("--offline", action="store_true", default=False)
     sp_single.add_argument(
+        "--offline-s2",
+        action="store_true",
+        default=False,
+        help="Pass --offline only to s2_ringdown_window",
+    )
+    sp_single.add_argument(
+        "--window-catalog",
+        default=None,
+        metavar="PATH",
+        help="Preferred alias: pass PATH as --window-catalog to s2_ringdown_window",
+    )
+    sp_single.add_argument(
+        "--t0-catalog",
+        default=None,
+        metavar="PATH",
+        help="Alias supported for compatibility; pass PATH as --window-catalog to s2_ringdown_window",
+    )
+    sp_single.add_argument(
         "--estimator", choices=["hilbert", "spectral", "dual"], default="spectral",
         
         help="Estimator to use for s3: spectral (default), hilbert (legacy), or dual (both + gate)",
@@ -1089,6 +1351,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.mode == "single":
+        window_catalog = args.window_catalog if args.window_catalog is not None else args.t0_catalog
         atlas_path = _resolve_atlas_path(args.atlas_path, args.atlas_default)
         event_id = _require_nonempty_event_id(args.event_id, "--event-id")
         rc, run_id = run_single_event(
@@ -1107,6 +1370,8 @@ def main() -> int:
             with_t0_sweep=args.with_t0_sweep,
             local_hdf5=args.local_hdf5,
             offline=args.offline,
+            offline_s2=args.offline_s2,
+            t0_catalog=window_catalog,
             estimator=args.estimator,
         )
         return rc

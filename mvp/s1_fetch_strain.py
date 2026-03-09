@@ -199,12 +199,25 @@ def _resolve_local_hdf5_mappings(items: list[str], event_id: str | None) -> dict
     return local_by_det
 
 
-def _collect_hdf5_candidates(event_dir: Path, det: str) -> list[Path]:
-    patterns = [f"*{det}*.hdf5", f"*{det}*.h5"]
-    out: list[Path] = []
-    for pattern in patterns:
-        out.extend(p for p in event_dir.glob(pattern) if p.is_file())
-    return sorted(set(out), key=lambda p: p.name)
+def match_hdf5_files(event_dir: Path) -> dict[str, list[Path]]:
+    """Return deterministic HDF5 matches for an event directory.
+
+    Never raises; missing/unreadable directories produce empty matches.
+    """
+    try:
+        all_files = [
+            p for p in event_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in {".h5", ".hdf5"}
+        ]
+    except OSError:
+        all_files = []
+
+    all_files = sorted(all_files, key=lambda p: p.name)
+    return {
+        "all": all_files,
+        "H1": [p for p in all_files if "H1" in p.name.upper()],
+        "L1": [p for p in all_files if "L1" in p.name.upper()],
+    }
 
 
 def _resolve_event_hdf5_or_die(*, hdf5_root: Path, event_id: str, detectors: list[str]) -> dict[str, Path]:
@@ -212,9 +225,10 @@ def _resolve_event_hdf5_or_die(*, hdf5_root: Path, event_id: str, detectors: lis
     resolved: dict[str, Path] = {}
     errors: list[str] = []
     patterns = {det: [f"*{det}*.hdf5", f"*{det}*.h5"] for det in detectors}
+    matches = match_hdf5_files(event_dir)
 
     for det in detectors:
-        candidates = _collect_hdf5_candidates(event_dir, det)
+        candidates = matches.get(det, [])
         if len(candidates) == 1:
             resolved[det] = candidates[0].resolve()
             continue
@@ -230,7 +244,11 @@ def _resolve_event_hdf5_or_die(*, hdf5_root: Path, event_id: str, detectors: lis
 
     lines = [
         f"No se pudieron auto-resolver HDF5 para event_id={event_id}.",
-        f"Ruta esperada: {event_dir}",
+        f"LOSC_ROOT_EFFECTIVE={hdf5_root.resolve()}",
+        f"EVENT_DIR={event_dir}",
+        f"h5_count={len(matches.get('all', []))}",
+        f"match_count_H1={len(matches.get('H1', []))}",
+        f"match_count_L1={len(matches.get('L1', []))}",
         "Patrones buscados por detector:",
     ]
     for det in detectors:
@@ -240,6 +258,10 @@ def _resolve_event_hdf5_or_die(*, hdf5_root: Path, event_id: str, detectors: lis
         lines.extend(errors)
     lines.extend(
         [
+            "Guía de resolución:",
+            "  A) mount/symlink roto: data/losc no apunta al cache real.",
+            "  B) naming: hay .h5/.hdf5 pero no casan H1/L1; crear symlinks H1.h5 y L1.h5.",
+            f"Precheck: python tools/losc_precheck.py --event-id {event_id} --losc-root {hdf5_root.resolve()}",
             f"Comprobación sugerida: find {event_dir} \\( -iname '*.hdf5' -o -iname '*.h5' \\) -type f",
             "Ejemplo explícito (--local-hdf5):",
             f"  python mvp/s1_fetch_strain.py --run <run_id> --event-id {event_id} --detectors {','.join(detectors)} "

@@ -363,7 +363,7 @@ El parámetro $\sigma = \kappa/(8Q^2)$ gobierna la validez de la expansión pert
 |---------|-----------|----------------|-------------|
 | Perturbativo | $\sigma \ll 1$ | Usar fórmula cerrada de $K$ (Teorema 1) | PSD suave o $Q$ alto |
 | Intermedio | $\sigma \sim 1$ | Usar $\mathcal{J}_0(\sigma)$ completo | Overtones cerca de líneas |
-| Colapsado | $\sigma \gg 1$ | $\mathcal{J}_0 \sim \pi/(2\sigma)$: $J$ suprimido $\Rightarrow$ $\Omega$ muy pequeña $\Rightarrow$ métrica degenerada | Inferencia no fiable |
+| Colapsado | $\sigma \gg 1$ | $\mathcal{J}_0 \sim 3\sqrt{\pi}/(8\sigma^{3/2})$: $J$ suprimido $\Rightarrow$ $\Omega$ muy pequeña $\Rightarrow$ métrica degenerada | Inferencia no fiable |
 
 ### 6.6 Notación consolidada para las derivadas logarítmicas de la PSD
 
@@ -563,7 +563,9 @@ $$I_{4,2} = \int_{-\infty}^{\infty}\frac{z^4\,dz}{(1+z^2)^2} = \text{diverge} \t
 
 $$\mathcal{J}_0(\sigma) = \pi\left[\left(\sigma+\frac{1}{2}\right)e^{\sigma}\,\text{erfc}(\sqrt{\sigma}) - \sqrt{\frac{\sigma}{\pi}}\right] \tag{A.4}$$
 
-$$\mathcal{J}_0(0) = \frac{\pi}{2}, \qquad \lim_{\sigma\to\infty}\mathcal{J}_0(\sigma) = \frac{\pi}{2\sigma} + O(\sigma^{-2}) \tag{A.5}$$
+$$\mathcal{J}_0(0) = \frac{\pi}{2}, \qquad \lim_{\sigma\to\infty}\mathcal{J}_0(\sigma) = \frac{3\sqrt{\pi}}{8\,\sigma^{3/2}} + O(\sigma^{-5/2}) \tag{A.5}$$
+
+> **Nota editorial:** el asintótico (A.5) se deriva de (A.4) usando $\mathrm{erfcx}(x)\sim x^{-1}/\sqrt{\pi}$ para $x\to\infty$, lo que da $\mathcal{J}_0(\sigma)\sim\pi(\sigma+\tfrac{1}{2})\cdot\sigma^{-1/2}/(\sqrt{\pi}\,\sigma^{1/2})\cdot[\text{corrección}]$. El cálculo exacto a orden dominante arroja $3\sqrt{\pi}/(8\sigma^{3/2})$, que es $O(\sigma^{-3/2})$, **no** $O(\sigma^{-1})$. La forma cerrada (A.4)/(6.7) es la definición normativa para implementación; esta fórmula asintótica es solo orientativa para el régimen $\sigma\gg 1$.
 
 ---
 

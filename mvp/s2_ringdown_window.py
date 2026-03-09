@@ -14,6 +14,9 @@ import argparse
 import json
 import os
 import sys
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -25,11 +28,54 @@ for _cand in [_here.parents[0], _here.parents[1]]:
             sys.path.insert(0, str(_cand))
         break
 
-from mvp.contracts import init_stage, check_inputs, finalize, abort
+from mvp.contracts import init_stage, check_inputs, finalize, abort, log_stage_paths
 from basurin_io import sha256_file, write_json_atomic
 
 STAGE = "s2_ringdown_window"
 DEFAULT_WINDOW_CATALOG = Path(__file__).resolve().parent / "assets" / "window_catalog_v1.json"
+OFFLINE_T0_ERROR = "missing_t0_gps_offline: unable to resolve t0_gps from local sources"
+
+
+def _stable_path(p: str | None) -> str | None:
+    if not p:
+        return None
+    return Path(p).name
+
+
+def _format_missing_t0_message(
+    *,
+    event_id: str,
+    offline: bool,
+    window_catalog_path: Path,
+    sources_attempted: dict[str, Any],
+    reason: str | None = None,
+    stable_paths: bool = False,
+) -> str:
+    error_code = "missing_t0_gps_offline" if offline else "missing_t0_gps"
+    window_catalog_display = str(window_catalog_path)
+    sources_attempted_display = dict(sources_attempted)
+    if stable_paths:
+        window_catalog_display = _stable_path(window_catalog_display) or window_catalog_display
+        for key in ("catalog_path", "legacy_windows_path", "run_cache_path"):
+            if key in sources_attempted_display:
+                sources_attempted_display[key] = _stable_path(sources_attempted_display.get(key))
+    if offline and stable_paths:
+        sources_str = json.dumps(sources_attempted_display, sort_keys=True)
+        return f"{OFFLINE_T0_ERROR}; sources_attempted={sources_str}"
+    parts = [
+        f"{error_code}: event_id={event_id}",
+        f"window_catalog={window_catalog_display}",
+    ]
+    if reason:
+        normalized_reason = reason.strip()
+        for prefix in ("missing_t0_gps_offline:", "missing_t0_gps:"):
+            if normalized_reason.startswith(prefix):
+                normalized_reason = normalized_reason[len(prefix):].strip()
+                break
+        if normalized_reason:
+            parts.append(normalized_reason)
+    parts.append(f"sources_attempted={json.dumps(sources_attempted_display, sort_keys=True)}")
+    return "; ".join(parts)
 
 def _ensure_window_meta_contract(ctx: Any, artifacts: dict[str, Path], strain_path: Path) -> None:
     ctx.outputs_dir.mkdir(parents=True, exist_ok=True)
@@ -62,24 +108,92 @@ def _canonical_event_id(event_id: str) -> str:
     return event_id.split("_", 1)[0] if "_" in event_id else event_id
 
 
+def _resolve_t0_gps_from_local_metadata(event_id: str) -> tuple[float, str] | None:
+    meta_path = Path("docs/ringdown/event_metadata") / f"{event_id}_metadata.json"
+    if not meta_path.exists():
+        return None
+    with open(meta_path, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+    for key in ("gps", "t0_gps", "event_time_gps", "t_coalescence_gps", "t0_ref_gps", "GPS", "gpstime"):
+        if key in meta:
+            return float(meta[key]), str(meta_path)
+    return None
+
+
+def _fetch_gwosc_event_gps(event_id: str, retries: int = 3, timeout_s: int = 20) -> float:
+    last_error = ""
+    url = f"https://gwosc.org/api/v2/events/{event_id}"
+    headers = {"Accept": "application/json", "User-Agent": "basurin-s2-ringdown-window/1.0"}
+    for attempt in range(1, retries + 1):
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            events = payload.get("events")
+            if isinstance(events, list) and events:
+                data = events[0]
+            elif isinstance(payload, dict):
+                data = payload
+            else:
+                data = {}
+            for key in ("gps", "t0_gps", "event_time_gps", "GPS", "gpstime", "gps_time"):
+                if key in data:
+                    return float(data[key])
+            raise RuntimeError(f"GWOSC response missing gps keys for {event_id}: keys={sorted(data.keys())[:12]}")
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, RuntimeError, ValueError) as exc:
+            last_error = str(exc)
+            if attempt < retries:
+                time.sleep(0.5 * attempt)
+    raise RuntimeError(f"GWOSC lookup failed for event_id={event_id!r} after {retries} retries: {last_error}")
+
+
+def _read_or_create_gwosc_cache(run_dir: Path, event_id: str) -> tuple[float, str, bool]:
+    cache_path = run_dir / "external_inputs" / "gwosc" / "event_time" / f"{event_id}.json"
+    if cache_path.exists():
+        with open(cache_path, "r", encoding="utf-8") as f:
+            cached = json.load(f)
+        for key in ("t0_gps", "gps", "event_time_gps"):
+            if key in cached:
+                return float(cached[key]), str(cache_path), False
+        raise RuntimeError(f"Invalid GWOSC cache (missing t0 key): {cache_path}")
+
+    t0_gps = _fetch_gwosc_event_gps(event_id)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(cache_path, {
+        "event_id": event_id,
+        "t0_gps": float(t0_gps),
+        "source": "gwosc_api_v2",
+        "fetched_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    })
+    return float(t0_gps), str(cache_path), True
+
+
 def _resolve_t0_gps(
     event_id: str,
     window_catalog_path: Path,
     *,
-    include_lookup_key: bool = False,
-) -> tuple[float, str] | tuple[float, str, str]:
+    offline: bool = False,
+    run_dir: Path | None = None,
+    stable_error_paths: bool = False,
+) -> tuple[float, str, dict[str, Any], bool]:
     canonical_event_id = _canonical_event_id(event_id)
     lookup_keys = [event_id]
     if canonical_event_id != event_id:
         lookup_keys.append(canonical_event_id)
 
-    def _pack(t0: float, source: str, lookup_key: str) -> tuple[float, str] | tuple[float, str, str]:
-        # Backward-compatible return shape:
-        # - canonical event IDs historically returned (t0, source)
-        # - alias lookups need (t0, source, lookup_key)
-        if include_lookup_key or lookup_key != event_id:
-            return (t0, source, lookup_key)
-        return (t0, source)
+    metadata_path = Path("docs/ringdown/event_metadata") / f"{event_id}_metadata.json"
+    run_cache_path: str | None = None
+    if run_dir is not None:
+        run_cache_path = str(run_dir / "external_inputs" / "gwosc" / "event_time" / f"{event_id}.json")
+    sources_attempted: dict[str, Any] = {
+        "catalog_path": str(window_catalog_path) if window_catalog_path is not None else None,
+        "metadata_path": str(metadata_path),
+        "legacy_windows_path": str(window_catalog_path) if window_catalog_path is not None else None,
+        "run_cache_path": run_cache_path,
+        "online_fetch_enabled": (not offline),
+        "offline": bool(offline),
+        "keys_checked": list(lookup_keys),
+    }
 
     if window_catalog_path.exists():
         with open(window_catalog_path, "r", encoding="utf-8") as f:
@@ -88,48 +202,72 @@ def _resolve_t0_gps(
 
         if isinstance(catalog, dict):
             # Legacy schema: {"windows": [{"event_id": ..., "t0_ref": {"value_gps": ...}}]}
+            legacy_event_ids: list[str] = []
             for w in catalog.get("windows", []):
                 if not isinstance(w, dict):
                     continue
-                if w.get("event_id") not in lookup_keys:
+                legacy_event_id = w.get("event_id")
+                if isinstance(legacy_event_id, str):
+                    legacy_event_ids.append(legacy_event_id)
+                if legacy_event_id not in lookup_keys:
                     continue
                 t0_ref = w.get("t0_ref", {})
                 if "value_gps" in t0_ref:
-                    return _pack(float(t0_ref["value_gps"]), str(window_catalog_path), str(w.get("event_id")))
+                    return (
+                        float(t0_ref["value_gps"]),
+                        str(window_catalog_path),
+                        {"lookup_key": str(w.get("event_id"))},
+                        False,
+                    )
+
+            if isinstance(catalog.get("windows"), list) and legacy_event_ids:
+                requested = lookup_keys[0]
+                if requested not in legacy_event_ids:
+                    raise RuntimeError(
+                        _format_missing_t0_message(
+                            event_id=event_id,
+                            offline=offline,
+                            window_catalog_path=window_catalog_path,
+                            sources_attempted=sources_attempted,
+                            reason=(
+                                "legacy_windows_event_mismatch: "
+                                f"requested_event_id={requested}, "
+                                f"available_event_ids={legacy_event_ids}, "
+                                f"path={window_catalog_path}"
+                            ),
+                        )
+                    )
 
             # Schema A: {"GW190521": {"t0_gps": 1242442967.4}}
             for lookup_key in lookup_keys:
                 if lookup_key in catalog and isinstance(catalog[lookup_key], dict) and "t0_gps" in catalog[lookup_key]:
-                    return _pack(float(catalog[lookup_key]["t0_gps"]), str(window_catalog_path), lookup_key)
+                    return float(catalog[lookup_key]["t0_gps"]), str(window_catalog_path), {"lookup_key": lookup_key}, False
 
             # Schema B: {"GW190521": 1242442967.4}
             for lookup_key in lookup_keys:
                 if lookup_key in catalog and isinstance(catalog[lookup_key], (int, float)):
-                    return _pack(float(catalog[lookup_key]), str(window_catalog_path), lookup_key)
+                    return float(catalog[lookup_key]), str(window_catalog_path), {"lookup_key": lookup_key}, False
 
-        canonical_detail = ""
-        if canonical_event_id != event_id:
-            canonical_detail = f"; canonical_event_id={canonical_event_id!r}"
+    metadata = _resolve_t0_gps_from_local_metadata(event_id)
+    if metadata is not None:
+        t0_gps, source = metadata
+        return t0_gps, source, {"lookup_key": event_id}, False
+
+    if offline:
         raise RuntimeError(
-            "Cannot resolve t0_gps from window catalog "
-            f"for event_id={event_id!r}{canonical_detail}; catalog_path={window_catalog_path}; "
-            f"detected_schema={schema}; available_keys(first {len(keys)}): {keys}"
+            _format_missing_t0_message(
+                event_id=event_id,
+                offline=True,
+                window_catalog_path=window_catalog_path,
+                sources_attempted=sources_attempted,
+                reason=OFFLINE_T0_ERROR,
+                stable_paths=stable_error_paths,
+            )
         )
 
-    meta_path = Path("docs/ringdown/event_metadata") / f"{event_id}_metadata.json"
-    if meta_path.exists():
-        with open(meta_path, "r", encoding="utf-8") as f:
-            meta = json.load(f)
-        for key in ("t_coalescence_gps", "t0_ref_gps", "GPS"):
-            if key in meta:
-                return _pack(float(meta[key]), str(meta_path), event_id)
-    canonical_detail = ""
-    if canonical_event_id != event_id:
-        canonical_detail = f"; canonical_event_id={canonical_event_id!r}"
-    raise RuntimeError(
-        f"Cannot resolve t0_gps for event_id={event_id!r}{canonical_detail}; "
-        f"catalog_path={window_catalog_path}; detected_schema=missing_catalog; available_keys(first 0): []"
-    )
+    effective_run_dir = run_dir if run_dir is not None else Path("runs") / "_s2_tmp"
+    t0_gps, source, fetched = _read_or_create_gwosc_cache(effective_run_dir, event_id)
+    return t0_gps, source, {"lookup_key": event_id, "gwosc_cache_path": source}, (not fetched)
 
 
 def main() -> int:
@@ -140,7 +278,13 @@ def main() -> int:
     ap.add_argument("--event-id", default="GW150914")
     ap.add_argument("--dt-start-s", type=float, default=0.003)
     ap.add_argument("--duration-s", type=float, default=0.06)
+    ap.add_argument(
+        "--clip-window",
+        action="store_true",
+        help="Clip per-detector window indices to valid [0, n] range instead of failing on out-of-range.",
+    )
     ap.add_argument("--window-catalog", default=str(DEFAULT_WINDOW_CATALOG))
+    ap.add_argument("--offline", action="store_true", default=False)
     ap.add_argument(
         "--strain-npz",
         default=None,
@@ -160,6 +304,7 @@ def main() -> int:
     ctx = init_stage(run_id, STAGE, params={
         "event_id": args.event_id, "dt_start_s": args.dt_start_s,
         "duration_s": args.duration_s, "window_catalog": args.window_catalog,
+        "offline": args.offline,
     })
 
     default_strain_path = ctx.run_dir / "s1_fetch_strain" / "outputs" / "strain.npz"
@@ -185,11 +330,33 @@ def main() -> int:
     try:
         import numpy as np
 
-        t0_gps, t0_source, event_id_lookup_key = _resolve_t0_gps(
+        t0_gps, t0_source, t0_details, t0_used_cache = _resolve_t0_gps(
             args.event_id,
             Path(args.window_catalog),
-            include_lookup_key=True,
+            offline=bool(args.offline),
+            run_dir=ctx.run_dir,
+            stable_error_paths=bool(args.offline),
         )
+        event_id_lookup_key = str(t0_details.get("lookup_key", args.event_id))
+        gwosc_cache_path: str | None = None
+        t0_gwosc_cache = t0_details.get("gwosc_cache_path")
+        if isinstance(t0_gwosc_cache, str):
+            gwosc_cache_path = t0_gwosc_cache
+        t0_source_path = Path(t0_source)
+        if t0_source_path.exists() and t0_source_path.is_absolute():
+            try:
+                rel = t0_source_path.relative_to(ctx.run_dir)
+                if rel.parts[:3] == ("external_inputs", "gwosc", "event_time"):
+                    gwosc_cache_path = str(t0_source_path)
+            except ValueError:
+                pass
+        if gwosc_cache_path is not None:
+            gwosc_cache = Path(gwosc_cache_path)
+            ctx.inputs_record.append({
+                "label": "gwosc_event_time",
+                "path": str(gwosc_cache.relative_to(ctx.run_dir)),
+                "sha256": sha256_file(gwosc_cache),
+            })
         t_start_gps = t0_gps + args.dt_start_s
         t_end_gps = t_start_gps + args.duration_s
 
@@ -206,7 +373,10 @@ def main() -> int:
             abort(ctx, "No detector arrays found in strain.npz")
 
         artifacts: dict[str, Path] = {}
+        window_status: dict[str, dict[str, Any]] = {}
+        window_errors: list[str] = []
         n_out = 0
+        any_t0_clipped = False
         for det in detectors:
             strain = np.asarray(data[det], dtype=np.float64)
             if strain.ndim != 1:
@@ -216,35 +386,112 @@ def main() -> int:
 
             i_start = int(round((t_start_gps - gps_start) * fs))
             n_out = int(round(args.duration_s * fs))
+            t_start_det = t_start_gps
+            t0_det = t0_gps
+
+            if args.clip_window and strain.size > 0:
+                i_start_clamped = max(0, min(i_start, int(strain.size) - 1))
+                if i_start_clamped != i_start:
+                    any_t0_clipped = True
+                    i_start = i_start_clamped
+                    t_start_det = gps_start + (i_start / fs)
+                    t0_det = t_start_det - args.dt_start_s
+
             i_end = i_start + n_out
             if i_start < 0 or i_end > strain.size:
-                abort(ctx, f"Window out of range for {det}: i_start={i_start}, i_end={i_end}, n={strain.size}")
+                err = f"Window out of range for {det}: i_start={i_start}, i_end={i_end}, n={strain.size}"
+                status: dict[str, Any] = {
+                    "ok": False,
+                    "reason": "out_of_range",
+                    "i_start": i_start,
+                    "i_end": i_end,
+                    "n": int(strain.size),
+                }
+                if args.clip_window:
+                    i_start_clipped = max(0, min(i_start, int(strain.size)))
+                    i_end_clipped = max(0, min(i_end, int(strain.size)))
+                    status.update({
+                        "clipped": True,
+                        "t0_clipped": bool(t0_det != t0_gps),
+                        "t0_gps_original": float(t0_gps),
+                        "t0_gps_used": float(t0_det),
+                        "t_start_gps_original": float(t_start_gps),
+                        "t_start_gps_used": float(t_start_det),
+                        "i_start_clipped": i_start_clipped,
+                        "i_end_clipped": i_end_clipped,
+                        "clip_left_samples": max(0, -i_start),
+                        "clip_right_samples": max(0, i_end - int(strain.size)),
+                    })
+                    if i_end_clipped > i_start_clipped:
+                        out_path = ctx.outputs_dir / f"{det}_rd.npz"
+                        np.savez(out_path, strain=strain[i_start_clipped:i_end_clipped].copy(),
+                                 gps_start=np.float64(gps_start + (i_start_clipped / fs)),
+                                 duration_s=np.float64((i_end_clipped - i_start_clipped) / fs),
+                                 sample_rate_hz=np.float64(fs))
+                        artifacts[f"{det}_rd"] = out_path
+                        status["ok"] = True
+                        status["reason"] = "clipped"
+                    else:
+                        status["reason"] = "empty_after_clip"
+                        window_errors.append(
+                            f"{err}; clip produced empty window (i_start_clipped={i_start_clipped}, "
+                            f"i_end_clipped={i_end_clipped})"
+                        )
+                else:
+                    window_errors.append(err)
+                window_status[det] = status
+                continue
 
             out_path = ctx.outputs_dir / f"{det}_rd.npz"
             np.savez(out_path, strain=strain[i_start:i_end].copy(),
                      gps_start=np.float64(t_start_gps), duration_s=np.float64(args.duration_s),
                      sample_rate_hz=np.float64(fs))
             artifacts[f"{det}_rd"] = out_path
+            window_status[det] = {
+                "ok": True,
+                "reason": "ok",
+                "i_start": i_start,
+                "i_end": i_end,
+                "n": int(strain.size),
+                "clipped": False,
+                "t0_clipped": bool(t0_det != t0_gps),
+                "t0_gps_original": float(t0_gps),
+                "t0_gps_used": float(t0_det),
+            }
 
         window_meta = {
             "event_id": args.event_id, "t0_gps": t0_gps, "t0_source": t0_source,
             "event_id_lookup_key": event_id_lookup_key,
+            "t0_details": t0_details,
+            "t0_used_cache": bool(t0_used_cache),
+            "gwosc_cache_path": gwosc_cache_path,
             "dt_start_s": args.dt_start_s, "duration_s": args.duration_s,
             "t_start_gps": t_start_gps, "t_end_gps": t_end_gps,
             "sample_rate_hz": fs, "detectors": detectors, "n_samples": n_out,
+            "clip_window": bool(args.clip_window),
+            "t0_clipped": bool(any_t0_clipped),
+            "window_status": window_status,
         }
         meta_path = ctx.outputs_dir / "window_meta.json"
         write_json_atomic(meta_path, window_meta)
         artifacts["window_meta"] = meta_path
 
         _ensure_window_meta_contract(ctx, artifacts, strain_path)
-        finalize(ctx, artifacts, results=window_meta)
+        verdict = "FAIL" if window_errors else "PASS"
+        extra_summary = {"error": "; ".join(window_errors)} if window_errors else None
+        finalize(ctx, artifacts, verdict=verdict, results=window_meta, extra_summary=extra_summary)
+        log_stage_paths(ctx)
+        if window_errors:
+            return 2
         return 0
 
     except SystemExit:
         raise
     except Exception as exc:
-        abort(ctx, str(exc))
+        try:
+            abort(ctx, str(exc))
+        except SystemExit:
+            pass
         return 2
 
 

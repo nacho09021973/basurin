@@ -7,12 +7,13 @@ Single source of truth for:
   - Deterministic IO rules (writes only under runs/<run_id>/).
 
 Usage in a stage:
-    from mvp.contracts import CONTRACTS, init_stage, check_inputs, finalize, abort
+    from mvp.contracts import CONTRACTS, init_stage, check_inputs, finalize, abort, log_stage_paths
 
     ctx = init_stage("my_run", "s1_fetch_strain", params={...})
     inputs = check_inputs(ctx, {"strain": path_to_strain})
     # ... do work ...
     finalize(ctx, artifacts={"result": output_path}, results={...})
+    log_stage_paths(ctx)  # mandatory: prints OUT_ROOT, STAGE_DIR, OUTPUTS_DIR, STAGE_SUMMARY, MANIFEST
 
     # On error:
     abort(ctx, "reason for failure")
@@ -130,6 +131,7 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         produced_outputs=[
             "outputs/compatible_set.json",
+            "outputs/ranked_all_full.json",
         ],
         upstream_stages=["s3_ringdown_estimates"],
     ),
@@ -147,6 +149,7 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         produced_outputs=[
             "outputs/compatible_set.json",
+            "outputs/ranked_all_full.json",
         ],
         upstream_stages=["s3_ringdown_estimates"],
     ),
@@ -155,6 +158,8 @@ CONTRACTS: dict[str, StageContract] = {
         required_inputs=[],  # Dynamic: depends on source_runs list
         dynamic_inputs=[
             "{source_run}/s4_geometry_filter/outputs/compatible_set.json",
+            "{source_run}/s3b_multimode_estimates/stage_summary.json",  # preferred
+            "{source_run}/s3_ringdown_estimates/stage_summary.json",  # fallback when s3b is absent
             "{source_run}/s6_information_geometry/outputs/curvature.json",
         ],
         produced_outputs=[
@@ -204,6 +209,21 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         upstream_stages=["s4_geometry_filter", "s6_information_geometry"],
     ),
+    # Stage-lite: extract_psd.py writes under runs/<run_id>/psd/ using the
+    # same manifest/stage_summary conventions but without init_stage/finalize.
+    # Declared here so downstream (s6c) can reference it as a formal upstream
+    # and auditors can verify the trazability chain.
+    "psd_extract": StageContract(
+        name="psd_extract",
+        required_inputs=[
+            "s1_fetch_strain/outputs/strain.npz",
+        ],
+        produced_outputs=[
+            "outputs/measured_psd.json",
+        ],
+        upstream_stages=["s1_fetch_strain"],
+        check_run_valid=True,
+    ),
     "s6c_brunete_psd_curvature": StageContract(
         name="s6c_brunete_psd_curvature",
         required_inputs=[
@@ -221,6 +241,7 @@ CONTRACTS: dict[str, StageContract] = {
         produced_outputs=[
             "outputs/brunete_metrics.json",
             "outputs/psd_derivatives.json",
+            "outputs/brunete_curvature.json",
             "stage_summary.json",
             "manifest.json",
         ],
@@ -279,16 +300,41 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         upstream_stages=["s3_ringdown_estimates", "s3b_multimode_estimates"],
     ),
+    "experiment_ex8_area_consistency": StageContract(
+        name="experiment_ex8_area_consistency",
+        required_inputs=[
+            "s3_ringdown_estimates/outputs/estimates.json",
+            "s3b_multimode_estimates/outputs/model_comparison.json",
+        ],
+        produced_outputs=[
+            "outputs/area_consistency.json",
+        ],
+        upstream_stages=["s3_ringdown_estimates", "s3b_multimode_estimates"],
+        check_run_valid=True,
+    ),
     "s4d_kerr_from_multimode": StageContract(
         name="s4d_kerr_from_multimode",
         required_inputs=[
             "s3b_multimode_estimates/outputs/multimode_estimates.json",
+            "s3b_multimode_estimates/stage_summary.json",
         ],
         produced_outputs=[
             "outputs/kerr_from_multimode.json",
             "outputs/kerr_from_multimode_diagnostics.json",
+            "outputs/kerr_extraction.json",
         ],
         upstream_stages=["s3b_multimode_estimates"],
+    ),
+    "s7_beyond_kerr_deviation_score": StageContract(
+        name="s7_beyond_kerr_deviation_score",
+        required_inputs=[
+            "s4d_kerr_from_multimode/outputs/kerr_extraction.json",
+            "s3b_multimode_estimates/outputs/multimode_estimates.json",
+        ],
+        produced_outputs=[
+            "outputs/beyond_kerr_score.json",
+        ],
+        upstream_stages=["s4d_kerr_from_multimode", "s3b_multimode_estimates"],
     ),
     "s3_spectral_estimates": StageContract(
         name="s3_spectral_estimates",
@@ -302,6 +348,57 @@ CONTRACTS: dict[str, StageContract] = {
             "outputs/spectral_estimates.json",
         ],
         upstream_stages=["s2_ringdown_window"],
+    ),
+    "s4g_mode220_geometry_filter": StageContract(
+        name="s4g_mode220_geometry_filter",
+        required_inputs=[
+            "s4g_mode220_geometry_filter/inputs/mode220_obs.json",
+        ],
+        external_inputs=[
+            "atlas",
+        ],
+        produced_outputs=[
+            "outputs/geometries_220.json",
+        ],
+        upstream_stages=[],
+        check_run_valid=True,
+    ),
+    "s4h_mode221_geometry_filter": StageContract(
+        name="s4h_mode221_geometry_filter",
+        required_inputs=[
+            # mode221_obs is optional; when absent the stage emits SKIPPED output.
+        ],
+        external_inputs=[
+            "atlas",
+        ],
+        produced_outputs=[
+            "outputs/mode221_filter.json",
+        ],
+        upstream_stages=[],
+        check_run_valid=True,
+    ),
+    "s4i_common_geometry_intersection": StageContract(
+        name="s4i_common_geometry_intersection",
+        required_inputs=[
+            "s4g_mode220_geometry_filter/outputs/mode220_filter.json",
+        ],
+        produced_outputs=[
+            "outputs/common_intersection.json",
+        ],
+        upstream_stages=["s4g_mode220_geometry_filter", "s4h_mode221_geometry_filter"],
+        check_run_valid=True,
+    ),
+    "s4j_hawking_area_filter": StageContract(
+        name="s4j_hawking_area_filter",
+        required_inputs=[
+            "s4i_common_geometry_intersection/outputs/common_intersection.json",
+            # area_obs input is optional; when absent no area constraint is applied.
+        ],
+        produced_outputs=[
+            "outputs/hawking_area_filter.json",
+        ],
+        upstream_stages=["s4i_common_geometry_intersection"],
+        check_run_valid=True,
     ),
     "experiment_geometry_evidence_vs_gr": StageContract(
         name="experiment_geometry_evidence_vs_gr",
@@ -324,6 +421,62 @@ CONTRACTS: dict[str, StageContract] = {
             "outputs/t0_sweep_golden_results.json",
         ],
         upstream_stages=["s5_aggregate"],
+        check_run_valid=True,
+    ),
+    "experiment_ex4_spectral_exclusion": StageContract(
+        name="experiment_ex4_spectral_exclusion",
+        required_inputs=[
+            "s5_aggregate/outputs/aggregate.json",
+        ],
+        produced_outputs=[
+            "outputs/exclusion_map.json",
+            "outputs/theory_survival.json",
+        ],
+        upstream_stages=["s5_aggregate"],
+        check_run_valid=True,
+    ),
+    "experiment_gwtc_posteriors_fetch": StageContract(
+        name="experiment_gwtc_posteriors_fetch",
+        required_inputs=[
+        ],
+        external_inputs=[
+            "gwtc_posteriors",
+        ],
+        produced_outputs=[
+            "outputs/validated_posteriors.json",
+        ],
+        upstream_stages=[],
+        check_run_valid=True,
+    ),
+    "experiment_area_theorem": StageContract(
+        name="experiment_area_theorem",
+        required_inputs=[
+        ],
+        external_inputs=[
+            "gwtc_posteriors",
+            "batch220_intersection",
+            "batch221_intersection",
+        ],
+        produced_outputs=[
+            "outputs/per_event.csv",
+            "outputs/summary.json",
+        ],
+        upstream_stages=[],
+        check_run_valid=True,
+    ),
+    "experiment/delta_lnL_sweep": StageContract(
+        name="experiment/delta_lnL_sweep",
+        required_inputs=[
+            "s3_ringdown_estimates/outputs/estimates.json",
+        ],
+        external_inputs=[
+            "atlas",
+        ],
+        produced_outputs=[
+            "outputs/delta_sweep.json",
+            "outputs/delta_sweep.tsv",
+        ],
+        upstream_stages=["s3_ringdown_estimates"],
         check_run_valid=True,
     ),
 }
@@ -575,6 +728,20 @@ def abort(ctx: StageContext, reason: str) -> None:
         extra={"verdict": "FAIL", "error": reason},
     )
     _fatal(f"[{ctx.stage_name}] {reason}")
+
+
+def log_stage_paths(ctx: StageContext) -> None:
+    """Print the canonical output paths mandated by AGENTS.md §Logging.
+
+    Call this at the end of every stage entrypoint that writes outputs.
+    Emits exactly the five variables required:
+        OUT_ROOT, STAGE_DIR, OUTPUTS_DIR, STAGE_SUMMARY, MANIFEST
+    """
+    print(f"OUT_ROOT={ctx.out_root}")
+    print(f"STAGE_DIR={ctx.stage_dir}")
+    print(f"OUTPUTS_DIR={ctx.outputs_dir}")
+    print(f"STAGE_SUMMARY={ctx.stage_dir / 'stage_summary.json'}")
+    print(f"MANIFEST={ctx.stage_dir / 'manifest.json'}")
 
 
 def enforce_outputs(ctx: StageContext) -> list[str]:

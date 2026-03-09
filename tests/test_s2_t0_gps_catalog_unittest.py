@@ -26,7 +26,9 @@ def _write_catalog(path: Path, payload: dict) -> Path:
 def test_resolve_t0_gps_schema_a_nested_dict(tmp_path: Path) -> None:
     catalog_path = _write_catalog(tmp_path / "catalog_a.json", {"GW190521": {"t0_gps": 1242442967.4}})
 
-    t0_gps, source = _resolve_t0_gps("GW190521", catalog_path)
+    resolved = _resolve_t0_gps("GW190521", catalog_path, offline=True, run_dir=tmp_path / "runs" / "rid")
+    assert isinstance(resolved, tuple) and len(resolved) == 4
+    t0_gps, source, _lookup_key, _gwosc_cache = resolved
 
     assert t0_gps == pytest.approx(1242442967.4)
     assert source == str(catalog_path)
@@ -35,22 +37,23 @@ def test_resolve_t0_gps_schema_a_nested_dict(tmp_path: Path) -> None:
 def test_resolve_t0_gps_schema_b_scalar_value(tmp_path: Path) -> None:
     catalog_path = _write_catalog(tmp_path / "catalog_b.json", {"GW190521": 1242442967.4})
 
-    t0_gps, source = _resolve_t0_gps("GW190521", catalog_path)
+    resolved = _resolve_t0_gps("GW190521", catalog_path, offline=True, run_dir=tmp_path / "runs" / "rid")
+    assert isinstance(resolved, tuple) and len(resolved) == 4
+    t0_gps, source, _lookup_key, _gwosc_cache = resolved
 
     assert t0_gps == pytest.approx(1242442967.4)
     assert source == str(catalog_path)
 
 
-def test_resolve_t0_gps_event_missing_includes_event_and_catalog_path(tmp_path: Path) -> None:
+def test_resolve_t0_gps_event_missing_includes_sources_attempted(tmp_path: Path) -> None:
     catalog_path = _write_catalog(tmp_path / "catalog_missing.json", {"GW150914": {"t0_gps": 1126259462.4}})
 
-    with pytest.raises(RuntimeError, match=r"GW190521") as exc:
-        _resolve_t0_gps("GW190521", catalog_path)
+    with pytest.raises(RuntimeError, match=r"missing_t0_gps_offline") as exc:
+        _resolve_t0_gps("GW190521", catalog_path, offline=True, run_dir=tmp_path / "runs" / "rid")
 
     message = str(exc.value)
     assert str(catalog_path) in message
-    assert "available_keys" in message
-    assert "detected_schema" in message
+    assert "sources_attempted" in message
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +75,9 @@ def test_resolve_t0_gps_legacy_windows_schema(tmp_path: Path) -> None:
         },
     )
 
-    t0_gps, source = _resolve_t0_gps("GW150914", catalog_path)
+    resolved = _resolve_t0_gps("GW150914", catalog_path)
+    assert isinstance(resolved, tuple) and len(resolved) == 4
+    t0_gps, source, _lookup_key, _gwosc_cache = resolved
 
     assert t0_gps == pytest.approx(1126259462.4)
     assert source == str(catalog_path)
@@ -93,10 +98,12 @@ def test_resolve_t0_gps_legacy_windows_wrong_event_raises(tmp_path: Path) -> Non
     )
 
     with pytest.raises(RuntimeError, match="GW190521"):
-        _resolve_t0_gps("GW190521", catalog_path)
+        _resolve_t0_gps("GW190521", catalog_path, offline=True, run_dir=tmp_path / "runs" / "rid")
 
 
-def test_resolve_t0_gps_legacy_windows_missing_value_gps_raises(tmp_path: Path) -> None:
+def test_resolve_t0_gps_legacy_windows_missing_value_gps_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Legacy entry without value_gps is skipped; no match → RuntimeError."""
     catalog_path = _write_catalog(
         tmp_path / "catalog_no_value.json",
@@ -110,8 +117,9 @@ def test_resolve_t0_gps_legacy_windows_missing_value_gps_raises(tmp_path: Path) 
         },
     )
 
-    with pytest.raises(RuntimeError):
-        _resolve_t0_gps("GW150914", catalog_path)
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(RuntimeError, match="missing_t0_gps_offline"):
+        _resolve_t0_gps("GW150914", catalog_path, offline=True, run_dir=tmp_path / "runs" / "rid")
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +143,9 @@ def test_resolve_t0_gps_metadata_t_coalescence_gps(
     nonexistent_catalog = tmp_path / "no_catalog.json"
     monkeypatch.chdir(tmp_path)
 
-    t0_gps, source = _resolve_t0_gps("GW_TEST", nonexistent_catalog)
+    resolved = _resolve_t0_gps("GW_TEST", nonexistent_catalog)
+    assert isinstance(resolved, tuple) and len(resolved) == 4
+    t0_gps, source, _lookup_key, _gwosc_cache = resolved
 
     assert t0_gps == pytest.approx(1234567890.1)
 
@@ -148,7 +158,9 @@ def test_resolve_t0_gps_metadata_t0_ref_gps_priority(
     nonexistent_catalog = tmp_path / "no_catalog.json"
     monkeypatch.chdir(tmp_path)
 
-    t0_gps, source = _resolve_t0_gps("GW_PRIO", nonexistent_catalog)
+    resolved = _resolve_t0_gps("GW_PRIO", nonexistent_catalog)
+    assert isinstance(resolved, tuple) and len(resolved) == 4
+    t0_gps, source, _lookup_key, _gwosc_cache = resolved
 
     assert t0_gps == pytest.approx(1111111111.0)
 
@@ -161,7 +173,9 @@ def test_resolve_t0_gps_metadata_gps_fallback(
     nonexistent_catalog = tmp_path / "no_catalog.json"
     monkeypatch.chdir(tmp_path)
 
-    t0_gps, source = _resolve_t0_gps("GW_GPS", nonexistent_catalog)
+    resolved = _resolve_t0_gps("GW_GPS", nonexistent_catalog)
+    assert isinstance(resolved, tuple) and len(resolved) == 4
+    t0_gps, source, _lookup_key, _gwosc_cache = resolved
 
     assert t0_gps == pytest.approx(1126259462.4)
 
@@ -170,6 +184,19 @@ def test_resolve_t0_gps_metadata_gps_fallback(
 # Path 3 — RuntimeError when neither catalog nor metadata exists
 # ---------------------------------------------------------------------------
 
+
+
+
+def test_resolve_t0_gps_metadata_event_time_gps_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_metadata(tmp_path, "GW_EVTIME", {"event_time_gps": 1010101010.5})
+    nonexistent_catalog = tmp_path / "no_catalog.json"
+    monkeypatch.chdir(tmp_path)
+
+    t0_gps, source, _lookup_key, _gwosc_cache = _resolve_t0_gps("GW_EVTIME", nonexistent_catalog)
+    assert t0_gps == pytest.approx(1010101010.5)
+    assert source.endswith("GW_EVTIME_metadata.json")
 
 def test_resolve_t0_gps_no_catalog_no_metadata_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -180,4 +207,61 @@ def test_resolve_t0_gps_no_catalog_no_metadata_raises(
     monkeypatch.chdir(tmp_path)
 
     with pytest.raises(RuntimeError, match="GW_UNKNOWN"):
-        _resolve_t0_gps("GW_UNKNOWN", nonexistent_catalog)
+        _resolve_t0_gps("GW_UNKNOWN", nonexistent_catalog, offline=True, run_dir=tmp_path / "runs" / "rid")
+
+
+def test_resolve_t0_gps_offline_without_sources_raises_stable_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    nonexistent_catalog = tmp_path / "no_catalog.json"
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(RuntimeError, match="missing_t0_gps_offline") as exc:
+        _resolve_t0_gps("GW_OFFLINE", nonexistent_catalog, offline=True, run_dir=tmp_path / "runs" / "r1")
+
+    message = str(exc.value)
+    assert "sources_attempted" in message
+    assert "window_catalog=" in message
+
+
+def test_resolve_t0_gps_online_fetch_creates_run_cache_and_reuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    nonexistent_catalog = tmp_path / "no_catalog.json"
+    monkeypatch.chdir(tmp_path)
+
+    calls: list[str] = []
+
+    def _fake_fetch(event_id: str, retries: int = 3, timeout_s: int = 20) -> float:
+        calls.append(event_id)
+        return 1234567890.25
+
+    monkeypatch.setattr("mvp.s2_ringdown_window._fetch_gwosc_event_gps", _fake_fetch)
+    run_dir = tmp_path / "runs" / "rid"
+
+    t0_gps, source, details, used_cache = _resolve_t0_gps(
+        "GW_ONLINE", nonexistent_catalog, offline=False, run_dir=run_dir
+    )
+    assert t0_gps == pytest.approx(1234567890.25)
+    assert details["lookup_key"] == "GW_ONLINE"
+    assert details["gwosc_cache_path"] is not None
+    assert used_cache is False
+    assert source.endswith("GW_ONLINE.json")
+    assert calls == ["GW_ONLINE"]
+
+    cache_file = run_dir / "external_inputs" / "gwosc" / "event_time" / "GW_ONLINE.json"
+    assert cache_file.exists()
+    payload = json.loads(cache_file.read_text(encoding="utf-8"))
+    assert payload["event_id"] == "GW_ONLINE"
+    assert payload["t0_gps"] == pytest.approx(1234567890.25)
+    assert payload["source"] == "gwosc_api_v2"
+
+    # Reuse cache; no additional network call expected.
+    t0_again, source_again, details_again, used_cache_again = _resolve_t0_gps(
+        "GW_ONLINE", nonexistent_catalog, offline=False, run_dir=run_dir
+    )
+    assert t0_again == pytest.approx(1234567890.25)
+    assert source_again == str(cache_file)
+    assert details_again["gwosc_cache_path"] == str(cache_file)
+    assert used_cache_again is True
+    assert calls == ["GW_ONLINE"]

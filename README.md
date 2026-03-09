@@ -89,6 +89,136 @@ Nota Bash importante:
 
 ## Ejecución básica
 
+## Guía rápida: no puedo mergear dos ramas
+
+Si `git merge` falla entre dos ramas, sigue este flujo corto y determinista:
+
+```bash
+# 1) verifica estado limpio
+git status
+
+# 2) actualiza referencias
+git fetch --all --prune
+
+# 3) cámbiate a la rama destino (ej. main)
+git checkout main
+git pull --ff-only
+
+# 4) intenta mergear la rama origen
+git merge <rama_origen>
+```
+
+Si aparecen conflictos:
+
+```bash
+# 5) lista ficheros en conflicto
+git diff --name-only --diff-filter=U
+
+# 6) resuélvelos editando los marcadores <<<<<<< ======= >>>>>>>
+# 7) marca como resueltos
+git add <archivo_resuelto>
+
+# 8) completa el merge
+git commit
+```
+
+Atajos útiles:
+
+```bash
+# abortar merge y volver al estado previo
+git merge --abort
+
+# aceptar todo lo de tu rama actual (ours) para un archivo
+git checkout --ours <archivo>
+
+# aceptar todo lo de la rama que estás mergeando (theirs)
+git checkout --theirs <archivo>
+```
+
+Si tu problema es historial divergente fuerte, suele ser más limpio rebasar la rama origen antes del merge:
+
+```bash
+git checkout <rama_origen>
+git rebase main
+git checkout main
+git merge <rama_origen>
+```
+
+> Consejo práctico: antes de abrir PR, ejecuta los tests del repo y confirma que no quedan conflictos ni archivos sin stage (`git status`).
+
+## Quickstart: Online vs Offline-first
+
+### Path A — Online (resolución en tiempo real)
+
+```bash
+python -m mvp.pipeline single \
+  --event-id GW150914 \
+  --atlas-default
+```
+
+### Path B — Offline-first (recomendado para batch)
+
+1) Genera auditoría LOSC/t0 y catálogo de eventos listos:
+
+```bash
+AUDIT_RUN="audit_gwosc_t0_$(date -u +%Y%m%dT%H%M%SZ)"
+
+python -m mvp.experiment_losc_quality \
+  --run "$AUDIT_RUN" \
+  --gwosc-api-version v2 \
+  --batch-gwosc \
+  --write-t0-catalog
+```
+
+2) Ejecuta pipeline consumiendo catálogo t0 cuando exista:
+
+```bash
+python -m mvp.pipeline single \
+  --event-id GW150914 \
+  --run-id <RUN_ID> \
+  --atlas-default \
+  --offline-s2 \
+  --window-catalog "runs/${AUDIT_RUN}/experiment/losc_quality/t0_catalog_gwosc_v2.json"
+```
+
+> Alias soportado: `--t0-catalog`.
+
+### Batch offline-first (recomendado)
+
+```bash
+python -m mvp.experiment_offline_batch --batch-run-id <BATCH_RUN_ID> --window-catalog "runs/${AUDIT_RUN}/experiment/losc_quality/t0_catalog_gwosc_v2.json" --events-file "runs/${AUDIT_RUN}/experiment/losc_quality/approved_events.txt"
+```
+
+### Catálogo t0 de GWOSC v2 (input externo auditable)
+
+- **Qué es**: `t0_catalog_gwosc_v2.json` es un catálogo determinista `event_id -> t0_gps` (segundos GPS) para eventos GWOSC v2.
+- **Dónde vive**: `runs/<audit_run_id>/experiment/losc_quality/t0_catalog_gwosc_v2.json`.
+- **Cómo se usa**: pásalo a `experiment_offline_batch` con `--t0-catalog` (alias de `--window-catalog`) para ejecutar en modo offline-first sin resolver t0 online en runtime.
+- **Práctica recomendada**: construir `events_with_t0.txt` como intersección entre eventos disponibles en `data/losc/*` y `keys(t0_catalog_gwosc_v2.json)`, y guardarlo en `runs/<prep_run_id>/external_inputs/events_with_t0.txt`.
+- **Por qué**: mejora reproducibilidad y auditoría, reduce dependencia de consultas online y evita fallos por eventos sin t0.
+
+Ejemplo explícito:
+
+```bash
+T0_CATALOG="runs/<audit_run_id>/experiment/losc_quality/t0_catalog_gwosc_v2.json"
+EVENTS_FILE="runs/<prep_run_id>/external_inputs/events_with_t0.txt"
+
+python -m mvp.experiment_offline_batch \
+  --batch-run-id <batch_run_id> \
+  --events-file "$EVENTS_FILE" \
+  --t0-catalog "$T0_CATALOG" \
+  --mode-filter "(2,2,0)"
+```
+
+## Quality gates (auditoría de eventos)
+
+En auditorías LOSC/t0, usa siempre estas listas como puertas de calidad antes de correr batch pesado:
+
+- `runs/<audit>/experiment/losc_quality/approved_events.txt`
+- `runs/<audit>/experiment/losc_quality/gwosc_ready_events.txt`
+
+Recomendación práctica: prioriza la intersección `approved_events ∩ gwosc_ready_events` para minimizar fallos por metadatos incompletos en ejecución online.
+
 ### Prerrequisitos mínimos del entorno Python
 
 Antes de ejecutar `pipeline.py` o cualquier stage del MVP, valida que estén disponibles
@@ -113,49 +243,37 @@ Para modo local con `--local-hdf5`, añade además `h5py` a la verificación.
 
 ## Descarga manual rápida de strain (GWOSC) para modo offline
 
-En algunos entornos, `s1_fetch_strain` puede tardar o colgarse cuando `gwpy` intenta resolver/descargar desde GWOSC. Cuando pase eso, usa descarga directa y deja los HDF5 en caché local para ejecución offline reproducible.
+Usa esta ruta solo cuando `data/losc/<EVENT_ID>/` no existe o está vacía, o cuando quieras precargar caché para batch offline. El objetivo no es "consumir una API concreta", sino dejar HDF5 válidos de H1/L1 en `data/losc/<EVENT_ID>/` y validar con precheck.
 
-**Requisitos de shell**: `curl`, `jq`, `aria2c`, `sha256sum`.
+**Requisitos de shell**: `curl`, `sha256sum` (opcional: `aria2c` para descarga paralela).
 
 ```bash
 EVENT_ID="GW190521_030229"
 OUT_DIR="data/losc/$EVENT_ID"
 mkdir -p "$OUT_DIR"
 
-# 1) Resolver versión correcta del evento (última detail_url)
-DETAIL_URL="$(curl -fsSL "https://gwosc.org/api/v2/events/${EVENT_ID}" \
-  | jq -r '.events[0].versions[-1].detail_url')"
-
-# 2) Extraer URLs H1/L1 para strain-files (duration=32, file-format=hdf5)
-H1_URL="$(curl -fsSL "$DETAIL_URL" | jq -r '
-  .strain[]
-  | select(.detector=="H1")
-  | .files[]
-  | select(.format=="hdf5" and .duration==32)
-  | .download_url' | head -n 1)"
-L1_URL="$(curl -fsSL "$DETAIL_URL" | jq -r '
-  .strain[]
-  | select(.detector=="L1")
-  | .files[]
-  | select(.format=="hdf5" and .duration==32)
-  | .download_url' | head -n 1)"
-
+# 1) Copia desde GWOSC/LOSC las URLs directas de los 2 ficheros HDF5 (H1 y L1)
+H1_URL="<URL_DIRECTA_H1.hdf5>"
+L1_URL="<URL_DIRECTA_L1.hdf5>"
 test -n "$H1_URL" && test -n "$L1_URL"
 
-# 3) Descargar ambos archivos en cache local (external input read-only)
-aria2c -x 8 -s 8 -d "$OUT_DIR" "$H1_URL" "$L1_URL"
+# 2) Descarga conservadora (sin depender de estructura JSON de la API)
+curl -fL "$H1_URL" -o "$OUT_DIR/$(basename "$H1_URL")"
+curl -fL "$L1_URL" -o "$OUT_DIR/$(basename "$L1_URL")"
 
-# 4) Verificación mínima contract-first (integridad y auditabilidad)
-ls -lh "$OUT_DIR"/*.hdf5
-sha256sum "$OUT_DIR"/*.hdf5
+# 3) Verificación mínima contract-first
+ls -lh "$OUT_DIR"/*.{h5,hdf5} 2>/dev/null
+sha256sum "$OUT_DIR"/*.{h5,hdf5} 2>/dev/null
+
+# 4) Validación canónica antes de s1
+python tools/losc_precheck.py --event-id "$EVENT_ID" --losc-root data/losc
 ```
 
-Ejemplo real validado para `GW190521_030229`:
+Si tu entorno permite `aria2c`, puedes reemplazar los dos `curl` por:
 
-- H1: `https://gwosc.org/eventapi/json/GWTC-2.1-confident/GW190521/v4/H-H1_GWOSC_16KHZ_R1-1242442952-32.hdf5`
-- L1: `https://gwosc.org/eventapi/json/GWTC-2.1-confident/GW190521/v4/L-L1_GWOSC_16KHZ_R1-1242442952-32.hdf5`
-- SHA256 H1 observado: `2761bf5eaffc2c9bc8620e82dcd4e91423f631c6374454172e63894364445ad4`
-- SHA256 L1: calcular con `sha256sum` tras descarga.
+```bash
+aria2c -x 8 -s 8 -d "$OUT_DIR" "$H1_URL" "$L1_URL"
+```
 
 ### Ejecutar `s1_fetch_strain` offline con HDF5 ya presentes en `data/losc`
 
@@ -166,6 +284,7 @@ Si no activas virtualenv con `source .venv/bin/activate`, usa siempre `.venv/bin
   --run <RUN_ID> \
   --event-id <EVENT_ID> \
   --offline \
+  --hdf5-root data/losc \
   --reuse-if-present
 ```
 
@@ -309,6 +428,25 @@ git branch -r
 
 ## Experimentos (`t0_sweep_full`) e inventario por fases
 
+Guías de experimentos documentadas:
+
+- `docs/manual_experimento_1.md`
+- `docs/readme_experiment_2.md`
+- `docs/readme_experiment_4.md` (batch offline-first con `t0`, `mode_filter` y calibración de `epsilon` en `s4_geometry_filter` con `metric=mahalanobis_log`)
+
+### Semántica mínima de `s4_geometry_filter` (evitar sobre-interpretación)
+
+- En `metric=mahalanobis_log`, `d²` debe leerse como **score operativo** (mínimo sobre atlas discreto + \(\Sigma\) estimada en runtime), **no** como un \(\chi^2\) calibrado para significancia estadística.
+- Interpretación de estados por evento en batch:
+  - `EMPTY`: no hubo candidatos evaluables para decidir compatibilidad.
+  - `SATURATED`: el score queda en régimen no informativo/saturado para decidir exclusión/compatibilidad fina.
+    **No** significa “compatibilidad alta”.
+  - `OK`: hubo evaluación informativa y la decisión de compatibilidad se interpreta con el umbral operativo.
+- Umbral recomendado cuando se usa comparación relativa por modo: `threshold_mode=delta_lnL`.
+  Flags explícitas disponibles en CLI de `s4`:
+  - `--delta-lnL-220`
+  - `--delta-lnL-221`
+
 - `mvp/experiment_t0_sweep_full.py`: **recomendado para escala/producción**, contract-first con fases `run`/`inventory`/`finalize`.
 - `mvp/experiment_t0_sweep.py`: herramienta **DEV/INTEGRATION** para sanity-check rápido; no contract-first, no inventory/finalize, no aislamiento por subrun. **No usar para conteos oficiales**.
 
@@ -419,6 +557,59 @@ Nota sobre subruns por seed: el experimento crea árboles por semilla para aisla
 
 - `data/losc/<EVENT_ID>/`
 - Convención de nombres (plana, sin subdirectorios por detector): los archivos deben incluir `H1` o `L1` en el nombre.
+
+### Precheck LOSC (canónico, 10 segundos)
+
+> **STOP**: no continúes con `s1` (ni con ningún stage downstream) si este precheck falla.
+
+Decisión rápida (A/B/C) antes de continuar:
+
+1. **Caché presente y válida**: `data/losc/<EVENT_ID>/` existe y el precheck encuentra H1+L1.  
+   Acción: continuar con `s1_fetch_strain` en offline/reuse.
+2. **Caché presente pero naming no casable**: hay `.h5/.hdf5`, pero no matchean `H1/L1`.  
+   Acción: crear symlinks `H1.h5` y `L1.h5`, repetir precheck.
+3. **Caché ausente o vacía**: falta `data/losc/<EVENT_ID>/` o no contiene HDF5 válidos.  
+   Acción: poblar `data/losc/<EVENT_ID>/` (ver sección "Descarga manual rápida de strain"), luego repetir precheck.
+
+Precheck read-only recomendado (script canónico):
+
+```bash
+python tools/losc_precheck.py --event-id GW150914 --losc-root data/losc
+```
+
+Precheck manual equivalente (bash):
+
+```bash
+EVENT_ID=GW150914
+echo "data/losc -> $(readlink -f data/losc 2>/dev/null || echo '(no symlink)')"
+test -d "data/losc/$EVENT_ID" || { echo "ERROR: falta data/losc/$EVENT_ID (cache no montada/visible)"; exit 2; }
+H1_MATCHES="$(find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*H1*.h5' -o -iname '*H1*.hdf5' \) | wc -l)"
+L1_MATCHES="$(find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*L1*.h5' -o -iname '*L1*.hdf5' \) | wc -l)"
+echo "H1 matches: ${H1_MATCHES}"
+echo "L1 matches: ${L1_MATCHES}"
+test "$H1_MATCHES" -ge 1 || { echo "ERROR: falta al menos 1 archivo H1 (.h5/.hdf5) en data/losc/$EVENT_ID"; exit 2; }
+test "$L1_MATCHES" -ge 1 || { echo "ERROR: falta al menos 1 archivo L1 (.h5/.hdf5) en data/losc/$EVENT_ID"; exit 2; }
+echo "total h5/hdf5:"; find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*.h5' -o -iname '*.hdf5' \) | wc -l
+```
+
+Resolución rápida en 3 ramas:
+
+- **Caso A (mount/symlink)**: `data/losc` no apunta a la caché real.
+  - Reapunta con **una sola** estrategia recomendada por el equipo (symlink o bind mount) para que `data/losc/<EVENT_ID>/...` exista y sea visible.
+- **Caso B (nombres)**: hay `.h5/.hdf5`, pero el patrón no casa con `H1/L1`.
+  - Sin renombrar originales, crea symlinks casables dentro de `data/losc/<EVENT_ID>/`:
+
+```bash
+ln -sf "<archivo_real_H1>.h5" "data/losc/$EVENT_ID/H1.h5"
+ln -sf "<archivo_real_L1>.h5" "data/losc/$EVENT_ID/L1.h5"
+```
+
+- **Caso C (carpeta ausente o vacía)**: no existe `data/losc/<EVENT_ID>/` o no hay HDF5 utilizables.
+  - Pobla primero `data/losc/<EVENT_ID>/` con H1/L1 (procedimiento canónico en "Descarga manual rápida de strain"), luego ejecuta de nuevo:
+
+```bash
+python tools/losc_precheck.py --event-id "$EVENT_ID" --losc-root data/losc
+```
 
 Ejemplo recomendado:
 
@@ -535,7 +726,7 @@ Todo cambio debe cerrar un ciclo completo: **Inputs deterministas → Estimació
 **Regla soberana:**
 
 * `RUN_VALID` es la **única puerta** hacia downstream.
-* Si `RUN_VALID != PASS` o falta `runs/<run_id>/RUN_VALID/verdict.json`, ningún stage downstream puede correr.
+* Si `runs/<run_id>/RUN_VALID/verdict.json` no existe o su `verdict != PASS`, ningún stage downstream puede correr.
 * Si un stage falla, el run **no existe** a efectos downstream (fail-fast).
 
 **Criterio de aceptación:**
@@ -638,7 +829,7 @@ Todo cambio debe cerrar un ciclo completo: **Inputs deterministas → Estimació
 
 **Criterio de aceptación:**
 
-* Si falla preflight, no se crea `runs/<run_id>/` (o se crea y queda `RUN_VALID=FAIL` con razón explícita).
+* Si falla preflight, no se crea `runs/<run_id>/` (o se crea y queda `RUN_VALID/verdict.json` con `verdict=FAIL` y razón explícita).
 
 ---
 

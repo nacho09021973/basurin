@@ -30,6 +30,55 @@ Objetivo: que una IA (o humano) no pierda 5–6 horas diarias por confundir `RUN
 - **Ejemplo NetCDF contra release externo:**
   - `runs/ext_220_210_20260227T090000Z/external_inputs/siegel_220_210/Users/RichardFineMan/Downloads/data_release/220_210/<file>.nc`
 
+---
+
+# Atlas (geometrías) — localización inmediata (<60s)
+
+## Rutas canónicas dentro del repo (no inventar “atlas.json”)
+Estos ficheros viven versionados en el repo (preferidos por gobernanza). Lista explícita:
+
+- `docs/ringdown/atlas/atlas_real_v2_s4.json`  *(recomendado para `s4_geometry_filter`)*
+- `docs/ringdown/atlas/atlas_berti_v2_s4.json`
+- `docs/ringdown/atlas/atlas_real_v1_s4.json`
+- `docs/ringdown/atlas/atlas_berti_v2.json`
+- `docs/ringdown/atlas/atlas_real_v1.json`
+- `mvp/test_atlas_fixture.json` *(solo tests; no usar en runs reales)*
+
+**Regla:** no existe (ni debe sugerirse) `atlas.json` en raíz. Si ves docs/ejemplos con `--atlas-path atlas.json`, trátalo como anti-ejemplo heredado.
+
+## Qué atlas usar dónde (regla operativa)
+- `s4_geometry_filter`: preferir `docs/ringdown/atlas/*_s4.json`
+- tests: `mvp/test_atlas_fixture.json`
+- batch/offline (`experiment_offline_batch`): documentar el atlas efectivo usado por esa CLI:
+  - hoy está documentado como `docs/ringdown/atlas/atlas_berti_v2.json` en `docs/readme_experiment_4.md`
+  - migración a `*_s4.json` solo cuando se haga explícita (no asumir)
+
+## Descubrimiento (copy/paste)
+Si dudas de rutas o estás en un checkout distinto:
+
+```bash
+find . -maxdepth 6 -type f \( -name "atlas*.json" -o -name "*atlas*.json" \) | sort
+```
+
+Comprobación rápida (estructura JSON):
+
+```bash
+python -c 'import json; p="docs/ringdown/atlas/atlas_real_v2_s4.json"; print("OK", p, "top_keys=", list(json.load(open(p)).keys())[:10])'
+```
+
+## Ejemplo de uso en pipeline (single-event)
+
+```bash
+python mvp/pipeline.py single \
+  --event-id GW191113_071753 \
+  --atlas-path docs/ringdown/atlas/atlas_real_v2_s4.json \
+  --run-id <RUN_ID>
+```
+
+Si vas con defaults:
+
+- usa `--atlas-default` (si está soportado por tu CLI) en lugar de inventar rutas.
+
 ### Comando universal para encontrar outputs sin pensar
 
 ```bash
@@ -48,38 +97,42 @@ find "runs/$RUN_ID" -type f \
 
 # HDF5 (LOSC/GWOSC) en 10 segundos (para que s1 no aborte)
 
-**Regla**: los HDF5 externos viven como input *solo lectura* en:
+Ruta canónica (input externo *read-only*):
 
 `data/losc/<EVENT_ID>/`
 
-**1) Lista los H5 disponibles (H1/L1)**:
+Precheck canónico:
 
 ```bash
-EVENT_ID=GW150914
-find "data/losc/$EVENT_ID" -type f \( -iname '*.hdf5' -o -iname '*.h5' \)
+python tools/losc_precheck.py --event-id "$EVENT_ID" --losc-root data/losc
 ```
 
-**2) Escoge uno de H1 y uno de L1** (típicamente contienen `H-H1_...` y `L-L1_...` en el nombre).
+Decisión rápida A/B/C:
 
-**3) Ejecuta s1 con rutas explícitas (copy/paste)**:
+- **Caso A (mount/symlink roto o mal apuntado)**: `data/losc` no apunta a la caché real.
+  - Reapunta `data/losc` con la estrategia estándar del equipo (symlink o bind mount).
+- **Caso B (naming)**: hay `.h5/.hdf5`, pero no casan con H1/L1.
+  - Crea symlinks casables `H1.h5` y `L1.h5` dentro del evento, sin renombrar originales:
+- **Caso C (carpeta inexistente o vacía)**: `data/losc/<EVENT_ID>/` no existe o no tiene HDF5 válidos.
+  - Pobla primero `data/losc/<EVENT_ID>/` con H1/L1.
+  - Repite `tools/losc_precheck.py`.
+  - Solo después corre `s1_fetch_strain`.
 
 ```bash
-RUN_ID="mvp_${EVENT_ID}_real_local_$(date -u +%Y%m%dT%H%M%SZ)"
-H1="/ruta/a/data/losc/$EVENT_ID/H-H1_...hdf5"
-L1="/ruta/a/data/losc/$EVENT_ID/L-L1_...hdf5"
-
-python mvp/s1_fetch_strain.py \
-  --run "$RUN_ID" \
-  --event-id "$EVENT_ID" \
-  --detectors H1,L1 \
-  --duration-s 32.0 \
-  --local-hdf5 "H1=$H1" \
-  --local-hdf5 "L1=$L1"
+ln -sf "<archivo_real_H1>.h5" "data/losc/$EVENT_ID/H1.h5"
+ln -sf "<archivo_real_L1>.h5" "data/losc/$EVENT_ID/L1.h5"
 ```
+
+**Solo después del precheck PASS**, continúa offline con `s1` (ejemplo corto):
+
+```bash
+python mvp/s1_fetch_strain.py --run <run_id> --event-id <EVENT_ID> --detectors H1,L1 --hdf5-root data/losc --reuse-if-present
+```
+
+Procedimiento completo de bootstrap/descarga/poblado: ver `README.md` en la sección "Descarga manual rápida de strain (GWOSC) para modo offline".
 
 **Nota de gobernanza**: `data/losc/...` es input externo. El árbol auditable del run empieza en `runs/<RUN_ID>/...`.
 
----
 
 ## 0) Regla de oro (léela primero)
 
@@ -97,6 +150,23 @@ Si eso no coincide con el árbol real donde está `RUN_VALID/verdict.json`, el s
 - `runs/<run_id>/external_inputs/...`: anclaje determinista de releases externos (por ejemplo, `siegel_220_210.tar.gz`) con hash verificable para trazabilidad.
 - `runs/<run_id>/<stage>/outputs/`: artefactos producidos por stages. Deben convivir con `manifest.json` y `stage_summary.json`, incluyendo hashes SHA256.
 - `runs/<run_id>/experiment/<name>/`: espacio para experimentos; no debe mutar artefactos canónicos de stages ya emitidos.
+
+### Rutas de auditoría LOSC/t0 y batch offline
+
+> En CLI de pipeline/batch, usa `--window-catalog` para s2. Alias soportado: `--t0-catalog`.
+
+- `runs/<audit>/experiment/losc_quality/losc_event_quality.csv`
+- `runs/<audit>/experiment/losc_quality/approved_events.txt`
+- `runs/<run_id>/experiment/losc_quality/t0_catalog_gwosc_v2.json` *(ruta canónica)*
+- `runs/<audit>/experiment/losc_quality/gwosc_ready_events.txt`
+- `runs/<prep_run_id>/external_inputs/events_with_t0.txt` *(lista derivada para batch offline)*
+- `runs/<batch>/experiment/offline_batch/results.csv`
+
+Propósito de `t0_catalog_gwosc_v2.json`: catálogo `event_id -> t0_gps` para experimentos offline/batch (por ejemplo `experiment_offline_batch --t0-catalog ...`), tratado como input externo gobernado dentro de `runs/`.
+
+Gobernanza: tanto el catálogo t0 como artefactos derivados (por ejemplo `events_with_t0.txt`) deben vivir bajo `runs/<run_id>/...`; está prohibido escribir fuera del árbol de runs auditable.
+
+Nota: `RUN_VALID` es un directorio; el veredicto canónico siempre vive en `RUN_VALID/verdict.json`.
 
 Verificación mínima (contract-first, tratable/auditable):
 
@@ -248,11 +318,18 @@ Patrones de nombre esperados:
 - `*H1*.hdf5` o `*H1*.h5`
 - `*L1*.hdf5` o `*L1*.h5`
 
-Verificación:
+Precheck obligatorio (mismo bloque canónico):
 
 ```bash
-find data/losc/GW150914 \( -iname '*.hdf5' -o -iname '*.h5' \) -type f
+EVENT_ID=GW150914
+echo "data/losc -> $(readlink -f data/losc 2>/dev/null || echo '(no symlink)')"
+test -d "data/losc/$EVENT_ID" || { echo "ERROR: falta data/losc/$EVENT_ID (cache no montada/visible)"; exit 2; }
+echo "H1/L1 matches:"
+ls -1 "data/losc/$EVENT_ID" | egrep -i 'H1.*\.(h5|hdf5)$|L1.*\.(h5|hdf5)$' || echo "ERROR: hay ficheros pero no casan con H1/L1"
+echo "total h5/hdf5:"; find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*.h5' -o -iname '*.hdf5' \) | wc -l
 ```
+
+Si falla: resolver primero **Caso A (mount/symlink)** o **Caso B (nombres con symlinks H1.h5/L1.h5)** y repetir el precheck.
 
 Ejemplo mínimo (s1 exige rutas explícitas si no hay fetch/caché):
 
@@ -362,7 +439,5 @@ Input requerido por el oráculo (debe existir antes):
 runs/<RUN_ID>/experiment/t0_sweep_full_seed<seed>/outputs/t0_sweep_full_results.json
 ```
 
-Si falta ese directorio/JSON, el oráculo imprime la ruta esperada exacta y el comando para regenerar el sweep (`phase=run`).
+Si falta ese directorio/JSON, el oráculo imprime la ruta esperada exacta y el comando para regenerar el sweep (`phase=run`)
 
-=======
-## Codex

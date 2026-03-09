@@ -19,6 +19,11 @@ for _cand in (_here.parents[0], _here.parents[1]):
 
 from basurin_io import write_json_atomic
 from mvp.contracts import abort, check_inputs, finalize, init_stage
+from mvp.multimode_viability import (
+    classify_multimode_viability as classify_multimode_viability_v3,
+    evaluate_science_evidence,
+    evaluate_systematics_gate,
+)
 from mvp.s3_ringdown_estimates import estimate_ringdown_observables, estimate_ringdown_spectral
 
 STAGE = "s3b_multimode_estimates"
@@ -29,6 +34,9 @@ TARGET_MODES = [
 MIN_BOOTSTRAP_SAMPLES = 128
 SIGMA_DET_EPS = 1e-12
 SIGMA_COND_MAX = 1e12
+MULTIMODE_OK = "MULTIMODE_OK"
+SINGLEMODE_ONLY = "SINGLEMODE_ONLY"
+RINGDOWN_NONINFORMATIVE = "RINGDOWN_NONINFORMATIVE"
 
 # --- model_comparison numerical guards (documented in output conventions block) ---
 _RSS_FLOOR = 1e-300         # floor applied to rss/n inside log; prevents -inf on perfect fits
@@ -194,6 +202,21 @@ def _load_s3_band(path: Path, *, window_meta: dict[str, Any] | None) -> tuple[fl
     raise RuntimeError(
         "invalid s3 estimates: missing band_hz (and no band_hz in s2 window_meta fallback)"
     )
+
+
+def _load_s3_selected_t0_offset_ms(path: Path) -> float:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    selected = payload.get("t0_selected")
+    if not isinstance(selected, dict):
+        return 0.0
+    value = selected.get("offset_ms")
+    if isinstance(value, bool):
+        return 0.0
+    if isinstance(value, (int, float)):
+        off = float(value)
+        if math.isfinite(off) and off >= 0.0:
+            return off
+    return 0.0
 
 
 def compute_robust_stability(samples: list[tuple[float, float]]) -> dict[str, float | None]:
@@ -800,6 +823,7 @@ def build_results_payload(
     flags: list[str],
     *,
     model_comparison: dict[str, Any] | None = None,
+    t0_offset_ms_from_s3: float = 0.0,
 ) -> dict[str, Any]:
     verdict = "OK" if mode_220_ok else "INSUFFICIENT_DATA"
     messages: list[str] = []
@@ -819,14 +843,172 @@ def build_results_payload(
         )
         results["quality_gates"] = {"two_mode_preferred": two_mode_preferred}
 
+    source: dict[str, Any] = {"stage": "s2_ringdown_window", "window": window_meta}
+    if t0_offset_ms_from_s3 > 0.0:
+        source["t0_offset_ms_from_s3"] = float(t0_offset_ms_from_s3)
+
     return {
         "schema_version": "multimode_estimates_v1",
         "run_id": run_id,
-        "source": {"stage": "s2_ringdown_window", "window": window_meta},
+        "source": source,
         "modes_target": TARGET_MODES,
         "results": results,
         "modes": [mode_220, mode_221],
     }
+
+
+def _as_float_or_none(value: Any) -> float | None:
+    if isinstance(value, (int, float)) and math.isfinite(value):
+        return float(value)
+    return None
+
+
+def _load_optional_multimode_inputs(run_dir: Path) -> dict[str, Any]:
+    optional = run_dir / "external_inputs" / "multimode_viability_inputs.json"
+    if not optional.exists():
+        return {}
+    try:
+        payload = json.loads(optional.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _mode_frequency_summary(mode_payload: dict[str, Any]) -> dict[str, float | None]:
+    fit = mode_payload.get("fit") if isinstance(mode_payload, dict) else None
+    stability = fit.get("stability") if isinstance(fit, dict) else {}
+
+    lnf_p10 = _as_float_or_none(stability.get("lnf_p10"))
+    lnf_p50 = _as_float_or_none(stability.get("lnf_p50"))
+    lnf_p90 = _as_float_or_none(stability.get("lnf_p90"))
+
+    f_p10 = math.exp(lnf_p10) if lnf_p10 is not None else None
+    f_p50 = math.exp(lnf_p50) if lnf_p50 is not None else None
+    f_p90 = math.exp(lnf_p90) if lnf_p90 is not None else None
+
+    return {
+        "f_p10": f_p10,
+        "f_median": f_p50,
+        "f_p90": f_p90,
+        "f_iqr": (f_p90 - f_p10) if (f_p10 is not None and f_p90 is not None) else None,
+    }
+
+
+def _mode_q_median(mode_payload: dict[str, Any]) -> float | None:
+    fit = mode_payload.get("fit") if isinstance(mode_payload, dict) else None
+    stability = fit.get("stability") if isinstance(fit, dict) else {}
+    lnq_p50 = _as_float_or_none(stability.get("lnQ_p50"))
+    if lnq_p50 is not None:
+        return math.exp(lnq_p50)
+    lnq = _as_float_or_none(mode_payload.get("ln_Q"))
+    return math.exp(lnq) if lnq is not None else None
+
+
+def _rf_quantiles_from_modes(mode_220: dict[str, Any], mode_221: dict[str, Any]) -> dict[str, float] | None:
+    f220 = _mode_frequency_summary(mode_220)
+    f221 = _mode_frequency_summary(mode_221)
+    values = (f220["f_p10"], f220["f_median"], f220["f_p90"], f221["f_p10"], f221["f_median"], f221["f_p90"])
+    if not all(_as_float_or_none(v) is not None and float(v) > 0.0 for v in values):
+        return None
+
+    q05 = float(f221["f_p10"] / f220["f_p90"])
+    q50 = float(f221["f_median"] / f220["f_median"])
+    q95 = float(f221["f_p90"] / f220["f_p10"])
+    if not (math.isfinite(q05) and math.isfinite(q50) and math.isfinite(q95) and q05 <= q50 <= q95):
+        return None
+    return {"q05": q05, "q50": q50, "q95": q95}
+
+
+def classify_multimode_viability(
+    *,
+    boundary_fraction: float | None,
+    valid_fraction_220: float | None,
+    valid_fraction_221: float | None,
+    boundary_fraction_threshold: float = 0.95,
+    valid_fraction_floor: float = 0.5,
+) -> dict[str, Any]:
+    """Compat wrapper (legacy tests) backed by multimode_viability_v3."""
+    if valid_fraction_220 is not None and float(valid_fraction_220) < float(valid_fraction_floor):
+        return {
+            "class": RINGDOWN_NONINFORMATIVE,
+            "reasons": ["VALID_FRACTION_220_LOW"],
+            "metrics": {
+                "boundary_fraction": boundary_fraction,
+                "valid_fraction": {"220": valid_fraction_220, "221": valid_fraction_221},
+            },
+        }
+    if boundary_fraction is not None and float(boundary_fraction) >= float(boundary_fraction_threshold):
+        return {
+            "class": SINGLEMODE_ONLY,
+            "reasons": ["BOUNDARY_FRACTION_HIGH"],
+            "metrics": {
+                "boundary_fraction": boundary_fraction,
+                "valid_fraction": {"220": valid_fraction_220, "221": valid_fraction_221},
+            },
+        }
+
+    return classify_multimode_viability_v3(
+        {
+            "valid_fraction_220": valid_fraction_220,
+            "valid_fraction_221": valid_fraction_221,
+            "f_220_median": 1.0,
+            "f_220_iqr": 0.0,
+            "f_221_median": 1.0,
+            "f_221_iqr": 0.0,
+            "Rf_bootstrap_quantiles": {"q05": 0.9, "q50": 1.0, "q95": 1.1},
+            "Rf_kerr_band": [0.8, 1.2],
+        }
+    )
+
+
+def _compute_multimode_summary_blocks(
+    mode_220: dict[str, Any],
+    mode_221: dict[str, Any],
+    model_comparison: dict[str, Any],
+    run_dir: Path,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    optional_inputs = _load_optional_multimode_inputs(run_dir)
+
+    m220 = _mode_frequency_summary(mode_220)
+    m221 = _mode_frequency_summary(mode_221)
+    rf_quantiles = _rf_quantiles_from_modes(mode_220, mode_221)
+
+    viability_inputs = {
+        "valid_fraction_220": mode_220.get("fit", {}).get("stability", {}).get("valid_fraction"),
+        "valid_fraction_221": mode_221.get("fit", {}).get("stability", {}).get("valid_fraction"),
+        "f_220_median": m220["f_median"],
+        "f_220_iqr": m220["f_iqr"],
+        "f_221_median": m221["f_median"],
+        "f_221_iqr": m221["f_iqr"],
+        "Q_221_median": _mode_q_median(mode_221),
+        "Rf_bootstrap_quantiles": rf_quantiles,
+        "Rf_kerr_band": optional_inputs.get("Rf_kerr_band"),
+        "delta_bic": model_comparison.get("delta_bic"),
+    }
+    viability = classify_multimode_viability_v3(viability_inputs)
+
+    systematics_gate = evaluate_systematics_gate(
+        {
+            "t0_plateau": optional_inputs.get("t0_plateau"),
+            "chi_psd_at_f221": optional_inputs.get("chi_psd_at_f221"),
+            "Q_221_median": viability_inputs["Q_221_median"],
+        }
+    )
+
+    science_evidence = evaluate_science_evidence(
+        viability=viability,
+        systematics=systematics_gate,
+        rf_bootstrap_quantiles=rf_quantiles,
+        rf_kerr_grid=optional_inputs.get("rf_kerr_grid") or [],
+        chi_grid=optional_inputs.get("chi_grid") or [],
+        override=optional_inputs.get("systematics_override"),
+    )
+
+    annotations = {
+        "kerr_inconsistency_is_not_fail": True,
+        "rf_quantiles_source": "derived_from_mode_bootstrap_percentiles" if rf_quantiles else "not_available",
+    }
+    return viability, systematics_gate, science_evidence, annotations
 
 
 def _json_strictify(value: Any) -> Any:
@@ -903,6 +1085,15 @@ def main() -> int:
             optional={"s2_window_meta": window_meta_path},
         )
         signal, fs = _load_signal_from_npz(npz_path, window_meta=window_meta)
+        selected_t0_offset_ms = _load_s3_selected_t0_offset_ms(s3_estimates_path)
+        applied_t0_offset_ms = 0.0
+        if selected_t0_offset_ms > 0.0:
+            shift = int(round((selected_t0_offset_ms / 1000.0) * fs))
+            if 0 < shift < signal.size - 16:
+                signal = signal[shift:]
+                applied_t0_offset_ms = selected_t0_offset_ms
+            else:
+                global_flags.append("s3_t0_selected_offset_out_of_range")
 
         if args.method == "spectral_two_pass":
             est_220 = lambda sig, sr: _estimate_220_spectral(sig, sr, band_low=band_low, band_high=band_high)
@@ -955,6 +1146,7 @@ def main() -> int:
             ok_221,
             global_flags + flags_220 + flags_221,
             model_comparison=model_comparison,
+            t0_offset_ms_from_s3=applied_t0_offset_ms,
         )
 
         out_path = ctx.outputs_dir / "multimode_estimates.json"
@@ -963,11 +1155,24 @@ def main() -> int:
         comparison_path = ctx.outputs_dir / "model_comparison.json"
         write_json_atomic(comparison_path, _json_strictify(model_comparison))
 
+        viability, systematics_gate, science_evidence, annotations = _compute_multimode_summary_blocks(
+            mode_220=mode_220,
+            mode_221=mode_221,
+            model_comparison=model_comparison,
+            run_dir=ctx.run_dir,
+        )
+
         finalize(
             ctx,
             {"multimode_estimates": out_path, "model_comparison": comparison_path},
             verdict="PASS",
             results=payload["results"],
+            extra_summary={
+                "multimode_viability": viability,
+                "systematics_gate": systematics_gate,
+                "science_evidence": science_evidence,
+                "annotations": annotations,
+            },
         )
         return 0
     except SystemExit:

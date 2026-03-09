@@ -60,8 +60,8 @@ def extract_psd(
     """
     from scipy.signal import welch
 
-    # Keep the historical floor when possible, but avoid nperseg > len(strain)
-    # warnings on very short inputs.
+    # Keep the historical floor (64) when possible, but never exceed len(strain),
+    # avoiding scipy's "nperseg > input length" warning on short inputs.
     nperseg = min(len(strain), max(64, int(nperseg_s * fs)))
     noverlap = int(nperseg * overlap)
 
