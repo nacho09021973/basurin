@@ -89,6 +89,63 @@ Nota Bash importante:
 
 ## Ejecución básica
 
+## Guía rápida: no puedo mergear dos ramas
+
+Si `git merge` falla entre dos ramas, sigue este flujo corto y determinista:
+
+```bash
+# 1) verifica estado limpio
+git status
+
+# 2) actualiza referencias
+git fetch --all --prune
+
+# 3) cámbiate a la rama destino (ej. main)
+git checkout main
+git pull --ff-only
+
+# 4) intenta mergear la rama origen
+git merge <rama_origen>
+```
+
+Si aparecen conflictos:
+
+```bash
+# 5) lista ficheros en conflicto
+git diff --name-only --diff-filter=U
+
+# 6) resuélvelos editando los marcadores <<<<<<< ======= >>>>>>>
+# 7) marca como resueltos
+git add <archivo_resuelto>
+
+# 8) completa el merge
+git commit
+```
+
+Atajos útiles:
+
+```bash
+# abortar merge y volver al estado previo
+git merge --abort
+
+# aceptar todo lo de tu rama actual (ours) para un archivo
+git checkout --ours <archivo>
+
+# aceptar todo lo de la rama que estás mergeando (theirs)
+git checkout --theirs <archivo>
+```
+
+Si tu problema es historial divergente fuerte, suele ser más limpio rebasar la rama origen antes del merge:
+
+```bash
+git checkout <rama_origen>
+git rebase main
+git checkout main
+git merge <rama_origen>
+```
+
+> Consejo práctico: antes de abrir PR, ejecuta los tests del repo y confirma que no quedan conflictos ni archivos sin stage (`git status`).
+
 ## Quickstart: Online vs Offline-first
 
 ### Path A — Online (resolución en tiempo real)

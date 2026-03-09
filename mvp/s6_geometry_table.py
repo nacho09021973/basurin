@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Derived extractor: geometry/stability table from s3b multimode outputs.
+"""DEPRECATED (2026-03-09): Derived extractor: geometry/stability table from s3b multimode outputs.
+
+Use ``mvp/s6_multi_event_table.py`` instead for multi-event geometry tables.
 
 Stdlib-only utility intended for experiment trees and canonical runs.
 """
