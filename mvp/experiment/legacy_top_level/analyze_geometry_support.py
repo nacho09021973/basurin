@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""DEPRECATED (2026-03-09): Legacy geometry support analysis.
+
+Use ``mvp/experiment/ex2_ranking.py`` and
+``mvp/experiment/geometry_evidence_vs_gr.py`` instead.
+"""
 from __future__ import annotations
 
 import argparse

@@ -298,8 +298,8 @@ def _evaluate_single_scenario(
             atlas_entries=atlas_entries,
             chi2_threshold=threshold_220,
         )
-        # Compatibility across branches: filter_mode220 may return either
-        # a list of ids or a tuple (ids, diagnostics).
+        # Compatibility across filter_mode220 return shapes used in different branches:
+        # either (ids, diagnostics) tuple or plain ids list.
         if isinstance(mode220_result, tuple):
             ids_220 = mode220_result[0]
         else:
