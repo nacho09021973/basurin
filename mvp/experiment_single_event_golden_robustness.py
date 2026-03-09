@@ -290,7 +290,7 @@ def _evaluate_single_scenario(
     st_220 = mode220["sigma_tau_s"] * sigma_scale
 
     try:
-        ids_220, _ = filter_mode220(
+        mode220_result = filter_mode220(
             obs_f_hz=mode220["obs_f_hz"],
             obs_tau_s=mode220["obs_tau_s"],
             sigma_f_hz=sf_220,
@@ -298,6 +298,12 @@ def _evaluate_single_scenario(
             atlas_entries=atlas_entries,
             chi2_threshold=threshold_220,
         )
+        # Compatibility across filter_mode220 return shapes used in different branches:
+        # either (ids, diagnostics) tuple or plain ids list.
+        if isinstance(mode220_result, tuple):
+            ids_220 = mode220_result[0]
+        else:
+            ids_220 = mode220_result
 
         ids_221: list[str] | None = None
         if mode221_available and mode221 is not None:
