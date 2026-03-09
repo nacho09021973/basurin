@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from mvp.generate_atlas_from_fits import _format_mass_token
 from mvp.tools.generate_multimode_atlas_v3 import (
     canonical_geometry_id,
     extract_physical_parameters,
@@ -90,3 +91,14 @@ def test_validate_physical_parameters_rejects_superextremal_kerr():
 
     with pytest.raises(ValueError, match=r"\|chi\| must be <= 1"):
         validate_physical_parameters(entry, "Kerr_M90_a1.1000", {"chi": 1.1})
+
+
+def test_format_mass_token_preserves_non_integer_resolution():
+    assert _format_mass_token(2.4) == "2.4"
+    assert _format_mass_token(2.45) == "2.45"
+    assert _format_mass_token(2.4567) == "2.4567"
+
+
+def test_format_mass_token_keeps_integer_ids_stable():
+    assert _format_mass_token(62.0) == "62"
+    assert _format_mass_token(90.0) == "90"

@@ -47,6 +47,10 @@ from basurin_io import resolve_out_root, sha256_file, write_json_atomic
 
 MVP_DIR = Path(__file__).resolve().parent
 DEFAULT_ATLAS_PATH = Path("docs/ringdown/atlas/atlas_berti_v2.json")
+FAMILY_STAGE_MAP: dict[str, tuple[str, str]] = {
+    "GR_KERR_BH": ("s8a_family_gr_kerr.py", "s8a_family_gr_kerr"),
+    "BNS_REMNANT": ("s8b_family_bns.py", "s8b_family_bns"),
+}
 
 
 def _autodetect_losc_hdf5_mappings(event_id: str) -> list[str]:
@@ -515,6 +519,9 @@ def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
         "kerr_from_multimode_status": None,
         "multimode_viability_class": None,
         "multimode_viability_reasons": [],
+        "primary_family": None,
+        "families_to_run": [],
+        "family_assessments": {},
     }
 
     def _coerce_reason_list(value: Any) -> list[str]:
@@ -587,7 +594,56 @@ def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
                     results["multimode_viability_class"] = viability_class
                     results["multimode_viability_reasons"] = _coerce_reason_list(viability.get("reasons"))
 
+    router_path = out_root / run_id / "s8_family_router" / "outputs" / "family_router.json"
+    if router_path.exists():
+        try:
+            payload_router = json.loads(router_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"[pipeline] WARNING: cannot parse {router_path}: {exc}", flush=True)
+        else:
+            primary_family = payload_router.get("primary_family")
+            if isinstance(primary_family, str):
+                results["primary_family"] = primary_family
+            families_to_run = payload_router.get("families_to_run")
+            if isinstance(families_to_run, list):
+                results["families_to_run"] = [str(v) for v in families_to_run]
+
+    family_output_map = {
+        "GR_KERR_BH": out_root / run_id / "s8a_family_gr_kerr" / "outputs" / "gr_kerr_family.json",
+        "BNS_REMNANT": out_root / run_id / "s8b_family_bns" / "outputs" / "bns_family.json",
+    }
+    for family, path in family_output_map.items():
+        if not path.exists():
+            continue
+        try:
+            payload_family = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"[pipeline] WARNING: cannot parse {path}: {exc}", flush=True)
+            continue
+        results["family_assessments"][family] = {
+            "status": payload_family.get("status"),
+            "assessment": payload_family.get("assessment"),
+            "reason": payload_family.get("reason"),
+            "model_status": payload_family.get("model_status"),
+        }
+
     return results
+
+
+def _load_family_routes(out_root: Path, run_id: str) -> list[str]:
+    router_path = out_root / run_id / "s8_family_router" / "outputs" / "family_router.json"
+    payload = json.loads(router_path.read_text(encoding="utf-8"))
+    families = payload.get("families_to_run")
+    if not isinstance(families, list):
+        raise ValueError(f"Invalid family router payload in {router_path}: missing families_to_run list")
+    out: list[str] = []
+    for raw in families:
+        family = str(raw)
+        if family in FAMILY_STAGE_MAP and family not in out:
+            out.append(family)
+    if not out:
+        raise ValueError(f"Family router selected no supported families in {router_path}")
+    return out
 
 
 def run_single_event(
@@ -899,6 +955,9 @@ def run_multimode_event(
             "kerr_from_multimode_status": None,
             "multimode_viability_class": None,
             "multimode_viability_reasons": [],
+            "primary_family": None,
+            "families_to_run": [],
+            "family_assessments": {},
         },
     }
     _write_timeline(out_root, run_id, timeline)
@@ -1043,6 +1102,29 @@ def run_multimode_event(
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
+
+    s8_router_args = ["--run-id", run_id]
+    rc = _run_stage("s8_family_router.py", s8_router_args, "s8_family_router", out_root, run_id, timeline, stage_timeout_s)
+    if rc != 0:
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return rc, run_id
+
+    try:
+        families_to_run = _load_family_routes(out_root, run_id)
+    except Exception as exc:
+        print(f"[pipeline] ABORT: cannot load family routes: {exc}", file=sys.stderr, flush=True)
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return 2, run_id
+
+    for family in families_to_run:
+        script, label = FAMILY_STAGE_MAP[family]
+        rc = _run_stage(script, ["--run-id", run_id], label, out_root, run_id, timeline, stage_timeout_s)
+        if rc != 0:
+            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+            _write_timeline(out_root, run_id, timeline)
+            return rc, run_id
 
     timeline["multimode_results"] = _parse_multimode_results(out_root, run_id)
     timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()

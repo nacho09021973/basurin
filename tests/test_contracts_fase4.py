@@ -152,7 +152,7 @@ class TestAntiRegression:
 class TestContractCount:
     def test_total_contracts_is_10(self):
         """Registry includes oracle precheck + FASE 4/5 + s4 spectral variant + experiments."""
-        assert len(CONTRACTS) == 30
+        assert len(CONTRACTS) == 33
 
 
 # ── Test 4: DAG integrity with new stages ────────────────────────────────
@@ -161,7 +161,15 @@ class TestContractCount:
 class TestDAGIntegrity:
     def test_new_upstream_references_valid(self):
         """All upstream_stages referenced by new contracts exist in CONTRACTS."""
-        for name in ("s3b_multimode_estimates", "s4c_kerr_consistency", "s4d_kerr_from_multimode", "s7_beyond_kerr_deviation_score"):
+        for name in (
+            "s3b_multimode_estimates",
+            "s4c_kerr_consistency",
+            "s4d_kerr_from_multimode",
+            "s7_beyond_kerr_deviation_score",
+            "s8_family_router",
+            "s8a_family_gr_kerr",
+            "s8b_family_bns",
+        ):
             c = CONTRACTS[name]
             for upstream in c.upstream_stages:
                 assert upstream in CONTRACTS, (

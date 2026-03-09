@@ -15,6 +15,13 @@ class TestMultimodeWiring(unittest.TestCase):
 
         def fake_run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s=None):
             calls.append({"label": label, "args": list(args), "run_id": run_id})
+            stage_dir = out_root / run_id / label / "outputs"
+            stage_dir.mkdir(parents=True, exist_ok=True)
+            if label == "s8_family_router":
+                (stage_dir / "family_router.json").write_text(
+                    json.dumps({"primary_family": "GR_KERR_BH", "families_to_run": ["GR_KERR_BH"]}),
+                    encoding="utf-8",
+                )
             timeline["stages"].append(
                 {
                     "stage": label,
@@ -204,6 +211,34 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                         json.dumps({"consistent_kerr_95": True, "chi_best_fit": 0.69, "d2_min": 1.2}),
                         encoding="utf-8",
                     )
+                    (out_root / run_id / "s3b_multimode_estimates" / "stage_summary.json").write_text(
+                        json.dumps({"multimode_viability": {"class": "MULTIMODE_OK", "reasons": []}}),
+                        encoding="utf-8",
+                    )
+                if label == "s4d_kerr_from_multimode":
+                    (stage_dir / "kerr_from_multimode.json").write_text(
+                        json.dumps({"status": "PASS"}),
+                        encoding="utf-8",
+                    )
+                    (stage_dir / "kerr_extraction.json").write_text(
+                        json.dumps({"verdict": "PASS", "M_final_Msun": 62.0, "chi_final": 0.67}),
+                        encoding="utf-8",
+                    )
+                if label == "s7_beyond_kerr_deviation_score":
+                    (stage_dir / "beyond_kerr_score.json").write_text(
+                        json.dumps({"verdict": "GR_CONSISTENT", "chi2_kerr_2dof": 1.0}),
+                        encoding="utf-8",
+                    )
+                if label == "s8_family_router":
+                    (stage_dir / "family_router.json").write_text(
+                        json.dumps({"primary_family": "GR_KERR_BH", "families_to_run": ["GR_KERR_BH"]}),
+                        encoding="utf-8",
+                    )
+                if label == "s8a_family_gr_kerr":
+                    (stage_dir / "gr_kerr_family.json").write_text(
+                        json.dumps({"status": "EVALUATED", "assessment": "SUPPORTED", "reason": "test"}),
+                        encoding="utf-8",
+                    )
 
                 timeline["stages"].append(
                     {
@@ -236,8 +271,18 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                 "s0_oracle_mvp", "s1_fetch_strain", "s2_ringdown_window", "s3_ringdown_estimates",
                 "s3b_multimode_estimates", "s4_geometry_filter", "s4c_kerr_consistency",
                 "s4d_kerr_from_multimode", "s7_beyond_kerr_deviation_score",
-            ])
+                "s8_family_router", "s8a_family_gr_kerr",
+            ]
+            self.assertEqual(stages[:len(expected_prefix)], expected_prefix)
+            self.assertEqual(timeline["multimode_results"]["kerr_consistent"], True)
+            self.assertEqual(timeline["multimode_results"]["chi_best"], 0.69)
+            self.assertEqual(timeline["multimode_results"]["d2_min"], 1.2)
             self.assertEqual(timeline["multimode_results"]["extraction_quality"], "INSUFFICIENT_DATA")
+            self.assertEqual(timeline["multimode_results"]["primary_family"], "GR_KERR_BH")
+            self.assertEqual(
+                timeline["multimode_results"]["family_assessments"]["GR_KERR_BH"]["assessment"],
+                "SUPPORTED",
+            )
 
     def test_multimode_with_t0_sweep_reinjects_selected_offset_to_s2(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -261,6 +306,34 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                 if label == "s4c_kerr_consistency":
                     (stage_dir / "kerr_consistency.json").write_text(
                         json.dumps({"kerr_consistent": False, "d2_min": 12.34}),
+                        encoding="utf-8",
+                    )
+                    (out_root / run_id / "s3b_multimode_estimates" / "stage_summary.json").write_text(
+                        json.dumps({"multimode_viability": {"class": "MULTIMODE_OK", "reasons": []}}),
+                        encoding="utf-8",
+                    )
+                if label == "s4d_kerr_from_multimode":
+                    (stage_dir / "kerr_from_multimode.json").write_text(
+                        json.dumps({"status": "PASS"}),
+                        encoding="utf-8",
+                    )
+                    (stage_dir / "kerr_extraction.json").write_text(
+                        json.dumps({"verdict": "PASS", "M_final_Msun": 62.0, "chi_final": 0.67}),
+                        encoding="utf-8",
+                    )
+                if label == "s7_beyond_kerr_deviation_score":
+                    (stage_dir / "beyond_kerr_score.json").write_text(
+                        json.dumps({"verdict": "GR_CONSISTENT", "chi2_kerr_2dof": 1.0}),
+                        encoding="utf-8",
+                    )
+                if label == "s8_family_router":
+                    (stage_dir / "family_router.json").write_text(
+                        json.dumps({"primary_family": "GR_KERR_BH", "families_to_run": ["GR_KERR_BH"]}),
+                        encoding="utf-8",
+                    )
+                if label == "s8a_family_gr_kerr":
+                    (stage_dir / "gr_kerr_family.json").write_text(
+                        json.dumps({"status": "EVALUATED", "assessment": "SUPPORTED", "reason": "test"}),
                         encoding="utf-8",
                     )
 

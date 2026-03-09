@@ -1,0 +1,23 @@
+{
+  "schema_version": "event_metadata_v1",
+  "event_id": "GW170817",
+  "t_coalescence_gps": 1187008882.43,
+  "source_class": "binary_neutron_star",
+  "preferred_families": ["BNS_REMNANT", "GR_KERR_BH"],
+  "multimessenger": true,
+  "family_priors": {
+    "BNS_REMNANT": {
+      "remnant_mass_msun_range": [2.45, 2.85],
+      "radius_1p6_km_range": [10.5, 13.5],
+      "classes": ["HMNS", "SMNS", "STABLE_NS"],
+      "n_mass_points": 9,
+      "n_radius_points": 7,
+      "collapse_time_ms_values": {
+        "HMNS": [5.0, 10.0, 20.0, 40.0, 80.0],
+        "SMNS": [100.0, 300.0, 1000.0],
+        "STABLE_NS": [3000.0, 10000.0]
+      }
+    }
+  },
+  "source": "GWOSC event page plus multimessenger classification"
+}
