@@ -51,6 +51,10 @@ def assess_gr_kerr_family(
     filtering = ratio_filter.get("filtering") if isinstance(ratio_filter.get("filtering"), dict) else {}
     ratio_consistent = kerr_ratio.get("Rf_consistent")
     informativity_class = diagnostics.get("informativity_class")
+    n_input_geometries = filtering.get("n_input_geometries")
+    n_ratio_compatible = filtering.get("n_ratio_compatible")
+    n_ratio_excluded = filtering.get("n_ratio_excluded")
+    n_ratio_not_applicable = filtering.get("n_ratio_not_applicable")
 
     if score_verdict == "GR_CONSISTENT" and kerr_extraction.get("M_final_Msun") is not None:
         assessment = "SUPPORTED"
@@ -71,6 +75,25 @@ def assess_gr_kerr_family(
     elif ratio_consistent is False and assessment == "TENSION":
         reason = "Kerr inversion exists with tension and the observed 221/220 ratio is also Kerr-inconsistent"
 
+    has_geometric_support = isinstance(n_input_geometries, int) and n_input_geometries > 0
+    if assessment in {"SUPPORTED", "TENSION"} and not has_geometric_support:
+        assessment = "INCONCLUSIVE"
+        reason = "Kerr inversion exists, but s4 geometry filtering produced no surviving geometries; cannot claim GR Kerr support without geometric support"
+
+    ratio_is_informative = isinstance(informativity_class, str) and informativity_class in {"HIGH", "MODERATE", "LOW"}
+    ratio_fully_excludes_supported_geometries = (
+        has_geometric_support
+        and isinstance(n_ratio_compatible, int)
+        and n_ratio_compatible <= 0
+        and isinstance(n_ratio_not_applicable, int)
+        and isinstance(n_input_geometries, int)
+        and n_ratio_not_applicable < n_input_geometries
+        and ratio_is_informative
+    )
+    if ratio_fully_excludes_supported_geometries:
+        assessment = "DISFAVORED"
+        reason = "the Kerr ratio filter is informative and excludes all surviving spin-bearing geometries"
+
     return {
         "status": "EVALUATED",
         "assessment": assessment,
@@ -81,8 +104,10 @@ def assess_gr_kerr_family(
         "ratio_filter_verdict": ratio_filter.get("verdict"),
         "ratio_rf_consistent": ratio_consistent,
         "ratio_informativity_class": informativity_class,
-        "n_ratio_compatible": filtering.get("n_ratio_compatible"),
-        "n_ratio_excluded": filtering.get("n_ratio_excluded"),
+        "n_input_geometries": n_input_geometries,
+        "n_ratio_compatible": n_ratio_compatible,
+        "n_ratio_excluded": n_ratio_excluded,
+        "n_ratio_not_applicable": n_ratio_not_applicable,
         "m_final_msun": kerr_extraction.get("M_final_Msun"),
         "chi_final": kerr_extraction.get("chi_final"),
         "chi2_kerr_2dof": beyond_kerr_score.get("chi2_kerr_2dof"),

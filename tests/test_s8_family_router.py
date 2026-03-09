@@ -62,7 +62,7 @@ def test_router_prioritizes_bns_when_metadata_says_bns() -> None:
 def test_gr_kerr_family_assessment_supported_when_score_is_consistent() -> None:
     payload = assess_gr_kerr_family(
         router_payload={"primary_family": FAMILY_GR_KERR, "families_to_run": [FAMILY_GR_KERR]},
-        ratio_filter={"verdict": "PASS", "kerr_consistency": {"Rf_consistent": True}, "diagnostics": {"informativity_class": "MODERATE"}, "filtering": {"n_ratio_compatible": 4, "n_ratio_excluded": 2}},
+        ratio_filter={"verdict": "PASS", "kerr_consistency": {"Rf_consistent": True}, "diagnostics": {"informativity_class": "MODERATE"}, "filtering": {"n_input_geometries": 6, "n_ratio_compatible": 4, "n_ratio_excluded": 2, "n_ratio_not_applicable": 0}},
         kerr_extraction={"verdict": "PASS", "M_final_Msun": 62.0, "chi_final": 0.67},
         beyond_kerr_score={"verdict": "GR_CONSISTENT", "chi2_kerr_2dof": 1.2},
     )
@@ -71,6 +71,32 @@ def test_gr_kerr_family_assessment_supported_when_score_is_consistent() -> None:
     assert payload["assessment"] == "SUPPORTED"
     assert payload["m_final_msun"] == 62.0
     assert payload["ratio_rf_consistent"] is True
+
+
+def test_gr_kerr_family_is_inconclusive_without_geometric_support() -> None:
+    payload = assess_gr_kerr_family(
+        router_payload={"primary_family": FAMILY_GR_KERR, "families_to_run": [FAMILY_GR_KERR]},
+        ratio_filter={"verdict": "PASS", "kerr_consistency": {"Rf_consistent": True}, "diagnostics": {"informativity_class": "UNINFORMATIVE"}, "filtering": {"n_input_geometries": 0, "n_ratio_compatible": 0, "n_ratio_excluded": 0, "n_ratio_not_applicable": 0}},
+        kerr_extraction={"verdict": "PASS", "M_final_Msun": 144.0, "chi_final": 0.96},
+        beyond_kerr_score={"verdict": "GR_CONSISTENT", "chi2_kerr_2dof": 0.15},
+    )
+
+    assert payload["status"] == "EVALUATED"
+    assert payload["assessment"] == "INCONCLUSIVE"
+    assert "no surviving geometries" in payload["reason"]
+
+
+def test_gr_kerr_family_is_disfavored_when_ratio_excludes_all_spin_geometries() -> None:
+    payload = assess_gr_kerr_family(
+        router_payload={"primary_family": FAMILY_GR_KERR, "families_to_run": [FAMILY_GR_KERR]},
+        ratio_filter={"verdict": "PASS", "kerr_consistency": {"Rf_consistent": False}, "diagnostics": {"informativity_class": "HIGH"}, "filtering": {"n_input_geometries": 5, "n_ratio_compatible": 0, "n_ratio_excluded": 5, "n_ratio_not_applicable": 0}},
+        kerr_extraction={"verdict": "PASS", "M_final_Msun": 62.0, "chi_final": 0.67},
+        beyond_kerr_score={"verdict": "GR_CONSISTENT", "chi2_kerr_2dof": 1.2},
+    )
+
+    assert payload["status"] == "EVALUATED"
+    assert payload["assessment"] == "DISFAVORED"
+    assert "excludes all surviving spin-bearing geometries" in payload["reason"]
 
 
 def test_bns_family_handler_supports_matching_candidate() -> None:
