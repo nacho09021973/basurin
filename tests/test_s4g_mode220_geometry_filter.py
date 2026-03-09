@@ -386,3 +386,20 @@ def test_oracle_gating_pass_multiple_accepted(tmp_path):
     )
     assert payload["n_geometries_accepted"] > 1
     assert payload["verdict"] == VERDICT_PASS
+
+def test_writes_mode220_alias_and_geometry_ids_for_s4i_compat(tmp_path):
+    obs = _make_obs()
+    atlas = [_unified_entry("g1", 250.0, 0.004)]
+    runs_root, atlas_path, run_id = _make_run(tmp_path, obs, atlas)
+    result = _run_cli(runs_root, atlas_path, run_id)
+    assert result.returncode == 0, result.stderr
+
+    primary = runs_root / run_id / STAGE / "outputs" / OUTPUT_FILE
+    alias = runs_root / run_id / STAGE / "outputs" / "mode220_filter.json"
+    assert primary.exists()
+    assert alias.exists()
+
+    p1 = json.loads(primary.read_text(encoding="utf-8"))
+    p2 = json.loads(alias.read_text(encoding="utf-8"))
+    assert p1 == p2
+    assert p1["geometry_ids"] == p1["accepted_geometry_ids"]
