@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -27,14 +28,29 @@ from mvp.golden_geometry_spec import (
 STAGE = "s4i_common_geometry_intersection"
 S4G_OUTPUT_PRIMARY_REL = "s4g_mode220_geometry_filter/outputs/mode220_filter.json"
 S4G_OUTPUT_LEGACY_REL = "s4g_mode220_geometry_filter/outputs/geometries_220.json"
+# Legacy alias kept for older tests/imports.
+S4G_OUTPUT_REL = S4G_OUTPUT_PRIMARY_REL
 S4H_OUTPUT_REL = "s4h_mode221_geometry_filter/outputs/mode221_filter.json"
 OUTPUT_FILE = "common_intersection.json"
+_MODE_SUFFIX_RE = re.compile(r"_l\d+m\d+n\d+$")
+
+
+def canonical_geometry_id(geometry_id: str) -> str:
+    """Return a mode-agnostic geometry id.
+
+    Atlas ids often encode the QNM mode suffix (e.g. ``..._l2m2n0`` vs
+    ``..._l2m2n1``). For the physical common-geometry intersection, we remove
+    that suffix so 220/221 predictions from the same remnant can match.
+    """
+    return _MODE_SUFFIX_RE.sub("", geometry_id)
 
 
 def compute_intersection(ids_220: list[str], ids_221: "list[str] | None") -> list[str]:
+    canonical_220 = {canonical_geometry_id(str(gid)) for gid in ids_220}
     if ids_221 is None:
-        return sorted(ids_220)
-    return sorted(set(ids_220) & set(ids_221))
+        return sorted(canonical_220)
+    canonical_221 = {canonical_geometry_id(str(gid)) for gid in ids_221}
+    return sorted(canonical_220 & canonical_221)
 
 
 def _read_ids(payload: dict) -> list[str]:

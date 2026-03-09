@@ -23,16 +23,19 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from mvp.contracts import CONTRACTS
-from mvp.s4g_mode220_geometry_filter import OUTPUT_FILE as S4G_OUTPUT_FILE
-from mvp.s4i_common_geometry_intersection import S4G_OUTPUT_REL
+from mvp.s4i_common_geometry_intersection import (
+    S4G_OUTPUT_LEGACY_REL,
+    S4G_OUTPUT_PRIMARY_REL,
+    compute_intersection,
+)
 
 
 # ── Contract alignment tests ────────────────────────────────────────────────
 
 def test_s4g_s4i_filename_contract():
-    """S4G_OUTPUT_REL in s4i must point to the actual file s4g writes."""
-    expected_suffix = f"s4g_mode220_geometry_filter/outputs/{S4G_OUTPUT_FILE}"
-    assert S4G_OUTPUT_REL == expected_suffix
+    """s4i reads s4g mode220 alias as primary and keeps legacy fallback."""
+    assert S4G_OUTPUT_PRIMARY_REL == "s4g_mode220_geometry_filter/outputs/mode220_filter.json"
+    assert S4G_OUTPUT_LEGACY_REL == "s4g_mode220_geometry_filter/outputs/geometries_220.json"
 
 
 def test_s4g_s4i_key_contract():
@@ -72,9 +75,17 @@ def test_golden_stages_in_contracts():
 
 
 def test_s4i_contract_requires_s4g_output():
-    """s4i contract must declare s4g geometries_220.json as required input."""
+    """s4i contract must declare s4g mode220_filter.json as required input."""
     contract = CONTRACTS["s4i_common_geometry_intersection"]
-    assert any("geometries_220.json" in inp for inp in contract.required_inputs)
+    assert any("mode220_filter.json" in inp for inp in contract.required_inputs)
+
+
+def test_s4i_intersection_is_mode_agnostic_on_suffix():
+    """Mode suffix (_l2m2n0/_l2m2n1) should not prevent common-geometry match."""
+    ids_220 = ["Kerr_M62_a0.6600_l2m2n0", "EdGB_M62_a0.67_z0.3"]
+    ids_221 = ["Kerr_M62_a0.6600_l2m2n1", "Kerr_M70_a0.5000_l2m2n1"]
+    common = compute_intersection(ids_220, ids_221)
+    assert common == ["Kerr_M62_a0.6600"]
 
 
 def test_s4j_contract_requires_s4i_output():
