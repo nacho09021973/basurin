@@ -56,7 +56,10 @@ def assess_gr_kerr_family(
     n_ratio_excluded = filtering.get("n_ratio_excluded")
     n_ratio_not_applicable = filtering.get("n_ratio_not_applicable")
 
-    if score_verdict == "GR_CONSISTENT" and kerr_extraction.get("M_final_Msun") is not None:
+    if score_verdict == "ASTRO_INCONSISTENT":
+        assessment = "DISFAVORED"
+        reason = "Kerr inversion is incompatible with astrophysical event priors for this source class"
+    elif score_verdict == "GR_CONSISTENT" and kerr_extraction.get("M_final_Msun") is not None:
         assessment = "SUPPORTED"
         reason = "multimode Kerr inversion succeeded and the 221 residual is GR-consistent"
     elif score_verdict == "GR_TENSION":

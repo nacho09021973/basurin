@@ -227,3 +227,35 @@ def test_sigma_floor_when_iqr_is_zero(tmp_path: Path, monkeypatch) -> None:
     assert math.isfinite(payload["delta_f_norm"])
     assert math.isfinite(payload["delta_tau_norm"])
     assert math.isfinite(payload["chi2_kerr_2dof"])
+
+
+def test_marks_astro_inconsistent_for_bns_high_mass(tmp_path: Path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    run_id = "s7_astro_bns_high_mass"
+    _seed_upstream(runs_root / run_id, m_final=68.0, chi_final=0.69, f_scale=1.0, tau_scale=1.0)
+    write_json_atomic(
+        runs_root / run_id / "run_provenance.json",
+        {"invocation": {"event_id": "GW170817"}},
+    )
+
+    _, _, payload = _run_execute_and_finalize(run_id)
+    assert payload["verdict"] == "ASTRO_INCONSISTENT"
+    assert payload["astrophysical_consistency"]["status"] == "INCONSISTENT"
+    assert payload["astrophysical_consistency"]["source_kind"] == "BNS"
+
+
+def test_astro_consistency_not_applicable_for_bbh(tmp_path: Path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    run_id = "s7_astro_bbh"
+    _seed_upstream(runs_root / run_id, m_final=68.0, chi_final=0.69, f_scale=1.0, tau_scale=1.0)
+    write_json_atomic(
+        runs_root / run_id / "run_provenance.json",
+        {"invocation": {"event_id": "GW150914"}},
+    )
+
+    _, _, payload = _run_execute_and_finalize(run_id)
+    assert payload["verdict"] == "GR_CONSISTENT"
+    assert payload["astrophysical_consistency"]["status"] == "NOT_APPLICABLE"
+    assert payload["astrophysical_consistency"]["source_kind"] == "BBH"
