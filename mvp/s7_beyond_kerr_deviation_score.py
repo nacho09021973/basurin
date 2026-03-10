@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Canonical stage s7: beyond-Kerr deviation score from s4d + s3b."""
+"""Canonical stage s7: beyond-Kerr deviation score from s4d + s3b.
+
+Contract note: ``verdict`` is a conditional summary state for this stage, not an
+independent GR confirmation label. The currently supported vocabulary is fixed to
+the tuple declared in ``VERDICT_TAXONOMY`` below.
+"""
 from __future__ import annotations
 
 import argparse
@@ -30,6 +35,15 @@ BNS_MAX_REMNANT_MASS_MSUN_MAX = 15.0
 logger = logging.getLogger(__name__)
 NON_INDEPENDENT = "NON_INDEPENDENT"
 DOMAIN_OUT_OF_DOMAIN = "OUT_OF_DOMAIN"
+VERDICT_TAXONOMY = (
+    "GR_CONSISTENT",
+    "GR_TENSION",
+    "GR_INCONSISTENT",
+    "SKIPPED_S4D_GATE",
+    "SKIPPED_OUT_OF_DOMAIN",
+    "ASTRO_INCONSISTENT",
+    "INCONCLUSIVE",
+)
 
 
 def _utc_now_z() -> str:

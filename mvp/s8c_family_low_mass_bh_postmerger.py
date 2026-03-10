@@ -284,18 +284,21 @@ def main(argv: list[str] | None = None) -> int:
         }
         out_path = ctx.outputs_dir / OUTPUT_FILE
         write_json_atomic(out_path, payload)
+        results = {
+            "family": FAMILY_LOW_MASS_BH,
+            "status": assessment["status"],
+            "assessment": assessment["assessment"],
+            "mass_in_range": assessment.get("mass_in_range"),
+            "chi_in_range": assessment.get("chi_in_range"),
+            "ratio_rf_consistent": assessment.get("ratio_rf_consistent"),
+        }
+        if assessment.get("domain_status") is not None:
+            results["domain_status"] = assessment.get("domain_status")
         finalize(
             ctx,
             artifacts={"low_mass_bh_family": out_path},
             verdict="PASS",
-            results={
-                "family": FAMILY_LOW_MASS_BH,
-                "status": assessment["status"],
-                "assessment": assessment["assessment"],
-                "mass_in_range": assessment.get("mass_in_range"),
-                "chi_in_range": assessment.get("chi_in_range"),
-                "ratio_rf_consistent": assessment.get("ratio_rf_consistent"),
-            },
+            results=results,
         )
         log_stage_paths(ctx)
         print(f"[{STAGE}] status={assessment['status']} assessment={assessment['assessment']}")
