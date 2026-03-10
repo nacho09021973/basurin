@@ -571,6 +571,28 @@ CONTRACTS: dict[str, StageContract] = {
         upstream_stages=["s3_ringdown_estimates"],
         check_run_valid=True,
     ),
+    "experiment/feature_foundry": StageContract(
+        name="experiment/feature_foundry",
+        required_inputs=[],
+        dynamic_inputs=[
+            "{source_run}/RUN_VALID/verdict.json",
+            "{source_run}/s1_fetch_strain/stage_summary.json",
+            "{source_run}/s3b_multimode_estimates/stage_summary.json",
+            "{source_run}/s4_geometry_filter/outputs/compatible_set.json",
+            "{source_run}/s8_family_router/outputs/family_router.json",
+        ],
+        external_inputs=[
+            "atlas",
+            "catalog",
+        ],
+        produced_outputs=[
+            "outputs/event_summary.csv",
+            "outputs/candidate_rows.csv",
+            "outputs/posthoc_checks.json",
+        ],
+        upstream_stages=[],
+        check_run_valid=False,
+    ),
 }
 
 
