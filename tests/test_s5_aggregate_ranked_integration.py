@@ -19,6 +19,8 @@ def _mk_run(
     ranked: list[int] | None,
     compatible: list[int] | None,
     viability_class: str = "MULTIMODE_OK",
+    viability_reasons: list[str] | None = None,
+    s3b_verdict: str = "PASS",
     with_s3b: bool = True,
     s4i_common: list[str] | None = None,
 ) -> None:
@@ -57,9 +59,14 @@ def _mk_run(
         s3b_stage = runs_root / run_id / "s3b_multimode_estimates"
         s3b_stage.mkdir(parents=True, exist_ok=True)
         (s3b_stage / "stage_summary.json").write_text(json.dumps({
+            "verdict": s3b_verdict,
             "multimode_viability": {
                 "class": viability_class,
-                "reasons": [] if viability_class == "MULTIMODE_OK" else ["BOUNDARY_FRACTION_HIGH"],
+                "reasons": (
+                    list(viability_reasons)
+                    if viability_reasons is not None
+                    else ([] if viability_class == "MULTIMODE_OK" else ["BOUNDARY_FRACTION_HIGH"])
+                ),
                 "metrics": {"boundary_fraction": None, "valid_fraction": {"220": 1.0, "221": 1.0}},
             }
         }), encoding="utf-8")
@@ -229,6 +236,51 @@ def test_s5_multimode_conditioned_population_is_supported_when_s4i_exists_for_el
     assert payload["multimode_conditioned_population"]["status"] == "SUPPORTED"
     assert payload["multimode_conditioned_population"]["artifact_basis"] == "s4i_common_geometry_intersection"
     assert payload["multimode_conditioned_population"]["common_geometry_ids"] == ["g1"]
+
+
+def test_s5_multimode_conditioned_population_is_not_supported_when_no_event_has_221_enabled(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    overtone_reasons = [
+        "mode_221_ok=false: overtone posterior not usable for multimode inference"
+    ]
+    _mk_run(
+        runs_root,
+        "run_a",
+        ranked=[0, 1],
+        compatible=[0],
+        viability_class="SINGLEMODE_ONLY",
+        viability_reasons=overtone_reasons,
+        s3b_verdict="PASS",
+    )
+    _mk_run(
+        runs_root,
+        "run_b",
+        ranked=[0, 1],
+        compatible=[0],
+        viability_class="SINGLEMODE_ONLY",
+        viability_reasons=overtone_reasons,
+        s3b_verdict="PASS",
+    )
+
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s5_aggregate.py"),
+        "--out-run",
+        "agg_mm_no_221_enabled",
+        "--source-runs",
+        "run_a,run_b",
+    ]
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, proc.stderr
+
+    stage_dir = runs_root / "agg_mm_no_221_enabled" / "s5_aggregate"
+    payload = json.loads((stage_dir / "outputs" / "aggregate.json").read_text(encoding="utf-8"))
+    stage_summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
+    assert payload["multimode_viability"]["counts"]["SINGLEMODE_ONLY"] == 2
+    assert payload["multimode_conditioned_population"]["n_events_eligible"] == 0
+    assert payload["multimode_conditioned_population"]["status"] == "NOT_SUPPORTED"
+    assert stage_summary["results"]["multimode_conditioned_status"] == "NOT_SUPPORTED"
 
 
 def test_s5_aggregate_require_multimode_fails_without_s3b(tmp_path: Path) -> None:

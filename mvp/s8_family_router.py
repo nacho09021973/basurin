@@ -34,7 +34,11 @@ ROUTE_STAGE_BY_FAMILY = {
     FAMILY_LOW_MASS_BH: "s8c_family_low_mass_bh_postmerger",
 }
 PROGRAM_MULTIMODE = "MULTIMODE_PROGRAM"
+PROGRAM_MULTIMODE_UNAVAILABLE = "MULTIMODE_PROGRAM_UNAVAILABLE"
 PROGRAM_SINGLEMODE_CONSTRAINED = "SINGLE_MODE_CONSTRAINED_PROGRAM"
+SCIENTIFIC_OUTCOME_UNAVAILABLE_221 = "MULTIMODE_UNAVAILABLE_221"
+FALLBACK_PATH_220_ATLAS = "220_ATLAS"
+FALLBACK_PATH_220_HAWKING = "220_HAWKING"
 
 
 def _repo_root() -> Path:
@@ -50,6 +54,66 @@ def _load_json_object(path: Path) -> dict[str, Any]:
 
 def _event_metadata_path(event_id: str) -> Path:
     return _repo_root() / "docs" / "ringdown" / "event_metadata" / f"{event_id}_metadata.json"
+
+
+def _coerce_reason_list(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [str(reason) for reason in raw]
+
+
+def _resolve_fallback_path(run_dir: Path) -> str:
+    hawking_path = run_dir / "s4j_hawking_area_filter" / "outputs" / "hawking_area_filter.json"
+    if hawking_path.exists():
+        return FALLBACK_PATH_220_HAWKING
+    return FALLBACK_PATH_220_ATLAS
+
+
+def _reason_indicates_221_unavailable(reasons: list[str]) -> bool:
+    reason_blob = " ".join(str(reason).lower() for reason in reasons)
+    return (
+        "mode_221_ok=false" in reason_blob
+        or "221" in reason_blob
+        or "overtone" in reason_blob
+    )
+
+
+def _derive_multimode_fallback(
+    *,
+    run_dir: Path,
+    multimode_viability_class: str | None,
+    multimode_viability_reasons: list[str],
+    multimode_fallback: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if isinstance(multimode_fallback, dict):
+        classification = multimode_fallback.get("classification")
+        if isinstance(classification, str) and classification:
+            fallback = dict(multimode_fallback)
+            if not isinstance(fallback.get("fallback_path"), str):
+                fallback["fallback_path"] = _resolve_fallback_path(run_dir)
+            if not isinstance(fallback.get("program_classification"), str):
+                fallback["program_classification"] = PROGRAM_SINGLEMODE_CONSTRAINED
+            if not isinstance(fallback.get("reason"), str):
+                fallback["reason"] = (
+                    multimode_viability_reasons[0]
+                    if multimode_viability_reasons
+                    else "mode 221 is not usable for canonical multimode inference"
+                )
+            return fallback
+
+    if multimode_viability_class != "SINGLEMODE_ONLY" and not _reason_indicates_221_unavailable(multimode_viability_reasons):
+        return None
+
+    return {
+        "classification": SCIENTIFIC_OUTCOME_UNAVAILABLE_221,
+        "fallback_path": _resolve_fallback_path(run_dir),
+        "program_classification": PROGRAM_SINGLEMODE_CONSTRAINED,
+        "reason": (
+            multimode_viability_reasons[0]
+            if multimode_viability_reasons
+            else "mode 221 is not usable for canonical multimode inference"
+        ),
+    }
 
 
 def _normalize_family_list(raw: Any) -> list[str]:
@@ -121,6 +185,7 @@ def route_family_candidates(
     metadata: dict[str, Any],
     known_bbh_catalog_entry: dict[str, float] | None,
     multimode_viability_class: str | None,
+    multimode_viability_reasons: list[str] | None = None,
     multimode_fallback: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     preferred = _normalize_family_list(metadata.get("preferred_families"))
@@ -146,11 +211,12 @@ def route_family_candidates(
         routing_reason = "insufficient source-class metadata; evaluate multiple families"
 
     program_classification = (
-        PROGRAM_MULTIMODE if multimode_viability_class == "MULTIMODE_OK" else "MULTIMODE_PROGRAM_UNAVAILABLE"
+        PROGRAM_MULTIMODE if multimode_viability_class == "MULTIMODE_OK" else PROGRAM_MULTIMODE_UNAVAILABLE
     )
     fallback_classification = None
     fallback_path = None
     fallback_reason = None
+    viability_reasons = _coerce_reason_list(multimode_viability_reasons)
     if isinstance(multimode_fallback, dict):
         fallback_classification = multimode_fallback.get("classification")
         fallback_path = multimode_fallback.get("fallback_path")
@@ -164,6 +230,15 @@ def route_family_candidates(
             program_classification = str(
                 multimode_fallback.get("program_classification") or PROGRAM_SINGLEMODE_CONSTRAINED
             )
+
+    multimode_220_221_enabled = bool(
+        multimode_viability_class == "MULTIMODE_OK" and fallback_classification is None
+    )
+    scientific_outcome = (
+        str(fallback_classification)
+        if fallback_classification is not None
+        else (str(multimode_viability_class) if multimode_viability_class is not None else "UNKNOWN")
+    )
 
     family_routes = [
         {
@@ -182,6 +257,9 @@ def route_family_candidates(
         "has_multimessenger_hint": has_multimessenger,
         "known_bbh_catalog_match": known_bbh_catalog_entry is not None,
         "multimode_viability_class": multimode_viability_class,
+        "multimode_viability_reasons": viability_reasons,
+        "multimode_220_221_enabled": multimode_220_221_enabled,
+        "scientific_outcome": scientific_outcome,
         "program_classification": program_classification,
         "fallback_classification": fallback_classification,
         "fallback_path": fallback_path,
@@ -227,13 +305,21 @@ def main(argv: list[str] | None = None) -> int:
         s4d_payload = _load_json_object(s4d_path)
         multimode_viability = s3b_summary.get("multimode_viability")
         multimode_viability_class = None
+        multimode_viability_reasons: list[str] = []
         if isinstance(multimode_viability, dict):
             value = multimode_viability.get("class")
             if isinstance(value, str):
                 multimode_viability_class = value
-        multimode_fallback = s4d_payload.get("multimode_fallback")
-        if not isinstance(multimode_fallback, dict):
-            multimode_fallback = None
+            multimode_viability_reasons = _coerce_reason_list(multimode_viability.get("reasons"))
+        multimode_fallback = _derive_multimode_fallback(
+            run_dir=ctx.run_dir,
+            multimode_viability_class=multimode_viability_class,
+            multimode_viability_reasons=multimode_viability_reasons,
+            multimode_fallback=(
+                s4d_payload.get("multimode_fallback")
+                if isinstance(s4d_payload.get("multimode_fallback"), dict) else None
+            ),
+        )
 
         metadata = _load_json_object(metadata_path) if metadata_path.exists() else {}
         known_bbh = get_event(event_id)
@@ -242,6 +328,7 @@ def main(argv: list[str] | None = None) -> int:
             metadata=metadata,
             known_bbh_catalog_entry=known_bbh,
             multimode_viability_class=multimode_viability_class,
+            multimode_viability_reasons=multimode_viability_reasons,
             multimode_fallback=multimode_fallback,
         )
 
@@ -267,6 +354,10 @@ def main(argv: list[str] | None = None) -> int:
                 "routing_mode": routing["routing_mode"],
                 "primary_family": routing["primary_family"],
                 "n_families": len(routing["families_to_run"]),
+                "multimode_viability_class": routing["multimode_viability_class"],
+                "multimode_viability_reasons": routing["multimode_viability_reasons"],
+                "multimode_220_221_enabled": routing["multimode_220_221_enabled"],
+                "scientific_outcome": routing["scientific_outcome"],
                 "program_classification": routing["program_classification"],
                 "fallback_classification": routing["fallback_classification"],
                 "fallback_path": routing["fallback_path"],
