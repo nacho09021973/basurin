@@ -20,6 +20,7 @@ from mvp.s8_family_router import FAMILY_LOW_MASS_BH
 STAGE = "s8c_family_low_mass_bh_postmerger"
 OUTPUT_FILE = "low_mass_bh_family.json"
 MULTIMODE_OK = "MULTIMODE_OK"
+DOMAIN_OUT_OF_DOMAIN = "OUT_OF_DOMAIN"
 DEFAULT_PRIOR = {
     "mass_msun_range": [2.3, 3.2],
     "chi_range": [0.55, 0.98],
@@ -44,6 +45,61 @@ def _to_float(value: Any) -> float | None:
     except Exception:
         return None
     return out if out == out and abs(out) != float("inf") else None
+
+
+def _coerce_range(raw: Any) -> tuple[float, float] | None:
+    if not isinstance(raw, list) or len(raw) != 2:
+        return None
+    low = _to_float(raw[0])
+    high = _to_float(raw[1])
+    if low is None or high is None or high <= low:
+        return None
+    return (float(low), float(high))
+
+
+def _extract_analysis_band_hz(
+    *,
+    run_provenance: dict[str, Any],
+) -> tuple[float, float] | None:
+    invocation = run_provenance.get("invocation")
+    if not isinstance(invocation, dict):
+        return None
+    key_params = invocation.get("key_params")
+    if not isinstance(key_params, dict):
+        return None
+    low = _to_float(key_params.get("band_low"))
+    high = _to_float(key_params.get("band_high"))
+    if low is None or high is None or high <= low:
+        return None
+    return (float(low), float(high))
+
+
+def _linspace(lo: float, hi: float, n: int) -> list[float]:
+    if n <= 1 or hi <= lo:
+        return [float(lo)]
+    step = (hi - lo) / float(n - 1)
+    return [float(lo + step * i) for i in range(n)]
+
+
+def _low_mass_kerr_frequency_envelope(prior: dict[str, Any]) -> tuple[float, float] | None:
+    mass_range = _coerce_range(prior.get("mass_msun_range"))
+    chi_range = _coerce_range(prior.get("chi_range"))
+    if mass_range is None or chi_range is None:
+        return None
+
+    from mvp.kerr_qnm_fits import kerr_qnm
+
+    freqs: list[float] = []
+    for mass_msun in _linspace(float(mass_range[0]), float(mass_range[1]), 9):
+        for chi in _linspace(float(chi_range[0]), float(chi_range[1]), 9):
+            for mode in ((2, 2, 0), (2, 2, 1)):
+                qnm = kerr_qnm(mass_msun, chi, mode)
+                freq = _to_float(qnm.f_hz)
+                if freq is not None and freq > 0.0:
+                    freqs.append(float(freq))
+    if not freqs:
+        return None
+    return (float(min(freqs)), float(max(freqs)))
 
 
 def _merge_prior(event_metadata: dict[str, Any]) -> tuple[dict[str, Any], str]:
@@ -94,6 +150,8 @@ def assess_low_mass_bh_family(
     ratio_consistency = ratio_filter.get("kerr_consistency") if isinstance(ratio_filter.get("kerr_consistency"), dict) else {}
     filtering = ratio_filter.get("filtering") if isinstance(ratio_filter.get("filtering"), dict) else {}
     diagnostics = ratio_filter.get("diagnostics") if isinstance(ratio_filter.get("diagnostics"), dict) else {}
+    analysis_band = _extract_analysis_band_hz(run_provenance=run_provenance)
+    local_envelope = _low_mass_kerr_frequency_envelope(prior)
 
     mass_ok = (
         m_final is not None and
@@ -106,8 +164,22 @@ def assess_low_mass_bh_family(
     ratio_rf_consistent = ratio_consistency.get("Rf_consistent")
     ratio_informativity = diagnostics.get("informativity_class")
     n_ratio_compatible = int(filtering.get("n_ratio_compatible") or 0)
+    out_of_domain_reason: str | None = None
+    if analysis_band is not None and local_envelope is not None:
+        overlap_low = max(float(analysis_band[0]), float(local_envelope[0]))
+        overlap_high = min(float(analysis_band[1]), float(local_envelope[1]))
+        overlap_hz = max(0.0, overlap_high - overlap_low)
+        if overlap_hz <= 0.0:
+            out_of_domain_reason = (
+                "analysis band has no physically useful overlap with the low-mass Kerr modal envelope "
+                f"for this event domain: band_hz=[{analysis_band[0]:.3f}, {analysis_band[1]:.3f}], "
+                f"kerr_envelope_hz=[{local_envelope[0]:.3f}, {local_envelope[1]:.3f}]"
+            )
 
-    if viability_class != MULTIMODE_OK or kerr_verdict != "PASS" or m_final is None or chi_final is None:
+    if out_of_domain_reason is not None:
+        assessment = "INCONCLUSIVE"
+        reason = out_of_domain_reason
+    elif viability_class != MULTIMODE_OK or kerr_verdict != "PASS" or m_final is None or chi_final is None:
         assessment = "INCONCLUSIVE"
         reason = "low-mass BH branch requires a valid multimode Kerr inversion"
     elif not mass_ok or not chi_ok:
@@ -130,7 +202,7 @@ def assess_low_mass_bh_family(
         reason = "the low-mass Kerr post-merger branch is not supported by the current multimode evidence"
 
     invocation = run_provenance.get("invocation") if isinstance(run_provenance.get("invocation"), dict) else {}
-    return {
+    payload = {
         "status": "EVALUATED",
         "assessment": assessment,
         "reason": reason,
@@ -149,6 +221,9 @@ def assess_low_mass_bh_family(
         "ratio_informativity_class": ratio_informativity,
         "n_ratio_compatible": n_ratio_compatible,
     }
+    if out_of_domain_reason is not None:
+        payload["domain_status"] = DOMAIN_OUT_OF_DOMAIN
+    return payload
 
 
 def main(argv: list[str] | None = None) -> int:

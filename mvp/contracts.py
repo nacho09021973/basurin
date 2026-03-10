@@ -318,6 +318,9 @@ CONTRACTS: dict[str, StageContract] = {
             "s3b_multimode_estimates/outputs/multimode_estimates.json",
             "s3b_multimode_estimates/stage_summary.json",
         ],
+        external_inputs=[
+            "event_metadata",
+        ],
         produced_outputs=[
             "outputs/kerr_from_multimode.json",
             "outputs/kerr_from_multimode_diagnostics.json",
@@ -366,13 +369,20 @@ CONTRACTS: dict[str, StageContract] = {
         required_inputs=[
             "s8_family_router/outputs/family_router.json",
             "s4e_kerr_ratio_filter/outputs/ratio_filter_result.json",
+            "s4c_kerr_consistency/outputs/kerr_consistency.json",
             "s4d_kerr_from_multimode/outputs/kerr_extraction.json",
             "s7_beyond_kerr_deviation_score/outputs/beyond_kerr_score.json",
         ],
         produced_outputs=[
             "outputs/gr_kerr_family.json",
         ],
-        upstream_stages=["s8_family_router", "s4e_kerr_ratio_filter", "s4d_kerr_from_multimode", "s7_beyond_kerr_deviation_score"],
+        upstream_stages=[
+            "s8_family_router",
+            "s4e_kerr_ratio_filter",
+            "s4c_kerr_consistency",
+            "s4d_kerr_from_multimode",
+            "s7_beyond_kerr_deviation_score",
+        ],
     ),
     "s8b_family_bns": StageContract(
         name="s8b_family_bns",

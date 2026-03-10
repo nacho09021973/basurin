@@ -59,12 +59,25 @@ def test_router_prioritizes_bns_when_metadata_says_bns() -> None:
     assert routing["routing_mode"] == "metadata_bns_or_multimessenger"
 
 
+def test_router_does_not_emit_generic_domain_status() -> None:
+    routing = route_family_candidates(
+        event_id="GW170817",
+        metadata={"source_class": "binary_neutron_star", "multimessenger": True},
+        known_bbh_catalog_entry=None,
+        multimode_viability_class="MULTIMODE_OK",
+    )
+
+    assert routing["primary_family"] == FAMILY_BNS
+    assert "domain_status" not in routing
+
+
 def test_gr_kerr_family_assessment_supported_when_score_is_consistent() -> None:
     payload = assess_gr_kerr_family(
         router_payload={"primary_family": FAMILY_GR_KERR, "families_to_run": [FAMILY_GR_KERR]},
         ratio_filter={"verdict": "PASS", "kerr_consistency": {"Rf_consistent": True}, "diagnostics": {"informativity_class": "MODERATE"}, "filtering": {"n_input_geometries": 6, "n_ratio_compatible": 4, "n_ratio_excluded": 2, "n_ratio_not_applicable": 0}},
         kerr_extraction={"verdict": "PASS", "M_final_Msun": 62.0, "chi_final": 0.67},
-        beyond_kerr_score={"verdict": "GR_CONSISTENT", "chi2_kerr_2dof": 1.2},
+        beyond_kerr_score={"verdict": "GR_CONSISTENT", "chi2_kerr_2dof": 1.2, "independence_class": "NON_INDEPENDENT"},
+        kerr_consistency={"status": "OK", "kerr_consistent": True, "source": {"compatible_set_present": True}},
     )
 
     assert payload["status"] == "EVALUATED"
@@ -73,12 +86,40 @@ def test_gr_kerr_family_assessment_supported_when_score_is_consistent() -> None:
     assert payload["ratio_rf_consistent"] is True
 
 
+def test_gr_kerr_family_requires_explicit_monomode_support_before_supported() -> None:
+    payload = assess_gr_kerr_family(
+        router_payload={"primary_family": FAMILY_GR_KERR, "families_to_run": [FAMILY_GR_KERR]},
+        ratio_filter={"verdict": "PASS", "kerr_consistency": {"Rf_consistent": True}, "diagnostics": {"informativity_class": "MODERATE"}, "filtering": {"n_input_geometries": 6, "n_ratio_compatible": 4, "n_ratio_excluded": 2, "n_ratio_not_applicable": 0}},
+        kerr_extraction={"verdict": "PASS", "M_final_Msun": 62.0, "chi_final": 0.67},
+        beyond_kerr_score={"verdict": "GR_CONSISTENT", "chi2_kerr_2dof": 1.2, "independence_class": "NON_INDEPENDENT"},
+        kerr_consistency={"status": "OK", "kerr_consistent": False, "source": {"compatible_set_present": True}},
+    )
+
+    assert payload["status"] == "EVALUATED"
+    assert payload["assessment"] == "INCONCLUSIVE"
+    assert "non-independent" in payload["reason"]
+    assert "s4c" in payload["reason"]
+
+    skipped_payload = assess_gr_kerr_family(
+        router_payload={"primary_family": FAMILY_GR_KERR, "families_to_run": [FAMILY_GR_KERR]},
+        ratio_filter={"verdict": "PASS", "kerr_consistency": {"Rf_consistent": True}, "diagnostics": {"informativity_class": "MODERATE"}, "filtering": {"n_input_geometries": 6, "n_ratio_compatible": 4, "n_ratio_excluded": 2, "n_ratio_not_applicable": 0}},
+        kerr_extraction={"verdict": "PASS", "M_final_Msun": 62.0, "chi_final": 0.67},
+        beyond_kerr_score={"verdict": "GR_CONSISTENT", "chi2_kerr_2dof": 1.2, "independence_class": "NON_INDEPENDENT"},
+        kerr_consistency={"status": "SKIPPED_MULTIMODE_GATE", "kerr_consistent": None, "source": {"compatible_set_present": True}},
+    )
+
+    assert skipped_payload["status"] == "EVALUATED"
+    assert skipped_payload["assessment"] == "INCONCLUSIVE"
+    assert "s4c" in skipped_payload["reason"]
+
+
 def test_gr_kerr_family_is_inconclusive_without_geometric_support() -> None:
     payload = assess_gr_kerr_family(
         router_payload={"primary_family": FAMILY_GR_KERR, "families_to_run": [FAMILY_GR_KERR]},
         ratio_filter={"verdict": "PASS", "kerr_consistency": {"Rf_consistent": True}, "diagnostics": {"informativity_class": "UNINFORMATIVE"}, "filtering": {"n_input_geometries": 0, "n_ratio_compatible": 0, "n_ratio_excluded": 0, "n_ratio_not_applicable": 0}},
         kerr_extraction={"verdict": "PASS", "M_final_Msun": 144.0, "chi_final": 0.96},
-        beyond_kerr_score={"verdict": "GR_CONSISTENT", "chi2_kerr_2dof": 0.15},
+        beyond_kerr_score={"verdict": "GR_CONSISTENT", "chi2_kerr_2dof": 0.15, "independence_class": "NON_INDEPENDENT"},
+        kerr_consistency={"status": "OK", "kerr_consistent": True, "source": {"compatible_set_present": True}},
     )
 
     assert payload["status"] == "EVALUATED"
@@ -104,7 +145,8 @@ def test_gr_kerr_family_is_disfavored_when_ratio_excludes_all_spin_geometries() 
         router_payload={"primary_family": FAMILY_GR_KERR, "families_to_run": [FAMILY_GR_KERR]},
         ratio_filter={"verdict": "PASS", "kerr_consistency": {"Rf_consistent": False}, "diagnostics": {"informativity_class": "HIGH"}, "filtering": {"n_input_geometries": 5, "n_ratio_compatible": 0, "n_ratio_excluded": 5, "n_ratio_not_applicable": 0}},
         kerr_extraction={"verdict": "PASS", "M_final_Msun": 62.0, "chi_final": 0.67},
-        beyond_kerr_score={"verdict": "GR_CONSISTENT", "chi2_kerr_2dof": 1.2},
+        beyond_kerr_score={"verdict": "GR_CONSISTENT", "chi2_kerr_2dof": 1.2, "independence_class": "NON_INDEPENDENT"},
+        kerr_consistency={"status": "OK", "kerr_consistent": True, "source": {"compatible_set_present": True}},
     )
 
     assert payload["status"] == "EVALUATED"
@@ -139,6 +181,35 @@ def test_bns_family_handler_supports_matching_candidate() -> None:
     assert payload["best_candidate"]["remnant_class"] == "HMNS"
 
 
+def test_bns_family_handler_ignores_generic_upstream_out_of_domain_when_local_overlap_exists() -> None:
+    payload = assess_bns_family(
+        router_payload={
+            "primary_family": FAMILY_BNS,
+            "families_to_run": [FAMILY_BNS, FAMILY_LOW_MASS_BH, FAMILY_GR_KERR],
+            "domain_status": "OUT_OF_DOMAIN",
+        },
+        run_provenance={"invocation": {"event_id": "GW170817", "key_params": {"band_low": 2500.0, "band_high": 4000.0}}},
+        s3b_stage_summary={"multimode_viability": {"class": "MULTIMODE_OK"}},
+        multimode_estimates=_multimode_payload(3465.0, 0.0094, 2830.905, 0.00517),
+        event_metadata={
+            "family_priors": {
+                FAMILY_BNS: {
+                    "remnant_mass_msun_range": [2.7, 2.7],
+                    "radius_1p6_km_range": [12.0, 12.0],
+                    "classes": ["HMNS"],
+                    "n_mass_points": 1,
+                    "n_radius_points": 1,
+                    "collapse_time_ms_values": {"HMNS": [20.0]},
+                }
+            }
+        },
+    )
+
+    assert payload["status"] == "EVALUATED"
+    assert payload["assessment"] == "SUPPORTED"
+    assert "domain_status" not in payload
+
+
 def test_bns_family_handler_disfavors_incompatible_low_frequency_signal() -> None:
     payload = assess_bns_family(
         router_payload={"primary_family": FAMILY_BNS, "families_to_run": [FAMILY_BNS, FAMILY_LOW_MASS_BH, FAMILY_GR_KERR]},
@@ -161,6 +232,34 @@ def test_bns_family_handler_disfavors_incompatible_low_frequency_signal() -> Non
     assert payload["status"] == "EVALUATED"
     assert payload["assessment"] == "DISFAVORED"
     assert payload["atlas_summary"]["n_candidates_compatible"] == 0
+
+
+def test_bns_family_handler_marks_out_of_domain_when_band_has_no_atlas_overlap() -> None:
+    payload = assess_bns_family(
+        router_payload={
+            "primary_family": FAMILY_BNS,
+            "families_to_run": [FAMILY_BNS, FAMILY_LOW_MASS_BH, FAMILY_GR_KERR],
+        },
+        run_provenance={"invocation": {"event_id": "GW170817", "key_params": {"band_low": 150.0, "band_high": 400.0}}},
+        s3b_stage_summary={"multimode_viability": {"class": "MULTIMODE_OK"}},
+        multimode_estimates=_multimode_payload(224.0, 0.028, 227.0, 0.026),
+        event_metadata={
+            "family_priors": {
+                FAMILY_BNS: {
+                    "remnant_mass_msun_range": [2.5, 2.8],
+                    "radius_1p6_km_range": [11.0, 13.0],
+                    "classes": ["HMNS", "SMNS"],
+                    "n_mass_points": 3,
+                    "n_radius_points": 3,
+                }
+            }
+        },
+    )
+
+    assert payload["status"] == "EVALUATED"
+    assert payload["assessment"] == "INCONCLUSIVE"
+    assert payload["domain_status"] == "OUT_OF_DOMAIN"
+    assert "no physically useful overlap" in payload["reason"]
 
 
 def test_low_mass_bh_family_supports_matching_low_mass_kerr_solution() -> None:
@@ -209,3 +308,31 @@ def test_low_mass_bh_family_disfavors_high_mass_solution() -> None:
     assert payload["status"] == "EVALUATED"
     assert payload["assessment"] == "DISFAVORED"
     assert payload["mass_in_range"] is False
+
+
+def test_low_mass_bh_family_marks_out_of_domain_when_band_has_no_kerr_overlap() -> None:
+    payload = assess_low_mass_bh_family(
+        router_payload={"primary_family": FAMILY_BNS, "families_to_run": [FAMILY_BNS, FAMILY_LOW_MASS_BH, FAMILY_GR_KERR]},
+        run_provenance={"invocation": {"event_id": "GW170817", "key_params": {"band_low": 150.0, "band_high": 400.0}}},
+        s3b_stage_summary={"multimode_viability": {"class": "MULTIMODE_OK"}},
+        ratio_filter={
+            "kerr_consistency": {"Rf_consistent": True},
+            "diagnostics": {"informativity_class": "LOW"},
+            "filtering": {"n_ratio_compatible": 3},
+        },
+        kerr_extraction={"verdict": "PASS", "M_final_Msun": 2.72, "chi_final": 0.81},
+        beyond_kerr_score={"verdict": "GR_CONSISTENT"},
+        event_metadata={
+            "family_priors": {
+                FAMILY_LOW_MASS_BH: {
+                    "mass_msun_range": [2.5, 3.0],
+                    "chi_range": [0.7, 0.9],
+                }
+            }
+        },
+    )
+
+    assert payload["status"] == "EVALUATED"
+    assert payload["assessment"] == "INCONCLUSIVE"
+    assert payload["domain_status"] == "OUT_OF_DOMAIN"
+    assert "no physically useful overlap" in payload["reason"]

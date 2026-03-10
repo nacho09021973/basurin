@@ -20,6 +20,12 @@ from typing import Any
 from mvp.contracts import StageContext, abort, check_inputs, finalize, init_stage, log_stage_paths
 
 STAGE = "s4d_kerr_from_multimode"
+SKIPPED_OUT_OF_DOMAIN = "SKIPPED_OUT_OF_DOMAIN"
+DOMAIN_OUT_OF_DOMAIN = "OUT_OF_DOMAIN"
+BNS_FAMILY = "BNS_REMNANT"
+LOW_MASS_FAMILY = "LOW_MASS_BH_POSTMERGER"
+LOW_MASS_DEFAULT_MASS_RANGE = (2.3, 3.2)
+LOW_MASS_DEFAULT_CHI_RANGE = (0.55, 0.98)
 M_MIN = 5.0
 M_MAX = 500.0
 A_MIN = 0.0
@@ -102,6 +108,200 @@ def _to_float(value: Any) -> float | None:
     if not math.isfinite(out):
         return None
     return out
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _event_metadata_path(event_id: str) -> Path:
+    return _repo_root() / "docs" / "ringdown" / "event_metadata" / f"{event_id}_metadata.json"
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Expected JSON object in {path}, got {type(payload).__name__}")
+    return payload
+
+
+def _coerce_range(raw: Any) -> tuple[float, float] | None:
+    if not isinstance(raw, list) or len(raw) != 2:
+        return None
+    low = _to_float(raw[0])
+    high = _to_float(raw[1])
+    if low is None or high is None or high < low:
+        return None
+    return (float(low), float(high))
+
+
+def _normalize_family_list(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        family = str(item).strip().upper()
+        if family and family not in out:
+            out.append(family)
+    return out
+
+
+def _source_kind_from_metadata(metadata: dict[str, Any]) -> str | None:
+    for key in ("source_class", "event_class", "event_type", "source_type"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            token = value.strip().lower().replace("-", "_").replace(" ", "_")
+            if token in {"bns", "binary_neutron_star", "nsns"}:
+                return "BNS"
+            return token.upper()
+    return None
+
+
+def _extract_event_id(run_provenance: dict[str, Any]) -> str | None:
+    invocation = run_provenance.get("invocation")
+    if not isinstance(invocation, dict):
+        return None
+    event_id = invocation.get("event_id")
+    if not isinstance(event_id, str) or not event_id.strip():
+        return None
+    return event_id.strip()
+
+
+def _extract_analysis_band_hz(
+    *,
+    multimode: dict[str, Any],
+    run_provenance: dict[str, Any],
+) -> tuple[float, float] | None:
+    invocation = run_provenance.get("invocation")
+    if isinstance(invocation, dict):
+        key_params = invocation.get("key_params")
+        if isinstance(key_params, dict):
+            low = _to_float(key_params.get("band_low"))
+            high = _to_float(key_params.get("band_high"))
+            if low is not None and high is not None and high > low:
+                return (float(low), float(high))
+
+    source = multimode.get("source")
+    if isinstance(source, dict):
+        window = source.get("window")
+        if isinstance(window, dict):
+            band = _coerce_range(window.get("band_hz"))
+            if band is not None:
+                return band
+        band = _coerce_range(source.get("band_hz"))
+        if band is not None:
+            return band
+
+    return None
+
+
+def _resolve_low_mass_prior(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    family_priors = metadata.get("family_priors")
+    preferred = set(_normalize_family_list(metadata.get("preferred_families")))
+    source_kind = _source_kind_from_metadata(metadata)
+    low_mass_prior = family_priors.get(LOW_MASS_FAMILY) if isinstance(family_priors, dict) else None
+
+    if isinstance(low_mass_prior, dict):
+        mass_range = _coerce_range(low_mass_prior.get("mass_msun_range")) or LOW_MASS_DEFAULT_MASS_RANGE
+        chi_range = _coerce_range(low_mass_prior.get("chi_range")) or LOW_MASS_DEFAULT_CHI_RANGE
+        return {
+            "mass_msun_range": [float(mass_range[0]), float(mass_range[1])],
+            "chi_range": [float(chi_range[0]), float(chi_range[1])],
+            "source": "event_metadata",
+        }
+
+    if source_kind == "BNS" or BNS_FAMILY in preferred or LOW_MASS_FAMILY in preferred:
+        return {
+            "mass_msun_range": [float(LOW_MASS_DEFAULT_MASS_RANGE[0]), float(LOW_MASS_DEFAULT_MASS_RANGE[1])],
+            "chi_range": [float(LOW_MASS_DEFAULT_CHI_RANGE[0]), float(LOW_MASS_DEFAULT_CHI_RANGE[1])],
+            "source": "default_low_mass_domain",
+        }
+
+    return None
+
+
+def _linspace(lo: float, hi: float, n: int) -> list[float]:
+    if n <= 1 or math.isclose(lo, hi):
+        return [float(lo)]
+    step = (hi - lo) / float(n - 1)
+    return [float(lo + step * i) for i in range(n)]
+
+
+def _low_mass_kerr_frequency_envelope(prior: dict[str, Any]) -> dict[str, Any] | None:
+    mass_range = _coerce_range(prior.get("mass_msun_range"))
+    chi_range = _coerce_range(prior.get("chi_range"))
+    if mass_range is None or chi_range is None:
+        return None
+
+    from mvp.kerr_qnm_fits import kerr_qnm
+
+    freqs: list[float] = []
+    for mass_msun in _linspace(float(mass_range[0]), float(mass_range[1]), 9):
+        for chi in _linspace(float(chi_range[0]), float(chi_range[1]), 9):
+            for mode in ((2, 2, 0), (2, 2, 1)):
+                qnm = kerr_qnm(mass_msun, chi, mode)
+                freq = _to_float(qnm.f_hz)
+                if freq is not None and freq > 0.0:
+                    freqs.append(float(freq))
+
+    if not freqs:
+        return None
+
+    return {
+        "f_low_hz": float(min(freqs)),
+        "f_high_hz": float(max(freqs)),
+        "mass_msun_range": [float(mass_range[0]), float(mass_range[1])],
+        "chi_range": [float(chi_range[0]), float(chi_range[1])],
+        "source": str(prior.get("source") or "unknown"),
+    }
+
+
+def _evaluate_domain_guard(
+    *,
+    multimode: dict[str, Any],
+    run_provenance: dict[str, Any],
+    event_metadata: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not isinstance(event_metadata, dict) or not event_metadata:
+        return None
+
+    prior = _resolve_low_mass_prior(event_metadata)
+    if prior is None:
+        return None
+
+    analysis_band = _extract_analysis_band_hz(multimode=multimode, run_provenance=run_provenance)
+    if analysis_band is None:
+        return None
+
+    envelope = _low_mass_kerr_frequency_envelope(prior)
+    if envelope is None:
+        return None
+
+    overlap_low = max(float(analysis_band[0]), float(envelope["f_low_hz"]))
+    overlap_high = min(float(analysis_band[1]), float(envelope["f_high_hz"]))
+    overlap_hz = max(0.0, overlap_high - overlap_low)
+    if overlap_hz > 0.0:
+        return None
+
+    event_id = _extract_event_id(run_provenance) or event_metadata.get("event_id")
+    preferred = _normalize_family_list(event_metadata.get("preferred_families"))
+    reason = (
+        "analysis band has no physically useful overlap with the low-mass Kerr modal envelope "
+        f"for this event domain: band_hz=[{analysis_band[0]:.3f}, {analysis_band[1]:.3f}], "
+        f"kerr_envelope_hz=[{float(envelope['f_low_hz']):.3f}, {float(envelope['f_high_hz']):.3f}]"
+    )
+    return {
+        "domain_status": DOMAIN_OUT_OF_DOMAIN,
+        "reason": reason,
+        "event_id": event_id,
+        "source_class": event_metadata.get("source_class"),
+        "preferred_families": preferred,
+        "analysis_band_hz": [float(analysis_band[0]), float(analysis_band[1])],
+        "kerr_envelope_hz": [float(envelope["f_low_hz"]), float(envelope["f_high_hz"])],
+        "prior_source": envelope["source"],
+        "mass_msun_range": envelope["mass_msun_range"],
+        "chi_range": envelope["chi_range"],
+    }
 
 
 def _extract_quantile_block(mode_obj: dict[str, Any]) -> dict[str, dict[str, float]] | None:
@@ -556,6 +756,70 @@ def _extract_kerr_with_covariance(multimode: dict[str, Any]) -> dict[str, Any]:
         },
     }
 
+
+def _write_out_of_domain_skip(
+    *,
+    ctx: StageContext,
+    viability: dict[str, Any],
+    domain_guard: dict[str, Any],
+) -> dict[str, Path]:
+    skip_payload = {
+        "schema_name": "kerr_from_multimode",
+        "schema_version": "mvp_kerr_from_multimode_v1",
+        "json_strict": True,
+        "created_utc": _utc_now_z(),
+        "run_id": ctx.run_id,
+        "stage": STAGE,
+        "status": SKIPPED_OUT_OF_DOMAIN,
+        "domain_status": DOMAIN_OUT_OF_DOMAIN,
+        "reason": domain_guard["reason"],
+        "multimode_viability": viability,
+        "domain_guard": domain_guard,
+    }
+    diagnostics_payload = {
+        "schema_name": "kerr_from_multimode_diagnostics",
+        "schema_version": "mvp_kerr_from_multimode_diagnostics_v1",
+        "json_strict": True,
+        "created_utc": _utc_now_z(),
+        "run_id": ctx.run_id,
+        "stage": STAGE,
+        "diagnostics": {
+            "multimode_evaluated": False,
+            "skips": [DOMAIN_OUT_OF_DOMAIN],
+            "multimode_viability": viability,
+            "domain_guard": domain_guard,
+        },
+    }
+    extraction_payload = {
+        "schema_name": "kerr_extraction",
+        "schema_version": "mvp_kerr_extraction_v1",
+        "json_strict": True,
+        "created_utc": _utc_now_z(),
+        "run_id": ctx.run_id,
+        "stage": STAGE,
+        "verdict": SKIPPED_OUT_OF_DOMAIN,
+        "domain_status": DOMAIN_OUT_OF_DOMAIN,
+        "reason": domain_guard["reason"],
+        "M_final_Msun": None,
+        "chi_final": None,
+        "sigma_M": None,
+        "sigma_chi": None,
+        "cov_M_chi": None,
+        "delta_f221_Hz": None,
+        "delta_tau221_ms": None,
+        "consistency_score": None,
+    }
+
+    kerr_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode.json", skip_payload)
+    diag_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode_diagnostics.json", diagnostics_payload)
+    extraction_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_extraction.json", extraction_payload)
+    log_stage_paths(ctx)
+    return {
+        "kerr_from_multimode": kerr_path,
+        "kerr_from_multimode_diagnostics": diag_path,
+        "kerr_extraction": extraction_path,
+    }
+
 def _execute(ctx: StageContext) -> dict[str, Path]:
     if not isinstance(ctx.params, dict) or not ctx.params:
         ctx.params = _base_params()
@@ -563,11 +827,26 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
     multimode_path = ctx.run_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
     model_comparison_path = ctx.run_dir / "s3b_multimode_estimates" / "outputs" / "model_comparison.json"
     s3b_summary_path = ctx.run_dir / "s3b_multimode_estimates" / "stage_summary.json"
+    run_provenance_path = ctx.run_dir / "run_provenance.json"
+
+    run_provenance: dict[str, Any] = {}
+    if run_provenance_path.exists():
+        try:
+            run_provenance = _load_json_object(run_provenance_path)
+        except Exception:
+            run_provenance = {}
+
+    event_id = _extract_event_id(run_provenance)
+    event_metadata_path = _event_metadata_path(event_id) if event_id is not None else None
 
     inputs = check_inputs(
         ctx,
         paths={"multimode_estimates": multimode_path, "s3b_stage_summary": s3b_summary_path},
-        optional={"model_comparison": model_comparison_path},
+        optional={
+            "model_comparison": model_comparison_path,
+            "run_provenance": run_provenance_path,
+            **({"event_metadata": event_metadata_path} if event_metadata_path is not None and event_metadata_path.exists() else {}),
+        },
     )
     input_by_label = {row.get("label", ""): row for row in inputs}
 
@@ -655,6 +934,30 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
             "kerr_from_multimode_diagnostics": diag_path,
             "kerr_extraction": kerr_extract_path,
         }
+
+    event_metadata: dict[str, Any] = {}
+    if event_metadata_path is not None and event_metadata_path.exists():
+        try:
+            event_metadata = _load_json_object(event_metadata_path)
+        except Exception:
+            event_metadata = {}
+
+    domain_guard = _evaluate_domain_guard(
+        multimode=multimode,
+        run_provenance=run_provenance,
+        event_metadata=event_metadata,
+    )
+    if isinstance(domain_guard, dict) and domain_guard.get("domain_status") == DOMAIN_OUT_OF_DOMAIN:
+        ctx.params.update(
+            {
+                "multimode_viability_class": viability_class,
+                "multimode_viability_reasons": viability_reasons,
+                "multimode_evaluated": False,
+                "skips": [DOMAIN_OUT_OF_DOMAIN],
+                "domain_guard": domain_guard,
+            }
+        )
+        return _write_out_of_domain_skip(ctx=ctx, viability=viability, domain_guard=domain_guard)
 
     model_comparison = (
         json.loads(model_comparison_path.read_text(encoding="utf-8"))
@@ -1049,7 +1352,19 @@ def main() -> int:
     if not artifacts:
         return _abort_with_reason(ctx, f"{STAGE} failed: NO_OUTPUTS")
 
-    finalize(ctx, artifacts=artifacts)
+    summary_results: dict[str, Any] | None = None
+    try:
+        kerr_payload = _load_json_object(artifacts["kerr_from_multimode"])
+    except Exception:
+        kerr_payload = {}
+    if isinstance(kerr_payload, dict):
+        summary_results = {
+            key: kerr_payload.get(key)
+            for key in ("status", "domain_status", "reason")
+            if kerr_payload.get(key) is not None
+        } or None
+
+    finalize(ctx, artifacts=artifacts, results=summary_results)
     return 0
 
 

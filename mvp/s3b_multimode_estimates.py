@@ -964,6 +964,7 @@ def classify_multimode_viability(
 def _compute_multimode_summary_blocks(
     mode_220: dict[str, Any],
     mode_221: dict[str, Any],
+    mode_221_ok: bool,
     model_comparison: dict[str, Any],
     run_dir: Path,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -976,6 +977,7 @@ def _compute_multimode_summary_blocks(
     viability_inputs = {
         "valid_fraction_220": mode_220.get("fit", {}).get("stability", {}).get("valid_fraction"),
         "valid_fraction_221": mode_221.get("fit", {}).get("stability", {}).get("valid_fraction"),
+        "mode_221_ok": bool(mode_221_ok),
         "f_220_median": m220["f_median"],
         "f_220_iqr": m220["f_iqr"],
         "f_221_median": m221["f_median"],
@@ -984,6 +986,7 @@ def _compute_multimode_summary_blocks(
         "Rf_bootstrap_quantiles": rf_quantiles,
         "Rf_kerr_band": optional_inputs.get("Rf_kerr_band"),
         "delta_bic": model_comparison.get("delta_bic"),
+        "two_mode_preferred": (model_comparison.get("decision") or {}).get("two_mode_preferred"),
     }
     viability = classify_multimode_viability_v3(viability_inputs)
 
@@ -1158,6 +1161,7 @@ def main() -> int:
         viability, systematics_gate, science_evidence, annotations = _compute_multimode_summary_blocks(
             mode_220=mode_220,
             mode_221=mode_221,
+            mode_221_ok=ok_221,
             model_comparison=model_comparison,
             run_dir=ctx.run_dir,
         )

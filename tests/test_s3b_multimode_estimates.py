@@ -25,10 +25,30 @@ classify_multimode_viability = _MODULE.classify_multimode_viability
 covariance_gate = _MODULE.covariance_gate
 compute_robust_stability = _MODULE.compute_robust_stability
 evaluate_mode = _MODULE.evaluate_mode
+_compute_multimode_summary_blocks = _MODULE._compute_multimode_summary_blocks
 _discover_s2_npz = _MODULE._discover_s2_npz
 _load_signal_from_npz = _MODULE._load_signal_from_npz
 
 _discover_s2_window_meta = _MODULE._discover_s2_window_meta
+
+
+def _summary_mode_payload(*, label: str, f_hz: float, q: float, valid_fraction: float, frac: float = 0.02) -> dict[str, object]:
+    return {
+        "label": label,
+        "ln_f": float(np.log(f_hz)),
+        "ln_Q": float(np.log(q)),
+        "fit": {
+            "stability": {
+                "valid_fraction": valid_fraction,
+                "lnf_p10": float(np.log(f_hz * (1.0 - frac))),
+                "lnf_p50": float(np.log(f_hz)),
+                "lnf_p90": float(np.log(f_hz * (1.0 + frac))),
+                "lnQ_p10": float(np.log(q * (1.0 - frac))),
+                "lnQ_p50": float(np.log(q)),
+                "lnQ_p90": float(np.log(q * (1.0 + frac))),
+            }
+        },
+    }
 
 
 def test_mode_keeps_point_estimate_when_gates_fail() -> None:
@@ -179,6 +199,52 @@ def test_main_populates_source_window_and_avoids_missing_flag(tmp_path: Path) ->
 
     annotations = stage_summary.get("annotations")
     assert annotations["kerr_inconsistency_is_not_fail"] is True
+
+
+def test_summary_blocks_do_not_emit_multimode_ok_for_unusable_221(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run_x"
+    run_dir.mkdir(parents=True)
+
+    viability, _systematics_gate, science_evidence, _annotations = _compute_multimode_summary_blocks(
+        mode_220=_summary_mode_payload(label="220", f_hz=250.0, q=12.0, valid_fraction=0.80),
+        mode_221=_summary_mode_payload(label="221", f_hz=410.0, q=2.3, valid_fraction=0.55),
+        mode_221_ok=False,
+        model_comparison={
+            "delta_bic": None,
+            "decision": {"two_mode_preferred": False},
+            "valid_2mode": False,
+        },
+        run_dir=run_dir,
+    )
+
+    assert viability["class"] == "SINGLEMODE_ONLY"
+    assert science_evidence["status"] == "NOT_EVALUATED"
+    assert "MULTIMODE_GATE" in science_evidence["reason_if_skipped"]
+
+
+def test_summary_blocks_keep_multimode_ok_for_robust_221(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run_y"
+    run_dir.mkdir(parents=True)
+    external_inputs = run_dir / "external_inputs"
+    external_inputs.mkdir(parents=True)
+    (external_inputs / "multimode_viability_inputs.json").write_text(
+        json.dumps({"Rf_kerr_band": [0.88, 1.00]}),
+        encoding="utf-8",
+    )
+
+    viability, _systematics_gate, _science_evidence, _annotations = _compute_multimode_summary_blocks(
+        mode_220=_summary_mode_payload(label="220", f_hz=250.0, q=12.0, valid_fraction=0.80),
+        mode_221=_summary_mode_payload(label="221", f_hz=235.0, q=2.3, valid_fraction=0.55),
+        mode_221_ok=True,
+        model_comparison={
+            "delta_bic": -12.0,
+            "decision": {"two_mode_preferred": True},
+            "valid_2mode": True,
+        },
+        run_dir=run_dir,
+    )
+
+    assert viability["class"] == "MULTIMODE_OK"
 
 
 def test_classify_multimode_viability_is_conservative() -> None:

@@ -28,6 +28,8 @@ BNS_MAX_REMNANT_MASS_MSUN_MIN = 5.0
 BNS_MAX_REMNANT_MASS_MSUN_MAX = 15.0
 
 logger = logging.getLogger(__name__)
+NON_INDEPENDENT = "NON_INDEPENDENT"
+DOMAIN_OUT_OF_DOMAIN = "OUT_OF_DOMAIN"
 
 
 def _utc_now_z() -> str:
@@ -81,7 +83,26 @@ def _compute_score(
     }
 
 
-def _empty_score_payload(verdict: str) -> dict[str, Any]:
+def _semantic_fields(
+    *,
+    reason: str,
+    domain_status: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "independence_class": NON_INDEPENDENT,
+        "reason": reason,
+    }
+    if domain_status is not None:
+        payload["domain_status"] = domain_status
+    return payload
+
+
+def _empty_score_payload(
+    verdict: str,
+    *,
+    reason: str,
+    domain_status: str | None = None,
+) -> dict[str, Any]:
     return {
         "chi2_kerr_2dof": None,
         "chi2_cdf_proxy": None,
@@ -94,6 +115,10 @@ def _empty_score_payload(verdict: str) -> dict[str, Any]:
         "predicted_tau221_s": None,
         "gr_threshold_90pct": GR_THRESHOLD_90,
         "gr_threshold_99pct": GR_THRESHOLD_99,
+        **_semantic_fields(
+            reason=reason,
+            domain_status=domain_status,
+        ),
     }
 
 
@@ -373,13 +398,31 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
     _validate_upstream_governance(ctx)
 
     kerr = _load_json_object(kerr_path)
+    kerr_verdict = str(kerr.get("verdict"))
+    kerr_reason = str(kerr.get("reason")) if kerr.get("reason") is not None else None
+    domain_status = str(kerr.get("domain_status")) if kerr.get("domain_status") is not None else None
 
-    if (
-        kerr.get("verdict") == "SKIPPED_MULTIMODE_GATE"
+    if domain_status == DOMAIN_OUT_OF_DOMAIN or kerr_verdict == "SKIPPED_OUT_OF_DOMAIN":
+        score = _empty_score_payload(
+            "SKIPPED_OUT_OF_DOMAIN",
+            domain_status=DOMAIN_OUT_OF_DOMAIN,
+            reason=(
+                kerr_reason
+                or "s4d marked the Kerr inversion out of domain; the conditional 221 residual check is not physically applicable"
+            ),
+        )
+    elif (
+        kerr_verdict == "SKIPPED_MULTIMODE_GATE"
         or kerr.get("M_final_Msun") is None
         or kerr.get("chi_final") is None
     ):
-        score = _empty_score_payload("SKIPPED_S4D_GATE")
+        score = _empty_score_payload(
+            "SKIPPED_S4D_GATE",
+            reason=(
+                kerr_reason
+                or "s4d did not provide a usable Kerr remnant; this conditional 221 residual check was not evaluated"
+            ),
+        )
         score["astrophysical_consistency"] = {
             "source_kind": None,
             "status": "NOT_APPLICABLE",
@@ -420,6 +463,14 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
             sigma_f221=observed["sigma_f221"],
             sigma_tau221=observed["sigma_tau221"],
         )
+        score.update(
+            _semantic_fields(
+                reason=(
+                    "221 residual evaluated conditional on the s4d Kerr remnant; "
+                    "this is not an independent GR support test"
+                ),
+            )
+        )
         event_metadata = _load_event_metadata_for_run(ctx.run_dir)
         astro_consistency = _astrophysical_consistency(M_final=M_final, metadata=event_metadata)
         score["astrophysical_consistency"] = astro_consistency
@@ -459,6 +510,9 @@ def main() -> int:
             verdict="PASS",
             results={
                 "verdict": output_payload.get("verdict"),
+                "independence_class": output_payload.get("independence_class"),
+                "domain_status": output_payload.get("domain_status"),
+                "reason": output_payload.get("reason"),
                 "chi2_kerr_2dof": output_payload.get("chi2_kerr_2dof"),
             },
         )

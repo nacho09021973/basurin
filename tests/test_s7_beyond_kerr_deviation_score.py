@@ -56,6 +56,8 @@ def _seed_upstream(
     kerr_verdict: str = "PASS",
     m_final: float | None = 68.0,
     chi_final: float | None = 0.69,
+    kerr_domain_status: str | None = None,
+    kerr_reason: str | None = None,
     f_scale: float = 1.0,
     tau_scale: float = 1.0,
     zero_iqr_221: bool = False,
@@ -94,6 +96,8 @@ def _seed_upstream(
             "verdict": kerr_verdict,
             "M_final_Msun": m_final,
             "chi_final": chi_final,
+            **({"domain_status": kerr_domain_status} if kerr_domain_status is not None else {}),
+            **({"reason": kerr_reason} if kerr_reason is not None else {}),
         },
     )
 
@@ -135,7 +139,9 @@ def _seed_upstream(
     )
 
 
-def _run_execute_and_finalize(run_id: str) -> tuple[Path, dict[str, Any], dict[str, Any]]:
+def _run_execute_and_finalize(
+    run_id: str,
+) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
     ctx = init_stage(run_id, s7.STAGE, params={})
     artifacts = s7._execute(ctx)
     output_path = artifacts["beyond_kerr_score"]
@@ -144,9 +150,16 @@ def _run_execute_and_finalize(run_id: str) -> tuple[Path, dict[str, Any], dict[s
         ctx,
         artifacts=artifacts,
         verdict="PASS",
-        results={"verdict": payload.get("verdict"), "chi2_kerr_2dof": payload.get("chi2_kerr_2dof")},
+        results={
+            "verdict": payload.get("verdict"),
+            "independence_class": payload.get("independence_class"),
+            "domain_status": payload.get("domain_status"),
+            "reason": payload.get("reason"),
+            "chi2_kerr_2dof": payload.get("chi2_kerr_2dof"),
+        },
     )
-    return ctx.stage_dir, artifacts, payload
+    stage_summary = json.loads((ctx.stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
+    return ctx.stage_dir, artifacts, payload, stage_summary
 
 
 def test_gr_consistent_synthetic(tmp_path: Path, monkeypatch) -> None:
@@ -155,8 +168,11 @@ def test_gr_consistent_synthetic(tmp_path: Path, monkeypatch) -> None:
     run_id = "s7_consistent"
     _seed_upstream(runs_root / run_id, f_scale=1.0, tau_scale=1.0)
 
-    _, _, payload = _run_execute_and_finalize(run_id)
+    _, _, payload, stage_summary = _run_execute_and_finalize(run_id)
     assert payload["verdict"] == "GR_CONSISTENT"
+    assert payload["independence_class"] == "NON_INDEPENDENT"
+    assert "not an independent GR support test" in payload["reason"]
+    assert stage_summary["results"]["independence_class"] == "NON_INDEPENDENT"
     assert payload["chi2_kerr_2dof"] < 4.605
 
 
@@ -166,7 +182,7 @@ def test_gr_inconsistent_large_deviation(tmp_path: Path, monkeypatch) -> None:
     run_id = "s7_inconsistent"
     _seed_upstream(runs_root / run_id, f_scale=1.50, tau_scale=0.50)
 
-    _, _, payload = _run_execute_and_finalize(run_id)
+    _, _, payload, _ = _run_execute_and_finalize(run_id)
     assert payload["verdict"] == "GR_INCONSISTENT"
     assert payload["chi2_kerr_2dof"] > 9.210
 
@@ -182,8 +198,9 @@ def test_skips_gracefully_when_s4d_gated(tmp_path: Path, monkeypatch) -> None:
         chi_final=None,
     )
 
-    _, _, payload = _run_execute_and_finalize(run_id)
+    _, _, payload, _ = _run_execute_and_finalize(run_id)
     assert payload["verdict"] == "SKIPPED_S4D_GATE"
+    assert payload["independence_class"] == "NON_INDEPENDENT"
     assert payload["chi2_kerr_2dof"] is None
     assert payload["epsilon_f"] is None
     assert payload["gr_threshold_90pct"] == 4.605
@@ -196,7 +213,7 @@ def test_contract_outputs_exist_after_run(tmp_path: Path, monkeypatch) -> None:
     run_id = "s7_contract_outputs"
     _seed_upstream(runs_root / run_id)
 
-    stage_dir, artifacts, _ = _run_execute_and_finalize(run_id)
+    stage_dir, artifacts, _, _ = _run_execute_and_finalize(run_id)
     output_path = artifacts["beyond_kerr_score"]
     assert (stage_dir / "outputs" / "beyond_kerr_score.json").exists()
     assert (stage_dir / "stage_summary.json").exists()
@@ -223,7 +240,7 @@ def test_sigma_floor_when_iqr_is_zero(tmp_path: Path, monkeypatch) -> None:
         zero_iqr_221=True,
     )
 
-    _, _, payload = _run_execute_and_finalize(run_id)
+    _, _, payload, _ = _run_execute_and_finalize(run_id)
     assert math.isfinite(payload["delta_f_norm"])
     assert math.isfinite(payload["delta_tau_norm"])
     assert math.isfinite(payload["chi2_kerr_2dof"])
@@ -239,7 +256,7 @@ def test_marks_astro_inconsistent_for_bns_high_mass(tmp_path: Path, monkeypatch)
         {"invocation": {"event_id": "GW170817"}},
     )
 
-    _, _, payload = _run_execute_and_finalize(run_id)
+    _, _, payload, _ = _run_execute_and_finalize(run_id)
     assert payload["verdict"] == "ASTRO_INCONSISTENT"
     assert payload["astrophysical_consistency"]["status"] == "INCONSISTENT"
     assert payload["astrophysical_consistency"]["source_kind"] == "BNS"
@@ -255,7 +272,7 @@ def test_astro_consistency_not_applicable_for_bbh(tmp_path: Path, monkeypatch) -
         {"invocation": {"event_id": "GW150914"}},
     )
 
-    _, _, payload = _run_execute_and_finalize(run_id)
+    _, _, payload, _ = _run_execute_and_finalize(run_id)
     assert payload["verdict"] == "GR_CONSISTENT"
     assert payload["astrophysical_consistency"]["status"] == "NOT_APPLICABLE"
     assert payload["astrophysical_consistency"]["source_kind"] == "BBH"
@@ -271,7 +288,7 @@ def test_bns_mass_prior_boundary_respects_equal_limit(tmp_path: Path, monkeypatc
         {"invocation": {"event_id": "GW170817"}},
     )
 
-    _, _, payload = _run_execute_and_finalize(run_id)
+    _, _, payload, _ = _run_execute_and_finalize(run_id)
     assert payload["astrophysical_consistency"]["status"] == "CONSISTENT"
     assert payload["astrophysical_consistency"]["mass_upper_bound_msun"] == 10.0
 
@@ -287,7 +304,7 @@ def test_bns_mass_prior_is_configurable_from_env(tmp_path: Path, monkeypatch) ->
         {"invocation": {"event_id": "GW170817"}},
     )
 
-    _, _, payload = _run_execute_and_finalize(run_id)
+    _, _, payload, _ = _run_execute_and_finalize(run_id)
     assert payload["verdict"] == "ASTRO_INCONSISTENT"
     assert payload["astrophysical_consistency"]["mass_upper_bound_msun"] == 5.0
 
@@ -327,7 +344,7 @@ def test_inconclusive_when_event_metadata_is_insufficient(tmp_path: Path, monkey
         {"invocation": {"event_id": "GW_MISSING_METADATA"}},
     )
 
-    _, _, payload = _run_execute_and_finalize(run_id)
+    _, _, payload, _ = _run_execute_and_finalize(run_id)
     assert payload["verdict"] == "INCONCLUSIVE"
     assert payload["astrophysical_consistency"]["status"] == "METADATA_INSUFFICIENT"
     assert payload["astrophysical_consistency"]["source_kind"] is None
@@ -340,3 +357,26 @@ def test_prefers_family_priors_signal_for_bns_when_source_class_missing() -> Non
     )
     assert payload["source_kind"] == "BNS"
     assert payload["status"] == "INCONSISTENT"
+
+def test_propagates_out_of_domain_from_s4d(tmp_path: Path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    run_id = "s7_out_of_domain"
+    _seed_upstream(
+        runs_root / run_id,
+        kerr_verdict="SKIPPED_OUT_OF_DOMAIN",
+        m_final=None,
+        chi_final=None,
+        kerr_domain_status="OUT_OF_DOMAIN",
+        kerr_reason="analysis band has no physically useful overlap with the low-mass Kerr modal envelope",
+    )
+
+    _, _, payload, stage_summary = _run_execute_and_finalize(run_id)
+    assert payload["verdict"] == "SKIPPED_OUT_OF_DOMAIN"
+    assert payload["verdict"] != "GR_CONSISTENT"
+    assert payload["domain_status"] == "OUT_OF_DOMAIN"
+    assert payload["independence_class"] == "NON_INDEPENDENT"
+    assert stage_summary["results"]["independence_class"] == "NON_INDEPENDENT"
+    assert stage_summary["results"]["domain_status"] == "OUT_OF_DOMAIN"
+    assert payload["chi2_kerr_2dof"] is None
+    assert "physically useful overlap" in payload["reason"]

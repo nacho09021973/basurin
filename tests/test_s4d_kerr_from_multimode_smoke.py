@@ -4,6 +4,25 @@ import subprocess
 from pathlib import Path
 
 
+def _write_run_provenance(run_dir: Path, *, event_id: str, band_low: float = 150.0, band_high: float = 400.0) -> None:
+    (run_dir / "run_provenance.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "run_provenance_v1",
+                "run_id": run_dir.name,
+                "invocation": {
+                    "event_id": event_id,
+                    "key_params": {
+                        "band_low": band_low,
+                        "band_high": band_high,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_s4d_smoke_minimal(tmp_path: Path) -> None:
     # Use isolated runs root
     runs_root = tmp_path / "runs"
@@ -84,6 +103,7 @@ def test_s4d_extracts_kerr_and_contract_outputs(tmp_path: Path) -> None:
     run_dir = runs_root / run_id
     (run_dir / "RUN_VALID").mkdir(parents=True)
     (run_dir / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}\n', encoding="utf-8")
+    _write_run_provenance(run_dir, event_id="GW150914", band_low=150.0, band_high=400.0)
 
     from mvp.kerr_qnm_fits import kerr_qnm
 
@@ -109,6 +129,52 @@ def test_s4d_extracts_kerr_and_contract_outputs(tmp_path: Path) -> None:
     assert abs(kerr_extract["chi_final"] - chi_true) < 0.03
     assert abs(kerr_extract["delta_f221_Hz"]) / q221.f_hz < 1e-3
     assert abs(kerr_extract["delta_tau221_ms"]) / (q221.tau_s * 1e3) < 0.1
+
+
+def test_s4d_skips_low_mass_bns_domain_when_band_has_no_kerr_overlap(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    os.environ["BASURIN_RUNS_ROOT"] = str(runs_root)
+    run_id = "s4d_gw170817_like_skip"
+    run_dir = runs_root / run_id
+    (run_dir / "RUN_VALID").mkdir(parents=True)
+    (run_dir / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}\n', encoding="utf-8")
+    _write_run_provenance(run_dir, event_id="GW170817", band_low=150.0, band_high=400.0)
+
+    s3b_out = run_dir / "s3b_multimode_estimates" / "outputs"
+    s3b_out.mkdir(parents=True)
+    multimode = {
+        "estimates": {
+            "per_mode": {
+                "220": {"f_hz": {"p10": 180.0, "p50": 200.0, "p90": 220.0}, "tau_s": {"p10": 0.003, "p50": 0.004, "p90": 0.005}},
+                "221": {"f_hz": {"p10": 280.0, "p50": 320.0, "p90": 360.0}, "tau_s": {"p10": 0.002, "p50": 0.0025, "p90": 0.003}},
+            }
+        },
+        "modes": [
+            {"label": "220", "Sigma": [[0.04, 0.01], [0.01, 0.09]]},
+            {"label": "221", "Sigma": [[0.04, 0.01], [0.01, 0.09]]},
+        ],
+    }
+    (s3b_out / "multimode_estimates.json").write_text(json.dumps(multimode), encoding="utf-8")
+    (run_dir / "s3b_multimode_estimates" / "stage_summary.json").write_text(
+        json.dumps({"multimode_viability": {"class": "MULTIMODE_OK", "reasons": []}}),
+        encoding="utf-8",
+    )
+
+    cp = subprocess.run(["python", "-m", "mvp.s4d_kerr_from_multimode", "--run-id", run_id], capture_output=True, text=True, env=os.environ.copy())
+    assert cp.returncode == 0, cp.stderr
+
+    stage_dir = run_dir / "s4d_kerr_from_multimode"
+    payload = json.loads((stage_dir / "outputs" / "kerr_extraction.json").read_text(encoding="utf-8"))
+    assert payload["verdict"] == "SKIPPED_OUT_OF_DOMAIN"
+    assert payload["domain_status"] == "OUT_OF_DOMAIN"
+    assert payload["M_final_Msun"] is None
+    assert payload["chi_final"] is None
+
+    stage_summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
+    assert stage_summary["verdict"] == "PASS"
+    assert stage_summary["results"]["status"] == "SKIPPED_OUT_OF_DOMAIN"
+    assert stage_summary["results"]["domain_status"] == "OUT_OF_DOMAIN"
+    assert "no physically useful overlap" in stage_summary["results"]["reason"]
 
 
 def test_s4d_aborts_gracefully_when_singlemode_only(tmp_path: Path) -> None:

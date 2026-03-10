@@ -34,6 +34,7 @@ def assess_gr_kerr_family(
     ratio_filter: dict[str, Any],
     kerr_extraction: dict[str, Any],
     beyond_kerr_score: dict[str, Any],
+    kerr_consistency: dict[str, Any],
 ) -> dict[str, Any]:
     families = router_payload.get("families_to_run")
     selected = isinstance(families, list) and FAMILY_GR_KERR in {str(v) for v in families}
@@ -49,12 +50,19 @@ def assess_gr_kerr_family(
     kerr_ratio = ratio_filter.get("kerr_consistency") if isinstance(ratio_filter.get("kerr_consistency"), dict) else {}
     diagnostics = ratio_filter.get("diagnostics") if isinstance(ratio_filter.get("diagnostics"), dict) else {}
     filtering = ratio_filter.get("filtering") if isinstance(ratio_filter.get("filtering"), dict) else {}
+    consistency_source = kerr_consistency.get("source") if isinstance(kerr_consistency.get("source"), dict) else {}
     ratio_consistent = kerr_ratio.get("Rf_consistent")
     informativity_class = diagnostics.get("informativity_class")
     n_input_geometries = filtering.get("n_input_geometries")
     n_ratio_compatible = filtering.get("n_ratio_compatible")
     n_ratio_excluded = filtering.get("n_ratio_excluded")
     n_ratio_not_applicable = filtering.get("n_ratio_not_applicable")
+    independence_class = beyond_kerr_score.get("independence_class")
+    has_explicit_monomode_support = (
+        str(kerr_consistency.get("status")) == "OK"
+        and kerr_consistency.get("kerr_consistent") is True
+        and consistency_source.get("compatible_set_present") is True
+    )
 
     if score_verdict == "ASTRO_INCONSISTENT":
         assessment = "DISFAVORED"
@@ -77,6 +85,16 @@ def assess_gr_kerr_family(
         reason = "Kerr inversion is viable, but the observed 221/220 ratio falls outside the Kerr reference band"
     elif ratio_consistent is False and assessment == "TENSION":
         reason = "Kerr inversion exists with tension and the observed 221/220 ratio is also Kerr-inconsistent"
+
+    if assessment == "SUPPORTED" and not has_explicit_monomode_support:
+        assessment = "INCONCLUSIVE"
+        if independence_class == "NON_INDEPENDENT":
+            reason = (
+                "s7 is a conditional non-independent Kerr check, and s4c did not provide explicit "
+                "compatible monomode support for GR Kerr"
+            )
+        else:
+            reason = "s4c did not provide explicit compatible monomode support for GR Kerr"
 
     has_geometric_support = isinstance(n_input_geometries, int) and n_input_geometries > 0
     if assessment in {"SUPPORTED", "TENSION"} and not has_geometric_support:
@@ -127,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     ratio_path = ctx.run_dir / "s4e_kerr_ratio_filter" / "outputs" / "ratio_filter_result.json"
     kerr_path = ctx.run_dir / "s4d_kerr_from_multimode" / "outputs" / "kerr_extraction.json"
     score_path = ctx.run_dir / "s7_beyond_kerr_deviation_score" / "outputs" / "beyond_kerr_score.json"
+    consistency_path = ctx.run_dir / "s4c_kerr_consistency" / "outputs" / "kerr_consistency.json"
 
     try:
         check_inputs(
@@ -136,17 +155,20 @@ def main(argv: list[str] | None = None) -> int:
                 "ratio_filter": ratio_path,
                 "kerr_extraction": kerr_path,
                 "beyond_kerr_score": score_path,
+                "kerr_consistency": consistency_path,
             },
         )
         router = _load_json_object(router_path)
         ratio = _load_json_object(ratio_path)
         kerr = _load_json_object(kerr_path)
         score = _load_json_object(score_path)
+        consistency = _load_json_object(consistency_path)
         assessment = assess_gr_kerr_family(
             router_payload=router,
             ratio_filter=ratio,
             kerr_extraction=kerr,
             beyond_kerr_score=score,
+            kerr_consistency=consistency,
         )
 
         payload = {

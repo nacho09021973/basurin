@@ -21,10 +21,12 @@ def viability_base_inputs() -> dict[str, object]:
         "f_220_median": 250.0,
         "f_220_iqr": 30.0,
         "valid_fraction_221": 0.55,
+        "mode_221_ok": True,
         "f_221_median": 410.0,
         "f_221_iqr": 90.0,
         "spin_at_floor_frac_221": 0.05,
         "delta_bic": 3.2,
+        "two_mode_preferred": True,
         "Rf_bootstrap_quantiles": {"q05": 0.90, "q50": 0.94, "q95": 0.99},
         "Rf_kerr_band": [0.88, 1.00],
     }
@@ -83,6 +85,28 @@ def test_classification_singlemode_only_when_221_fraction_low(
     assert out["class"] == "SINGLEMODE_ONLY"
 
 
+def test_classification_singlemode_only_when_221_not_usable(
+    viability_base_inputs: dict[str, object],
+) -> None:
+    p = dict(viability_base_inputs)
+    p["mode_221_ok"] = False
+    p["two_mode_preferred"] = True
+    out = classify_multimode_viability(p)
+    assert out["class"] == "SINGLEMODE_ONLY"
+    assert "mode_221_ok=false" in " ".join(out["reasons"])
+
+
+def test_classification_singlemode_only_when_two_mode_not_preferred_or_delta_bic_missing(
+    viability_base_inputs: dict[str, object],
+) -> None:
+    p = dict(viability_base_inputs)
+    p["delta_bic"] = None
+    p["two_mode_preferred"] = False
+    out = classify_multimode_viability(p)
+    assert out["class"] == "SINGLEMODE_ONLY"
+    assert any("delta_bic" in reason or "two_mode_preferred=false" in reason for reason in out["reasons"])
+
+
 def test_classification_boundary_values_are_accepted(viability_base_inputs: dict[str, object]) -> None:
     p = dict(viability_base_inputs)
     p["valid_fraction_220"] = 0.50
@@ -101,6 +125,7 @@ def test_classification_degrades_to_singlemode_with_two_severe_flags(
     p = dict(viability_base_inputs)
     p["spin_at_floor_frac_221"] = 0.31
     p["delta_bic"] = 1.0
+    p["two_mode_preferred"] = None
     out = classify_multimode_viability(p)
     assert out["class"] == "SINGLEMODE_ONLY"
     assert out["metrics"]["n_severe_flags"] >= 2

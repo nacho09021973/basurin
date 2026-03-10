@@ -28,6 +28,7 @@ STAGE = "s8b_family_bns"
 OUTPUT_FILE = "bns_family.json"
 MODEL_STATUS = "PHENOMENOLOGICAL_V1"
 MULTIMODE_OK = "MULTIMODE_OK"
+DOMAIN_OUT_OF_DOMAIN = "OUT_OF_DOMAIN"
 DEFAULT_PRIOR = {
     "remnant_mass_msun_range": [2.3, 3.0],
     "radius_1p6_km_range": [10.5, 13.5],
@@ -57,6 +58,43 @@ def _to_float(value: Any) -> float | None:
     if not math.isfinite(out):
         return None
     return out
+
+
+def _coerce_range(raw: Any) -> tuple[float, float] | None:
+    if not isinstance(raw, list) or len(raw) != 2:
+        return None
+    low = _to_float(raw[0])
+    high = _to_float(raw[1])
+    if low is None or high is None or high <= low:
+        return None
+    return (float(low), float(high))
+
+
+def _extract_analysis_band_hz(
+    *,
+    run_provenance: dict[str, Any],
+    multimode_estimates: dict[str, Any],
+) -> tuple[float, float] | None:
+    invocation = run_provenance.get("invocation")
+    if isinstance(invocation, dict):
+        key_params = invocation.get("key_params")
+        if isinstance(key_params, dict):
+            low = _to_float(key_params.get("band_low"))
+            high = _to_float(key_params.get("band_high"))
+            if low is not None and high is not None and high > low:
+                return (float(low), float(high))
+
+    source = multimode_estimates.get("source")
+    if isinstance(source, dict):
+        window = source.get("window")
+        if isinstance(window, dict):
+            band = _coerce_range(window.get("band_hz"))
+            if band is not None:
+                return band
+        band = _coerce_range(source.get("band_hz"))
+        if band is not None:
+            return band
+    return None
 
 
 def _linspace(lo: float, hi: float, n: int) -> list[float]:
@@ -250,6 +288,20 @@ def _score_candidate(candidate: dict[str, Any], observed_modes: dict[str, dict[s
     }
 
 
+def _atlas_frequency_envelope(candidates: list[dict[str, Any]]) -> tuple[float, float] | None:
+    freqs: list[float] = []
+    for candidate in candidates:
+        for key in ("mode_220", "mode_221"):
+            mode = candidate.get(key)
+            if isinstance(mode, dict):
+                freq = _to_float(mode.get("f_hz"))
+                if freq is not None and freq > 0.0:
+                    freqs.append(float(freq))
+    if not freqs:
+        return None
+    return (float(min(freqs)), float(max(freqs)))
+
+
 def assess_bns_family(
     *,
     router_payload: dict[str, Any],
@@ -279,6 +331,19 @@ def assess_bns_family(
     }
     prior, prior_source = _merge_bns_prior(event_metadata)
     candidates = build_bns_candidate_atlas(prior)
+    analysis_band = _extract_analysis_band_hz(run_provenance=run_provenance, multimode_estimates=multimode_estimates)
+    atlas_envelope = _atlas_frequency_envelope(candidates)
+    out_of_domain_reason: str | None = None
+    if analysis_band is not None and atlas_envelope is not None:
+        overlap_low = max(float(analysis_band[0]), float(atlas_envelope[0]))
+        overlap_high = min(float(analysis_band[1]), float(atlas_envelope[1]))
+        overlap_hz = max(0.0, overlap_high - overlap_low)
+        if overlap_hz <= 0.0:
+            out_of_domain_reason = (
+                "analysis band has no physically useful overlap with the BNS post-merger atlas envelope "
+                f"for this event domain: band_hz=[{analysis_band[0]:.3f}, {analysis_band[1]:.3f}], "
+                f"atlas_envelope_hz=[{atlas_envelope[0]:.3f}, {atlas_envelope[1]:.3f}]"
+            )
 
     scored: list[dict[str, Any]] = []
     for candidate in candidates:
@@ -290,7 +355,10 @@ def assess_bns_family(
     compatible_classes = sorted({str(row["remnant_class"]) for row in compatible})
     best_candidate = compatible[0] if compatible else (scored[0] if scored else None)
 
-    if viability_class != MULTIMODE_OK:
+    if out_of_domain_reason is not None:
+        assessment = "INCONCLUSIVE"
+        reason = out_of_domain_reason
+    elif viability_class != MULTIMODE_OK:
         assessment = "INCONCLUSIVE"
         reason = "BNS family evaluation ran, but multimode viability is not MULTIMODE_OK"
     elif compatible:
@@ -330,7 +398,7 @@ def assess_bns_family(
             "mode_221": best_candidate["mode_221"],
         }
 
-    return {
+    payload = {
         "status": "EVALUATED",
         "assessment": assessment,
         "reason": reason,
@@ -349,6 +417,9 @@ def assess_bns_family(
         "best_candidate": best_view,
         "compatible_candidates": compatible_view,
     }
+    if out_of_domain_reason is not None:
+        payload["domain_status"] = DOMAIN_OUT_OF_DOMAIN
+    return payload
 
 
 def main(argv: list[str] | None = None) -> int:
