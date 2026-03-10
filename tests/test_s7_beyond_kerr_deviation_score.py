@@ -176,6 +176,18 @@ def test_gr_consistent_synthetic(tmp_path: Path, monkeypatch) -> None:
     assert payload["chi2_kerr_2dof"] < 4.605
 
 
+def test_verdict_taxonomy_is_explicit_and_stable() -> None:
+    assert s7.VERDICT_TAXONOMY == (
+        "GR_CONSISTENT",
+        "GR_TENSION",
+        "GR_INCONSISTENT",
+        "SKIPPED_S4D_GATE",
+        "SKIPPED_OUT_OF_DOMAIN",
+        "ASTRO_INCONSISTENT",
+        "INCONCLUSIVE",
+    )
+
+
 def test_gr_inconsistent_large_deviation(tmp_path: Path, monkeypatch) -> None:
     runs_root = tmp_path / "runs"
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))

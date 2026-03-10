@@ -41,6 +41,7 @@ def _read_json(path: Path) -> dict:
 
 
 def _seed_bns_stage_run(run_dir: Path) -> None:
+    write_json_atomic(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
     write_json_atomic(
         run_dir / "s8_family_router" / "outputs" / "family_router.json",
         {
@@ -68,6 +69,7 @@ def _seed_bns_stage_run(run_dir: Path) -> None:
 
 
 def _seed_low_mass_stage_run(run_dir: Path) -> None:
+    write_json_atomic(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
     write_json_atomic(
         run_dir / "s8_family_router" / "outputs" / "family_router.json",
         {
