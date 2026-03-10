@@ -34,7 +34,7 @@ def assess_gr_kerr_family(
     ratio_filter: dict[str, Any],
     kerr_extraction: dict[str, Any],
     beyond_kerr_score: dict[str, Any],
-    kerr_consistency: dict[str, Any],
+    kerr_consistency: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     families = router_payload.get("families_to_run")
     selected = isinstance(families, list) and FAMILY_GR_KERR in {str(v) for v in families}
@@ -50,6 +50,7 @@ def assess_gr_kerr_family(
     kerr_ratio = ratio_filter.get("kerr_consistency") if isinstance(ratio_filter.get("kerr_consistency"), dict) else {}
     diagnostics = ratio_filter.get("diagnostics") if isinstance(ratio_filter.get("diagnostics"), dict) else {}
     filtering = ratio_filter.get("filtering") if isinstance(ratio_filter.get("filtering"), dict) else {}
+    kerr_consistency = kerr_consistency if isinstance(kerr_consistency, dict) else {}
     consistency_source = kerr_consistency.get("source") if isinstance(kerr_consistency.get("source"), dict) else {}
     ratio_consistent = kerr_ratio.get("Rf_consistent")
     informativity_class = diagnostics.get("informativity_class")
