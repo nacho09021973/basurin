@@ -40,3 +40,12 @@ six==1.17.0
 tqdm==4.67.3
 tzlocal==5.3.1
 urllib3==2.6.3
+
+# --- Symbolic discovery (malda/11_kan_pysr_discovery.py) ---
+# Install manually; pin versions here for reproducibility reference.
+# torch: https://pytorch.org/get-started/locally/ (choose CUDA version for GPU)
+# torch>=2.1.0
+# pykan>=0.2.0          # Kolmogorov-Arnold Networks (MIT, Ziming Liu et al.)
+# pysr>=0.18.0          # Symbolic regression (Miles Cranmer)
+# pandas>=2.0.0         # PySR depends on pandas for equation output
+# scikit-learn>=1.3.0   # Optional: feature scaling helpers
