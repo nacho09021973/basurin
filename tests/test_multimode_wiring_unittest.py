@@ -159,6 +159,110 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                 ["rel_iqr_f220=0.833 > 0.5: fundamental frequency poorly constrained"],
             )
 
+    def test_parse_multimode_results_propagates_singlemode_only_out_of_domain_family_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runs_root = Path(td) / "runs"
+            run_id = "gw170817_like_singlemode_chain"
+            run_dir = runs_root / run_id
+
+            s3b_out = run_dir / "s3b_multimode_estimates" / "outputs"
+            s3b_out.mkdir(parents=True, exist_ok=True)
+            (s3b_out / "multimode_estimates.json").write_text(
+                json.dumps({"results": {"verdict": "OK"}}),
+                encoding="utf-8",
+            )
+            (run_dir / "s3b_multimode_estimates" / "stage_summary.json").write_text(
+                json.dumps(
+                    {
+                        "multimode_viability": {
+                            "class": "SINGLEMODE_ONLY",
+                            "reasons": [
+                                "mode_221_ok=false: overtone posterior not usable for multimode inference"
+                            ],
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            s4d_out = run_dir / "s4d_kerr_from_multimode" / "outputs"
+            s4d_out.mkdir(parents=True, exist_ok=True)
+            (s4d_out / "kerr_from_multimode.json").write_text(
+                json.dumps({"status": "SKIPPED_MULTIMODE_GATE"}),
+                encoding="utf-8",
+            )
+
+            router_out = run_dir / "s8_family_router" / "outputs"
+            router_out.mkdir(parents=True, exist_ok=True)
+            (router_out / "family_router.json").write_text(
+                json.dumps(
+                    {
+                        "primary_family": "BNS_REMNANT",
+                        "families_to_run": [
+                            "BNS_REMNANT",
+                            "LOW_MASS_BH_POSTMERGER",
+                            "GR_KERR_BH",
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            s8b_out = run_dir / "s8b_family_bns" / "outputs"
+            s8b_out.mkdir(parents=True, exist_ok=True)
+            (s8b_out / "bns_family.json").write_text(
+                json.dumps(
+                    {
+                        "status": "EVALUATED",
+                        "assessment": "INCONCLUSIVE",
+                        "reason": (
+                            "analysis band has no physically useful overlap with the BNS "
+                            "post-merger atlas envelope for this event domain"
+                        ),
+                        "model_status": "PHENOMENOLOGICAL_V1",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            s8c_out = run_dir / "s8c_family_low_mass_bh_postmerger" / "outputs"
+            s8c_out.mkdir(parents=True, exist_ok=True)
+            (s8c_out / "low_mass_bh_family.json").write_text(
+                json.dumps(
+                    {
+                        "status": "EVALUATED",
+                        "assessment": "INCONCLUSIVE",
+                        "reason": (
+                            "analysis band has no physically useful overlap with the low-mass "
+                            "Kerr modal envelope for this event domain"
+                        ),
+                        "model_status": "LOW_MASS_KERR_PRIOR_V1",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            parsed = pipeline._parse_multimode_results(runs_root, run_id)
+
+            self.assertEqual(parsed["multimode_viability_class"], "SINGLEMODE_ONLY")
+            self.assertTrue(
+                any("mode_221_ok=false" in reason for reason in parsed["multimode_viability_reasons"])
+            )
+            self.assertEqual(parsed["kerr_from_multimode_status"], "SKIPPED_MULTIMODE_GATE")
+            self.assertEqual(parsed["primary_family"], "BNS_REMNANT")
+            self.assertEqual(
+                parsed["families_to_run"],
+                ["BNS_REMNANT", "LOW_MASS_BH_POSTMERGER", "GR_KERR_BH"],
+            )
+
+            bns = parsed["family_assessments"]["BNS_REMNANT"]
+            low_mass = parsed["family_assessments"]["LOW_MASS_BH_POSTMERGER"]
+
+            self.assertEqual(bns["assessment"], "INCONCLUSIVE")
+            self.assertEqual(low_mass["assessment"], "INCONCLUSIVE")
+            self.assertIn("no physically useful overlap", bns["reason"] or "")
+            self.assertIn("no physically useful overlap", low_mass["reason"] or "")
+
     def test_single_with_t0_sweep_missing_script_is_best_effort(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             runs_root = Path(td) / "runs"
