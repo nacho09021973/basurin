@@ -20,6 +20,7 @@ def _mk_run(
     compatible: list[int] | None,
     viability_class: str = "MULTIMODE_OK",
     with_s3b: bool = True,
+    s4i_common: list[str] | None = None,
 ) -> None:
     rv = runs_root / run_id / "RUN_VALID"
     rv.mkdir(parents=True, exist_ok=True)
@@ -32,7 +33,7 @@ def _mk_run(
         "metric": "euclidean_log",
         "n_atlas": 5,
         "ranked_all": [{"geometry_id": f"g{i}"} for i in range(5)],
-        "compatible_geometries": [{"geometry_id": "g0"}],
+        "compatible_geometries": [{"geometry_id": "g0", "compatible": True}],
     }), encoding="utf-8")
 
     s3_stage = runs_root / run_id / "s3_ringdown_estimates"
@@ -61,6 +62,19 @@ def _mk_run(
                 "reasons": [] if viability_class == "MULTIMODE_OK" else ["BOUNDARY_FRACTION_HIGH"],
                 "metrics": {"boundary_fraction": None, "valid_fraction": {"220": 1.0, "221": 1.0}},
             }
+        }), encoding="utf-8")
+
+    if s4i_common is not None:
+        s4i_out = runs_root / run_id / "s4i_common_geometry_intersection" / "outputs"
+        s4i_out.mkdir(parents=True, exist_ok=True)
+        (s4i_out / "common_intersection.json").write_text(json.dumps({
+            "schema_name": "golden_geometry_common",
+            "schema_version": "v1",
+            "run_id": run_id,
+            "stage": "s4i_common_geometry_intersection",
+            "common_geometry_ids": list(s4i_common),
+            "n_common": len(s4i_common),
+            "verdict": "PASS" if s4i_common else "NO_COMMON_GEOMETRIES",
         }), encoding="utf-8")
 
 
@@ -143,6 +157,78 @@ def test_s5_aggregate_fallback_to_s3_when_s3b_absent(tmp_path: Path) -> None:
     assert "MISSING_S3B_UPSTREAM:run_a" in payload["warnings"]
     assert payload["multimode_viability"]["per_event"]["run_a"]["reasons"] == ["MISSING_S3B_UPSTREAM"]
     assert payload["multimode_viability"]["per_event"]["run_a"]["metrics"] == {}
+
+
+def test_s5_multimode_conditioned_population_is_insufficient_with_one_eligible_event(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    _mk_run(runs_root, "run_a", ranked=[0, 1], compatible=[0], viability_class="MULTIMODE_OK")
+    _mk_run(runs_root, "run_b", ranked=[0, 1], compatible=[0], viability_class="SINGLEMODE_ONLY")
+
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s5_aggregate.py"),
+        "--out-run",
+        "agg_mm_insufficient",
+        "--source-runs",
+        "run_a,run_b",
+    ]
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, proc.stderr
+
+    stage_dir = runs_root / "agg_mm_insufficient" / "s5_aggregate"
+    payload = json.loads((stage_dir / "outputs" / "aggregate.json").read_text(encoding="utf-8"))
+    stage_summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
+    assert payload["multimode_conditioned_population"]["status"] == "INSUFFICIENT_POPULATION"
+    assert payload["multimode_conditioned_population"]["n_events_eligible"] == 1
+    assert "need at least 2 eligible events" in payload["multimode_conditioned_population"]["reason"]
+    assert stage_summary["results"]["multimode_conditioned_status"] == "INSUFFICIENT_POPULATION"
+
+
+def test_s5_multimode_conditioned_population_is_not_supported_without_s4i_artifacts(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    _mk_run(runs_root, "run_a", ranked=[0, 1], compatible=[0], viability_class="MULTIMODE_OK")
+    _mk_run(runs_root, "run_b", ranked=[0, 1], compatible=[0], viability_class="MULTIMODE_OK")
+
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s5_aggregate.py"),
+        "--out-run",
+        "agg_mm_not_supported",
+        "--source-runs",
+        "run_a,run_b",
+    ]
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, proc.stderr
+
+    payload = json.loads((runs_root / "agg_mm_not_supported" / "s5_aggregate" / "outputs" / "aggregate.json").read_text(encoding="utf-8"))
+    assert payload["multimode_conditioned_population"]["status"] == "NOT_SUPPORTED"
+    assert "s4i_common_geometry_intersection/outputs/common_intersection.json" in payload["multimode_conditioned_population"]["reason"]
+    assert payload["multimode_conditioned_population"]["missing_common_intersection_run_ids"] == ["run_a", "run_b"]
+
+
+def test_s5_multimode_conditioned_population_is_supported_when_s4i_exists_for_eligible_subset(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    _mk_run(runs_root, "run_a", ranked=[0, 1], compatible=[0], viability_class="MULTIMODE_OK", s4i_common=["g0", "g1"])
+    _mk_run(runs_root, "run_b", ranked=[0, 1], compatible=[0], viability_class="MULTIMODE_OK", s4i_common=["g1", "g2"])
+
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s5_aggregate.py"),
+        "--out-run",
+        "agg_mm_supported",
+        "--source-runs",
+        "run_a,run_b",
+    ]
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, proc.stderr
+
+    payload = json.loads((runs_root / "agg_mm_supported" / "s5_aggregate" / "outputs" / "aggregate.json").read_text(encoding="utf-8"))
+    assert payload["multimode_conditioned_population"]["status"] == "SUPPORTED"
+    assert payload["multimode_conditioned_population"]["artifact_basis"] == "s4i_common_geometry_intersection"
+    assert payload["multimode_conditioned_population"]["common_geometry_ids"] == ["g1"]
 
 
 def test_s5_aggregate_require_multimode_fails_without_s3b(tmp_path: Path) -> None:

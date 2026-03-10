@@ -188,7 +188,17 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
             s4d_out = run_dir / "s4d_kerr_from_multimode" / "outputs"
             s4d_out.mkdir(parents=True, exist_ok=True)
             (s4d_out / "kerr_from_multimode.json").write_text(
-                json.dumps({"status": "SKIPPED_MULTIMODE_GATE"}),
+                json.dumps(
+                    {
+                        "status": "SKIPPED_MULTIMODE_GATE",
+                        "multimode_fallback": {
+                            "classification": "MULTIMODE_UNAVAILABLE_221",
+                            "fallback_path": "220_ATLAS",
+                            "program_classification": "SINGLE_MODE_CONSTRAINED_PROGRAM",
+                            "reason": "mode_221_ok=false: overtone posterior not usable for multimode inference",
+                        },
+                    }
+                ),
                 encoding="utf-8",
             )
 
@@ -203,6 +213,9 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                             "LOW_MASS_BH_POSTMERGER",
                             "GR_KERR_BH",
                         ],
+                        "program_classification": "SINGLE_MODE_CONSTRAINED_PROGRAM",
+                        "fallback_classification": "MULTIMODE_UNAVAILABLE_221",
+                        "fallback_path": "220_ATLAS",
                     }
                 ),
                 encoding="utf-8",
@@ -249,6 +262,9 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                 any("mode_221_ok=false" in reason for reason in parsed["multimode_viability_reasons"])
             )
             self.assertEqual(parsed["kerr_from_multimode_status"], "SKIPPED_MULTIMODE_GATE")
+            self.assertEqual(parsed["program_classification"], "SINGLE_MODE_CONSTRAINED_PROGRAM")
+            self.assertEqual(parsed["fallback_classification"], "MULTIMODE_UNAVAILABLE_221")
+            self.assertEqual(parsed["fallback_path"], "220_ATLAS")
             self.assertEqual(parsed["primary_family"], "BNS_REMNANT")
             self.assertEqual(
                 parsed["families_to_run"],

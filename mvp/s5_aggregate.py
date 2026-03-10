@@ -43,6 +43,12 @@ ALLOWED_MULTIMODE_VIABILITY_CLASSES = {
 }
 SINGLEMODE_FALLBACK_CLASS = "SINGLEMODE_ONLY"
 SINGLEMODE_FALLBACK_REASON = "MISSING_S3B_UPSTREAM"
+MULTIMODE_CONDITIONED_SUPPORTED = "SUPPORTED"
+MULTIMODE_CONDITIONED_NOT_SUPPORTED = "NOT_SUPPORTED"
+MULTIMODE_CONDITIONED_INSUFFICIENT = "INSUFFICIENT_POPULATION"
+MIN_MULTIMODE_POPULATION_EVENTS = 2
+
+
 def _relpath_under(root: Path, p: Path) -> str:
     """Return POSIX path relative to root when possible, else absolute POSIX path."""
     try:
@@ -214,6 +220,86 @@ def _extract_vector4(s4c_payload: dict[str, Any]) -> dict[str, Any]:
         "delta_tau_221": _first_number(deltas, ["delta_tau_221"]),
         "cov4": s4c_payload.get("cov4") if isinstance(s4c_payload.get("cov4"), list) else None,
     }
+
+
+def _extract_common_intersection_ids(payload: dict[str, Any]) -> list[str]:
+    ids = payload.get("common_geometry_ids")
+    if not isinstance(ids, list):
+        return []
+    return [str(geometry_id) for geometry_id in ids]
+
+
+def compute_multimode_conditioned_population(
+    source_data: list[dict[str, Any]],
+    *,
+    min_events_required: int = MIN_MULTIMODE_POPULATION_EVENTS,
+) -> dict[str, Any]:
+    eligible = [
+        src for src in source_data
+        if src.get("multimode_viability_class") == "MULTIMODE_OK"
+        and bool(src.get("compatible_ids"))
+    ]
+    payload: dict[str, Any] = {
+        "status": None,
+        "reason": None,
+        "min_events_required": int(min_events_required),
+        "n_events_eligible": len(eligible),
+        "eligible_run_ids": [str(src.get("run_id")) for src in eligible],
+        "eligible_event_ids": [str(src.get("event_id")) for src in eligible],
+        "artifact_basis": None,
+        "common_geometry_ids": [],
+        "n_common": 0,
+    }
+
+    if not eligible:
+        payload["status"] = MULTIMODE_CONDITIONED_NOT_SUPPORTED
+        payload["reason"] = (
+            "no events satisfy MULTIMODE_OK with non-empty s4 compatible_set; "
+            "220∩221 population aggregation is not supported"
+        )
+        return payload
+
+    if len(eligible) < min_events_required:
+        payload["status"] = MULTIMODE_CONDITIONED_INSUFFICIENT
+        payload["reason"] = (
+            f"need at least {min_events_required} eligible events with MULTIMODE_OK "
+            f"and non-empty compatible_set; got {len(eligible)}"
+        )
+        return payload
+
+    missing_s4i = [
+        str(src.get("run_id"))
+        for src in eligible
+        if not src.get("s4i_present")
+    ]
+    if missing_s4i:
+        payload["status"] = MULTIMODE_CONDITIONED_NOT_SUPPORTED
+        payload["reason"] = (
+            "canonical per-event 220∩221 artifact missing: "
+            "s4i_common_geometry_intersection/outputs/common_intersection.json"
+        )
+        payload["missing_common_intersection_run_ids"] = missing_s4i
+        return payload
+
+    common_sets = [
+        set(map(str, src.get("common_intersection_ids", [])))
+        for src in eligible
+    ]
+    common_geometry_ids = sorted(set.intersection(*common_sets)) if common_sets else []
+    payload.update(
+        {
+            "status": MULTIMODE_CONDITIONED_SUPPORTED,
+            "reason": (
+                "sufficient eligible events with canonical 220∩221 common-intersection artifacts"
+            ),
+            "artifact_basis": "s4i_common_geometry_intersection",
+            "common_geometry_ids": common_geometry_ids,
+            "n_common": len(common_geometry_ids),
+        }
+    )
+    return payload
+
+
 def aggregate_compatible_sets(
     source_data: list[dict[str, Any]], min_coverage: float = 1.0, top_k: int = 50,
 ) -> dict[str, Any]:
@@ -712,16 +798,26 @@ def main() -> int:
     ranked_paths: dict[str, Path] = {}
     s3b_summary_paths: dict[str, Path] = {}
     s3_summary_paths: dict[str, Path] = {}
+    common_intersection_paths: dict[str, Path] = {}
+    hawking_paths: dict[str, Path] = {}
     for src in source_runs:
         p = out_root / src / "s4_geometry_filter" / "outputs" / "compatible_set.json"
         source_paths[src] = p
         ranked_paths[src] = out_root / src / "s6b_information_geometry_ranked" / "outputs" / "ranked_geometries.json"
         s3b_summary_paths[src] = out_root / src / "s3b_multimode_estimates" / "stage_summary.json"
         s3_summary_paths[src] = out_root / src / "s3_ringdown_estimates" / "stage_summary.json"
+        common_intersection_paths[src] = out_root / src / "s4i_common_geometry_intersection" / "outputs" / "common_intersection.json"
+        hawking_paths[src] = out_root / src / "s4j_hawking_area_filter" / "outputs" / "hawking_area_filter.json"
     check_inputs(
         ctx,
         source_paths,
-        optional={**ranked_paths, **s3b_summary_paths, **s3_summary_paths},
+        optional={
+            **ranked_paths,
+            **s3b_summary_paths,
+            **s3_summary_paths,
+            **common_intersection_paths,
+            **hawking_paths,
+        },
     )
     # Keep metadata portable/auditable: prefer paths relative to runs_root for upstream inputs.
     for rec in ctx.inputs_record:
@@ -815,6 +911,10 @@ def main() -> int:
                 "compatible_indices": [],
                 "multimode_viability_class": None,
                 "compatible_set_schema": {},
+                "s4i_present": False,
+                "common_intersection_ids": [],
+                "s4j_present": False,
+                "hawking_geometry_ids": [],
             })
             if "schema_version" in cs:
                 detected_schema, normalized_schema = _detect_compatible_set_schema(cs, p)
@@ -872,8 +972,33 @@ def main() -> int:
                     source_data[-1]["compatible_indices"] = _parse_s6b_indices(ranked_payload.get("compatible"))
                 except Exception:
                     pass
+            common_intersection_path = common_intersection_paths[src]
+            if common_intersection_path.exists():
+                try:
+                    common_payload = json.loads(common_intersection_path.read_text(encoding="utf-8"))
+                    source_data[-1]["s4i_present"] = True
+                    source_data[-1]["common_intersection_ids"] = _extract_common_intersection_ids(common_payload)
+                except Exception:
+                    pass
+            hawking_path = hawking_paths[src]
+            if hawking_path.exists():
+                try:
+                    hawking_payload = json.loads(hawking_path.read_text(encoding="utf-8"))
+                    golden_ids = hawking_payload.get("golden_geometry_ids")
+                    if isinstance(golden_ids, list):
+                        source_data[-1]["s4j_present"] = True
+                        source_data[-1]["hawking_geometry_ids"] = [str(geometry_id) for geometry_id in golden_ids]
+                except Exception:
+                    pass
 
         result = aggregate_compatible_sets(source_data, args.min_coverage, top_k=args.top_k)
+        multimode_conditioned_population = compute_multimode_conditioned_population(source_data)
+        result["multimode_conditioned_population"] = multimode_conditioned_population
+        conditioned_status = multimode_conditioned_population.get("status")
+        if conditioned_status == MULTIMODE_CONDITIONED_NOT_SUPPORTED:
+            result.setdefault("warnings", []).append("MULTIMODE_CONDITIONED_NOT_SUPPORTED")
+        elif conditioned_status == MULTIMODE_CONDITIONED_INSUFFICIENT:
+            result.setdefault("warnings", []).append("MULTIMODE_CONDITIONED_INSUFFICIENT_POPULATION")
         schema_rows = [
             {
                 "run_id": str(src.get("run_id")),
@@ -935,6 +1060,8 @@ def main() -> int:
             "n_events": result["n_events"],
             "n_common": result["n_common_geometries"],
             "n_unique": result["n_total_unique_geometries"],
+            "multimode_conditioned_status": multimode_conditioned_population.get("status"),
+            "multimode_conditioned_reason": multimode_conditioned_population.get("reason"),
             "diagnostics": {
                 "missing_scalar_kerr_tension": scalar_missing,
             },

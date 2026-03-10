@@ -521,6 +521,9 @@ def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
         "kerr_from_multimode_status": None,
         "multimode_viability_class": None,
         "multimode_viability_reasons": [],
+        "program_classification": None,
+        "fallback_classification": None,
+        "fallback_path": None,
         "primary_family": None,
         "families_to_run": [],
         "family_assessments": {},
@@ -595,6 +598,17 @@ def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
                 if isinstance(viability_class, str):
                     results["multimode_viability_class"] = viability_class
                     results["multimode_viability_reasons"] = _coerce_reason_list(viability.get("reasons"))
+            fallback = payload_s4d.get("multimode_fallback")
+            if isinstance(fallback, dict):
+                classification = fallback.get("classification")
+                if isinstance(classification, str):
+                    results["fallback_classification"] = classification
+                fallback_path = fallback.get("fallback_path")
+                if isinstance(fallback_path, str):
+                    results["fallback_path"] = fallback_path
+                program_classification = fallback.get("program_classification")
+                if isinstance(program_classification, str):
+                    results["program_classification"] = program_classification
 
     router_path = out_root / run_id / "s8_family_router" / "outputs" / "family_router.json"
     if router_path.exists():
@@ -609,6 +623,15 @@ def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
             families_to_run = payload_router.get("families_to_run")
             if isinstance(families_to_run, list):
                 results["families_to_run"] = [str(v) for v in families_to_run]
+            program_classification = payload_router.get("program_classification")
+            if isinstance(program_classification, str):
+                results["program_classification"] = program_classification
+            fallback_classification = payload_router.get("fallback_classification")
+            if isinstance(fallback_classification, str):
+                results["fallback_classification"] = fallback_classification
+            fallback_path = payload_router.get("fallback_path")
+            if isinstance(fallback_path, str):
+                results["fallback_path"] = fallback_path
 
     ratio_path = out_root / run_id / "s4e_kerr_ratio_filter" / "outputs" / "ratio_filter_result.json"
     if ratio_path.exists():
@@ -975,6 +998,9 @@ def run_multimode_event(
             "kerr_from_multimode_status": None,
             "multimode_viability_class": None,
             "multimode_viability_reasons": [],
+            "program_classification": None,
+            "fallback_classification": None,
+            "fallback_path": None,
             "primary_family": None,
             "families_to_run": [],
             "ratio_rf_consistent": None,

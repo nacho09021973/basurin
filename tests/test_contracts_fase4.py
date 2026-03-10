@@ -202,3 +202,9 @@ class TestDAGIntegrity:
 
     def test_s3b_depends_on_s3_output(self):
         assert "s3_ringdown_estimates" in CONTRACTS["s3b_multimode_estimates"].upstream_stages
+
+    def test_s4d_requires_monomode_compatible_set(self):
+        assert "s4_geometry_filter/outputs/compatible_set.json" in CONTRACTS["s4d_kerr_from_multimode"].required_inputs
+
+    def test_router_requires_s4d_output(self):
+        assert "s4d_kerr_from_multimode/outputs/kerr_from_multimode.json" in CONTRACTS["s8_family_router"].required_inputs

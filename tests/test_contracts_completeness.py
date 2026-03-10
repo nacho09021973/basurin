@@ -18,6 +18,8 @@ def test_no_undocumented_dynamic_inputs() -> None:
         "{source_run}/s3b_multimode_estimates/stage_summary.json",
         "{source_run}/s3_ringdown_estimates/stage_summary.json",
         "{source_run}/s6_information_geometry/outputs/curvature.json",
+        "{source_run}/s4i_common_geometry_intersection/outputs/common_intersection.json",
+        "{source_run}/s4j_hawking_area_filter/outputs/hawking_area_filter.json",
     ]
 
 

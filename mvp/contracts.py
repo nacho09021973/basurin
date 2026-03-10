@@ -161,6 +161,8 @@ CONTRACTS: dict[str, StageContract] = {
             "{source_run}/s3b_multimode_estimates/stage_summary.json",  # preferred
             "{source_run}/s3_ringdown_estimates/stage_summary.json",  # fallback when s3b is absent
             "{source_run}/s6_information_geometry/outputs/curvature.json",
+            "{source_run}/s4i_common_geometry_intersection/outputs/common_intersection.json",
+            "{source_run}/s4j_hawking_area_filter/outputs/hawking_area_filter.json",
         ],
         produced_outputs=[
             "outputs/aggregate.json",
@@ -317,6 +319,7 @@ CONTRACTS: dict[str, StageContract] = {
         required_inputs=[
             "s3b_multimode_estimates/outputs/multimode_estimates.json",
             "s3b_multimode_estimates/stage_summary.json",
+            "s4_geometry_filter/outputs/compatible_set.json",
         ],
         external_inputs=[
             "event_metadata",
@@ -326,7 +329,7 @@ CONTRACTS: dict[str, StageContract] = {
             "outputs/kerr_from_multimode_diagnostics.json",
             "outputs/kerr_extraction.json",
         ],
-        upstream_stages=["s3b_multimode_estimates"],
+        upstream_stages=["s3b_multimode_estimates", "s4_geometry_filter"],
     ),
     "s4e_kerr_ratio_filter": StageContract(
         name="s4e_kerr_ratio_filter",
@@ -355,6 +358,7 @@ CONTRACTS: dict[str, StageContract] = {
         required_inputs=[
             "run_provenance.json",
             "s3b_multimode_estimates/stage_summary.json",
+            "s4d_kerr_from_multimode/outputs/kerr_from_multimode.json",
         ],
         external_inputs=[
             "event_metadata",

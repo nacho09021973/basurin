@@ -5,7 +5,13 @@ import math
 from pathlib import Path
 
 from basurin_io import write_json_atomic
-from mvp.s8_family_router import FAMILY_BNS, FAMILY_GR_KERR, FAMILY_LOW_MASS_BH, route_family_candidates
+from mvp.s8_family_router import (
+    FAMILY_BNS,
+    FAMILY_GR_KERR,
+    FAMILY_LOW_MASS_BH,
+    main as s8_router_main,
+    route_family_candidates,
+)
 from mvp.s8a_family_gr_kerr import assess_gr_kerr_family
 from mvp.s8b_family_bns import assess_bns_family, main as s8b_main
 from mvp.s8c_family_low_mass_bh_postmerger import assess_low_mass_bh_family, main as s8c_main
@@ -38,6 +44,32 @@ def _multimode_payload(f220_hz: float, tau220_s: float, f221_hz: float, tau221_s
 
 def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _seed_router_stage_run(run_dir: Path, *, viability_class: str, multimode_fallback: dict | None) -> None:
+    write_json_atomic(run_dir / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    write_json_atomic(
+        run_dir / "run_provenance.json",
+        {
+            "invocation": {
+                "event_id": "GW_ROUTER_STAGE",
+                "key_params": {"band_low": 150.0, "band_high": 400.0},
+            }
+        },
+    )
+    write_json_atomic(
+        run_dir / "s3b_multimode_estimates" / "stage_summary.json",
+        {"multimode_viability": {"class": viability_class, "reasons": ["mode_221_ok=false"] if viability_class != "MULTIMODE_OK" else []}},
+    )
+    payload = {
+        "status": "SKIPPED_MULTIMODE_GATE" if multimode_fallback is not None else "PASS",
+    }
+    if multimode_fallback is not None:
+        payload["multimode_fallback"] = multimode_fallback
+    write_json_atomic(
+        run_dir / "s4d_kerr_from_multimode" / "outputs" / "kerr_from_multimode.json",
+        payload,
+    )
 
 
 def _seed_bns_stage_run(run_dir: Path) -> None:
@@ -144,6 +176,55 @@ def test_router_does_not_emit_generic_domain_status() -> None:
 
     assert routing["primary_family"] == FAMILY_BNS
     assert "domain_status" not in routing
+
+
+def test_router_marks_single_mode_constrained_program_when_221_fallback_is_active() -> None:
+    routing = route_family_candidates(
+        event_id="GW190521_074359",
+        metadata={},
+        known_bbh_catalog_entry=None,
+        multimode_viability_class="SINGLEMODE_ONLY",
+        multimode_fallback={
+            "classification": "MULTIMODE_UNAVAILABLE_221",
+            "fallback_path": "220_ATLAS",
+            "program_classification": "SINGLE_MODE_CONSTRAINED_PROGRAM",
+            "reason": "mode_221_ok=false: overtone posterior not usable for multimode inference",
+        },
+    )
+
+    assert routing["program_classification"] == "SINGLE_MODE_CONSTRAINED_PROGRAM"
+    assert routing["routing_mode"] == "single_mode_constrained_program"
+    assert routing["fallback_classification"] == "MULTIMODE_UNAVAILABLE_221"
+    assert routing["fallback_path"] == "220_ATLAS"
+    assert "mode_221_ok=false" in routing["fallback_reason"]
+
+
+def test_router_stage_propagates_single_mode_fallback_to_stage_summary(tmp_path: Path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    run_id = "s8_router_single_mode_fallback"
+    run_dir = runs_root / run_id
+    _seed_router_stage_run(
+        run_dir,
+        viability_class="SINGLEMODE_ONLY",
+        multimode_fallback={
+            "classification": "MULTIMODE_UNAVAILABLE_221",
+            "fallback_path": "220_ATLAS",
+            "program_classification": "SINGLE_MODE_CONSTRAINED_PROGRAM",
+            "reason": "mode_221_ok=false: overtone posterior not usable for multimode inference",
+        },
+    )
+
+    assert s8_router_main(["--run-id", run_id]) == 0
+
+    payload = _read_json(run_dir / "s8_family_router" / "outputs" / "family_router.json")
+    stage_summary = _read_json(run_dir / "s8_family_router" / "stage_summary.json")
+    assert payload["program_classification"] == "SINGLE_MODE_CONSTRAINED_PROGRAM"
+    assert payload["fallback_classification"] == "MULTIMODE_UNAVAILABLE_221"
+    assert payload["fallback_path"] == "220_ATLAS"
+    assert payload["routing_mode"] == "single_mode_constrained_program"
+    assert stage_summary["results"]["program_classification"] == "SINGLE_MODE_CONSTRAINED_PROGRAM"
+    assert stage_summary["results"]["fallback_classification"] == "MULTIMODE_UNAVAILABLE_221"
 
 
 def test_gr_kerr_family_assessment_supported_when_score_is_consistent() -> None:

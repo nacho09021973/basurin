@@ -33,6 +33,8 @@ ROUTE_STAGE_BY_FAMILY = {
     FAMILY_BNS: "s8b_family_bns",
     FAMILY_LOW_MASS_BH: "s8c_family_low_mass_bh_postmerger",
 }
+PROGRAM_MULTIMODE = "MULTIMODE_PROGRAM"
+PROGRAM_SINGLEMODE_CONSTRAINED = "SINGLE_MODE_CONSTRAINED_PROGRAM"
 
 
 def _repo_root() -> Path:
@@ -119,6 +121,7 @@ def route_family_candidates(
     metadata: dict[str, Any],
     known_bbh_catalog_entry: dict[str, float] | None,
     multimode_viability_class: str | None,
+    multimode_fallback: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     preferred = _normalize_family_list(metadata.get("preferred_families"))
     source_class = _extract_source_class(metadata)
@@ -142,6 +145,26 @@ def route_family_candidates(
         routing_mode = "fallback_multi_family"
         routing_reason = "insufficient source-class metadata; evaluate multiple families"
 
+    program_classification = (
+        PROGRAM_MULTIMODE if multimode_viability_class == "MULTIMODE_OK" else "MULTIMODE_PROGRAM_UNAVAILABLE"
+    )
+    fallback_classification = None
+    fallback_path = None
+    fallback_reason = None
+    if isinstance(multimode_fallback, dict):
+        fallback_classification = multimode_fallback.get("classification")
+        fallback_path = multimode_fallback.get("fallback_path")
+        fallback_reason = multimode_fallback.get("reason")
+        if fallback_classification is not None:
+            routing_mode = "single_mode_constrained_program"
+            routing_reason = str(
+                fallback_reason
+                or "mode 221 unavailable; route families conservatively on the single-mode fallback program"
+            )
+            program_classification = str(
+                multimode_fallback.get("program_classification") or PROGRAM_SINGLEMODE_CONSTRAINED
+            )
+
     family_routes = [
         {
             "family": family,
@@ -159,6 +182,10 @@ def route_family_candidates(
         "has_multimessenger_hint": has_multimessenger,
         "known_bbh_catalog_match": known_bbh_catalog_entry is not None,
         "multimode_viability_class": multimode_viability_class,
+        "program_classification": program_classification,
+        "fallback_classification": fallback_classification,
+        "fallback_path": fallback_path,
+        "fallback_reason": fallback_reason,
         "routing_mode": routing_mode,
         "primary_family": families[0],
         "families_to_run": families,
@@ -174,6 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     ctx = init_stage(args.run_id, STAGE)
     run_provenance_path = ctx.run_dir / "run_provenance.json"
     s3b_summary_path = ctx.run_dir / "s3b_multimode_estimates" / "stage_summary.json"
+    s4d_path = ctx.run_dir / "s4d_kerr_from_multimode" / "outputs" / "kerr_from_multimode.json"
 
     try:
         run_provenance = _load_json_object(run_provenance_path)
@@ -187,17 +215,25 @@ def main(argv: list[str] | None = None) -> int:
         metadata_path = _event_metadata_path(event_id)
         check_inputs(
             ctx,
-            {"run_provenance": run_provenance_path, "s3b_stage_summary": s3b_summary_path},
+            {
+                "run_provenance": run_provenance_path,
+                "s3b_stage_summary": s3b_summary_path,
+                "s4d_kerr_from_multimode": s4d_path,
+            },
             optional={"event_metadata": metadata_path},
         )
 
         s3b_summary = _load_json_object(s3b_summary_path)
+        s4d_payload = _load_json_object(s4d_path)
         multimode_viability = s3b_summary.get("multimode_viability")
         multimode_viability_class = None
         if isinstance(multimode_viability, dict):
             value = multimode_viability.get("class")
             if isinstance(value, str):
                 multimode_viability_class = value
+        multimode_fallback = s4d_payload.get("multimode_fallback")
+        if not isinstance(multimode_fallback, dict):
+            multimode_fallback = None
 
         metadata = _load_json_object(metadata_path) if metadata_path.exists() else {}
         known_bbh = get_event(event_id)
@@ -206,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
             metadata=metadata,
             known_bbh_catalog_entry=known_bbh,
             multimode_viability_class=multimode_viability_class,
+            multimode_fallback=multimode_fallback,
         )
 
         payload = {
@@ -230,6 +267,10 @@ def main(argv: list[str] | None = None) -> int:
                 "routing_mode": routing["routing_mode"],
                 "primary_family": routing["primary_family"],
                 "n_families": len(routing["families_to_run"]),
+                "program_classification": routing["program_classification"],
+                "fallback_classification": routing["fallback_classification"],
+                "fallback_path": routing["fallback_path"],
+                "fallback_reason": routing["fallback_reason"],
             },
         )
         log_stage_paths(ctx)
