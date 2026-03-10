@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 
+from basurin_io import write_json_atomic
 from mvp.s8_family_router import FAMILY_BNS, FAMILY_GR_KERR, FAMILY_LOW_MASS_BH, route_family_candidates
 from mvp.s8a_family_gr_kerr import assess_gr_kerr_family
-from mvp.s8b_family_bns import assess_bns_family
-from mvp.s8c_family_low_mass_bh_postmerger import assess_low_mass_bh_family
+from mvp.s8b_family_bns import assess_bns_family, main as s8b_main
+from mvp.s8c_family_low_mass_bh_postmerger import assess_low_mass_bh_family, main as s8c_main
 
 
 def _mode_payload(label: str, f_hz: float, tau_s: float, frac: float = 0.02) -> dict:
@@ -31,6 +34,76 @@ def _multimode_payload(f220_hz: float, tau220_s: float, f221_hz: float, tau221_s
             _mode_payload("221", f221_hz, tau221_s),
         ]
     }
+
+
+def _read_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _seed_bns_stage_run(run_dir: Path) -> None:
+    write_json_atomic(
+        run_dir / "s8_family_router" / "outputs" / "family_router.json",
+        {
+            "primary_family": FAMILY_BNS,
+            "families_to_run": [FAMILY_BNS, FAMILY_LOW_MASS_BH, FAMILY_GR_KERR],
+        },
+    )
+    write_json_atomic(
+        run_dir / "run_provenance.json",
+        {
+            "invocation": {
+                "event_id": "GW170817_STAGE_SUMMARY",
+                "key_params": {"band_low": 150.0, "band_high": 400.0},
+            }
+        },
+    )
+    write_json_atomic(
+        run_dir / "s3b_multimode_estimates" / "stage_summary.json",
+        {"multimode_viability": {"class": "MULTIMODE_OK"}},
+    )
+    write_json_atomic(
+        run_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json",
+        _multimode_payload(224.0, 0.028, 227.0, 0.026),
+    )
+
+
+def _seed_low_mass_stage_run(run_dir: Path) -> None:
+    write_json_atomic(
+        run_dir / "s8_family_router" / "outputs" / "family_router.json",
+        {
+            "primary_family": FAMILY_BNS,
+            "families_to_run": [FAMILY_BNS, FAMILY_LOW_MASS_BH, FAMILY_GR_KERR],
+        },
+    )
+    write_json_atomic(
+        run_dir / "run_provenance.json",
+        {
+            "invocation": {
+                "event_id": "GW170817_LOW_MASS_STAGE_SUMMARY",
+                "key_params": {"band_low": 150.0, "band_high": 400.0},
+            }
+        },
+    )
+    write_json_atomic(
+        run_dir / "s3b_multimode_estimates" / "stage_summary.json",
+        {"multimode_viability": {"class": "MULTIMODE_OK"}},
+    )
+    write_json_atomic(
+        run_dir / "s4e_kerr_ratio_filter" / "outputs" / "ratio_filter_result.json",
+        {
+            "kerr_consistency": {"Rf_consistent": True},
+            "diagnostics": {"informativity_class": "LOW"},
+            "filtering": {"n_ratio_compatible": 3},
+        },
+    )
+    write_json_atomic(
+        run_dir / "s4d_kerr_from_multimode" / "outputs" / "kerr_extraction.json",
+        {"verdict": "PASS", "M_final_Msun": 2.72, "chi_final": 0.81},
+    )
+    write_json_atomic(
+        run_dir / "s7_beyond_kerr_deviation_score" / "outputs" / "beyond_kerr_score.json",
+        {"verdict": "GR_CONSISTENT"},
+    )
 
 
 def test_router_prefers_known_bbh_catalog_events() -> None:
@@ -262,6 +335,22 @@ def test_bns_family_handler_marks_out_of_domain_when_band_has_no_atlas_overlap()
     assert "no physically useful overlap" in payload["reason"]
 
 
+def test_bns_stage_summary_propagates_domain_status(tmp_path: Path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    run_id = "s8b_stage_summary_domain_status"
+    run_dir = runs_root / run_id
+    _seed_bns_stage_run(run_dir)
+
+    assert s8b_main(["--run-id", run_id]) == 0
+
+    payload = _read_json(run_dir / "s8b_family_bns" / "outputs" / "bns_family.json")
+    stage_summary = _read_json(run_dir / "s8b_family_bns" / "stage_summary.json")
+    assert payload["domain_status"] == "OUT_OF_DOMAIN"
+    assert stage_summary["results"]["assessment"] == "INCONCLUSIVE"
+    assert stage_summary["results"]["domain_status"] == "OUT_OF_DOMAIN"
+
+
 def test_low_mass_bh_family_supports_matching_low_mass_kerr_solution() -> None:
     payload = assess_low_mass_bh_family(
         router_payload={"primary_family": FAMILY_BNS, "families_to_run": [FAMILY_BNS, FAMILY_LOW_MASS_BH, FAMILY_GR_KERR]},
@@ -336,3 +425,19 @@ def test_low_mass_bh_family_marks_out_of_domain_when_band_has_no_kerr_overlap() 
     assert payload["assessment"] == "INCONCLUSIVE"
     assert payload["domain_status"] == "OUT_OF_DOMAIN"
     assert "no physically useful overlap" in payload["reason"]
+
+
+def test_low_mass_stage_summary_propagates_domain_status(tmp_path: Path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    run_id = "s8c_stage_summary_domain_status"
+    run_dir = runs_root / run_id
+    _seed_low_mass_stage_run(run_dir)
+
+    assert s8c_main(["--run-id", run_id]) == 0
+
+    payload = _read_json(run_dir / "s8c_family_low_mass_bh_postmerger" / "outputs" / "low_mass_bh_family.json")
+    stage_summary = _read_json(run_dir / "s8c_family_low_mass_bh_postmerger" / "stage_summary.json")
+    assert payload["domain_status"] == "OUT_OF_DOMAIN"
+    assert stage_summary["results"]["assessment"] == "INCONCLUSIVE"
+    assert stage_summary["results"]["domain_status"] == "OUT_OF_DOMAIN"
