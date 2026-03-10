@@ -20,6 +20,7 @@ for _cand in (_here.parents[0], _here.parents[1]):
 from basurin_io import write_json_atomic
 from mvp.contracts import abort, check_inputs, finalize, init_stage
 from mvp.multimode_viability import (
+    DEFAULT_THRESHOLDS,
     classify_multimode_viability as classify_multimode_viability_v3,
     evaluate_science_evidence,
     evaluate_systematics_gate,
@@ -951,12 +952,15 @@ def classify_multimode_viability(
         {
             "valid_fraction_220": valid_fraction_220,
             "valid_fraction_221": valid_fraction_221,
+            "mode_221_ok": True,
             "f_220_median": 1.0,
             "f_220_iqr": 0.0,
             "f_221_median": 1.0,
             "f_221_iqr": 0.0,
             "Rf_bootstrap_quantiles": {"q05": 0.9, "q50": 1.0, "q95": 1.1},
             "Rf_kerr_band": [0.8, 1.2],
+            "delta_bic": DEFAULT_THRESHOLDS["DELTA_BIC_SUPPORTIVE"],
+            "two_mode_preferred": True,
         }
     )
 

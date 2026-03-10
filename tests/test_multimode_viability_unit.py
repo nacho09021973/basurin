@@ -96,15 +96,25 @@ def test_classification_singlemode_only_when_221_not_usable(
     assert "mode_221_ok=false" in " ".join(out["reasons"])
 
 
-def test_classification_singlemode_only_when_two_mode_not_preferred_or_delta_bic_missing(
+def test_classification_singlemode_only_when_delta_bic_missing(
     viability_base_inputs: dict[str, object],
 ) -> None:
     p = dict(viability_base_inputs)
     p["delta_bic"] = None
+    out = classify_multimode_viability(p)
+    assert out["class"] == "SINGLEMODE_ONLY"
+    assert any("delta_bic" in reason for reason in out["reasons"])
+
+
+def test_classification_singlemode_only_when_two_mode_not_preferred(
+    viability_base_inputs: dict[str, object],
+) -> None:
+    p = dict(viability_base_inputs)
+    p["delta_bic"] = 3.2
     p["two_mode_preferred"] = False
     out = classify_multimode_viability(p)
     assert out["class"] == "SINGLEMODE_ONLY"
-    assert any("delta_bic" in reason or "two_mode_preferred=false" in reason for reason in out["reasons"])
+    assert any("two_mode_preferred=false" in reason for reason in out["reasons"])
 
 
 def test_classification_boundary_values_are_accepted(viability_base_inputs: dict[str, object]) -> None:

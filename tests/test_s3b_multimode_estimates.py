@@ -248,6 +248,13 @@ def test_summary_blocks_keep_multimode_ok_for_robust_221(tmp_path: Path) -> None
 
 
 def test_classify_multimode_viability_is_conservative() -> None:
+    nominal = classify_multimode_viability(
+        boundary_fraction=0.1,
+        valid_fraction_220=0.9,
+        valid_fraction_221=0.6,
+    )
+    assert nominal["class"] == "MULTIMODE_OK"
+
     singlemode = classify_multimode_viability(
         boundary_fraction=1.0,
         valid_fraction_220=0.9,
