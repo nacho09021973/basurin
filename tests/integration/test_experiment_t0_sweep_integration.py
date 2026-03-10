@@ -69,11 +69,16 @@ def test_experiment_t0_sweep_deterministic(tmp_path: Path) -> None:
 
     out_json = runs_root / run_id / "experiment" / "t0_sweep" / "outputs" / "t0_sweep_results.json"
     assert out_json.exists()
+    stage_summary_path = runs_root / run_id / "experiment" / "t0_sweep" / "stage_summary.json"
+    assert stage_summary_path.exists()
 
     payload = json.loads(out_json.read_text(encoding="utf-8"))
+    stage_summary = json.loads(stage_summary_path.read_text(encoding="utf-8"))
     assert payload["schema_version"] == "experiment_t0_sweep_v1"
     assert len(payload["points"]) == 3
     assert [p["t0_ms"] for p in payload["points"]] == [0, 5, 10]
+    assert stage_summary["results"]["execution_path"] == "legacy_s2_only"
+    assert stage_summary["results"]["fallback_reason"] == "missing base s1 strain NPZ"
 
     sha_first = _sha(out_json)
     second = subprocess.run(cmd, cwd=repo, env=env, check=False, capture_output=True, text=True)
