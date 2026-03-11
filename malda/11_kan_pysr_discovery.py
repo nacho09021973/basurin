@@ -81,20 +81,6 @@ from basurin_io import (  # noqa: E402
 # Feature groups
 # ---------------------------------------------------------------------------
 
-# Features used as inputs to models (X matrix).
-# We include both raw and derived quantities so PySR can discover the
-# simplest combination.
-INPUT_FEATURES = [
-    "m1_src", "m2_src", "M_total", "Mchirp",
-    "chi_eff", "Mf", "af",
-    "q", "eta", "delta",
-    "E_rad_frac",
-    "snr", "z", "DL_Mpc",
-    "Q_220", "F_220_dimless", "f_ratio_221_220", "Q_ratio_221_220",
-    "xi_f",
-    "S1_schw", "S2_schw",
-]
-
 # Target variables — we ask "what determines Y?"
 # Each target gets its own PySR run and KAN output head.
 TARGETS = {
@@ -108,12 +94,114 @@ TARGETS = {
     "f_ratio_221_220": "Frequency ratio f_221/f_220  [mass-independent in Kerr]",
 }
 
-# Columns that should be log-transformed before feeding to models
-# (positive-definite, spanning orders of magnitude)
-LOG_TRANSFORM_COLS = {
-    "m1_src", "m2_src", "M_total", "Mchirp", "Mf",
-    "S_f", "S1_schw", "S2_schw", "DL_Mpc",
+# Columns excluded from physical discovery regardless of target.
+UNIVERSAL_DROP = {
+    "event_id",
+    "GPS",
+    "snr",
+    "p_astro",
+    "far_yr",
+    "DL_Mpc",
+    "z",
+    "log_DL",
+    "log1pz",
+    "is_bbh",
+    "is_bns",
+    "is_nsbh",
+    "classification_source",
+    "has_multimessenger",
+    "glitch_mitigated",
+    "catalog",
 }
+
+# Strict scientific discovery space: initial / inspiral state only.
+PREMERGER_ONLY = [
+    "m1_src",
+    "m2_src",
+    "M_total",
+    "Mchirp",
+    "chi_eff",
+    "q",
+    "eta",
+    "delta",
+    "log_q",
+    "Mchirp_over_Mtotal",
+]
+
+# Post-merger or definitional columns that are high-risk for leakage.
+POSTMERGER_AND_LEAKY = {
+    "Mf",
+    "af",
+    "E_rad_Msun",
+    "E_rad_frac",
+    "f_220_hz",
+    "tau_220_s",
+    "Q_220",
+    "F_220_dimless",
+    "f_221_hz",
+    "tau_221_s",
+    "Q_221",
+    "F_221_dimless",
+    "f_330_hz",
+    "tau_330_s",
+    "Q_330",
+    "F_330_dimless",
+    "f_ratio_221_220",
+    "Q_ratio_221_220",
+    "Mf_f220_dimless",
+    "xi_f",
+    "S_f",
+    "S1_schw",
+    "S2_schw",
+    "delta_S",
+    "delta_S_frac",
+    "S_ratio",
+}
+
+# Candidate inputs considered before policy filtering.
+INPUT_FEATURES = PREMERGER_ONLY + ["af"]
+
+TARGET_ALLOWLIST_STRICT = {target: list(PREMERGER_ONLY) for target in TARGETS}
+TARGET_ALLOWLIST_KERR_VALIDATION = {
+    "Q_220": ["af"],
+    "F_220_dimless": ["af"],
+    "f_ratio_221_220": ["af"],
+}
+
+# Columns that should be log-transformed after policy filtering
+# (positive-definite, spanning orders of magnitude).
+LOG_TRANSFORM_COLS = {
+    "m1_src",
+    "m2_src",
+    "M_total",
+    "Mchirp",
+}
+
+
+def resolve_input_features(target_name: str, feature_policy: str) -> tuple[list[str], str]:
+    """Return base input features for a target before any transformations."""
+    if feature_policy == "strict_premerger":
+        allowed = TARGET_ALLOWLIST_STRICT.get(target_name, PREMERGER_ONLY)
+        analysis_mode = "discovery"
+    elif feature_policy == "kerr_validation":
+        allowed = TARGET_ALLOWLIST_KERR_VALIDATION.get(target_name, PREMERGER_ONLY)
+        analysis_mode = "kerr_validation" if target_name in TARGET_ALLOWLIST_KERR_VALIDATION else "discovery"
+    else:
+        raise ValueError(f"Unknown feature policy: {feature_policy}")
+
+    selected: list[str] = []
+    for feature in allowed:
+        if feature in UNIVERSAL_DROP:
+            continue
+        if feature not in INPUT_FEATURES:
+            continue
+        if feature_policy == "strict_premerger" and feature in POSTMERGER_AND_LEAKY:
+            continue
+        if feature not in selected:
+            selected.append(feature)
+    if not selected:
+        raise ValueError(f"No input features resolved for target '{target_name}' under policy '{feature_policy}'")
+    return selected, analysis_mode
 
 
 # ---------------------------------------------------------------------------
@@ -447,6 +535,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Comma-separated subset of targets to run (default: all)",
     )
     parser.add_argument(
+        "--feature-policy",
+        choices=["strict_premerger", "kerr_validation"],
+        default="strict_premerger",
+        help="Feature selection policy applied before any internal transforms (default: strict_premerger)",
+    )
+    parser.add_argument(
         "--no-kan",
         action="store_true",
         help="Skip KAN step (faster, PySR only)",
@@ -533,6 +627,8 @@ def main(argv: list[str] | None = None) -> int:
         "n_events_total": int(data.shape[0]),
         "targets": {},
     }
+    features_by_target: dict[str, list[str]] = {}
+    analysis_mode_by_target: dict[str, str] = {}
 
     # Per-target loop
     for target_name, target_desc in active_targets.items():
@@ -540,24 +636,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"TARGET: {target_name}  ({target_desc})")
         print("="*60)
 
-        exclude_for_target: dict[str, list[str]] = {
-            "Q_220": ["F_220_dimless", "f_ratio_221_220", "Q_ratio_221_220", "Q_220", "tau_220_s", "f_220_hz"],
-            "F_220_dimless": ["Q_220", "f_ratio_221_220", "Q_ratio_221_220", "F_220_dimless"],
-            "f_ratio_221_220": ["Q_ratio_221_220", "F_220_dimless", "Q_220", "f_ratio_221_220"],
-            "S_f": ["delta_S", "S_ratio", "S_f"],
-            "delta_S": ["S_ratio", "S_f", "delta_S"],
-            "S_ratio": ["delta_S", "S_f", "S_ratio"],
-            "E_rad_frac": ["E_rad_Msun", "E_rad_frac"],
-            "af": ["af", "xi_f"],
-        }
-        exclude = set(exclude_for_target.get(target_name, [target_name]))
-        inputs = [f for f in INPUT_FEATURES if f not in exclude]
+        inputs, analysis_mode = resolve_input_features(target_name, args.feature_policy)
 
         try:
             X, y, feat_names = prepare_XY(cols, data, target_name, inputs)
         except ValueError as exc:
             print(f"[11_discovery] Skipping {target_name}: {exc}", file=sys.stderr)
-            all_results["targets"][target_name] = {"status": "skipped", "reason": str(exc)}
+            all_results["targets"][target_name] = {
+                "status": "skipped",
+                "reason": str(exc),
+                "analysis_mode": analysis_mode,
+                "feature_policy": args.feature_policy,
+                "features_selected_base": inputs,
+                "features_used": [],
+            }
+            features_by_target[target_name] = []
+            analysis_mode_by_target[target_name] = analysis_mode
             continue
 
         print(f"  n_valid={len(y)}  features={feat_names}")
@@ -565,13 +659,18 @@ def main(argv: list[str] | None = None) -> int:
 
         target_result: dict[str, Any] = {
             "description": target_desc,
+            "analysis_mode": analysis_mode,
+            "feature_policy": args.feature_policy,
             "n_valid": int(len(y)),
+            "features_selected_base": inputs,
             "features_used": feat_names,
             "y_stats": {
                 "min": float(y.min()), "max": float(y.max()),
                 "mean": float(y.mean()), "std": float(y.std()),
             },
         }
+        features_by_target[target_name] = list(feat_names)
+        analysis_mode_by_target[target_name] = analysis_mode
 
         # KAN
         if not args.no_kan:
@@ -676,6 +775,7 @@ def main(argv: list[str] | None = None) -> int:
         "config": {
             "seed": args.seed,
             "bbh_only": args.bbh_only,
+            "feature_policy": args.feature_policy,
             "no_kan": args.no_kan,
             "no_pysr": args.no_pysr,
             "pysr_iterations": args.pysr_iterations,
@@ -688,6 +788,8 @@ def main(argv: list[str] | None = None) -> int:
             "n_events": int(data.shape[0]),
             "n_targets_run": len([t for t in all_results["targets"].values() if t.get("status") != "skipped"]),
             "n_equations_total": len(all_equations),
+            "features_by_target": features_by_target,
+            "analysis_mode_by_target": analysis_mode_by_target,
         },
         "outputs": {k: str(v) for k, v in artifacts.items()},
     })
