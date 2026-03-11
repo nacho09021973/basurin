@@ -147,6 +147,16 @@ def _failure_pattern(fail_count: int, unknown_count: int, support_count: int) ->
     return "PASS_ALL_SEEN"
 
 
+def _common_candidate_hawking_status(summary_row: dict[str, Any]) -> str:
+    if not bool(summary_row.get("is_common_pre_hawking")):
+        return ""
+    if int(summary_row.get("n_fail_events_area_lower_bound", 0)) > 0:
+        return "DEFINITE_FAIL"
+    if int(summary_row.get("n_fail_events_area_upper_bound", 0)) == 0:
+        return "ROBUST_PASS"
+    return "BOUND_SENSITIVE"
+
+
 def _format_mode(value: Any) -> str:
     if value is None:
         return ""
@@ -612,6 +622,7 @@ def run_feature_foundry(
                 support_count,
             )
             summary_row[f"{metric_label}_fail_events"] = fail_events
+        summary_row["common_candidate_hawking_status"] = _common_candidate_hawking_status(summary_row)
         candidate_summary_by_id[candidate_id] = summary_row
         support_rows.append(summary_row)
 
@@ -654,6 +665,36 @@ def run_feature_foundry(
             metric_field,
         )
         kerr_metric_candidates[metric_label] = survivors
+
+    common_candidate_status_rows = sorted(
+        (
+            {
+                "candidate_id": row["candidate_id"],
+                "M_solar": row["M_solar"],
+                "chi": row["chi"],
+                "family": row["family"],
+                "source": row["source"],
+                "support_count": row["support_count"],
+                "is_kerr_family": row["is_kerr_family"],
+                "common_candidate_hawking_status": row["common_candidate_hawking_status"],
+                "n_fail_events_area_lower_bound": row["n_fail_events_area_lower_bound"],
+                "n_fail_events_area_upper_bound": row["n_fail_events_area_upper_bound"],
+                "n_fail_events_zero_spin_proxy": row["n_fail_events_zero_spin_proxy"],
+                "n_fail_events_chieff_projection_proxy": row["n_fail_events_chieff_projection_proxy"],
+                "area_lower_bound_fail_events": "; ".join(row["area_lower_bound_fail_events"]),
+                "area_upper_bound_fail_events": "; ".join(row["area_upper_bound_fail_events"]),
+                "zero_spin_proxy_fail_events": "; ".join(row["zero_spin_proxy_fail_events"]),
+                "chieff_projection_proxy_fail_events": "; ".join(row["chieff_projection_proxy_fail_events"]),
+            }
+            for row in support_rows
+            if row["is_common_pre_hawking"]
+        ),
+        key=lambda row: (
+            float(row["M_solar"]) if row["M_solar"] is not None else float("inf"),
+            float(row["chi"]) if row["chi"] is not None else float("inf"),
+            str(row["candidate_id"]),
+        ),
+    )
 
     event_rows.sort(key=lambda row: source_runs_resolved.index(row["source_run_id"]))
     candidate_rows.sort(key=lambda row: (source_runs_resolved.index(row["source_run_id"]), int(row["rank"]), row["candidate_id"]))
@@ -723,11 +764,35 @@ def run_feature_foundry(
         "zero_spin_proxy_failure_pattern",
         "chieff_projection_proxy_failure_pattern",
     ]
+    common_candidate_status_fieldnames = [
+        "candidate_id",
+        "M_solar",
+        "chi",
+        "family",
+        "source",
+        "support_count",
+        "is_kerr_family",
+        "common_candidate_hawking_status",
+        "n_fail_events_area_lower_bound",
+        "n_fail_events_area_upper_bound",
+        "n_fail_events_zero_spin_proxy",
+        "n_fail_events_chieff_projection_proxy",
+        "area_lower_bound_fail_events",
+        "area_upper_bound_fail_events",
+        "zero_spin_proxy_fail_events",
+        "chieff_projection_proxy_fail_events",
+    ]
 
     event_csv = ctx.outputs_dir / "event_summary.csv"
     candidate_csv = ctx.outputs_dir / "candidate_rows.csv"
+    common_candidate_status_csv = ctx.outputs_dir / "common_candidate_status.csv"
     _write_csv(event_csv, event_rows, event_fieldnames)
     _write_csv(candidate_csv, candidate_rows, candidate_fieldnames)
+    _write_csv(common_candidate_status_csv, common_candidate_status_rows, common_candidate_status_fieldnames)
+
+    common_status_counts = dict(
+        sorted(Counter(row["common_candidate_hawking_status"] for row in common_candidate_status_rows).items())
+    )
 
     posthoc = {
         "schema_version": "experiment_feature_foundry_v2",
@@ -744,6 +809,7 @@ def run_feature_foundry(
             "n_unique_candidates_kerr_only": len(kerr_only_candidate_ids),
             "n_common_pre_hawking": len(common_pre_hawking),
             "n_common_pre_hawking_kerr_only": len(common_pre_hawking_kerr),
+            "common_candidate_hawking_status_counts": common_status_counts,
             "n_common_hawking_area_lower_bound": len(common_metric_candidates["area_lower_bound"]),
             "n_common_hawking_area_upper_bound": len(common_metric_candidates["area_upper_bound"]),
             "n_common_hawking_zero_spin_proxy": len(common_metric_candidates["zero_spin_proxy"]),
@@ -773,6 +839,7 @@ def run_feature_foundry(
         "chieff_elimination_counts_by_event": common_metric_eliminations["chieff_projection_proxy"],
         "chieff_projection_elimination_counts_by_event": common_metric_eliminations["chieff_projection_proxy"],
         "per_candidate_support": support_rows,
+        "common_candidate_status_rows": common_candidate_status_rows,
         "kerr_only": {
             "candidate_ids": kerr_only_candidate_ids,
             "common_pre_hawking_candidate_ids": common_pre_hawking_kerr,
@@ -796,6 +863,7 @@ def run_feature_foundry(
         artifacts={
             "event_summary_csv": event_csv,
             "candidate_rows_csv": candidate_csv,
+            "common_candidate_status_csv": common_candidate_status_csv,
             "posthoc_checks_json": posthoc_path,
         },
         results={
@@ -804,6 +872,9 @@ def run_feature_foundry(
             "n_candidate_rows": len(candidate_rows),
             "n_unique_candidates": len(candidate_support),
             "n_common_pre_hawking": len(common_pre_hawking),
+            "n_common_candidate_robust_pass": common_status_counts.get("ROBUST_PASS", 0),
+            "n_common_candidate_bound_sensitive": common_status_counts.get("BOUND_SENSITIVE", 0),
+            "n_common_candidate_definite_fail": common_status_counts.get("DEFINITE_FAIL", 0),
             "n_common_hawking_area_lower_bound": len(common_metric_candidates["area_lower_bound"]),
             "n_common_hawking_area_upper_bound": len(common_metric_candidates["area_upper_bound"]),
             "n_common_hawking_zero_spin_proxy": len(common_metric_candidates["zero_spin_proxy"]),

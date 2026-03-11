@@ -169,12 +169,20 @@ def test_feature_foundry_smoke_ranked_fallback_and_path_safety(tmp_path: Path) -
 
     posthoc = json.loads((stage_dir / "outputs" / "posthoc_checks.json").read_text(encoding="utf-8"))
     assert posthoc["summary"]["n_common_pre_hawking"] == 2
+    assert posthoc["summary"]["common_candidate_hawking_status_counts"] == {
+        "DEFINITE_FAIL": 1,
+        "ROBUST_PASS": 1,
+    }
     assert posthoc["summary"]["n_common_hawking_area_lower_bound"] == 1
     assert posthoc["summary"]["n_common_hawking_area_upper_bound"] == 1
     assert posthoc["common_hawking_area_lower_bound_candidate_ids"] == ["geom_big"]
     assert posthoc["common_hawking_zero_spin_candidate_ids"] == ["geom_big"]
     assert posthoc["area_lower_bound_elimination_counts_by_event"] == {"GW_TEST": 1}
     assert posthoc["zero_spin_elimination_counts_by_event"] == {"GW_TEST": 1}
+
+    common_rows = list(csv.DictReader((stage_dir / "outputs" / "common_candidate_status.csv").open("r", encoding="utf-8")))
+    assert [row["candidate_id"] for row in common_rows] == ["geom_small", "geom_big"]
+    assert [row["common_candidate_hawking_status"] for row in common_rows] == ["DEFINITE_FAIL", "ROBUST_PASS"]
 
     assert not (tmp_path / "runs").exists()
 
@@ -280,6 +288,10 @@ def test_feature_foundry_multi_run_support_and_hawking_intersection(tmp_path: Pa
     assert posthoc["common_pre_hawking_candidate_ids"] == ["geom_a", "geom_alt", "geom_b"]
     assert posthoc["common_hawking_area_lower_bound_candidate_ids"] == ["geom_a", "geom_alt", "geom_b"]
     assert posthoc["common_hawking_zero_spin_candidate_ids"] == ["geom_a", "geom_alt"]
+    assert posthoc["summary"]["common_candidate_hawking_status_counts"] == {
+        "BOUND_SENSITIVE": 1,
+        "ROBUST_PASS": 2,
+    }
     assert posthoc["zero_spin_elimination_counts_by_event"] == {"GW_EVT2": 1}
     assert posthoc["summary"]["n_common_pre_hawking_kerr_only"] == 2
     assert posthoc["kerr_only"]["common_pre_hawking_candidate_ids"] == ["geom_a", "geom_b"]
@@ -296,3 +308,11 @@ def test_feature_foundry_multi_run_support_and_hawking_intersection(tmp_path: Pa
     assert geom_b_evt2["n_fail_events_area_lower_bound"] == "0"
     assert geom_b_evt2["area_upper_bound_failure_pattern"] == "FAIL_FEW_SEEN"
     assert geom_b_evt2["area_lower_bound_failure_pattern"] == "PASS_ALL_SEEN"
+
+    common_rows = list(csv.DictReader((stage_dir / "outputs" / "common_candidate_status.csv").open("r", encoding="utf-8")))
+    assert [row["candidate_id"] for row in common_rows] == ["geom_b", "geom_a", "geom_alt"]
+    assert [row["common_candidate_hawking_status"] for row in common_rows] == [
+        "BOUND_SENSITIVE",
+        "ROBUST_PASS",
+        "ROBUST_PASS",
+    ]

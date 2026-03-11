@@ -588,6 +588,7 @@ CONTRACTS: dict[str, StageContract] = {
         produced_outputs=[
             "outputs/event_summary.csv",
             "outputs/candidate_rows.csv",
+            "outputs/common_candidate_status.csv",
             "outputs/posthoc_checks.json",
         ],
         upstream_stages=[],

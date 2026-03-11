@@ -96,6 +96,11 @@ class TestContractRegistry:
         assert "outputs/model_comparison.json" in produced, \
             "s3b_multimode_estimates must declare outputs/model_comparison.json in produced_outputs"
 
+    def test_feature_foundry_declares_common_candidate_status_output(self):
+        """Guardrail: feature_foundry must declare the aggregated common-candidate table."""
+        produced = CONTRACTS["experiment/feature_foundry"].produced_outputs
+        assert "outputs/common_candidate_status.csv" in produced
+
 
 # ── Test 2: init_stage validation ──────────────────────────────────────────
 
