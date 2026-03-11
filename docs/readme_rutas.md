@@ -19,6 +19,8 @@ Objetivo: que una IA (o humano) no pierda 5–6 horas diarias por confundir `RUN
   - `runs/<RUN_ID>/s3b_multimode_estimates/outputs/`
 - **Filtro geométrico (s4):**
   - `runs/<RUN_ID>/s4_geometry_filter/outputs/`
+- **Artefacto consolidado por evento (rama golden geometry explícita):**
+  - `runs/<RUN_ID>/s4k_event_support_region/outputs/event_support_region.json`
 - **Curvatura/diagnóstico (s6/s6b):**
   - `runs/<RUN_ID>/s6*/outputs/curvature*.json`
   - `runs/<RUN_ID>/s6*/outputs/metric_diagnostics*.json`
@@ -214,6 +216,26 @@ Anti-pérdida-de-tiempo:
 - `data/losc/...` no crea `RUN_VALID`.
 - `event_features.csv` no sustituye `RUN_VALID`.
 - Si `runs/<RUN_ID>/RUN_VALID/verdict.json` no existe, `step 12` debe fallar.
+
+### Golden geometry explícita: artefacto canónico por evento
+
+Si ejecutas la rama explícita `s4g -> s4h -> s4i -> s4j`, el artefacto downstream recomendado ya no es mirar cuatro JSON por separado, sino:
+
+- `runs/<RUN_ID>/s4k_event_support_region/outputs/event_support_region.json`
+
+Ese artefacto consolida:
+
+- región compatible `220`
+- región compatible `221`
+- intersección común
+- filtro de Hawking
+- `multimode_viability` desde `s3b`
+- `domain_status` desde `s4d` cuando exista
+
+Regla práctica:
+
+- `s4k_event_support_region` no re-ejecuta física; solo consolida artefactos ya emitidos.
+- Si falta cualquiera de `s4g`, `s4h`, `s4i` o `s4j`, el stage debe fallar por contrato.
 
 ### Rutas de auditoría LOSC/t0 y batch offline
 

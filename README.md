@@ -209,6 +209,7 @@ Estos stages ya existen y representan mas directamente el flujo cientifico "regi
 | `s4h_mode221_geometry_filter` | Filtra el atlas con el observable del modo 221; si falta input de 221, emite `SKIPPED_221_UNAVAILABLE`. | Implementado y contractual. |
 | `s4i_common_geometry_intersection` | Calcula la interseccion de geometrias comunes entre 220 y 221. | Implementado y contractual. |
 | `s4j_hawking_area_filter` | Aplica el filtro de area/Hawking sobre la interseccion comun. | Implementado y contractual. |
+| `s4k_event_support_region` | Consolida `220`, `221`, interseccion, Hawking, `multimode_viability` y `domain_status` en un unico artefacto por evento. | Implementado y contractual; es la salida canónica recomendada para downstream de la rama golden geometry. |
 
 ### 4.3 Gates auxiliares que protegen la interpretacion
 
@@ -265,6 +266,7 @@ En el estado local inspeccionado para esta reescritura, ese subconjunto pasa (`5
 Implementado hoy no significa que ya exista una superficie cientifica definitivamente cerrada. En particular:
 
 - la ruta explicita `220 -> 221 -> interseccion -> Hawking` existe en stages separados, pero el artefacto canonico unico por evento todavia no esta fijado como salida unificada del pipeline multimodo completo;
+- la ruta explicita `220 -> 221 -> interseccion -> Hawking` ya puede consolidarse en `s4k_event_support_region`, pero esa rama todavia no esta orquestada por defecto dentro de `python -m mvp.pipeline multimode`;
 - existen handlers de familia y agregacion poblacional, pero la inferencia poblacional final basada en regiones canonicas por evento sigue siendo objetivo de diseno, no conclusion cerrada;
 - `experiment_population_kerr.py` existe, pero es un experimento no canonico y no debe confundirse con el stage poblacional definitivo que consumira artefactos geometricos por evento.
 
@@ -391,12 +393,14 @@ Regla de interpretacion:
 3. `runs/<run_id>/<stage>/stage_summary.json`
 4. `runs/<run_id>/<stage>/manifest.json`
 5. `runs/<run_id>/s1_fetch_strain/outputs/provenance.json`
+6. `runs/<run_id>/s4k_event_support_region/outputs/event_support_region.json` cuando exista la rama golden geometry explicita
 
 ### 8.2 Rutas practicas
 
 - mapa operativo de rutas: [`docs/readme_rutas.md`](docs/readme_rutas.md)
 - flujo de ejecucion y validaciones: [`docs/request_flow.md`](docs/request_flow.md)
 - semantica multimodo y canal de evidencia: [`docs/multimode_viability_and_evidence.md`](docs/multimode_viability_and_evidence.md)
+- artefacto consolidado por evento de la rama golden geometry: `runs/<run_id>/s4k_event_support_region/outputs/event_support_region.json`
 
 ### 8.3 Atlas y metadatos
 

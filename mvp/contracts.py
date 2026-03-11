@@ -492,6 +492,27 @@ CONTRACTS: dict[str, StageContract] = {
         upstream_stages=["s4i_common_geometry_intersection"],
         check_run_valid=True,
     ),
+    "s4k_event_support_region": StageContract(
+        name="s4k_event_support_region",
+        required_inputs=[
+            "s3b_multimode_estimates/stage_summary.json",
+            "s4g_mode220_geometry_filter/outputs/mode220_filter.json",
+            "s4h_mode221_geometry_filter/outputs/mode221_filter.json",
+            "s4i_common_geometry_intersection/outputs/common_intersection.json",
+            "s4j_hawking_area_filter/outputs/hawking_area_filter.json",
+        ],
+        produced_outputs=[
+            "outputs/event_support_region.json",
+        ],
+        upstream_stages=[
+            "s3b_multimode_estimates",
+            "s4g_mode220_geometry_filter",
+            "s4h_mode221_geometry_filter",
+            "s4i_common_geometry_intersection",
+            "s4j_hawking_area_filter",
+        ],
+        check_run_valid=True,
+    ),
     "experiment_geometry_evidence_vs_gr": StageContract(
         name="experiment_geometry_evidence_vs_gr",
         required_inputs=[
