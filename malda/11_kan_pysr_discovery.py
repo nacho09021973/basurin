@@ -294,6 +294,7 @@ def run_kan(
     out_dir: Path,
     n_epochs: int = 200,
     grid: int = 5,
+    seed: int = 42,
 ) -> dict[str, Any]:
     """Train a KAN on X->y, return activation summary."""
     try:
@@ -336,11 +337,20 @@ def run_kan(
 
     # Build KAN: [n_features, 4, 1]  (small hidden layer)
     n_in = X.shape[1]
-    model = KAN(width=[n_in, max(4, n_in // 2), 1], grid=grid, k=3, device=device)
+    kan_backend_dir = out_dir / "kan_backend" / target_name
+    model = KAN(
+        width=[n_in, max(4, n_in // 2), 1],
+        grid=grid,
+        k=3,
+        device=device,
+        seed=seed,
+        auto_save=False,
+        ckpt_path=str(kan_backend_dir),
+    )
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        results = model.train(dataset, opt="Adam", steps=n_epochs, lamb=0.01, display_metrics=None)
+        results = model.fit(dataset, opt="Adam", steps=n_epochs, lamb=0.01, display_metrics=None)
 
     train_loss = float(results["train_loss"][-1]) if results.get("train_loss") else float("nan")
     test_loss = float(results["test_loss"][-1]) if results.get("test_loss") else float("nan")
@@ -677,6 +687,7 @@ def main(argv: list[str] | None = None) -> int:
             kan_result = run_kan(
                 X, y, feat_names, target_name, outputs_dir,
                 n_epochs=args.kan_epochs,
+                seed=args.seed,
             )
             target_result["kan"] = kan_result
         else:

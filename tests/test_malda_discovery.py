@@ -89,6 +89,28 @@ class _FakePySRRegressor:
         }
 
 
+class _FakeKAN:
+    last_init: dict[str, object] | None = None
+    last_fit: dict[str, object] | None = None
+
+    def __init__(self, **kwargs: object) -> None:
+        type(self).last_init = kwargs
+        self.act_fun = []
+
+    def fit(self, dataset: dict[str, object], **kwargs: object) -> dict[str, list[float]]:
+        type(self).last_fit = {
+            "dataset_keys": sorted(dataset.keys()),
+            "kwargs": kwargs,
+        }
+        return {"train_loss": [0.1], "test_loss": [0.2]}
+
+    def train(self, *args: object, **kwargs: object) -> None:
+        raise AssertionError("run_kan must use model.fit, not model.train")
+
+    def plot(self, folder: str, beta: int) -> None:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+
+
 @pytest.mark.parametrize(
     ("target_name", "blocked_features"),
     [
@@ -175,6 +197,38 @@ def test_run_pysr_uses_backend_directory_and_exports_pareto_csv(
         "y_shape": (2,),
         "variable_names": ["m1_src", "m2_src"],
     }
+
+
+def test_run_kan_uses_fit_and_keeps_backend_under_outputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_kan = types.ModuleType("kan")
+    fake_kan.KAN = _FakeKAN
+    monkeypatch.setitem(sys.modules, "kan", fake_kan)
+
+    out_dir = tmp_path / "runs" / "demo_run" / "experiment" / "malda_discovery" / "outputs"
+    result = _MODULE.run_kan(
+        X=np.array([[1.0, 2.0], [1.5, 2.5], [2.0, 3.0], [2.5, 3.5], [3.0, 4.0]], dtype=np.float64),
+        y=np.array([0.1, 0.2, 0.3, 0.4, 0.5], dtype=np.float64),
+        feat_names=["m1_src", "m2_src"],
+        target_name="E_rad_frac",
+        out_dir=out_dir,
+        n_epochs=3,
+        seed=123,
+    )
+
+    assert _FakeKAN.last_init is not None
+    assert _FakeKAN.last_init["auto_save"] is False
+    assert _FakeKAN.last_init["seed"] == 123
+    assert _FakeKAN.last_init["ckpt_path"] == str(out_dir / "kan_backend" / "E_rad_frac")
+
+    assert _FakeKAN.last_fit == {
+        "dataset_keys": ["test_input", "test_label", "train_input", "train_label"],
+        "kwargs": {"opt": "Adam", "steps": 3, "lamb": 0.01, "display_metrics": None},
+    }
+    assert result["status"] == "ok"
+    assert result["target"] == "E_rad_frac"
 
 
 def test_main_records_strict_feature_policy_and_final_features(
