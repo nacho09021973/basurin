@@ -55,13 +55,13 @@ def test_build_row_falls_back_to_catalog_threshold_for_bbh() -> None:
             "catalog": "synthetic",
         },
         {},
-        {"source_class": None},
     )
 
     assert row["is_bbh"] == 1
     assert row["is_bns"] == 0
     assert row["is_nsbh"] == 0
     assert row["classification_source"] == "catalog_mass_threshold"
+    assert row["has_multimessenger"] == 0
 
 
 def test_build_row_classifies_bns_from_catalog_threshold() -> None:
@@ -75,13 +75,50 @@ def test_build_row_classifies_bns_from_catalog_threshold() -> None:
             "catalog": "synthetic",
         },
         {},
-        {"source_class": None},
     )
 
     assert row["is_bbh"] == 0
     assert row["is_bns"] == 1
     assert row["is_nsbh"] == 0
     assert row["classification_source"] == "catalog_mass_threshold"
+
+
+def test_build_row_classifies_nsbh_from_catalog_threshold() -> None:
+    row = _MODULE.build_row(
+        {
+            "event": "GW_TEST_NSBH",
+            "m1_source": "7.2",
+            "m2_source": "1.8",
+            "chi_eff": "0.0",
+            "final_mass_source": "8.7",
+            "catalog": "synthetic",
+        },
+        {},
+    )
+
+    assert row["is_bbh"] == 0
+    assert row["is_bns"] == 0
+    assert row["is_nsbh"] == 1
+    assert row["classification_source"] == "catalog_mass_threshold"
+
+
+def test_build_row_marks_unknown_when_catalog_masses_are_invalid() -> None:
+    row = _MODULE.build_row(
+        {
+            "event": "GW_TEST_UNKNOWN",
+            "m1_source": "",
+            "m2_source": "nan",
+            "chi_eff": "0.0",
+            "final_mass_source": "8.7",
+            "catalog": "synthetic",
+        },
+        {},
+    )
+
+    assert row["is_bbh"] == 0
+    assert row["is_bns"] == 0
+    assert row["is_nsbh"] == 0
+    assert row["classification_source"] == "unknown"
 
 
 def test_bbh_only_zero_rows_writes_fail_summary(tmp_path: Path, monkeypatch) -> None:
@@ -120,7 +157,6 @@ def test_bbh_only_zero_rows_writes_fail_summary(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setattr(_MODULE, "CATALOG_CSV", catalog_path)
     monkeypatch.setattr(_MODULE, "T0_JSON", t0_path)
     monkeypatch.setattr(_MODULE, "LOSC_DIR", losc_root)
-    monkeypatch.setattr(_MODULE, "META_DIR", tmp_path / "docs" / "ringdown" / "event_metadata")
     monkeypatch.setattr(_MODULE, "write_hdf5", lambda rows, path: None)
 
     run_id = "malda_zero_rows"
@@ -134,6 +170,7 @@ def test_bbh_only_zero_rows_writes_fail_summary(tmp_path: Path, monkeypatch) -> 
     assert summary["reason"] == "bbh_filter_yielded_zero_rows"
     assert manifest["verdict"] == "FAIL"
     assert manifest["reason"] == "bbh_filter_yielded_zero_rows"
+    assert set(summary["config"]) == {"bbh_only", "catalog_csv", "t0_json", "losc_inventory_root"}
     assert (stage_dir / "outputs" / "event_features.csv").exists()
     assert (stage_dir / "outputs" / "feature_catalog.json").exists()
 
@@ -174,7 +211,6 @@ def test_main_respects_temp_runs_root_and_writes_only_inside_stage_dir(tmp_path:
     monkeypatch.setattr(_MODULE, "CATALOG_CSV", catalog_path)
     monkeypatch.setattr(_MODULE, "T0_JSON", t0_path)
     monkeypatch.setattr(_MODULE, "LOSC_DIR", losc_root)
-    monkeypatch.setattr(_MODULE, "META_DIR", tmp_path / "docs" / "ringdown" / "event_metadata")
     monkeypatch.setattr(_MODULE, "write_hdf5", lambda rows, path: None)
 
     run_id = "malda_path_safety"
@@ -188,5 +224,7 @@ def test_main_respects_temp_runs_root_and_writes_only_inside_stage_dir(tmp_path:
     assert len(rows) == 1
     assert rows[0]["is_bbh"] == "1"
     assert rows[0]["classification_source"] == "catalog_mass_threshold"
+    assert rows[0]["has_multimessenger"] == "0"
+    assert set(summary["config"]) == {"bbh_only", "catalog_csv", "t0_json", "losc_inventory_root"}
     assert stage_dir.exists()
     assert not ((Path(__file__).resolve().parents[1] / "runs" / run_id).exists())

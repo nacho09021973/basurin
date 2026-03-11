@@ -6,9 +6,6 @@ Reads:
   - gwtc_events_t0.json         : GPS + posteriors
   - data/losc/                  : local event inventory
 
-Optional compatibility hints:
-  - docs/ringdown/event_metadata/*.json : multimessenger + legacy source_class when present
-
 Computes all derived physical quantities (mass ratios, Kerr QNM predictions
 via Berti fits, black-hole area/entropy proxies, dimensionless combinations).
 
@@ -57,7 +54,6 @@ from basurin_io import (  # noqa: E402
 CATALOG_CSV = REPO_ROOT / "gwtc_quality_events.csv"
 T0_JSON = REPO_ROOT / "gwtc_events_t0.json"
 LOSC_DIR = REPO_ROOT / "data" / "losc"
-META_DIR = REPO_ROOT / "docs" / "ringdown" / "event_metadata"
 
 # Physical constants
 MSUN_S = 4.925491025543576e-6   # G*M_sun/c^3  [seconds]
@@ -165,33 +161,6 @@ def safe_float(value: str | float | None, default: float = float("nan")) -> floa
         return default
 
 
-def _normalize_source_class(value: Any) -> str | None:
-    if value is None:
-        return None
-    token = str(value).strip().lower()
-    if not token or token in {"none", "null", "nan"}:
-        return None
-    return token.replace("-", "_").replace(" ", "_")
-
-
-def _classify_from_source_class(source_class: str | None) -> tuple[int, int, int] | None:
-    if source_class is None:
-        return None
-    if "neutron" in source_class and "black" in source_class:
-        return 0, 0, 1
-    if "neutron_star" in source_class and "black" not in source_class:
-        return 0, 1, 0
-    if "black_hole" in source_class and "neutron" not in source_class:
-        return 1, 0, 0
-    if source_class in {"bbh", "binary_black_hole"}:
-        return 1, 0, 0
-    if source_class in {"bns", "binary_neutron_star"}:
-        return 0, 1, 0
-    if source_class in {"nsbh", "neutron_star_black_hole", "black_hole_neutron_star"}:
-        return 0, 0, 1
-    return None
-
-
 def load_losc_inventory(root: Path) -> set[str]:
     if not root.exists():
         return set()
@@ -202,31 +171,15 @@ def load_losc_inventory(root: Path) -> set[str]:
 # Per-event feature extraction
 # ---------------------------------------------------------------------------
 
-def load_metadata(event_id: str) -> dict[str, Any]:
-    path = META_DIR / f"{event_id}_metadata.json"
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
-    return {}
-
-
-def classify_source(meta: dict[str, Any], m1: float, m2: float) -> dict[str, int | str]:
-    source_class = _normalize_source_class(meta.get("source_class"))
-    from_metadata = _classify_from_source_class(source_class)
-    if from_metadata is not None:
-        is_bbh, is_bns, is_nsbh = from_metadata
-        classification_source = "event_metadata.source_class"
-    elif math.isfinite(m1) and math.isfinite(m2):
-        light = min(m1, m2)
-        heavy = max(m1, m2)
-        if heavy < 3.0:
+def classify_source(m1: float, m2: float) -> dict[str, int | str]:
+    if math.isfinite(m1) and math.isfinite(m2) and m1 > 0.0 and m2 > 0.0:
+        if m1 < 3.0 and m2 < 3.0:
             is_bbh, is_bns, is_nsbh = 0, 1, 0
-            classification_source = "catalog_mass_threshold"
-        elif light < 3.0 <= heavy:
+        elif (m1 < 3.0 <= m2) or (m2 < 3.0 <= m1):
             is_bbh, is_bns, is_nsbh = 0, 0, 1
-            classification_source = "catalog_mass_threshold"
         else:
             is_bbh, is_bns, is_nsbh = 1, 0, 0
-            classification_source = "catalog_mass_threshold"
+        classification_source = "catalog_mass_threshold"
     else:
         is_bbh, is_bns, is_nsbh = 0, 0, 0
         classification_source = "unknown"
@@ -235,14 +188,13 @@ def classify_source(meta: dict[str, Any], m1: float, m2: float) -> dict[str, int
         "is_bns": is_bns,
         "is_nsbh": is_nsbh,
         "classification_source": classification_source,
-        "has_multimessenger": int(bool(meta.get("multimessenger", False))),
+        "has_multimessenger": 0,
     }
 
 
 def build_row(
     cat: dict[str, str],
     t0_entry: dict[str, Any],
-    meta: dict[str, Any],
 ) -> dict[str, float | int | str]:
     row: dict[str, float | int | str] = {}
 
@@ -409,7 +361,7 @@ def build_row(
         row["log1pz"] = float("nan")
 
     # --- Source classification ---
-    row.update(classify_source(meta, m1, m2))
+    row.update(classify_source(m1, m2))
     row["glitch_mitigated"] = int(str(cat.get("glitch_mitigated", "False")).strip() == "True")
 
     # catalog origin
@@ -470,8 +422,8 @@ FEATURE_CATALOG: dict[str, str] = {
     "is_bbh": "Flag: binary black hole merger",
     "is_bns": "Flag: binary neutron star merger",
     "is_nsbh": "Flag: neutron star - black hole merger",
-    "classification_source": "Traceability for source classification: event_metadata.source_class, catalog_mass_threshold, or unknown",
-    "has_multimessenger": "Flag: electromagnetic counterpart detected",
+    "classification_source": "Source classification traceability: catalog_mass_threshold when both source masses are valid, else unknown",
+    "has_multimessenger": "Reserved multimessenger flag; current MALDA feature inputs do not populate it",
     "glitch_mitigated": "Flag: glitch mitigation applied",
     "catalog": "GWTC catalog version",
 }
@@ -584,8 +536,7 @@ def main(argv: list[str] | None = None) -> int:
         if not event_id:
             continue
         t0_entry = t0_data.get(event_id, {})
-        meta = load_metadata(event_id)
-        row = build_row(cat, t0_entry, meta)
+        row = build_row(cat, t0_entry)
 
         if args.bbh_only and not row.get("is_bbh"):
             skipped += 1
@@ -649,7 +600,6 @@ def main(argv: list[str] | None = None) -> int:
             "catalog_csv": str(CATALOG_CSV),
             "t0_json": str(T0_JSON),
             "losc_inventory_root": str(LOSC_DIR),
-            "event_metadata_optional_root": str(META_DIR),
         },
         "results": {
             "n_events": len(feature_rows),

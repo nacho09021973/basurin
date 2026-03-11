@@ -340,17 +340,15 @@ python -m mvp.experiment_offline_batch \
 - mapa operativo de rutas: [`docs/readme_rutas.md`](docs/readme_rutas.md)
 - flujo de ejecucion y validaciones: [`docs/request_flow.md`](docs/request_flow.md)
 - semantica multimodo y canal de evidencia: [`docs/multimode_viability_and_evidence.md`](docs/multimode_viability_and_evidence.md)
-- metadatos de eventos y priors de familia: [`docs/ringdown/event_metadata/README.md`](docs/ringdown/event_metadata/README.md)
 
 ### 8.3 Atlas y metadatos
 
 - Los atlas versionados viven bajo `docs/ringdown/atlas/`.
-- Los metadatos por evento viven bajo `docs/ringdown/event_metadata/`.
+- La clasificacion usada por `malda/10_build_event_feature_table.py` sale del catalogo (`m1_source`, `m2_source`), sin un arbol de metadatos versionados bajo `docs/ringdown/`.
 - Cuando se pase un atlas explicito por CLI, debe ser un fichero versionado y trazable del repositorio o una ruta externa igualmente auditable.
 
 Nota prudente:
 
-- hoy algunos stages consultan metadatos versionados del repositorio cuando existen;
 - la direccion de gobernanza sigue siendo mover todo consumo efectivo de inputs externos hacia artefactos explicitamente anclados y hasheados dentro del run.
 
 ## 9. Hoja de ruta cientifica
