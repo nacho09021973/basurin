@@ -511,6 +511,160 @@ def _run_optional_experiment_t0_sweep(
     return selected_t0_ms
 
 
+def _load_json_object(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Expected JSON object in {path}, got {type(payload).__name__}")
+    return payload
+
+
+def _as_finite_float(value: Any, *, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"Expected finite float for {field}, got {value!r}")
+    coerced = float(value)
+    if not math.isfinite(coerced):
+        raise ValueError(f"Expected finite float for {field}, got {value!r}")
+    return coerced
+
+
+def _stabilize_sigma(value: Any, *, scale: float, field: str) -> float:
+    sigma = abs(_as_finite_float(value, field=field))
+    floor = max(abs(scale) * 1e-6, 1e-12)
+    return max(sigma, floor)
+
+
+def _find_mode_payload(multimode_payload: dict[str, Any], label: str) -> dict[str, Any] | None:
+    modes = multimode_payload.get("modes")
+    if not isinstance(modes, list):
+        return None
+    for item in modes:
+        if isinstance(item, dict) and str(item.get("label")) == label:
+            return item
+    return None
+
+
+def _reasons_indicate_221_unavailable(reasons: list[str]) -> bool:
+    reason_blob = " ".join(str(reason).lower() for reason in reasons)
+    return "mode_221_ok=false" in reason_blob or "overtone posterior not usable" in reason_blob
+
+
+def _build_mode220_obs_payload(run_dir: Path) -> dict[str, float]:
+    estimates_path = run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
+    estimates = _load_json_object(estimates_path)
+    combined = estimates.get("combined")
+    combined_uncertainty = estimates.get("combined_uncertainty")
+    if not isinstance(combined, dict):
+        raise ValueError(f"Invalid estimates schema in {estimates_path}: missing combined object")
+    if not isinstance(combined_uncertainty, dict):
+        raise ValueError(
+            f"Invalid estimates schema in {estimates_path}: missing combined_uncertainty object"
+        )
+
+    obs_f_hz = _as_finite_float(combined.get("f_hz"), field="combined.f_hz")
+    obs_tau_s = _as_finite_float(combined.get("tau_s"), field="combined.tau_s")
+    sigma_f_hz = _stabilize_sigma(
+        combined.get("sigma_f_hz", combined_uncertainty.get("sigma_f_hz")),
+        scale=obs_f_hz,
+        field="combined_uncertainty.sigma_f_hz",
+    )
+    sigma_tau_s = _stabilize_sigma(
+        combined.get("sigma_tau_s", combined_uncertainty.get("sigma_tau_s")),
+        scale=obs_tau_s,
+        field="combined_uncertainty.sigma_tau_s",
+    )
+    return {
+        "obs_f_hz": obs_f_hz,
+        "obs_tau_s": obs_tau_s,
+        "sigma_f_hz": sigma_f_hz,
+        "sigma_tau_s": sigma_tau_s,
+    }
+
+
+def _build_mode221_obs_payload(run_dir: Path) -> dict[str, float] | None:
+    s3b_summary_path = run_dir / "s3b_multimode_estimates" / "stage_summary.json"
+    multimode_path = run_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
+
+    s3b_summary = _load_json_object(s3b_summary_path)
+    multimode_payload = _load_json_object(multimode_path)
+
+    viability = s3b_summary.get("multimode_viability")
+    reasons: list[str] = []
+    if isinstance(viability, dict):
+        raw_reasons = viability.get("reasons")
+        if isinstance(raw_reasons, list):
+            reasons = [str(reason) for reason in raw_reasons]
+    if _reasons_indicate_221_unavailable(reasons):
+        return None
+
+    mode_221 = _find_mode_payload(multimode_payload, "221")
+    if mode_221 is None:
+        return None
+
+    try:
+        ln_f = _as_finite_float(mode_221.get("ln_f"), field="modes[221].ln_f")
+        ln_q = _as_finite_float(mode_221.get("ln_Q"), field="modes[221].ln_Q")
+    except ValueError:
+        return None
+
+    sigma = mode_221.get("Sigma")
+    if not (
+        isinstance(sigma, list)
+        and len(sigma) == 2
+        and all(isinstance(row, list) and len(row) == 2 for row in sigma)
+    ):
+        return None
+
+    try:
+        var_lnf = _as_finite_float(sigma[0][0], field="modes[221].Sigma[0][0]")
+        cov_lnf_lnq = _as_finite_float(sigma[0][1], field="modes[221].Sigma[0][1]")
+        var_lnq = _as_finite_float(sigma[1][1], field="modes[221].Sigma[1][1]")
+    except ValueError:
+        return None
+    if var_lnf < 0.0 or var_lnq < 0.0:
+        return None
+
+    obs_f_hz = math.exp(ln_f)
+    q_221 = math.exp(ln_q)
+    obs_tau_s = q_221 / (math.pi * obs_f_hz)
+    sigma_lnf = math.sqrt(var_lnf)
+    sigma_ln_tau = math.sqrt(max(var_lnq + var_lnf - (2.0 * cov_lnf_lnq), 0.0))
+    sigma_f_hz = max(obs_f_hz * sigma_lnf, obs_f_hz * 1e-6, 1e-12)
+    sigma_tau_s = max(obs_tau_s * sigma_ln_tau, obs_tau_s * 1e-6, 1e-12)
+    return {
+        "obs_f_hz": obs_f_hz,
+        "obs_tau_s": obs_tau_s,
+        "sigma_f_hz": sigma_f_hz,
+        "sigma_tau_s": sigma_tau_s,
+    }
+
+
+def _prepare_explicit_support_region_inputs(out_root: Path, run_id: str) -> dict[str, Any]:
+    run_dir = out_root / run_id
+    mode220_input_path = run_dir / "s4g_mode220_geometry_filter" / "inputs" / "mode220_obs.json"
+    mode221_input_path = run_dir / "s4h_mode221_geometry_filter" / "inputs" / "mode221_obs.json"
+
+    mode220_payload = _build_mode220_obs_payload(run_dir)
+    mode220_input_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(mode220_input_path, mode220_payload)
+
+    mode221_payload = _build_mode221_obs_payload(run_dir)
+    if mode221_payload is None:
+        mode221_input_path.unlink(missing_ok=True)
+    else:
+        mode221_input_path.parent.mkdir(parents=True, exist_ok=True)
+        write_json_atomic(mode221_input_path, mode221_payload)
+
+    print(
+        f"[pipeline] explicit support-region inputs ready: "
+        f"mode220=present mode221={'present' if mode221_payload is not None else 'skipped'}",
+        flush=True,
+    )
+    return {
+        "mode220_input": str(mode220_input_path),
+        "mode221_input": str(mode221_input_path) if mode221_payload is not None else None,
+    }
+
+
 def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
     results: dict[str, Any] = {
         "kerr_consistent": None,
@@ -1156,6 +1310,37 @@ def run_multimode_event(
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
 
+    try:
+        _prepare_explicit_support_region_inputs(out_root, run_id)
+    except Exception as exc:
+        _set_run_valid_verdict(
+            out_root,
+            run_id,
+            "FAIL",
+            f"explicit support-region input preparation failed: {exc}",
+        )
+        print(
+            f"[pipeline] ABORT: cannot prepare explicit support-region inputs: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return 2, run_id
+
+    explicit_stage_specs = [
+        ("s4g_mode220_geometry_filter.py", ["--run-id", run_id, "--atlas-path", atlas_path], "s4g_mode220_geometry_filter"),
+        ("s4h_mode221_geometry_filter.py", ["--run-id", run_id, "--atlas-path", atlas_path], "s4h_mode221_geometry_filter"),
+        ("s4i_common_geometry_intersection.py", ["--run-id", run_id], "s4i_common_geometry_intersection"),
+        ("s4j_hawking_area_filter.py", ["--run-id", run_id], "s4j_hawking_area_filter"),
+    ]
+    for script, args, label in explicit_stage_specs:
+        rc = _run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s)
+        if rc != 0:
+            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+            _write_timeline(out_root, run_id, timeline)
+            return rc, run_id
+
     s4_args = ["--run", run_id, "--atlas-path", atlas_path, "--epsilon", str(epsilon)]
     rc = _run_stage("s4_geometry_filter.py", s4_args, "s4_geometry_filter", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
@@ -1173,6 +1358,13 @@ def run_multimode_event(
     # Phase B: Kerr inference from multimode (canonical; does not replace s4/s4c)
     s4d_args = ["--run-id", run_id]
     rc = _run_stage("s4d_kerr_from_multimode.py", s4d_args, "s4d_kerr_from_multimode", out_root, run_id, timeline, stage_timeout_s)
+    if rc != 0:
+        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_timeline(out_root, run_id, timeline)
+        return rc, run_id
+
+    s4k_args = ["--run-id", run_id]
+    rc = _run_stage("s4k_event_support_region.py", s4k_args, "s4k_event_support_region", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, run_id, timeline)
