@@ -16,24 +16,27 @@ Here we give PySR the numbers and let it tell us what relationships exist.
 
 Usage:
     # Build feature table first:
-    python malda/10_build_event_feature_table.py
+    python malda/10_build_event_feature_table.py --run-id my_run_01
 
     # Then run discovery (GPU accelerated if CUDA available):
-    python malda/11_kan_pysr_discovery.py
+    python malda/11_kan_pysr_discovery.py --run-id my_run_01
 
     # Restrict to BBH events for cleaner QNM columns:
-    python malda/11_kan_pysr_discovery.py --bbh-only
+    python malda/11_kan_pysr_discovery.py --run-id my_run_01 --bbh-only
 
     # Skip KAN (fast mode, PySR only):
-    python malda/11_kan_pysr_discovery.py --no-kan
+    python malda/11_kan_pysr_discovery.py --run-id my_run_01 --no-kan
 
     # Run KAN only (no PySR):
-    python malda/11_kan_pysr_discovery.py --no-pysr
+    python malda/11_kan_pysr_discovery.py --run-id my_run_01 --no-pysr
 
-Outputs (all in malda/runs/discovery/):
-    pareto_frontier.csv     — PySR equations (complexity vs loss, all targets)
-    kan_activations.json    — KAN learned function descriptions per target
-    discovery_summary.json  — top equations + KAN highlights
+Outputs (under runs/<run-id>/experiment/malda_discovery/):
+    outputs/pareto_frontier_all.csv  — combined PySR Pareto frontier (all targets)
+    outputs/pysr_pareto_<target>.csv — per-target PySR Pareto CSV
+    outputs/discovery_results.json   — full per-target results (KAN + PySR)
+    outputs/discovery_summary.json   — top-1 equation per target
+    manifest.json                    — SHA256 hashes, artifact paths
+    stage_summary.json               — verdict, config, seed
 
 Requirements:
     pip install pysr pykan torch pandas scikit-learn
@@ -58,11 +61,21 @@ from typing import Any
 import numpy as np
 
 # ---------------------------------------------------------------------------
-# Repository layout
+# Repository layout + BASURIN IO
 # ---------------------------------------------------------------------------
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_FEATURE_TABLE = REPO_ROOT / "malda" / "runs" / "feature_table" / "event_features.csv"
-DEFAULT_OUT_DIR = REPO_ROOT / "malda" / "runs" / "discovery"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from basurin_io import (  # noqa: E402
+    resolve_out_root,
+    sha256_file,
+    utc_now_iso,
+    validate_run_id,
+    write_json_atomic,
+    write_manifest,
+    write_stage_summary,
+)
 
 # ---------------------------------------------------------------------------
 # Feature groups
@@ -306,6 +319,7 @@ def run_pysr(
     n_iterations: int = 100,
     maxsize: int = 20,
     use_gpu: bool = False,
+    seed: int = 42,
 ) -> dict[str, Any]:
     """Run PySR symbolic regression on X->y."""
     try:
@@ -345,7 +359,7 @@ def run_pysr(
         verbosity=0,
         progress=False,
         # Reproducibility
-        random_state=42,
+        random_state=seed,
         # Save Pareto CSV
         equation_file=str(pareto_path),
     )
@@ -396,14 +410,17 @@ def main(argv: list[str] | None = None) -> int:
         description="KAN + PySR symbolic discovery on GW event feature table"
     )
     parser.add_argument(
-        "--feature-table",
-        default=str(DEFAULT_FEATURE_TABLE),
-        help="Path to event_features.csv from step 10",
+        "--run-id",
+        required=True,
+        help="BASURIN run identifier (alphanumeric, -, ., _)",
     )
     parser.add_argument(
-        "--out-dir",
-        default=str(DEFAULT_OUT_DIR),
-        help="Output directory for discovery results",
+        "--feature-table",
+        default="",
+        help=(
+            "Path to event_features.csv from step 10. "
+            "Defaults to runs/<run-id>/experiment/malda_feature_table/outputs/event_features.csv"
+        ),
     )
     parser.add_argument(
         "--bbh-only",
@@ -452,20 +469,34 @@ def main(argv: list[str] | None = None) -> int:
         "--seed",
         type=int,
         default=42,
-        help="Random seed for reproducibility",
+        help="Random seed for reproducibility (governs numpy, torch, and PySR)",
     )
     args = parser.parse_args(argv)
 
+    # Seed all RNGs
     np.random.seed(args.seed)
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        import torch
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
+    except ImportError:
+        pass
 
-    # Load data
-    table_path = Path(args.feature_table)
+    runs_root = resolve_out_root("runs")
+    validate_run_id(args.run_id, runs_root)
+    stage_dir = runs_root / args.run_id / "experiment" / "malda_discovery"
+    outputs_dir = stage_dir / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resolve feature table path
+    table_path = Path(args.feature_table) if args.feature_table else (
+        runs_root / args.run_id / "experiment" / "malda_feature_table" / "outputs" / "event_features.csv"
+    )
     if not table_path.exists():
         print(
             f"[11_discovery] ERROR: feature table not found at {table_path}\n"
-            "  Run first: python malda/10_build_event_feature_table.py",
+            f"  Run first: python malda/10_build_event_feature_table.py --run-id {args.run_id}",
             file=sys.stderr,
         )
         return 1
@@ -481,8 +512,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[11_discovery] Running {len(active_targets)} targets: {list(active_targets)}")
 
     # Results accumulator
+    config_dict = vars(args).copy()
+    config_dict["feature_table_resolved"] = str(table_path)
     all_results: dict[str, Any] = {
-        "config": vars(args),
+        "config": config_dict,
         "n_events_total": int(data.shape[0]),
         "targets": {},
     }
@@ -493,9 +526,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"TARGET: {target_name}  ({target_desc})")
         print("="*60)
 
-        # Build input set: exclude the target and highly correlated proxies
-        # (e.g. when predicting Q_220, exclude F_220_dimless since it's a
-        # direct algebraic function of af — that would be trivial)
         exclude_for_target: dict[str, list[str]] = {
             "Q_220": ["F_220_dimless", "f_ratio_221_220", "Q_ratio_221_220", "Q_220", "tau_220_s", "f_220_hz"],
             "F_220_dimless": ["Q_220", "f_ratio_221_220", "Q_ratio_221_220", "F_220_dimless"],
@@ -504,7 +534,7 @@ def main(argv: list[str] | None = None) -> int:
             "delta_S": ["S_ratio", "S_f", "delta_S"],
             "S_ratio": ["delta_S", "S_f", "S_ratio"],
             "E_rad_frac": ["E_rad_Msun", "E_rad_frac"],
-            "af": ["af", "xi_f"],  # xi_f is a direct function of af
+            "af": ["af", "xi_f"],
         }
         exclude = set(exclude_for_target.get(target_name, [target_name]))
         inputs = [f for f in INPUT_FEATURES if f not in exclude]
@@ -532,7 +562,7 @@ def main(argv: list[str] | None = None) -> int:
         # KAN
         if not args.no_kan:
             kan_result = run_kan(
-                X, y, feat_names, target_name, out_dir,
+                X, y, feat_names, target_name, outputs_dir,
                 n_epochs=args.kan_epochs,
             )
             target_result["kan"] = kan_result
@@ -542,10 +572,11 @@ def main(argv: list[str] | None = None) -> int:
         # PySR
         if not args.no_pysr:
             pysr_result = run_pysr(
-                X, y, feat_names, target_name, out_dir,
+                X, y, feat_names, target_name, outputs_dir,
                 n_iterations=args.pysr_iterations,
                 maxsize=args.pysr_maxsize,
                 use_gpu=args.gpu,
+                seed=args.seed,
             )
             target_result["pysr"] = pysr_result
         else:
@@ -560,11 +591,11 @@ def main(argv: list[str] | None = None) -> int:
         for eq in pysr.get("pareto_equations", []):
             all_equations.append({"target": tname, **eq})
 
-    # Save combined Pareto CSV
+    # Save combined Pareto CSV to outputs/
+    combined_path = outputs_dir / "pareto_frontier_all.csv"
     if all_equations:
         try:
             import csv as csvmod
-            combined_path = out_dir / "pareto_frontier_all.csv"
             fieldnames = ["target", "complexity", "loss", "score", "equation", "sympy_format"]
             with open(combined_path, "w", newline="", encoding="utf-8") as f:
                 writer = csvmod.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
@@ -604,16 +635,50 @@ def main(argv: list[str] | None = None) -> int:
 
     all_results["summary"] = summary_rows
 
-    # Save full results JSON
-    results_path = out_dir / "discovery_results.json"
-    results_path.write_text(json.dumps(all_results, indent=2, default=str), encoding="utf-8")
+    # Write outputs to outputs/
+    results_path = outputs_dir / "discovery_results.json"
+    write_json_atomic(results_path, all_results)
     print(f"\n[11_discovery] Full results: {results_path}")
 
-    # Human-readable summary
-    summary_path = out_dir / "discovery_summary.json"
-    summary_path.write_text(json.dumps(summary_rows, indent=2, default=str), encoding="utf-8")
+    summary_path = outputs_dir / "discovery_summary.json"
+    write_json_atomic(summary_path, summary_rows)
     print(f"[11_discovery] Summary: {summary_path}")
-    print(f"\n[11_discovery] Done. Check {out_dir}/ for all outputs.")
+
+    # --- Manifest + stage_summary ---
+    artifacts: dict[str, Any] = {
+        "discovery_results": results_path,
+        "discovery_summary": summary_path,
+    }
+    if combined_path.exists():
+        artifacts["pareto_frontier_all"] = combined_path
+
+    write_manifest(stage_dir, artifacts, extra={"run_id": args.run_id, "stage": "malda_discovery"})
+
+    write_stage_summary(stage_dir, {
+        "stage": "malda_discovery",
+        "verdict": "PASS",
+        "run_id": args.run_id,
+        "created": utc_now_iso(),
+        "config": {
+            "seed": args.seed,
+            "bbh_only": args.bbh_only,
+            "no_kan": args.no_kan,
+            "no_pysr": args.no_pysr,
+            "pysr_iterations": args.pysr_iterations,
+            "pysr_maxsize": args.pysr_maxsize,
+            "kan_epochs": args.kan_epochs,
+            "gpu": args.gpu,
+            "feature_table": str(table_path),
+        },
+        "results": {
+            "n_events": int(data.shape[0]),
+            "n_targets_run": len([t for t in all_results["targets"].values() if t.get("status") != "skipped"]),
+            "n_equations_total": len(all_equations),
+        },
+        "outputs": {k: str(v) for k, v in artifacts.items()},
+    })
+
+    print(f"\n[11_discovery] Done → {stage_dir}")
     return 0
 
 
