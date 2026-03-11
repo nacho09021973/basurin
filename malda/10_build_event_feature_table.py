@@ -4,7 +4,10 @@
 Reads:
   - gwtc_quality_events.csv     : GWTC catalog (56 events)
   - gwtc_events_t0.json         : GPS + posteriors
-  - docs/ringdown/event_metadata/*.json : per-event classification
+  - data/losc/                  : local event inventory
+
+Optional compatibility hints:
+  - docs/ringdown/event_metadata/*.json : multimessenger + legacy source_class when present
 
 Computes all derived physical quantities (mass ratios, Kerr QNM predictions
 via Berti fits, black-hole area/entropy proxies, dimensionless combinations).
@@ -53,6 +56,7 @@ from basurin_io import (  # noqa: E402
 )
 CATALOG_CSV = REPO_ROOT / "gwtc_quality_events.csv"
 T0_JSON = REPO_ROOT / "gwtc_events_t0.json"
+LOSC_DIR = REPO_ROOT / "data" / "losc"
 META_DIR = REPO_ROOT / "docs" / "ringdown" / "event_metadata"
 
 # Physical constants
@@ -161,6 +165,39 @@ def safe_float(value: str | float | None, default: float = float("nan")) -> floa
         return default
 
 
+def _normalize_source_class(value: Any) -> str | None:
+    if value is None:
+        return None
+    token = str(value).strip().lower()
+    if not token or token in {"none", "null", "nan"}:
+        return None
+    return token.replace("-", "_").replace(" ", "_")
+
+
+def _classify_from_source_class(source_class: str | None) -> tuple[int, int, int] | None:
+    if source_class is None:
+        return None
+    if "neutron" in source_class and "black" in source_class:
+        return 0, 0, 1
+    if "neutron_star" in source_class and "black" not in source_class:
+        return 0, 1, 0
+    if "black_hole" in source_class and "neutron" not in source_class:
+        return 1, 0, 0
+    if source_class in {"bbh", "binary_black_hole"}:
+        return 1, 0, 0
+    if source_class in {"bns", "binary_neutron_star"}:
+        return 0, 1, 0
+    if source_class in {"nsbh", "neutron_star_black_hole", "black_hole_neutron_star"}:
+        return 0, 0, 1
+    return None
+
+
+def load_losc_inventory(root: Path) -> set[str]:
+    if not root.exists():
+        return set()
+    return {item.name for item in root.iterdir() if item.is_dir()}
+
+
 # ---------------------------------------------------------------------------
 # Per-event feature extraction
 # ---------------------------------------------------------------------------
@@ -172,12 +209,32 @@ def load_metadata(event_id: str) -> dict[str, Any]:
     return {}
 
 
-def classify_source(meta: dict[str, Any]) -> dict[str, int]:
-    sc = str(meta.get("source_class", "")).lower()
+def classify_source(meta: dict[str, Any], m1: float, m2: float) -> dict[str, int | str]:
+    source_class = _normalize_source_class(meta.get("source_class"))
+    from_metadata = _classify_from_source_class(source_class)
+    if from_metadata is not None:
+        is_bbh, is_bns, is_nsbh = from_metadata
+        classification_source = "event_metadata.source_class"
+    elif math.isfinite(m1) and math.isfinite(m2):
+        light = min(m1, m2)
+        heavy = max(m1, m2)
+        if heavy < 3.0:
+            is_bbh, is_bns, is_nsbh = 0, 1, 0
+            classification_source = "catalog_mass_threshold"
+        elif light < 3.0 <= heavy:
+            is_bbh, is_bns, is_nsbh = 0, 0, 1
+            classification_source = "catalog_mass_threshold"
+        else:
+            is_bbh, is_bns, is_nsbh = 1, 0, 0
+            classification_source = "catalog_mass_threshold"
+    else:
+        is_bbh, is_bns, is_nsbh = 0, 0, 0
+        classification_source = "unknown"
     return {
-        "is_bbh": int("black_hole" in sc and "neutron" not in sc),
-        "is_bns": int("neutron_star" in sc and "black" not in sc),
-        "is_nsbh": int("neutron" in sc and "black" in sc),
+        "is_bbh": is_bbh,
+        "is_bns": is_bns,
+        "is_nsbh": is_nsbh,
+        "classification_source": classification_source,
         "has_multimessenger": int(bool(meta.get("multimessenger", False))),
     }
 
@@ -352,7 +409,7 @@ def build_row(
         row["log1pz"] = float("nan")
 
     # --- Source classification ---
-    row.update(classify_source(meta))
+    row.update(classify_source(meta, m1, m2))
     row["glitch_mitigated"] = int(str(cat.get("glitch_mitigated", "False")).strip() == "True")
 
     # catalog origin
@@ -413,6 +470,7 @@ FEATURE_CATALOG: dict[str, str] = {
     "is_bbh": "Flag: binary black hole merger",
     "is_bns": "Flag: binary neutron star merger",
     "is_nsbh": "Flag: neutron star - black hole merger",
+    "classification_source": "Traceability for source classification: event_metadata.source_class, catalog_mass_threshold, or unknown",
     "has_multimessenger": "Flag: electromagnetic counterpart detected",
     "glitch_mitigated": "Flag: glitch mitigation applied",
     "catalog": "GWTC catalog version",
@@ -433,7 +491,7 @@ def write_hdf5(rows: list[dict], path: Path) -> None:
     # Separate numeric and string columns
     all_keys = list(FEATURE_CATALOG.keys())
     float_keys = []
-    str_keys = ["event_id", "catalog"]
+    str_keys = ["event_id", "classification_source", "catalog"]
 
     for k in all_keys:
         if k not in str_keys:
@@ -514,6 +572,10 @@ def main(argv: list[str] | None = None) -> int:
         t0_data = json.loads(T0_JSON.read_text(encoding="utf-8"))
         print(f"[10_build] Loaded t0 data for {len(t0_data)} events from {T0_JSON.name}")
 
+    losc_inventory = load_losc_inventory(LOSC_DIR)
+    n_catalog_events_with_losc = sum(1 for row in cat_rows if row.get("event", "").strip() in losc_inventory)
+    print(f"[10_build] LOSC inventory: {len(losc_inventory)} local event directories in {LOSC_DIR}")
+
     # --- Build rows ---
     feature_rows: list[dict] = []
     skipped = 0
@@ -550,6 +612,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[10_build] Feature catalog: {catalog_path}")
 
     # --- Manifest + stage_summary ---
+    verdict = "PASS"
+    reason = ""
+    exit_code = 0
+    if args.bbh_only and len(feature_rows) == 0:
+        verdict = "FAIL"
+        reason = "bbh_filter_yielded_zero_rows"
+        exit_code = 2
+
     artifacts: dict[str, Any] = {
         "event_features_csv": csv_path,
         "feature_catalog": catalog_path,
@@ -557,25 +627,50 @@ def main(argv: list[str] | None = None) -> int:
     if h5_path.exists():
         artifacts["event_features_h5"] = h5_path
 
-    write_manifest(stage_dir, artifacts, extra={"run_id": args.run_id, "stage": "malda_feature_table"})
+    manifest_path = write_manifest(
+        stage_dir,
+        artifacts,
+        extra={
+            "run_id": args.run_id,
+            "stage": "malda_feature_table",
+            "verdict": verdict,
+            "reason": reason,
+        },
+    )
 
-    write_stage_summary(stage_dir, {
+    stage_summary_path = write_stage_summary(stage_dir, {
         "stage": "malda_feature_table",
-        "verdict": "PASS",
+        "verdict": verdict,
+        "reason": reason,
         "run_id": args.run_id,
         "created": utc_now_iso(),
-        "config": {"bbh_only": args.bbh_only},
+        "config": {
+            "bbh_only": args.bbh_only,
+            "catalog_csv": str(CATALOG_CSV),
+            "t0_json": str(T0_JSON),
+            "losc_inventory_root": str(LOSC_DIR),
+            "event_metadata_optional_root": str(META_DIR),
+        },
         "results": {
             "n_events": len(feature_rows),
             "n_skipped": skipped,
             "n_features": len(FEATURE_CATALOG),
+            "n_catalog_rows": len(cat_rows),
+            "n_t0_rows": len(t0_data),
+            "n_local_losc_events": len(losc_inventory),
+            "n_catalog_events_with_losc": n_catalog_events_with_losc,
             "columns": list(FEATURE_CATALOG.keys()),
         },
         "outputs": {k: str(v) for k, v in artifacts.items()},
     })
 
     print(f"[10_build] Done. {len(feature_rows)} events × {len(FEATURE_CATALOG)} features → {stage_dir}")
-    return 0
+    print(f"OUT_ROOT={runs_root}")
+    print(f"STAGE_DIR={stage_dir}")
+    print(f"OUTPUTS_DIR={outputs_dir}")
+    print(f"STAGE_SUMMARY={stage_summary_path}")
+    print(f"MANIFEST={manifest_path}")
+    return exit_code
 
 
 if __name__ == "__main__":
