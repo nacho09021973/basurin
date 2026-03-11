@@ -93,7 +93,7 @@ def test_feature_foundry_smoke_ranked_fallback_and_path_safety(tmp_path: Path) -
                     "geometry_id": "geom_small",
                     "f_hz": 200.0,
                     "tau_s": 0.05,
-                    "metadata": {"M_solar": 4.0, "chi": 0.0, "mode": "(2,2,1)", "family": "kerr", "source": "test"},
+                    "metadata": {"M_solar": 3.0, "chi": 0.0, "mode": "(2,2,1)", "family": "kerr", "source": "test"},
                 },
             ]
         },
@@ -150,6 +150,7 @@ def test_feature_foundry_smoke_ranked_fallback_and_path_safety(tmp_path: Path) -
     assert event_rows[0]["candidate_basis"] == "ranked_all_fallback"
     assert event_rows[0]["detectors_used"] == "H1+L1"
     assert event_rows[0]["scientific_outcome"] == "MULTIMODE_UNAVAILABLE_221"
+    assert float(event_rows[0]["initial_area_bound_min"]) < float(event_rows[0]["initial_area_bound_max"])
 
     candidate_rows = list(csv.DictReader((stage_dir / "outputs" / "candidate_rows.csv").open("r", encoding="utf-8")))
     assert len(candidate_rows) == 2
@@ -157,12 +158,22 @@ def test_feature_foundry_smoke_ranked_fallback_and_path_safety(tmp_path: Path) -
     geom_small = next(row for row in candidate_rows if row["candidate_id"] == "geom_small")
     assert geom_big["support_count"] == "1"
     assert geom_big["is_common_pre_hawking"] == "True"
+    assert geom_big["hawking_interval_status"] == "ROBUST_PASS"
+    assert geom_big["area_upper_bound_failure_pattern"] == "PASS_ALL_SEEN"
     assert geom_big["hawking_pass_zero_spin_proxy"] == "True"
+    assert geom_small["hawking_pass_area_lower_bound"] == "False"
+    assert geom_small["hawking_interval_status"] == "DEFINITE_FAIL"
+    assert geom_small["n_fail_events_area_lower_bound"] == "1"
+    assert geom_small["area_lower_bound_failure_pattern"] == "FAIL_ALL_SEEN"
     assert geom_small["hawking_pass_zero_spin_proxy"] == "False"
 
     posthoc = json.loads((stage_dir / "outputs" / "posthoc_checks.json").read_text(encoding="utf-8"))
     assert posthoc["summary"]["n_common_pre_hawking"] == 2
+    assert posthoc["summary"]["n_common_hawking_area_lower_bound"] == 1
+    assert posthoc["summary"]["n_common_hawking_area_upper_bound"] == 1
+    assert posthoc["common_hawking_area_lower_bound_candidate_ids"] == ["geom_big"]
     assert posthoc["common_hawking_zero_spin_candidate_ids"] == ["geom_big"]
+    assert posthoc["area_lower_bound_elimination_counts_by_event"] == {"GW_TEST": 1}
     assert posthoc["zero_spin_elimination_counts_by_event"] == {"GW_TEST": 1}
 
     assert not (tmp_path / "runs").exists()
@@ -195,6 +206,12 @@ def test_feature_foundry_multi_run_support_and_hawking_intersection(tmp_path: Pa
                     "tau_s": 0.04,
                     "metadata": {"M_solar": 5.0, "chi": 0.0, "mode": "(2,2,1)", "family": "kerr", "source": "test"},
                 },
+                {
+                    "geometry_id": "geom_alt",
+                    "f_hz": 110.0,
+                    "tau_s": 0.07,
+                    "metadata": {"M_solar": 20.0, "chi": 0.1, "mode": "(2,2,1)", "family": "alt", "source": "test"},
+                },
             ]
         },
     )
@@ -215,6 +232,7 @@ def test_feature_foundry_multi_run_support_and_hawking_intersection(tmp_path: Pa
         candidates=[
             {"geometry_id": "geom_a", "delta_lnL": 0.0, "d2": 1.0, "posterior_weight": 0.5, "prior_weight": 0.02, "compatible": True},
             {"geometry_id": "geom_b", "delta_lnL": -0.2, "d2": 1.5, "posterior_weight": 0.4, "prior_weight": 0.02, "compatible": True},
+            {"geometry_id": "geom_alt", "delta_lnL": -0.4, "d2": 1.7, "posterior_weight": 0.1, "prior_weight": 0.02, "compatible": True},
         ],
     )
     _make_source_run(
@@ -227,6 +245,7 @@ def test_feature_foundry_multi_run_support_and_hawking_intersection(tmp_path: Pa
             {"geometry_id": "geom_a", "delta_lnL": 0.0, "d2": 1.0, "posterior_weight": 0.6, "prior_weight": 0.02, "compatible": True},
             {"geometry_id": "geom_b", "delta_lnL": -0.1, "d2": 1.2, "posterior_weight": 0.3, "prior_weight": 0.02, "compatible": True},
             {"geometry_id": "geom_c", "delta_lnL": -0.8, "d2": 3.0, "posterior_weight": 0.1, "prior_weight": 0.02, "compatible": True},
+            {"geometry_id": "geom_alt", "delta_lnL": -0.2, "d2": 1.4, "posterior_weight": 0.15, "prior_weight": 0.02, "compatible": True},
         ],
     )
 
@@ -258,12 +277,22 @@ def test_feature_foundry_multi_run_support_and_hawking_intersection(tmp_path: Pa
 
     stage_dir = runs_root / "host_multi" / "experiment" / "feature_foundry"
     posthoc = json.loads((stage_dir / "outputs" / "posthoc_checks.json").read_text(encoding="utf-8"))
-    assert posthoc["common_pre_hawking_candidate_ids"] == ["geom_a", "geom_b"]
-    assert posthoc["common_hawking_zero_spin_candidate_ids"] == ["geom_a"]
+    assert posthoc["common_pre_hawking_candidate_ids"] == ["geom_a", "geom_alt", "geom_b"]
+    assert posthoc["common_hawking_area_lower_bound_candidate_ids"] == ["geom_a", "geom_alt", "geom_b"]
+    assert posthoc["common_hawking_zero_spin_candidate_ids"] == ["geom_a", "geom_alt"]
     assert posthoc["zero_spin_elimination_counts_by_event"] == {"GW_EVT2": 1}
+    assert posthoc["summary"]["n_common_pre_hawking_kerr_only"] == 2
+    assert posthoc["kerr_only"]["common_pre_hawking_candidate_ids"] == ["geom_a", "geom_b"]
+    assert posthoc["kerr_only"]["common_hawking_zero_spin_candidate_ids"] == ["geom_a"]
 
     candidate_rows = list(csv.DictReader((stage_dir / "outputs" / "candidate_rows.csv").open("r", encoding="utf-8")))
     geom_b_rows = [row for row in candidate_rows if row["candidate_id"] == "geom_b"]
     assert len(geom_b_rows) == 2
     assert {row["support_count"] for row in geom_b_rows} == {"2"}
     assert {row["is_common_pre_hawking"] for row in geom_b_rows} == {"True"}
+    geom_b_evt2 = next(row for row in geom_b_rows if row["event_id_canonical"] == "GW_EVT2")
+    assert geom_b_evt2["hawking_interval_status"] == "BOUND_SENSITIVE"
+    assert geom_b_evt2["n_fail_events_area_upper_bound"] == "1"
+    assert geom_b_evt2["n_fail_events_area_lower_bound"] == "0"
+    assert geom_b_evt2["area_upper_bound_failure_pattern"] == "FAIL_FEW_SEEN"
+    assert geom_b_evt2["area_lower_bound_failure_pattern"] == "PASS_ALL_SEEN"

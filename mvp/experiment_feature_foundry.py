@@ -29,6 +29,7 @@ DEFAULT_CATALOG_RELS = [
     Path("gw_events/gwtc_quality_events.csv"),
     Path("gwtc_quality_events.csv"),
 ]
+EXTREMAL_CHI = 0.999999
 
 
 def _parse_csv_tokens(raw: str | None) -> list[str]:
@@ -110,6 +111,42 @@ def _black_hole_area(m_solar: float | None, chi: float | None) -> float | None:
     return 8.0 * math.pi * float(m_solar) * float(m_solar) * (1.0 + math.sqrt(1.0 - achi * achi))
 
 
+def _hawking_pass(final_area: float | None, initial_area: float | None) -> bool | None:
+    if final_area is None or initial_area is None:
+        return None
+    return bool(final_area >= initial_area)
+
+
+def _hawking_interval_status(
+    final_area: float | None,
+    initial_area_bound_min: float | None,
+    initial_area_bound_max: float | None,
+) -> str:
+    if final_area is None or initial_area_bound_min is None or initial_area_bound_max is None:
+        return "UNKNOWN"
+    if final_area < initial_area_bound_min:
+        return "DEFINITE_FAIL"
+    if final_area >= initial_area_bound_max:
+        return "ROBUST_PASS"
+    return "BOUND_SENSITIVE"
+
+
+def _is_kerr_family(value: Any) -> bool:
+    return str(value or "").strip().lower() == "kerr"
+
+
+def _failure_pattern(fail_count: int, unknown_count: int, support_count: int) -> str:
+    if support_count <= 0:
+        return "UNSEEN"
+    if fail_count >= support_count:
+        return "FAIL_ALL_SEEN"
+    if fail_count > 0:
+        return "FAIL_FEW_SEEN"
+    if unknown_count > 0:
+        return "UNKNOWN_PRESENT"
+    return "PASS_ALL_SEEN"
+
+
 def _format_mode(value: Any) -> str:
     if value is None:
         return ""
@@ -188,22 +225,35 @@ def _load_catalog(catalog_path: Path | None) -> dict[str, dict[str, str]]:
         return {str(row.get("event", "")).strip(): row for row in reader if str(row.get("event", "")).strip()}
 
 
-def _event_initial_areas(event_id: str, catalog: dict[str, dict[str, str]]) -> tuple[bool, float | None, float | None]:
+def _event_initial_areas(event_id: str, catalog: dict[str, dict[str, str]]) -> tuple[bool, dict[str, float | None]]:
+    empty = {
+        "bound_min": None,
+        "bound_max": None,
+        "zero_spin_proxy": None,
+        "chieff_projection_proxy": None,
+    }
     row = catalog.get(event_id)
     if row is None:
-        return False, None, None
+        return False, empty
     m1 = _safe_float(row.get("m1_source") or row.get("mass_1_source"))
     m2 = _safe_float(row.get("m2_source") or row.get("mass_2_source"))
     chi_eff = abs(_safe_float(row.get("chi_eff")) or 0.0)
     if m1 is None or m2 is None:
-        return False, None, None
+        return False, empty
+    area_min_1 = _black_hole_area(m1, EXTREMAL_CHI)
+    area_min_2 = _black_hole_area(m2, EXTREMAL_CHI)
     area_zero_1 = _black_hole_area(m1, 0.0)
     area_zero_2 = _black_hole_area(m2, 0.0)
     area_chi_1 = _black_hole_area(m1, chi_eff)
     area_chi_2 = _black_hole_area(m2, chi_eff)
-    if area_zero_1 is None or area_zero_2 is None or area_chi_1 is None or area_chi_2 is None:
-        return False, None, None
-    return True, area_zero_1 + area_zero_2, area_chi_1 + area_chi_2
+    if None in (area_min_1, area_min_2, area_zero_1, area_zero_2, area_chi_1, area_chi_2):
+        return False, empty
+    return True, {
+        "bound_min": area_min_1 + area_min_2,
+        "bound_max": area_zero_1 + area_zero_2,
+        "zero_spin_proxy": area_zero_1 + area_zero_2,
+        "chieff_projection_proxy": area_chi_1 + area_chi_2,
+    }
 
 
 def _infer_event_id(run_id: str, s1: dict[str, Any] | None, s4: dict[str, Any] | None, router: dict[str, Any] | None) -> str:
@@ -284,6 +334,29 @@ def _candidate_info(candidate: Any, atlas_rows: list[dict[str, Any]], atlas_by_i
         "tau_s": tau_s,
         "final_area_proxy": _black_hole_area(m_solar, chi),
     }
+
+
+def _evaluate_common_metric(
+    candidate_ids: list[str],
+    candidate_groups: dict[str, list[dict[str, Any]]],
+    source_runs: list[str],
+    metric_field: str,
+) -> tuple[list[str], Counter[str]]:
+    survivors: list[str] = []
+    elimination_counts: Counter[str] = Counter()
+    for candidate_id in candidate_ids:
+        rows = candidate_groups.get(candidate_id, [])
+        rows_by_run = {str(row["source_run_id"]): row for row in rows}
+        metric_ok = True
+        for source_run in source_runs:
+            row = rows_by_run.get(source_run)
+            if row is None or row.get(metric_field) is not True:
+                metric_ok = False
+                if row is not None and row.get(metric_field) is False:
+                    elimination_counts[str(row["event_id_canonical"])] += 1
+        if metric_ok:
+            survivors.append(candidate_id)
+    return sorted(survivors), elimination_counts
 
 
 def _write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
@@ -373,7 +446,7 @@ def run_feature_foundry(
 
         event_id = _infer_event_id(source_run, s1_summary, s4_payload, router_payload)
         event_id_canonical = _canonical_event_id(event_id)
-        catalog_found, initial_area_zero, initial_area_chieff = _event_initial_areas(event_id_canonical, catalog)
+        catalog_found, initial_areas = _event_initial_areas(event_id_canonical, catalog)
         if not catalog_found:
             events_missing_catalog.append(event_id_canonical)
 
@@ -426,8 +499,11 @@ def run_feature_foundry(
                 "s4_metric": str((s4_payload or {}).get("metric", "")),
                 "s4_threshold_d2": _safe_float((s4_payload or {}).get("threshold_d2")),
                 "catalog_found": catalog_found,
-                "initial_area_zero_spin_proxy": initial_area_zero,
-                "initial_area_chieff_proxy": initial_area_chieff,
+                "initial_area_bound_min": initial_areas["bound_min"],
+                "initial_area_bound_max": initial_areas["bound_max"],
+                "initial_area_zero_spin_proxy": initial_areas["zero_spin_proxy"],
+                "initial_area_chieff_proxy": initial_areas["chieff_projection_proxy"],
+                "initial_area_chieff_projection_proxy": initial_areas["chieff_projection_proxy"],
                 "missing_artifacts": "; ".join(missing_artifacts),
             }
         )
@@ -435,8 +511,10 @@ def run_feature_foundry(
         for rank, candidate in enumerate(candidate_basis_rows, start=1):
             info = _candidate_info(candidate, atlas_rows, atlas_by_id)
             final_area = info["final_area_proxy"]
-            hawking_zero = None if final_area is None or initial_area_zero is None else bool(final_area >= initial_area_zero)
-            hawking_chieff = None if final_area is None or initial_area_chieff is None else bool(final_area >= initial_area_chieff)
+            hawking_lower = _hawking_pass(final_area, initial_areas["bound_min"])
+            hawking_upper = _hawking_pass(final_area, initial_areas["bound_max"])
+            hawking_zero = _hawking_pass(final_area, initial_areas["zero_spin_proxy"])
+            hawking_chieff = _hawking_pass(final_area, initial_areas["chieff_projection_proxy"])
             is_compatible = candidate_basis == "compatible_geometries"
             if isinstance(candidate, dict) and "compatible" in candidate:
                 is_compatible = bool(candidate.get("compatible"))
@@ -448,6 +526,7 @@ def run_feature_foundry(
                 "rank": rank,
                 "candidate_id": info["candidate_id"],
                 "is_compatible": is_compatible,
+                "is_kerr_family": _is_kerr_family(info["family"]),
                 "support_count": 0,
                 "is_common_pre_hawking": False,
                 "delta_lnL": _safe_float(candidate.get("delta_lnL")) if isinstance(candidate, dict) else None,
@@ -462,8 +541,24 @@ def run_feature_foundry(
                 "f_hz": info["f_hz"],
                 "tau_s": info["tau_s"],
                 "final_area_proxy": final_area,
+                "hawking_pass_area_lower_bound": hawking_lower,
+                "hawking_pass_area_upper_bound": hawking_upper,
+                "hawking_interval_status": _hawking_interval_status(
+                    final_area,
+                    initial_areas["bound_min"],
+                    initial_areas["bound_max"],
+                ),
                 "hawking_pass_zero_spin_proxy": hawking_zero,
+                "hawking_pass_chieff_projection_proxy": hawking_chieff,
                 "hawking_pass_chieff_proxy": hawking_chieff,
+                "n_fail_events_area_lower_bound": 0,
+                "n_fail_events_area_upper_bound": 0,
+                "n_fail_events_zero_spin_proxy": 0,
+                "n_fail_events_chieff_projection_proxy": 0,
+                "area_lower_bound_failure_pattern": "UNSEEN",
+                "area_upper_bound_failure_pattern": "UNSEEN",
+                "zero_spin_proxy_failure_pattern": "UNSEEN",
+                "chieff_projection_proxy_failure_pattern": "UNSEEN",
             }
             candidate_rows.append(row)
             candidate_support[info["candidate_id"]].add(source_run)
@@ -471,54 +566,94 @@ def run_feature_foundry(
 
     total_runs = len(source_runs_resolved)
     common_pre_hawking = sorted(gid for gid, runs in candidate_support.items() if len(runs) == total_runs)
-    zero_elimination_counts: Counter[str] = Counter()
-    chieff_elimination_counts: Counter[str] = Counter()
-    common_zero: list[str] = []
-    common_chieff: list[str] = []
+    common_pre_hawking_set = set(common_pre_hawking)
+    metric_fields = {
+        "area_lower_bound": "hawking_pass_area_lower_bound",
+        "area_upper_bound": "hawking_pass_area_upper_bound",
+        "zero_spin_proxy": "hawking_pass_zero_spin_proxy",
+        "chieff_projection_proxy": "hawking_pass_chieff_projection_proxy",
+    }
+
+    candidate_summary_by_id: dict[str, dict[str, Any]] = {}
+    support_rows = []
+    candidate_is_kerr: dict[str, bool] = {}
+    for candidate_id, runs in sorted(candidate_support.items()):
+        rows = candidate_groups.get(candidate_id, [])
+        info = atlas_by_id.get(candidate_id, {})
+        support_count = len(runs)
+        is_kerr_family = bool(rows) and all(bool(row.get("is_kerr_family")) for row in rows)
+        candidate_is_kerr[candidate_id] = is_kerr_family
+        summary_row: dict[str, Any] = {
+            "candidate_id": candidate_id,
+            "support_count": support_count,
+            "M_solar": info.get("M_solar"),
+            "chi": info.get("chi"),
+            "family": info.get("family"),
+            "source": info.get("source"),
+            "f_hz": info.get("f_hz"),
+            "tau_s": info.get("tau_s"),
+            "final_area_proxy": info.get("final_area_proxy"),
+            "is_kerr_family": is_kerr_family,
+            "is_common_pre_hawking": candidate_id in common_pre_hawking_set,
+        }
+        for metric_label, metric_field in metric_fields.items():
+            fail_events = sorted(
+                str(row["event_id_canonical"])
+                for row in rows
+                if row.get(metric_field) is False
+            )
+            fail_count = len(fail_events)
+            unknown_count = sum(1 for row in rows if row.get(metric_field) is None)
+            summary_row[f"n_fail_events_{metric_label}"] = fail_count
+            summary_row[f"n_unknown_events_{metric_label}"] = unknown_count
+            summary_row[f"{metric_label}_failure_pattern"] = _failure_pattern(
+                fail_count,
+                unknown_count,
+                support_count,
+            )
+            summary_row[f"{metric_label}_fail_events"] = fail_events
+        candidate_summary_by_id[candidate_id] = summary_row
+        support_rows.append(summary_row)
 
     for row in candidate_rows:
         support_count = len(candidate_support.get(row["candidate_id"], set()))
         row["support_count"] = support_count
-        row["is_common_pre_hawking"] = row["candidate_id"] in common_pre_hawking
-
-    for candidate_id in common_pre_hawking:
-        rows = candidate_groups.get(candidate_id, [])
-        rows_by_run = {row["source_run_id"]: row for row in rows}
-        zero_ok = True
-        chieff_ok = True
-        for source_run in source_runs_resolved:
-            row = rows_by_run.get(source_run)
-            if row is None:
-                zero_ok = False
-                chieff_ok = False
-                continue
-            if row.get("hawking_pass_zero_spin_proxy") is not True:
-                zero_ok = False
-                if row.get("hawking_pass_zero_spin_proxy") is False:
-                    zero_elimination_counts[row["event_id_canonical"]] += 1
-            if row.get("hawking_pass_chieff_proxy") is not True:
-                chieff_ok = False
-                if row.get("hawking_pass_chieff_proxy") is False:
-                    chieff_elimination_counts[row["event_id_canonical"]] += 1
-        if zero_ok:
-            common_zero.append(candidate_id)
-        if chieff_ok:
-            common_chieff.append(candidate_id)
-
-    support_rows = []
-    for candidate_id, runs in sorted(candidate_support.items()):
-        info = atlas_by_id.get(candidate_id, {})
-        support_rows.append(
-            {
-                "candidate_id": candidate_id,
-                "support_count": len(runs),
-                "M_solar": info.get("M_solar"),
-                "chi": info.get("chi"),
-                "f_hz": info.get("f_hz"),
-                "tau_s": info.get("tau_s"),
-                "final_area_proxy": info.get("final_area_proxy"),
-            }
+        row["is_common_pre_hawking"] = row["candidate_id"] in common_pre_hawking_set
+        summary_row = candidate_summary_by_id.get(str(row["candidate_id"]), {})
+        row["n_fail_events_area_lower_bound"] = int(summary_row.get("n_fail_events_area_lower_bound", 0))
+        row["n_fail_events_area_upper_bound"] = int(summary_row.get("n_fail_events_area_upper_bound", 0))
+        row["n_fail_events_zero_spin_proxy"] = int(summary_row.get("n_fail_events_zero_spin_proxy", 0))
+        row["n_fail_events_chieff_projection_proxy"] = int(summary_row.get("n_fail_events_chieff_projection_proxy", 0))
+        row["area_lower_bound_failure_pattern"] = str(summary_row.get("area_lower_bound_failure_pattern", "UNSEEN"))
+        row["area_upper_bound_failure_pattern"] = str(summary_row.get("area_upper_bound_failure_pattern", "UNSEEN"))
+        row["zero_spin_proxy_failure_pattern"] = str(summary_row.get("zero_spin_proxy_failure_pattern", "UNSEEN"))
+        row["chieff_projection_proxy_failure_pattern"] = str(
+            summary_row.get("chieff_projection_proxy_failure_pattern", "UNSEEN")
         )
+
+    common_metric_candidates: dict[str, list[str]] = {}
+    common_metric_eliminations: dict[str, dict[str, int]] = {}
+    for metric_label, metric_field in metric_fields.items():
+        survivors, eliminations = _evaluate_common_metric(
+            common_pre_hawking,
+            candidate_groups,
+            source_runs_resolved,
+            metric_field,
+        )
+        common_metric_candidates[metric_label] = survivors
+        common_metric_eliminations[metric_label] = dict(sorted(eliminations.items()))
+
+    kerr_only_candidate_ids = sorted(candidate_id for candidate_id, is_kerr in candidate_is_kerr.items() if is_kerr)
+    common_pre_hawking_kerr = [candidate_id for candidate_id in common_pre_hawking if candidate_is_kerr.get(candidate_id, False)]
+    kerr_metric_candidates: dict[str, list[str]] = {}
+    for metric_label, metric_field in metric_fields.items():
+        survivors, _ = _evaluate_common_metric(
+            common_pre_hawking_kerr,
+            candidate_groups,
+            source_runs_resolved,
+            metric_field,
+        )
+        kerr_metric_candidates[metric_label] = survivors
 
     event_rows.sort(key=lambda row: source_runs_resolved.index(row["source_run_id"]))
     candidate_rows.sort(key=lambda row: (source_runs_resolved.index(row["source_run_id"]), int(row["rank"]), row["candidate_id"]))
@@ -543,8 +678,11 @@ def run_feature_foundry(
         "s4_metric",
         "s4_threshold_d2",
         "catalog_found",
+        "initial_area_bound_min",
+        "initial_area_bound_max",
         "initial_area_zero_spin_proxy",
         "initial_area_chieff_proxy",
+        "initial_area_chieff_projection_proxy",
         "missing_artifacts",
     ]
     candidate_fieldnames = [
@@ -555,6 +693,7 @@ def run_feature_foundry(
         "rank",
         "candidate_id",
         "is_compatible",
+        "is_kerr_family",
         "support_count",
         "is_common_pre_hawking",
         "delta_lnL",
@@ -569,8 +708,20 @@ def run_feature_foundry(
         "f_hz",
         "tau_s",
         "final_area_proxy",
+        "hawking_pass_area_lower_bound",
+        "hawking_pass_area_upper_bound",
+        "hawking_interval_status",
         "hawking_pass_zero_spin_proxy",
+        "hawking_pass_chieff_projection_proxy",
         "hawking_pass_chieff_proxy",
+        "n_fail_events_area_lower_bound",
+        "n_fail_events_area_upper_bound",
+        "n_fail_events_zero_spin_proxy",
+        "n_fail_events_chieff_projection_proxy",
+        "area_lower_bound_failure_pattern",
+        "area_upper_bound_failure_pattern",
+        "zero_spin_proxy_failure_pattern",
+        "chieff_projection_proxy_failure_pattern",
     ]
 
     event_csv = ctx.outputs_dir / "event_summary.csv"
@@ -579,7 +730,7 @@ def run_feature_foundry(
     _write_csv(candidate_csv, candidate_rows, candidate_fieldnames)
 
     posthoc = {
-        "schema_version": "experiment_feature_foundry_v1",
+        "schema_version": "experiment_feature_foundry_v2",
         "stage": STAGE,
         "host_run_id": run_id,
         "source_runs": source_runs_resolved,
@@ -590,9 +741,16 @@ def run_feature_foundry(
             "n_event_rows": len(event_rows),
             "n_candidate_rows": len(candidate_rows),
             "n_unique_candidates": len(candidate_support),
+            "n_unique_candidates_kerr_only": len(kerr_only_candidate_ids),
             "n_common_pre_hawking": len(common_pre_hawking),
-            "n_common_hawking_zero_spin_proxy": len(common_zero),
-            "n_common_hawking_chieff_proxy": len(common_chieff),
+            "n_common_pre_hawking_kerr_only": len(common_pre_hawking_kerr),
+            "n_common_hawking_area_lower_bound": len(common_metric_candidates["area_lower_bound"]),
+            "n_common_hawking_area_upper_bound": len(common_metric_candidates["area_upper_bound"]),
+            "n_common_hawking_zero_spin_proxy": len(common_metric_candidates["zero_spin_proxy"]),
+            "n_common_hawking_chieff_projection_proxy": len(common_metric_candidates["chieff_projection_proxy"]),
+            "n_common_hawking_chieff_proxy": len(common_metric_candidates["chieff_projection_proxy"]),
+            "n_common_hawking_area_lower_bound_kerr_only": len(kerr_metric_candidates["area_lower_bound"]),
+            "n_common_hawking_area_upper_bound_kerr_only": len(kerr_metric_candidates["area_upper_bound"]),
             "candidate_basis_counts": dict(sorted(basis_counter.items())),
             "n_runs_missing_s4": len(runs_missing_s4),
             "n_runs_missing_s8": len(runs_missing_router),
@@ -600,18 +758,34 @@ def run_feature_foundry(
             "n_events_missing_catalog": len(set(events_missing_catalog)),
         },
         "common_pre_hawking_candidate_ids": common_pre_hawking,
-        "common_hawking_zero_spin_candidate_ids": sorted(common_zero),
-        "common_hawking_chieff_candidate_ids": sorted(common_chieff),
+        "common_hawking_area_lower_bound_candidate_ids": common_metric_candidates["area_lower_bound"],
+        "common_hawking_area_upper_bound_candidate_ids": common_metric_candidates["area_upper_bound"],
+        "common_hawking_zero_spin_candidate_ids": common_metric_candidates["zero_spin_proxy"],
+        "common_hawking_chieff_candidate_ids": common_metric_candidates["chieff_projection_proxy"],
+        "common_hawking_chieff_projection_candidate_ids": common_metric_candidates["chieff_projection_proxy"],
         "events_missing_catalog": sorted(set(events_missing_catalog)),
         "runs_missing_s4": sorted(runs_missing_s4),
         "runs_missing_s8": sorted(runs_missing_router),
         "runs_missing_s3b": sorted(runs_missing_s3b),
-        "zero_spin_elimination_counts_by_event": dict(sorted(zero_elimination_counts.items())),
-        "chieff_elimination_counts_by_event": dict(sorted(chieff_elimination_counts.items())),
+        "area_lower_bound_elimination_counts_by_event": common_metric_eliminations["area_lower_bound"],
+        "area_upper_bound_elimination_counts_by_event": common_metric_eliminations["area_upper_bound"],
+        "zero_spin_elimination_counts_by_event": common_metric_eliminations["zero_spin_proxy"],
+        "chieff_elimination_counts_by_event": common_metric_eliminations["chieff_projection_proxy"],
+        "chieff_projection_elimination_counts_by_event": common_metric_eliminations["chieff_projection_proxy"],
         "per_candidate_support": support_rows,
+        "kerr_only": {
+            "candidate_ids": kerr_only_candidate_ids,
+            "common_pre_hawking_candidate_ids": common_pre_hawking_kerr,
+            "common_hawking_area_lower_bound_candidate_ids": kerr_metric_candidates["area_lower_bound"],
+            "common_hawking_area_upper_bound_candidate_ids": kerr_metric_candidates["area_upper_bound"],
+            "common_hawking_zero_spin_candidate_ids": kerr_metric_candidates["zero_spin_proxy"],
+            "common_hawking_chieff_projection_candidate_ids": kerr_metric_candidates["chieff_projection_proxy"],
+        },
         "notes": [
             "common_pre_hawking uses exact candidate_id intersection across source runs on the chosen per-event basis",
-            "hawking proxies are conservative post-hoc filters derived from catalog source masses and |chi_eff|",
+            "initial_area_bound_min and initial_area_bound_max define a physical Kerr-area interval at fixed source masses",
+            "hawking_pass_area_upper_bound is identical to the zero-spin conservative proxy by construction",
+            "hawking_pass_chieff_projection_proxy is a post-hoc projection proxy derived from catalog source masses and |chi_eff|",
         ],
     }
     posthoc_path = ctx.outputs_dir / "posthoc_checks.json"
@@ -630,8 +804,10 @@ def run_feature_foundry(
             "n_candidate_rows": len(candidate_rows),
             "n_unique_candidates": len(candidate_support),
             "n_common_pre_hawking": len(common_pre_hawking),
-            "n_common_hawking_zero_spin_proxy": len(common_zero),
-            "n_common_hawking_chieff_proxy": len(common_chieff),
+            "n_common_hawking_area_lower_bound": len(common_metric_candidates["area_lower_bound"]),
+            "n_common_hawking_area_upper_bound": len(common_metric_candidates["area_upper_bound"]),
+            "n_common_hawking_zero_spin_proxy": len(common_metric_candidates["zero_spin_proxy"]),
+            "n_common_hawking_chieff_projection_proxy": len(common_metric_candidates["chieff_projection_proxy"]),
         },
     )
     log_stage_paths(ctx)
