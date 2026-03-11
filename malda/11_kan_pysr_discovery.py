@@ -140,6 +140,13 @@ CLAIM_GRADE_ONLY = [
     "chi_eff",
 ]
 
+# Claim-grade symmetric space: symmetric mass-ratio descriptors plus spin.
+CLAIM_GRADE_SYMMETRIC = [
+    "q",
+    "eta",
+    "chi_eff",
+]
+
 # Post-merger or definitional columns that are high-risk for leakage.
 POSTMERGER_AND_LEAKY = {
     "Mf",
@@ -171,10 +178,11 @@ POSTMERGER_AND_LEAKY = {
 }
 
 # Candidate inputs considered before policy filtering.
-INPUT_FEATURES = list(dict.fromkeys(PREMERGER_ONLY + CLAIM_GRADE_ONLY + ["af"]))
+INPUT_FEATURES = list(dict.fromkeys(PREMERGER_ONLY + CLAIM_GRADE_ONLY + CLAIM_GRADE_SYMMETRIC + ["af"]))
 
 TARGET_ALLOWLIST_STRICT = {target: list(PREMERGER_ONLY) for target in TARGETS}
 TARGET_ALLOWLIST_CLAIM_GRADE = {target: list(CLAIM_GRADE_ONLY) for target in TARGETS}
+TARGET_ALLOWLIST_CLAIM_GRADE_SYMMETRIC = {target: list(CLAIM_GRADE_SYMMETRIC) for target in TARGETS}
 TARGET_ALLOWLIST_KERR_VALIDATION = {
     "Q_220": ["af"],
     "F_220_dimless": ["af"],
@@ -195,6 +203,15 @@ SEARCH_DEFAULTS: dict[str, dict[str, float | int]] = {
         "pysr_iterations": 1200,
         "pysr_maxsize": 10,
         "pysr_parsimony": 5e-3,
+        "pysr_populations": 64,
+        "pysr_population_size": 48,
+        "pysr_ncycles_per_iteration": 1200,
+        "kan_epochs": 800,
+    },
+    "claim_grade_symmetric": {
+        "pysr_iterations": 1200,
+        "pysr_maxsize": 8,
+        "pysr_parsimony": 7e-3,
         "pysr_populations": 64,
         "pysr_population_size": 48,
         "pysr_ncycles_per_iteration": 1200,
@@ -391,6 +408,9 @@ def resolve_input_features(target_name: str, feature_policy: str) -> tuple[list[
     elif feature_policy == "claim_grade":
         allowed = TARGET_ALLOWLIST_CLAIM_GRADE.get(target_name, CLAIM_GRADE_ONLY)
         analysis_mode = "claim_grade"
+    elif feature_policy == "claim_grade_symmetric":
+        allowed = TARGET_ALLOWLIST_CLAIM_GRADE_SYMMETRIC.get(target_name, CLAIM_GRADE_SYMMETRIC)
+        analysis_mode = "claim_grade_symmetric"
     elif feature_policy == "kerr_validation":
         allowed = TARGET_ALLOWLIST_KERR_VALIDATION.get(target_name, PREMERGER_ONLY)
         analysis_mode = "kerr_validation" if target_name in TARGET_ALLOWLIST_KERR_VALIDATION else "discovery"
@@ -403,7 +423,7 @@ def resolve_input_features(target_name: str, feature_policy: str) -> tuple[list[
             continue
         if feature not in INPUT_FEATURES:
             continue
-        if feature_policy in {"strict_premerger", "claim_grade"} and feature in POSTMERGER_AND_LEAKY:
+        if feature_policy in {"strict_premerger", "claim_grade", "claim_grade_symmetric"} and feature in POSTMERGER_AND_LEAKY:
             continue
         if feature not in selected:
             selected.append(feature)
@@ -815,7 +835,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--feature-policy",
-        choices=["strict_premerger", "claim_grade", "kerr_validation"],
+        choices=["strict_premerger", "claim_grade", "claim_grade_symmetric", "kerr_validation"],
         default="strict_premerger",
         help="Feature selection policy applied before any internal transforms (default: strict_premerger)",
     )

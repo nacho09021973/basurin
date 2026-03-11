@@ -175,6 +175,30 @@ def test_claim_grade_reduces_inputs_to_primitive_inspiral_features() -> None:
     assert "eta" not in feat_names
 
 
+def test_claim_grade_symmetric_reduces_inputs_to_q_eta_chi_eff() -> None:
+    selected, analysis_mode = _MODULE.resolve_input_features("E_rad_frac", "claim_grade_symmetric")
+
+    assert analysis_mode == "claim_grade_symmetric"
+    assert selected == ["q", "eta", "chi_eff"]
+
+    cols = ["m1_src", "m2_src", "q", "eta", "chi_eff", "E_rad_frac"]
+    data = np.array(
+        [
+            [30.0, 20.0, 20.0 / 30.0, (30.0 * 20.0) / (50.0**2), 0.0, 0.04],
+            [31.0, 21.0, 21.0 / 31.0, (31.0 * 21.0) / (52.0**2), 0.1, 0.042],
+            [32.0, 22.0, 22.0 / 32.0, (32.0 * 22.0) / (54.0**2), 0.2, 0.044],
+            [33.0, 23.0, 23.0 / 33.0, (33.0 * 23.0) / (56.0**2), 0.3, 0.046],
+            [34.0, 24.0, 24.0 / 34.0, (34.0 * 24.0) / (58.0**2), 0.4, 0.048],
+        ],
+        dtype=np.float64,
+    )
+    _, _, feat_names = _MODULE.prepare_XY(cols, data, "E_rad_frac", selected)
+
+    assert feat_names == ["q", "eta", "chi_eff"]
+    assert "log_m1_src" not in feat_names
+    assert "log_m2_src" not in feat_names
+
+
 def test_runtime_timeline_emits_heartbeat_and_persists_jsonl(tmp_path: Path) -> None:
     timeline = _MODULE.RuntimeTimeline(tmp_path / "timeline.jsonl")
 
@@ -378,6 +402,51 @@ def test_main_records_claim_grade_defaults(
     assert stage_summary["config"]["pysr_iterations"] == _MODULE.SEARCH_DEFAULTS["claim_grade"]["pysr_iterations"]
     assert stage_summary["results"]["features_by_target"]["S_f"] == ["log_m1_src", "log_m2_src", "chi_eff"]
     assert stage_summary["results"]["analysis_mode_by_target"]["S_f"] == "claim_grade"
+    assert (stage_dir / "outputs" / "runtime_timeline.json").exists()
+    assert (stage_dir / "outputs" / "runtime_timeline.jsonl").exists()
+
+
+def test_main_records_claim_grade_symmetric_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runs_root = tmp_path / "runsroot_claim_symmetric"
+    table_path = tmp_path / "inputs" / "event_features_claim_symmetric.csv"
+    _write_feature_table(table_path)
+
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    rc = _MODULE.main(
+        [
+            "--run-id",
+            "malda_claim_grade_symmetric_smoke",
+            "--feature-table",
+            str(table_path),
+            "--feature-policy",
+            "claim_grade_symmetric",
+            "--no-kan",
+            "--no-pysr",
+        ]
+    )
+
+    stage_dir = runs_root / "malda_claim_grade_symmetric_smoke" / "experiment" / "malda_discovery"
+    stage_summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
+
+    assert rc == 0
+    assert stage_summary["config"]["feature_policy"] == "claim_grade_symmetric"
+    assert (
+        stage_summary["config"]["pysr_maxsize"]
+        == _MODULE.SEARCH_DEFAULTS["claim_grade_symmetric"]["pysr_maxsize"]
+    )
+    assert (
+        stage_summary["config"]["pysr_parsimony"]
+        == _MODULE.SEARCH_DEFAULTS["claim_grade_symmetric"]["pysr_parsimony"]
+    )
+    assert (
+        stage_summary["config"]["pysr_iterations"]
+        == _MODULE.SEARCH_DEFAULTS["claim_grade_symmetric"]["pysr_iterations"]
+    )
+    assert stage_summary["results"]["features_by_target"]["E_rad_frac"] == ["q", "eta", "chi_eff"]
+    assert stage_summary["results"]["analysis_mode_by_target"]["E_rad_frac"] == "claim_grade_symmetric"
     assert (stage_dir / "outputs" / "runtime_timeline.json").exists()
     assert (stage_dir / "outputs" / "runtime_timeline.jsonl").exists()
 
