@@ -332,6 +332,9 @@ def run_pysr(
     print(f"[PySR:{target_name}] X={X.shape}  n_iter={n_iterations}  maxsize={maxsize}")
 
     pareto_path = out_dir / f"pysr_pareto_{target_name}.csv"
+    backend_dir = out_dir / "pysr_backend"
+    backend_dir.mkdir(parents=True, exist_ok=True)
+    backend_run_id = f"{target_name}_{seed}"
 
     model = PySRRegressor(
         # Search space
@@ -352,7 +355,9 @@ def run_pysr(
         # Output
         output_jax_format=False,
         output_torch_format=False,
-        temp_equation_file=True,
+        temp_equation_file=False,
+        output_directory=str(backend_dir),
+        run_id=backend_run_id,
         # GPU
         turbo=use_gpu,
         # Verbosity
@@ -360,8 +365,6 @@ def run_pysr(
         progress=False,
         # Reproducibility
         random_state=seed,
-        # Save Pareto CSV
-        equation_file=str(pareto_path),
     )
 
     with warnings.catch_warnings():
@@ -390,6 +393,17 @@ def run_pysr(
         print(f"[PySR:{target_name}] WARNING: could not extract equations: {exc}", file=sys.stderr)
         eq_list = []
         best = {}
+
+    import csv
+
+    with open(pareto_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["complexity", "loss", "score", "equation", "sympy_format"],
+            extrasaction="ignore",
+        )
+        writer.writeheader()
+        writer.writerows(eq_list)
 
     return {
         "status": "ok",
