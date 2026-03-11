@@ -41,11 +41,17 @@ RUN_PROVENANCE_REL = "run_provenance.json"
 OUTPUT_FILE = "event_support_region.json"
 
 DOMAIN_STATUS_UNKNOWN = "UNKNOWN"
+DOMAIN_OUT_OF_DOMAIN = "OUT_OF_DOMAIN"
 ANALYSIS_PATH_MULTIMODE = "MULTIMODE_INTERSECTION"
 ANALYSIS_PATH_MODE220_FALLBACK = "MODE220_PLUS_HAWKING"
 SUPPORT_REGION_AVAILABLE = "SUPPORT_REGION_AVAILABLE"
 HAWKING_FILTER_EMPTY = "HAWKING_FILTER_EMPTY"
 NO_COMMON_REGION = "NO_COMMON_REGION"
+MULTIMODE_OK = "MULTIMODE_OK"
+DOWNSTREAM_MULTIMODE_USABLE = "MULTIMODE_USABLE"
+DOWNSTREAM_GEOMETRY_PRESENT_BUT_NONINFORMATIVE = "GEOMETRY_PRESENT_BUT_NONINFORMATIVE"
+DOWNSTREAM_OUT_OF_DOMAIN = "OUT_OF_DOMAIN"
+DOWNSTREAM_NO_SUPPORT_REGION = "NO_SUPPORT_REGION"
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -92,6 +98,47 @@ def _derive_support_region_status(*, final_ids: list[str], common_ids: list[str]
     if common_ids:
         return HAWKING_FILTER_EMPTY
     return NO_COMMON_REGION
+
+
+def _extract_multimode_viability_class(multimode_viability: Any) -> str | None:
+    if not isinstance(multimode_viability, dict):
+        return None
+    value = multimode_viability.get("class")
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def _derive_downstream_status(
+    *,
+    support_region_status: str,
+    multimode_viability: Any,
+    domain_status: str,
+) -> dict[str, Any]:
+    reasons: list[str] = []
+    viability_class = _extract_multimode_viability_class(multimode_viability)
+
+    if domain_status == DOMAIN_OUT_OF_DOMAIN:
+        reasons.append("domain_status=OUT_OF_DOMAIN from s4d_kerr_from_multimode")
+        return {"class": DOWNSTREAM_OUT_OF_DOMAIN, "reasons": reasons}
+
+    if support_region_status != SUPPORT_REGION_AVAILABLE:
+        reasons.append(f"support_region_status={support_region_status}")
+        return {"class": DOWNSTREAM_NO_SUPPORT_REGION, "reasons": reasons}
+
+    if viability_class == MULTIMODE_OK:
+        reasons.append("support region available and multimode_viability=MULTIMODE_OK")
+        if domain_status == DOMAIN_STATUS_UNKNOWN:
+            reasons.append("domain_status=UNKNOWN: explicit s4d domain guard not available")
+        return {"class": DOWNSTREAM_MULTIMODE_USABLE, "reasons": reasons}
+
+    if viability_class is not None:
+        reasons.append(f"multimode_viability={viability_class}")
+    else:
+        reasons.append("multimode_viability missing or invalid")
+    if domain_status == DOMAIN_STATUS_UNKNOWN:
+        reasons.append("domain_status=UNKNOWN")
+    return {"class": DOWNSTREAM_GEOMETRY_PRESENT_BUT_NONINFORMATIVE, "reasons": reasons}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -151,6 +198,11 @@ def main(argv: list[str] | None = None) -> int:
         domain_status_source = (
             _relative_to_run(ctx.run_dir, s4d_path) if s4d_path.exists() else "unknown"
         )
+        downstream_status = _derive_downstream_status(
+            support_region_status=support_region_status,
+            multimode_viability=s3b_summary.get("multimode_viability"),
+            domain_status=domain_status,
+        )
 
         event_id: str | None = None
         invocation = run_provenance.get("invocation")
@@ -172,6 +224,7 @@ def main(argv: list[str] | None = None) -> int:
             "n_final_geometries": len(golden_geometry_ids),
             "domain_status": domain_status,
             "domain_status_source": domain_status_source,
+            "downstream_status": downstream_status,
             "multimode_viability": s3b_summary.get("multimode_viability"),
             "systematics_gate": s3b_summary.get("systematics_gate"),
             "science_evidence": s3b_summary.get("science_evidence"),
@@ -226,6 +279,8 @@ def main(argv: list[str] | None = None) -> int:
                     if isinstance(payload.get("multimode_viability"), dict)
                     else None
                 ),
+                "downstream_status_class": downstream_status["class"],
+                "downstream_status_reasons": downstream_status["reasons"],
                 "domain_status": domain_status,
                 "mode221_skipped": mode221_skipped,
                 "n_mode220": len(geometry_ids_220),
@@ -237,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
         log_stage_paths(ctx)
         print(
             f"[{STAGE}] analysis_path={analysis_path} support_region_status={support_region_status} "
-            f"n_final={len(golden_geometry_ids)}"
+            f"downstream_status={downstream_status['class']} n_final={len(golden_geometry_ids)}"
         )
         return 0
     except SystemExit:

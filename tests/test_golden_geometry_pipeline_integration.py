@@ -30,6 +30,7 @@ from mvp.s4i_common_geometry_intersection import (
     S4G_OUTPUT_PRIMARY_REL,
     compute_intersection,
 )
+from mvp.s4k_event_support_region import _derive_downstream_status
 
 
 # ── Contract alignment tests ────────────────────────────────────────────────
@@ -108,6 +109,26 @@ def test_s4k_contract_requires_consolidation_inputs():
         "s4j_hawking_area_filter/outputs/hawking_area_filter.json",
     ]
     assert contract.produced_outputs == ["outputs/event_support_region.json"]
+
+
+def test_s4k_downstream_status_marks_noninformative_support() -> None:
+    downstream = _derive_downstream_status(
+        support_region_status="SUPPORT_REGION_AVAILABLE",
+        multimode_viability={"class": "RINGDOWN_NONINFORMATIVE", "reasons": ["test"]},
+        domain_status="UNKNOWN",
+    )
+    assert downstream["class"] == "GEOMETRY_PRESENT_BUT_NONINFORMATIVE"
+    assert "multimode_viability=RINGDOWN_NONINFORMATIVE" in downstream["reasons"]
+
+
+def test_s4k_downstream_status_out_of_domain_has_priority() -> None:
+    downstream = _derive_downstream_status(
+        support_region_status="SUPPORT_REGION_AVAILABLE",
+        multimode_viability={"class": "MULTIMODE_OK", "reasons": []},
+        domain_status="OUT_OF_DOMAIN",
+    )
+    assert downstream["class"] == "OUT_OF_DOMAIN"
+    assert downstream["reasons"] == ["domain_status=OUT_OF_DOMAIN from s4d_kerr_from_multimode"]
 
 
 def test_s4h_contract_has_atlas_external_input():
@@ -259,6 +280,8 @@ def test_s4k_consolidates_explicit_branch_into_single_event_artifact(tmp_path: P
     assert payload["support_region_status"] == "SUPPORT_REGION_AVAILABLE"
     assert payload["final_geometry_ids"] == ["geo_A"]
     assert payload["domain_status"] == "IN_DOMAIN"
+    assert payload["downstream_status"]["class"] == "MULTIMODE_USABLE"
+    assert "support region available and multimode_viability=MULTIMODE_OK" in payload["downstream_status"]["reasons"]
     assert payload["multimode_viability"]["class"] == "MULTIMODE_OK"
     assert payload["mode_220_region"]["geometry_ids"] == ["geo_A", "geo_B"]
     assert payload["mode_221_region"]["geometry_ids"] == ["geo_A"]
@@ -268,5 +291,6 @@ def test_s4k_consolidates_explicit_branch_into_single_event_artifact(tmp_path: P
     assert stage_summary["verdict"] == "PASS"
     assert stage_summary["results"]["analysis_path"] == "MULTIMODE_INTERSECTION"
     assert stage_summary["results"]["support_region_status"] == "SUPPORT_REGION_AVAILABLE"
+    assert stage_summary["results"]["downstream_status_class"] == "MULTIMODE_USABLE"
     assert stage_summary["results"]["domain_status"] == "IN_DOMAIN"
     assert stage_summary["results"]["n_final"] == 1

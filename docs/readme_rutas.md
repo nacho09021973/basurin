@@ -231,11 +231,13 @@ Ese artefacto consolida:
 - filtro de Hawking
 - `multimode_viability` desde `s3b`
 - `domain_status` desde `s4d` cuando exista
+- `downstream_status` como semántica conservadora para consumo downstream
 
 Regla práctica:
 
 - `s4k_event_support_region` no re-ejecuta física; solo consolida artefactos ya emitidos.
 - Si falta cualquiera de `s4g`, `s4h`, `s4i` o `s4j`, el stage debe fallar por contrato.
+- `downstream_status.class` resume la legibilidad downstream del artefacto: `MULTIMODE_USABLE`, `GEOMETRY_PRESENT_BUT_NONINFORMATIVE`, `OUT_OF_DOMAIN` o `NO_SUPPORT_REGION`.
 
 ### Rutas de auditoría LOSC/t0 y batch offline
 

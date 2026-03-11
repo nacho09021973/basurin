@@ -209,7 +209,7 @@ Estos stages ya existen y representan mas directamente el flujo cientifico "regi
 | `s4h_mode221_geometry_filter` | Filtra el atlas con el observable del modo 221; si falta input de 221, emite `SKIPPED_221_UNAVAILABLE`. | Implementado y contractual. |
 | `s4i_common_geometry_intersection` | Calcula la interseccion de geometrias comunes entre 220 y 221. | Implementado y contractual. |
 | `s4j_hawking_area_filter` | Aplica el filtro de area/Hawking sobre la interseccion comun. | Implementado y contractual. |
-| `s4k_event_support_region` | Consolida `220`, `221`, interseccion, Hawking, `multimode_viability` y `domain_status` en un unico artefacto por evento. | Implementado y contractual; es la salida canónica recomendada para downstream de la rama golden geometry. |
+| `s4k_event_support_region` | Consolida `220`, `221`, interseccion, Hawking, `multimode_viability` y `domain_status` en un unico artefacto por evento. | Implementado y contractual; añade `downstream_status` conservador (`MULTIMODE_USABLE`, `GEOMETRY_PRESENT_BUT_NONINFORMATIVE`, `OUT_OF_DOMAIN`, `NO_SUPPORT_REGION`) para consumo downstream. |
 
 ### 4.3 Gates auxiliares que protegen la interpretacion
 
@@ -400,7 +400,7 @@ Regla de interpretacion:
 - mapa operativo de rutas: [`docs/readme_rutas.md`](docs/readme_rutas.md)
 - flujo de ejecucion y validaciones: [`docs/request_flow.md`](docs/request_flow.md)
 - semantica multimodo y canal de evidencia: [`docs/multimode_viability_and_evidence.md`](docs/multimode_viability_and_evidence.md)
-- artefacto consolidado por evento de la rama golden geometry: `runs/<run_id>/s4k_event_support_region/outputs/event_support_region.json`
+- artefacto consolidado por evento de la rama golden geometry: `runs/<run_id>/s4k_event_support_region/outputs/event_support_region.json` con `downstream_status.class` para gating conservador downstream
 
 ### 8.3 Atlas y metadatos
 
