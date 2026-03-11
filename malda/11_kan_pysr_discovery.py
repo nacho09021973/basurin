@@ -53,6 +53,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import multiprocessing
 import sys
 import threading
 import time
@@ -225,32 +226,21 @@ class RuntimeTimeline:
 
     def __init__(self, jsonl_path: Path) -> None:
         self.jsonl_path = jsonl_path
-        self._events: list[dict[str, Any]] = []
         self._lock = threading.Lock()
         self._t0 = time.monotonic()
         self.jsonl_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _timestamp(self) -> str:
-        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
     def record(self, event: str, **payload: Any) -> dict[str, Any]:
-        entry = {
-            "event": event,
-            "timestamp": self._timestamp(),
-            "elapsed_s": round(time.monotonic() - self._t0, 3),
-            **payload,
-        }
-        line = json.dumps(entry, sort_keys=True)
-        with self._lock:
-            self._events.append(entry)
-            with self.jsonl_path.open("a", encoding="utf-8") as fh:
-                fh.write(line + "\n")
-        print(f"[timeline +{entry['elapsed_s']:.1f}s] {event} {self._format_payload(payload)}")
-        return entry
+        return _append_timeline_event(self.jsonl_path, self._t0, event, payload, lock=self._lock)
 
     def snapshot(self) -> list[dict[str, Any]]:
-        with self._lock:
-            return list(self._events)
+        if not self.jsonl_path.exists():
+            return []
+        return [
+            json.loads(line)
+            for line in self.jsonl_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
 
     @staticmethod
     def _format_payload(payload: dict[str, Any]) -> str:
@@ -263,6 +253,61 @@ class RuntimeTimeline:
         if "error" in payload:
             parts.append(f"error={payload['error']}")
         return " ".join(parts)
+
+
+def _timestamp_utc() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _append_timeline_event(
+    jsonl_path: Path,
+    t0_monotonic: float,
+    event: str,
+    payload: dict[str, Any],
+    *,
+    lock: threading.Lock | None = None,
+) -> dict[str, Any]:
+    entry = {
+        "event": event,
+        "timestamp": _timestamp_utc(),
+        "elapsed_s": round(time.monotonic() - t0_monotonic, 3),
+        **payload,
+    }
+    line = json.dumps(entry, sort_keys=True)
+    if lock is None:
+        with jsonl_path.open("a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    else:
+        with lock:
+            with jsonl_path.open("a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+    print(f"[timeline +{entry['elapsed_s']:.1f}s] {event} {RuntimeTimeline._format_payload(payload)}", flush=True)
+    return entry
+
+
+def _heartbeat_process_loop(
+    jsonl_path_str: str,
+    run_t0_monotonic: float,
+    step_t0_monotonic: float,
+    heartbeat_seconds: float,
+    target_name: str,
+    step_name: str,
+    stop_event,
+) -> None:
+    jsonl_path = Path(jsonl_path_str)
+    while not stop_event.wait(heartbeat_seconds):
+        _append_timeline_event(
+            jsonl_path,
+            run_t0_monotonic,
+            "step_heartbeat",
+            {
+                "target": target_name,
+                "step": step_name,
+                "status": "running",
+                "duration_s": round(time.monotonic() - step_t0_monotonic, 3),
+                "heartbeat_interval_s": heartbeat_seconds,
+            },
+        )
 
 
 def run_with_heartbeat(
@@ -284,22 +329,27 @@ def run_with_heartbeat(
             heartbeat_interval_s=heartbeat_seconds,
         )
 
-    stop_event = threading.Event()
-
-    def _heartbeat_loop() -> None:
-        while not stop_event.wait(heartbeat_seconds):
-            if timeline is not None:
-                timeline.record(
-                    "step_heartbeat",
-                    target=target_name,
-                    step=step_name,
-                    status="running",
-                    duration_s=round(time.monotonic() - step_t0, 3),
-                    heartbeat_interval_s=heartbeat_seconds,
-                )
-
-    heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
-    heartbeat_thread.start()
+    heartbeat_process = None
+    heartbeat_stop_event = None
+    if timeline is not None:
+        start_methods = multiprocessing.get_all_start_methods()
+        ctx_name = "fork" if "fork" in start_methods else "spawn"
+        ctx = multiprocessing.get_context(ctx_name)
+        heartbeat_stop_event = ctx.Event()
+        heartbeat_process = ctx.Process(
+            target=_heartbeat_process_loop,
+            args=(
+                str(timeline.jsonl_path),
+                timeline._t0,
+                step_t0,
+                heartbeat_seconds,
+                target_name,
+                step_name,
+                heartbeat_stop_event,
+            ),
+            daemon=True,
+        )
+        heartbeat_process.start()
     try:
         result = fn()
     except Exception as exc:
@@ -314,8 +364,13 @@ def run_with_heartbeat(
             )
         raise
     finally:
-        stop_event.set()
-        heartbeat_thread.join(timeout=max(heartbeat_seconds, 0.1) + 0.5)
+        if heartbeat_stop_event is not None:
+            heartbeat_stop_event.set()
+        if heartbeat_process is not None:
+            heartbeat_process.join(timeout=max(heartbeat_seconds, 0.1) + 1.0)
+            if heartbeat_process.is_alive():
+                heartbeat_process.terminate()
+                heartbeat_process.join(timeout=1.0)
 
     if timeline is not None:
         timeline.record(
