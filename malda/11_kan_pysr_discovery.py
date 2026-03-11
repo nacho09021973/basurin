@@ -128,6 +128,14 @@ PREMERGER_ONLY = [
     "Mchirp_over_Mtotal",
 ]
 
+# Claim-grade space: only primitive inspiral quantities, no algebraic
+# reparameterisations of the masses.
+CLAIM_GRADE_ONLY = [
+    "m1_src",
+    "m2_src",
+    "chi_eff",
+]
+
 # Post-merger or definitional columns that are high-risk for leakage.
 POSTMERGER_AND_LEAKY = {
     "Mf",
@@ -159,13 +167,44 @@ POSTMERGER_AND_LEAKY = {
 }
 
 # Candidate inputs considered before policy filtering.
-INPUT_FEATURES = PREMERGER_ONLY + ["af"]
+INPUT_FEATURES = list(dict.fromkeys(PREMERGER_ONLY + CLAIM_GRADE_ONLY + ["af"]))
 
 TARGET_ALLOWLIST_STRICT = {target: list(PREMERGER_ONLY) for target in TARGETS}
+TARGET_ALLOWLIST_CLAIM_GRADE = {target: list(CLAIM_GRADE_ONLY) for target in TARGETS}
 TARGET_ALLOWLIST_KERR_VALIDATION = {
     "Q_220": ["af"],
     "F_220_dimless": ["af"],
     "f_ratio_221_220": ["af"],
+}
+
+SEARCH_DEFAULTS: dict[str, dict[str, float | int]] = {
+    "strict_premerger": {
+        "pysr_iterations": 600,
+        "pysr_maxsize": 14,
+        "pysr_parsimony": 2e-3,
+        "pysr_populations": 48,
+        "pysr_population_size": 40,
+        "pysr_ncycles_per_iteration": 800,
+        "kan_epochs": 400,
+    },
+    "claim_grade": {
+        "pysr_iterations": 1200,
+        "pysr_maxsize": 10,
+        "pysr_parsimony": 5e-3,
+        "pysr_populations": 64,
+        "pysr_population_size": 48,
+        "pysr_ncycles_per_iteration": 1200,
+        "kan_epochs": 800,
+    },
+    "kerr_validation": {
+        "pysr_iterations": 500,
+        "pysr_maxsize": 12,
+        "pysr_parsimony": 1e-3,
+        "pysr_populations": 40,
+        "pysr_population_size": 36,
+        "pysr_ncycles_per_iteration": 700,
+        "kan_epochs": 400,
+    },
 }
 
 # Columns that should be log-transformed after policy filtering
@@ -183,6 +222,9 @@ def resolve_input_features(target_name: str, feature_policy: str) -> tuple[list[
     if feature_policy == "strict_premerger":
         allowed = TARGET_ALLOWLIST_STRICT.get(target_name, PREMERGER_ONLY)
         analysis_mode = "discovery"
+    elif feature_policy == "claim_grade":
+        allowed = TARGET_ALLOWLIST_CLAIM_GRADE.get(target_name, CLAIM_GRADE_ONLY)
+        analysis_mode = "claim_grade"
     elif feature_policy == "kerr_validation":
         allowed = TARGET_ALLOWLIST_KERR_VALIDATION.get(target_name, PREMERGER_ONLY)
         analysis_mode = "kerr_validation" if target_name in TARGET_ALLOWLIST_KERR_VALIDATION else "discovery"
@@ -195,13 +237,38 @@ def resolve_input_features(target_name: str, feature_policy: str) -> tuple[list[
             continue
         if feature not in INPUT_FEATURES:
             continue
-        if feature_policy == "strict_premerger" and feature in POSTMERGER_AND_LEAKY:
+        if feature_policy in {"strict_premerger", "claim_grade"} and feature in POSTMERGER_AND_LEAKY:
             continue
         if feature not in selected:
             selected.append(feature)
     if not selected:
         raise ValueError(f"No input features resolved for target '{target_name}' under policy '{feature_policy}'")
     return selected, analysis_mode
+
+
+def resolve_search_config(
+    feature_policy: str,
+    *,
+    pysr_iterations: int | None,
+    pysr_maxsize: int | None,
+    pysr_parsimony: float | None,
+    pysr_populations: int | None,
+    pysr_population_size: int | None,
+    pysr_ncycles_per_iteration: int | None,
+    kan_epochs: int | None,
+) -> dict[str, float | int]:
+    defaults = SEARCH_DEFAULTS[feature_policy]
+    return {
+        "pysr_iterations": int(defaults["pysr_iterations"] if pysr_iterations is None else pysr_iterations),
+        "pysr_maxsize": int(defaults["pysr_maxsize"] if pysr_maxsize is None else pysr_maxsize),
+        "pysr_parsimony": float(defaults["pysr_parsimony"] if pysr_parsimony is None else pysr_parsimony),
+        "pysr_populations": int(defaults["pysr_populations"] if pysr_populations is None else pysr_populations),
+        "pysr_population_size": int(defaults["pysr_population_size"] if pysr_population_size is None else pysr_population_size),
+        "pysr_ncycles_per_iteration": int(
+            defaults["pysr_ncycles_per_iteration"] if pysr_ncycles_per_iteration is None else pysr_ncycles_per_iteration
+        ),
+        "kan_epochs": int(defaults["kan_epochs"] if kan_epochs is None else kan_epochs),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -414,8 +481,12 @@ def run_pysr(
     feat_names: list[str],
     target_name: str,
     out_dir: Path,
-    n_iterations: int = 100,
-    maxsize: int = 20,
+    n_iterations: int = 600,
+    maxsize: int = 14,
+    parsimony: float = 2e-3,
+    populations: int = 48,
+    population_size: int = 40,
+    ncycles_per_iteration: int = 800,
     use_gpu: bool = False,
     seed: int = 42,
 ) -> dict[str, Any]:
@@ -427,7 +498,11 @@ def run_pysr(
         print("  Install with: pip install pysr", file=sys.stderr)
         return {"status": "skipped", "reason": "pysr not installed"}
 
-    print(f"[PySR:{target_name}] X={X.shape}  n_iter={n_iterations}  maxsize={maxsize}")
+    print(
+        f"[PySR:{target_name}] X={X.shape}  n_iter={n_iterations}  maxsize={maxsize}  "
+        f"parsimony={parsimony}  populations={populations}  population_size={population_size}  "
+        f"ncycles={ncycles_per_iteration}"
+    )
 
     pareto_path = out_dir / f"pysr_pareto_{target_name}.csv"
     backend_dir = out_dir / "pysr_backend"
@@ -441,7 +516,7 @@ def run_pysr(
         binary_operators=["+", "-", "*", "/", "^"],
         unary_operators=["sqrt", "log", "exp", "abs", "square"],
         # Parsimony: reward simple expressions
-        parsimony=1e-4,
+        parsimony=parsimony,
         # Complexity penalty
         complexity_of_operators={
             "^": 3,
@@ -450,6 +525,9 @@ def run_pysr(
             "sqrt": 2,
             "square": 1,
         },
+        populations=populations,
+        population_size=population_size,
+        ncycles_per_iteration=ncycles_per_iteration,
         # Output
         output_jax_format=False,
         output_torch_format=False,
@@ -546,7 +624,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--feature-policy",
-        choices=["strict_premerger", "kerr_validation"],
+        choices=["strict_premerger", "claim_grade", "kerr_validation"],
         default="strict_premerger",
         help="Feature selection policy applied before any internal transforms (default: strict_premerger)",
     )
@@ -563,20 +641,44 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--pysr-iterations",
         type=int,
-        default=100,
-        help="Number of PySR iterations per target (default: 100; more = slower but better)",
+        default=None,
+        help="Number of PySR iterations per target (default resolved from feature policy)",
     )
     parser.add_argument(
         "--pysr-maxsize",
         type=int,
-        default=20,
-        help="Maximum equation complexity for PySR (default: 20)",
+        default=None,
+        help="Maximum equation complexity for PySR (default resolved from feature policy)",
+    )
+    parser.add_argument(
+        "--pysr-parsimony",
+        type=float,
+        default=None,
+        help="Complexity penalty factor for PySR (default resolved from feature policy)",
+    )
+    parser.add_argument(
+        "--pysr-populations",
+        type=int,
+        default=None,
+        help="Number of parallel PySR populations (default resolved from feature policy)",
+    )
+    parser.add_argument(
+        "--pysr-population-size",
+        type=int,
+        default=None,
+        help="Individuals per PySR population (default resolved from feature policy)",
+    )
+    parser.add_argument(
+        "--pysr-ncycles-per-iteration",
+        type=int,
+        default=None,
+        help="Mutational work per PySR iteration (default resolved from feature policy)",
     )
     parser.add_argument(
         "--kan-epochs",
         type=int,
-        default=200,
-        help="Number of KAN training epochs per target (default: 200)",
+        default=None,
+        help="Number of KAN training epochs per target (default resolved from feature policy)",
     )
     parser.add_argument(
         "--gpu",
@@ -606,6 +708,24 @@ def main(argv: list[str] | None = None) -> int:
     stage_dir = runs_root / args.run_id / "experiment" / "malda_discovery"
     outputs_dir = stage_dir / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
+
+    search_config = resolve_search_config(
+        args.feature_policy,
+        pysr_iterations=args.pysr_iterations,
+        pysr_maxsize=args.pysr_maxsize,
+        pysr_parsimony=args.pysr_parsimony,
+        pysr_populations=args.pysr_populations,
+        pysr_population_size=args.pysr_population_size,
+        pysr_ncycles_per_iteration=args.pysr_ncycles_per_iteration,
+        kan_epochs=args.kan_epochs,
+    )
+    args.pysr_iterations = int(search_config["pysr_iterations"])
+    args.pysr_maxsize = int(search_config["pysr_maxsize"])
+    args.pysr_parsimony = float(search_config["pysr_parsimony"])
+    args.pysr_populations = int(search_config["pysr_populations"])
+    args.pysr_population_size = int(search_config["pysr_population_size"])
+    args.pysr_ncycles_per_iteration = int(search_config["pysr_ncycles_per_iteration"])
+    args.kan_epochs = int(search_config["kan_epochs"])
 
     # Resolve feature table path
     table_path = Path(args.feature_table) if args.feature_table else (
@@ -699,6 +819,10 @@ def main(argv: list[str] | None = None) -> int:
                 X, y, feat_names, target_name, outputs_dir,
                 n_iterations=args.pysr_iterations,
                 maxsize=args.pysr_maxsize,
+                parsimony=args.pysr_parsimony,
+                populations=args.pysr_populations,
+                population_size=args.pysr_population_size,
+                ncycles_per_iteration=args.pysr_ncycles_per_iteration,
                 use_gpu=args.gpu,
                 seed=args.seed,
             )
@@ -791,6 +915,10 @@ def main(argv: list[str] | None = None) -> int:
             "no_pysr": args.no_pysr,
             "pysr_iterations": args.pysr_iterations,
             "pysr_maxsize": args.pysr_maxsize,
+            "pysr_parsimony": args.pysr_parsimony,
+            "pysr_populations": args.pysr_populations,
+            "pysr_population_size": args.pysr_population_size,
+            "pysr_ncycles_per_iteration": args.pysr_ncycles_per_iteration,
             "kan_epochs": args.kan_epochs,
             "gpu": args.gpu,
             "feature_table": str(table_path),

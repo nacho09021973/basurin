@@ -150,6 +150,30 @@ def test_strict_premerger_blocks_leaky_inputs_and_transforms(
     assert "log_xi_f" not in feat_names
 
 
+def test_claim_grade_reduces_inputs_to_primitive_inspiral_features() -> None:
+    selected, analysis_mode = _MODULE.resolve_input_features("S_f", "claim_grade")
+
+    assert analysis_mode == "claim_grade"
+    assert selected == ["m1_src", "m2_src", "chi_eff"]
+
+    cols = ["m1_src", "m2_src", "chi_eff", "q", "eta", "S_f"]
+    data = np.array(
+        [
+            [30.0, 20.0, 0.0, 20.0 / 30.0, (30.0 * 20.0) / (50.0**2), 3000.0],
+            [31.0, 21.0, 0.1, 21.0 / 31.0, (31.0 * 21.0) / (52.0**2), 3200.0],
+            [32.0, 22.0, 0.2, 22.0 / 32.0, (32.0 * 22.0) / (54.0**2), 3400.0],
+            [33.0, 23.0, 0.3, 23.0 / 33.0, (33.0 * 23.0) / (56.0**2), 3600.0],
+            [34.0, 24.0, 0.4, 24.0 / 34.0, (34.0 * 24.0) / (58.0**2), 3800.0],
+        ],
+        dtype=np.float64,
+    )
+    _, _, feat_names = _MODULE.prepare_XY(cols, data, "S_f", selected)
+
+    assert feat_names == ["log_m1_src", "log_m2_src", "chi_eff"]
+    assert "q" not in feat_names
+    assert "eta" not in feat_names
+
+
 def test_run_pysr_uses_backend_directory_and_exports_pareto_csv(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -167,6 +191,10 @@ def test_run_pysr_uses_backend_directory_and_exports_pareto_csv(
         out_dir=out_dir,
         n_iterations=5,
         maxsize=7,
+        parsimony=0.123,
+        populations=9,
+        population_size=11,
+        ncycles_per_iteration=13,
         use_gpu=False,
         seed=123,
     )
@@ -177,6 +205,10 @@ def test_run_pysr_uses_backend_directory_and_exports_pareto_csv(
     assert kwargs["output_directory"] == str(out_dir / "pysr_backend")
     assert kwargs["run_id"] == "af_123"
     assert kwargs["temp_equation_file"] is False
+    assert kwargs["parsimony"] == 0.123
+    assert kwargs["populations"] == 9
+    assert kwargs["population_size"] == 11
+    assert kwargs["ncycles_per_iteration"] == 13
 
     pareto_path = out_dir / "pysr_pareto_af.csv"
     rows = list(csv.DictReader(pareto_path.open("r", encoding="utf-8")))
@@ -258,6 +290,16 @@ def test_main_records_strict_feature_policy_and_final_features(
 
     assert rc == 0
     assert stage_summary["config"]["feature_policy"] == "strict_premerger"
+    assert stage_summary["config"]["pysr_iterations"] == _MODULE.SEARCH_DEFAULTS["strict_premerger"]["pysr_iterations"]
+    assert stage_summary["config"]["pysr_maxsize"] == _MODULE.SEARCH_DEFAULTS["strict_premerger"]["pysr_maxsize"]
+    assert stage_summary["config"]["pysr_parsimony"] == _MODULE.SEARCH_DEFAULTS["strict_premerger"]["pysr_parsimony"]
+    assert stage_summary["config"]["pysr_populations"] == _MODULE.SEARCH_DEFAULTS["strict_premerger"]["pysr_populations"]
+    assert stage_summary["config"]["pysr_population_size"] == _MODULE.SEARCH_DEFAULTS["strict_premerger"]["pysr_population_size"]
+    assert (
+        stage_summary["config"]["pysr_ncycles_per_iteration"]
+        == _MODULE.SEARCH_DEFAULTS["strict_premerger"]["pysr_ncycles_per_iteration"]
+    )
+    assert stage_summary["config"]["kan_epochs"] == _MODULE.SEARCH_DEFAULTS["strict_premerger"]["kan_epochs"]
     assert stage_summary["results"]["features_by_target"]["S_f"] == [
         "log_m1_src",
         "log_m2_src",
@@ -273,3 +315,37 @@ def test_main_records_strict_feature_policy_and_final_features(
     assert "Mf" not in stage_summary["results"]["features_by_target"]["S_f"]
     assert "xi_f" not in stage_summary["results"]["features_by_target"]["S_f"]
     assert stage_summary["results"]["analysis_mode_by_target"]["Q_220"] == "discovery"
+
+
+def test_main_records_claim_grade_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runs_root = tmp_path / "runsroot_claim"
+    table_path = tmp_path / "inputs" / "event_features_claim.csv"
+    _write_feature_table(table_path)
+
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    rc = _MODULE.main(
+        [
+            "--run-id",
+            "malda_claim_grade_smoke",
+            "--feature-table",
+            str(table_path),
+            "--feature-policy",
+            "claim_grade",
+            "--no-kan",
+            "--no-pysr",
+        ]
+    )
+
+    stage_dir = runs_root / "malda_claim_grade_smoke" / "experiment" / "malda_discovery"
+    stage_summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
+
+    assert rc == 0
+    assert stage_summary["config"]["feature_policy"] == "claim_grade"
+    assert stage_summary["config"]["pysr_maxsize"] == _MODULE.SEARCH_DEFAULTS["claim_grade"]["pysr_maxsize"]
+    assert stage_summary["config"]["pysr_parsimony"] == _MODULE.SEARCH_DEFAULTS["claim_grade"]["pysr_parsimony"]
+    assert stage_summary["config"]["pysr_iterations"] == _MODULE.SEARCH_DEFAULTS["claim_grade"]["pysr_iterations"]
+    assert stage_summary["results"]["features_by_target"]["S_f"] == ["log_m1_src", "log_m2_src", "chi_eff"]
+    assert stage_summary["results"]["analysis_mode_by_target"]["S_f"] == "claim_grade"
