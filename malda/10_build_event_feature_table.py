@@ -9,13 +9,15 @@ Reads:
 Computes all derived physical quantities (mass ratios, Kerr QNM predictions
 via Berti fits, black-hole area/entropy proxies, dimensionless combinations).
 
-Outputs:
-  - malda/runs/feature_table/event_features.h5
-  - malda/runs/feature_table/event_features.csv
-  - malda/runs/feature_table/feature_catalog.json  (column descriptions)
+Outputs (under runs/<run-id>/experiment/malda_feature_table/):
+  - outputs/event_features.h5
+  - outputs/event_features.csv
+  - outputs/feature_catalog.json  (column descriptions)
+  - manifest.json                 (SHA256 hashes, artifact paths)
+  - stage_summary.json            (verdict, config, result counts)
 
 Usage:
-    python malda/10_build_event_feature_table.py [--out-dir DIR]
+    python malda/10_build_event_feature_table.py --run-id <run-id> [--bbh-only]
 
 Design philosophy:
     NO physics assumptions injected beyond what's already in the catalog.
@@ -35,9 +37,20 @@ from typing import Any
 import numpy as np
 
 # ---------------------------------------------------------------------------
-# Repository layout
+# Repository layout + BASURIN IO
 # ---------------------------------------------------------------------------
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from basurin_io import (  # noqa: E402
+    resolve_out_root,
+    utc_now_iso,
+    validate_run_id,
+    write_json_atomic,
+    write_manifest,
+    write_stage_summary,
+)
 CATALOG_CSV = REPO_ROOT / "gwtc_quality_events.csv"
 T0_JSON = REPO_ROOT / "gwtc_events_t0.json"
 META_DIR = REPO_ROOT / "docs" / "ringdown" / "event_metadata"
@@ -471,9 +484,9 @@ def main(argv: list[str] | None = None) -> int:
         description="Build enriched GW event feature table for KAN/PySR symbolic discovery"
     )
     parser.add_argument(
-        "--out-dir",
-        default=str(REPO_ROOT / "malda" / "runs" / "feature_table"),
-        help="Output directory (default: malda/runs/feature_table/)",
+        "--run-id",
+        required=True,
+        help="BASURIN run identifier (alphanumeric, -, ., _)",
     )
     parser.add_argument(
         "--bbh-only",
@@ -481,7 +494,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Only include BBH events (drop BNS/NSBH for cleaner QNM columns)",
     )
     args = parser.parse_args(argv)
-    out_dir = Path(args.out_dir)
+
+    runs_root = resolve_out_root("runs")
+    validate_run_id(args.run_id, runs_root)
+    stage_dir = runs_root / args.run_id / "experiment" / "malda_feature_table"
+    outputs_dir = stage_dir / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
 
     # --- Load catalog ---
     if not CATALOG_CSV.exists():
@@ -507,7 +525,6 @@ def main(argv: list[str] | None = None) -> int:
         meta = load_metadata(event_id)
         row = build_row(cat, t0_entry, meta)
 
-        # Optionally filter to BBH only
         if args.bbh_only and not row.get("is_bbh"):
             skipped += 1
             continue
@@ -522,34 +539,42 @@ def main(argv: list[str] | None = None) -> int:
         n_valid = sum(1 for r in feature_rows if math.isfinite(float(r.get(col, float("nan")))))
         print(f"  {col:25s}: {n_valid}/{len(feature_rows)} valid")
 
-    # --- Write outputs ---
-    write_hdf5(feature_rows, out_dir / "event_features.h5")
-    write_csv(feature_rows, out_dir / "event_features.csv")
+    # --- Write outputs to outputs/ ---
+    h5_path = outputs_dir / "event_features.h5"
+    csv_path = outputs_dir / "event_features.csv"
+    catalog_path = outputs_dir / "feature_catalog.json"
 
-    # Feature catalog JSON
-    catalog_path = out_dir / "feature_catalog.json"
-    catalog_path.write_text(
-        json.dumps(FEATURE_CATALOG, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    write_hdf5(feature_rows, h5_path)
+    write_csv(feature_rows, csv_path)
+    write_json_atomic(catalog_path, FEATURE_CATALOG)
     print(f"[10_build] Feature catalog: {catalog_path}")
 
-    # Summary JSON
-    summary = {
-        "n_events": len(feature_rows),
-        "n_features": len(FEATURE_CATALOG),
-        "bbh_only": args.bbh_only,
-        "outputs": {
-            "hdf5": str(out_dir / "event_features.h5"),
-            "csv": str(out_dir / "event_features.csv"),
-            "feature_catalog": str(catalog_path),
-        },
-        "columns": list(FEATURE_CATALOG.keys()),
+    # --- Manifest + stage_summary ---
+    artifacts: dict[str, Any] = {
+        "event_features_csv": csv_path,
+        "feature_catalog": catalog_path,
     }
-    (out_dir / "build_summary.json").write_text(
-        json.dumps(summary, indent=2), encoding="utf-8"
-    )
+    if h5_path.exists():
+        artifacts["event_features_h5"] = h5_path
 
-    print(f"[10_build] Done. {len(feature_rows)} events × {len(FEATURE_CATALOG)} features.")
+    write_manifest(stage_dir, artifacts, extra={"run_id": args.run_id, "stage": "malda_feature_table"})
+
+    write_stage_summary(stage_dir, {
+        "stage": "malda_feature_table",
+        "verdict": "PASS",
+        "run_id": args.run_id,
+        "created": utc_now_iso(),
+        "config": {"bbh_only": args.bbh_only},
+        "results": {
+            "n_events": len(feature_rows),
+            "n_skipped": skipped,
+            "n_features": len(FEATURE_CATALOG),
+            "columns": list(FEATURE_CATALOG.keys()),
+        },
+        "outputs": {k: str(v) for k, v in artifacts.items()},
+    })
+
+    print(f"[10_build] Done. {len(feature_rows)} events × {len(FEATURE_CATALOG)} features → {stage_dir}")
     return 0
 
 
