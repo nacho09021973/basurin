@@ -233,6 +233,29 @@ def test_claim_grade_symmetric_reduces_inputs_to_q_eta_chi_eff() -> None:
     assert "log_m2_src" not in feat_names
 
 
+def test_claim_grade_symmetric_reduces_af_to_eta_and_chi_eff() -> None:
+    selected, analysis_mode = _MODULE.resolve_input_features("af", "claim_grade_symmetric")
+
+    assert analysis_mode == "claim_grade_symmetric"
+    assert selected == ["eta", "chi_eff"]
+
+    cols = ["q", "eta", "chi_eff", "af"]
+    data = np.array(
+        [
+            [20.0 / 30.0, (30.0 * 20.0) / (50.0**2), 0.0, 0.68],
+            [21.0 / 31.0, (31.0 * 21.0) / (52.0**2), 0.1, 0.70],
+            [22.0 / 32.0, (32.0 * 22.0) / (54.0**2), 0.2, 0.72],
+            [23.0 / 33.0, (33.0 * 23.0) / (56.0**2), 0.3, 0.74],
+            [24.0 / 34.0, (34.0 * 24.0) / (58.0**2), 0.4, 0.76],
+        ],
+        dtype=np.float64,
+    )
+    _, _, feat_names = _MODULE.prepare_XY(cols, data, "af", selected)
+
+    assert feat_names == ["eta", "chi_eff"]
+    assert "q" not in feat_names
+
+
 def test_runtime_timeline_emits_heartbeat_and_persists_jsonl(tmp_path: Path) -> None:
     timeline = _MODULE.RuntimeTimeline(tmp_path / "timeline.jsonl")
 

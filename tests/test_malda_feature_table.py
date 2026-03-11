@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import importlib.util
 import json
+import math
 from pathlib import Path
 
 
@@ -119,6 +120,56 @@ def test_build_row_marks_unknown_when_catalog_masses_are_invalid() -> None:
     assert row["is_bns"] == 0
     assert row["is_nsbh"] == 0
     assert row["classification_source"] == "unknown"
+
+
+def test_build_row_computes_horizon_thermo_and_distance_features() -> None:
+    row = _MODULE.build_row(
+        {
+            "event": "GW_TEST_BBH",
+            "m1_source": "34.5",
+            "m2_source": "29.0",
+            "chi_eff": "0.1",
+            "final_mass_source": "60.0",
+            "luminosity_distance": "500.0",
+            "redshift": "0.1",
+            "catalog": "synthetic",
+        },
+        {},
+    )
+
+    assert math.isclose(float(row["DL_Gly"]), 500.0 * _MODULE.MPC_TO_GLY, rel_tol=1e-12)
+    assert math.isclose(float(row["Mf_kg"]), 60.0 * _MODULE.MSUN_KG, rel_tol=1e-12)
+    assert 0.0 < float(row["T_H_K"]) < 1e-6
+    assert 0.0 < float(row["f_horizon_hz"]) < float(row["f_220_hz"])
+    assert 0.0 < float(row["E_rot_frac"]) < 1.0
+    assert float(row["M_irr_Msun"]) < float(row["Mf"])
+    assert float(row["r_plus_km"]) > float(row["r_g_km"])
+    assert float(row["A_horizon_km2"]) > 0.0
+
+
+def test_build_row_sets_new_remnant_features_to_nan_without_valid_final_mass() -> None:
+    row = _MODULE.build_row(
+        {
+            "event": "GW_TEST_MISSING_MF",
+            "m1_source": "34.5",
+            "m2_source": "29.0",
+            "chi_eff": "0.1",
+            "final_mass_source": "",
+            "luminosity_distance": "500.0",
+            "catalog": "synthetic",
+        },
+        {},
+    )
+
+    assert math.isnan(float(row["Mf_kg"]))
+    assert math.isnan(float(row["M_irr_Msun"]))
+    assert math.isnan(float(row["E_rot_Msun"]))
+    assert math.isnan(float(row["E_rot_frac"]))
+    assert math.isnan(float(row["r_g_km"]))
+    assert math.isnan(float(row["r_plus_km"]))
+    assert math.isnan(float(row["A_horizon_km2"]))
+    assert math.isnan(float(row["T_H_K"]))
+    assert math.isnan(float(row["f_horizon_hz"]))
 
 
 def test_bbh_only_zero_rows_writes_fail_summary(tmp_path: Path, monkeypatch) -> None:

@@ -57,6 +57,13 @@ LOSC_DIR = REPO_ROOT / "data" / "losc"
 
 # Physical constants
 MSUN_S = 4.925491025543576e-6   # G*M_sun/c^3  [seconds]
+MSUN_KG = 1.988409870698051e30  # Solar mass [kg]
+RG_KM_PER_MSUN = 1.4766250385   # G*M_sun/c^2 [km]
+MPC_TO_GLY = 3.2615637769e-3    # 1 Mpc in billions of light years
+HBAR_SI = 1.054571817e-34       # Reduced Planck constant [J s]
+G_SI = 6.67430e-11              # Newton constant [m^3 kg^-1 s^-2]
+KB_SI = 1.380649e-23            # Boltzmann constant [J K^-1]
+C_SI = 299792458.0              # Speed of light [m s^-1]
 CHI_MAX = 0.998                  # numerical limit for Berti fits
 
 # ---------------------------------------------------------------------------
@@ -133,6 +140,42 @@ def bh_xi(af: float) -> float:
 def bh_entropy_proxy(M_msun: float, af: float) -> float:
     """S ∝ M^2 * xi(a).  Proportional to Bekenstein-Hawking entropy (G=c=ħ=kB=1)."""
     return M_msun ** 2 * bh_xi(af)
+
+
+def irreducible_mass_msun(M_msun: float, af: float) -> float:
+    """Irreducible Kerr mass in solar masses."""
+    return M_msun * math.sqrt(bh_xi(af) / 2.0)
+
+
+def horizon_radius_km(M_msun: float, af: float) -> float:
+    """Outer Kerr horizon radius in km."""
+    return RG_KM_PER_MSUN * M_msun * bh_xi(af)
+
+
+def horizon_area_km2(M_msun: float, af: float) -> float:
+    """Kerr horizon area in km^2."""
+    rg_km = RG_KM_PER_MSUN * M_msun
+    return 8.0 * math.pi * rg_km ** 2 * bh_xi(af)
+
+
+def hawking_temperature_K(M_msun: float, af: float) -> float:
+    """Hawking temperature in Kelvin for a Kerr black hole."""
+    sqrt_term = math.sqrt(max(0.0, 1.0 - min(abs(af), CHI_MAX) ** 2))
+    correction = 2.0 * sqrt_term / (1.0 + sqrt_term)
+    if correction <= 0.0:
+        return 0.0
+    M_kg = M_msun * MSUN_KG
+    base = HBAR_SI * C_SI ** 3 / (8.0 * math.pi * G_SI * KB_SI * M_kg)
+    return base * correction
+
+
+def horizon_frequency_hz(M_msun: float, af: float) -> float:
+    """Horizon angular frequency converted to cyclic frequency [Hz]."""
+    sqrt_term = math.sqrt(max(0.0, 1.0 - min(abs(af), CHI_MAX) ** 2))
+    denominator = 4.0 * math.pi * M_msun * MSUN_S * (1.0 + sqrt_term)
+    if denominator <= 0.0:
+        return float("nan")
+    return af / denominator
 
 
 # ---------------------------------------------------------------------------
@@ -300,10 +343,28 @@ def build_row(
         xi_f = bh_xi(af)
         row["xi_f"] = xi_f                              # area shape factor of final BH
         row["S_f"] = bh_entropy_proxy(Mf, af)           # ~ Bekenstein entropy [M_sun^2]
+        row["Mf_kg"] = Mf * MSUN_KG
+        row["M_irr_Msun"] = irreducible_mass_msun(Mf, af)
+        row["E_rot_Msun"] = Mf - row["M_irr_Msun"]
+        row["E_rot_frac"] = row["E_rot_Msun"] / Mf
+        row["r_g_km"] = RG_KM_PER_MSUN * Mf
+        row["r_plus_km"] = horizon_radius_km(Mf, af)
+        row["A_horizon_km2"] = horizon_area_km2(Mf, af)
+        row["T_H_K"] = hawking_temperature_K(Mf, af)
+        row["f_horizon_hz"] = horizon_frequency_hz(Mf, af)
 
     else:
         row["xi_f"] = float("nan")
         row["S_f"] = float("nan")
+        row["Mf_kg"] = float("nan")
+        row["M_irr_Msun"] = float("nan")
+        row["E_rot_Msun"] = float("nan")
+        row["E_rot_frac"] = float("nan")
+        row["r_g_km"] = float("nan")
+        row["r_plus_km"] = float("nan")
+        row["A_horizon_km2"] = float("nan")
+        row["T_H_K"] = float("nan")
+        row["f_horizon_hz"] = float("nan")
 
     # Schwarzschild (a=0) entropy estimates for the progenitors
     if math.isfinite(m1) and math.isfinite(m2):
@@ -353,8 +414,10 @@ def build_row(
     # --- Distance / cosmology ---
     if math.isfinite(DL) and DL > 0:
         row["log_DL"] = math.log(DL)
+        row["DL_Gly"] = DL * MPC_TO_GLY
     else:
         row["log_DL"] = float("nan")
+        row["DL_Gly"] = float("nan")
     if math.isfinite(z) and z > 0:
         row["log1pz"] = math.log(1.0 + z)
     else:
@@ -386,7 +449,9 @@ FEATURE_CATALOG: dict[str, str] = {
     "chi_eff": "Effective inspiral spin parameter",
     "Mf": "Final remnant mass [M_sun]",
     "af": "Final remnant dimensionless spin (estimated from eta+chi_eff via Rezzolla+2008/HBR+2016)",
+    "Mf_kg": "Final remnant mass [kg]",
     "DL_Mpc": "Luminosity distance [Mpc]",
+    "DL_Gly": "Luminosity distance [Gly]",
     "z": "Redshift",
     "q": "Mass ratio m_light/m_heavy [0..1]",
     "eta": "Symmetric mass ratio m1*m2/(m1+m2)^2 [0..0.25]",
@@ -411,6 +476,14 @@ FEATURE_CATALOG: dict[str, str] = {
     "Mf_f220_dimless": "2*pi*Mf[s]*f_220: should equal F_220_dimless",
     "xi_f": "BH area shape factor 1+sqrt(1-af^2) [2=Schwarzschild, 1=extremal]",
     "S_f": "Final BH entropy proxy Mf^2*(1+sqrt(1-af^2)) [M_sun^2, G=c=1]",
+    "M_irr_Msun": "Irreducible mass of the final Kerr BH [M_sun]",
+    "E_rot_Msun": "Rotational energy proxy Mf - M_irr [M_sun c^2]",
+    "E_rot_frac": "Fraction of final mass-energy stored in Kerr rotation",
+    "r_g_km": "Gravitational radius GM/c^2 of the remnant [km]",
+    "r_plus_km": "Outer Kerr horizon radius r_+ [km]",
+    "A_horizon_km2": "Kerr horizon area [km^2]",
+    "T_H_K": "Hawking temperature of the remnant Kerr BH [K]",
+    "f_horizon_hz": "Horizon angular frequency converted to cyclic frequency [Hz]",
     "S1_schw": "Schwarzschild entropy proxy for m1 [M_sun^2]",
     "S2_schw": "Schwarzschild entropy proxy for m2 [M_sun^2]",
     "delta_S": "Entropy increase S_f_full - S1_full - S2_full [M_sun^2] (Hawking: >=0)",
