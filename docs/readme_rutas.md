@@ -238,6 +238,7 @@ Regla práctica:
 - `s4k_event_support_region` no re-ejecuta física; solo consolida artefactos ya emitidos.
 - Si falta cualquiera de `s4g`, `s4h`, `s4i` o `s4j`, el stage debe fallar por contrato.
 - `downstream_status.class` resume la legibilidad downstream del artefacto: `MULTIMODE_USABLE`, `GEOMETRY_PRESENT_BUT_NONINFORMATIVE`, `OUT_OF_DOMAIN` o `NO_SUPPORT_REGION`.
+- `s5_aggregate` consume este artefacto cuando existe y, si hay suficientes eventos `MULTIMODE_USABLE`, usa `s4k_event_support_region` como base preferente para `multimode_conditioned_population`.
 
 ### Rutas de auditoría LOSC/t0 y batch offline
 

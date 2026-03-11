@@ -23,6 +23,8 @@ def _mk_run(
     s3b_verdict: str = "PASS",
     with_s3b: bool = True,
     s4i_common: list[str] | None = None,
+    s4k_downstream_status: str | None = None,
+    s4k_final: list[str] | None = None,
 ) -> None:
     rv = runs_root / run_id / "RUN_VALID"
     rv.mkdir(parents=True, exist_ok=True)
@@ -82,6 +84,24 @@ def _mk_run(
             "common_geometry_ids": list(s4i_common),
             "n_common": len(s4i_common),
             "verdict": "PASS" if s4i_common else "NO_COMMON_GEOMETRIES",
+        }), encoding="utf-8")
+
+    if s4k_downstream_status is not None:
+        s4k_out = runs_root / run_id / "s4k_event_support_region" / "outputs"
+        s4k_out.mkdir(parents=True, exist_ok=True)
+        final_ids = list(s4k_final or [])
+        (s4k_out / "event_support_region.json").write_text(json.dumps({
+            "schema_name": "golden_geometry_event_support",
+            "schema_version": "v1",
+            "run_id": run_id,
+            "stage": "s4k_event_support_region",
+            "analysis_path": "MULTIMODE_INTERSECTION",
+            "support_region_status": "SUPPORT_REGION_AVAILABLE" if final_ids else "NO_COMMON_REGION",
+            "final_geometry_ids": final_ids,
+            "downstream_status": {
+                "class": s4k_downstream_status,
+                "reasons": [f"seeded_for_test:{s4k_downstream_status}"],
+            },
         }), encoding="utf-8")
 
 
@@ -236,6 +256,53 @@ def test_s5_multimode_conditioned_population_is_supported_when_s4i_exists_for_el
     assert payload["multimode_conditioned_population"]["status"] == "SUPPORTED"
     assert payload["multimode_conditioned_population"]["artifact_basis"] == "s4i_common_geometry_intersection"
     assert payload["multimode_conditioned_population"]["common_geometry_ids"] == ["g1"]
+
+
+def test_s5_multimode_conditioned_population_prefers_s4k_when_present(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    _mk_run(
+        runs_root,
+        "run_a",
+        ranked=[0, 1],
+        compatible=[0],
+        viability_class="MULTIMODE_OK",
+        s4i_common=["g0", "g1"],
+        s4k_downstream_status="MULTIMODE_USABLE",
+        s4k_final=["g1", "g2"],
+    )
+    _mk_run(
+        runs_root,
+        "run_b",
+        ranked=[0, 1],
+        compatible=[0],
+        viability_class="MULTIMODE_OK",
+        s4i_common=["g1", "g3"],
+        s4k_downstream_status="MULTIMODE_USABLE",
+        s4k_final=["g2", "g4"],
+    )
+
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s5_aggregate.py"),
+        "--out-run",
+        "agg_mm_s4k_supported",
+        "--source-runs",
+        "run_a,run_b",
+    ]
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, proc.stderr
+
+    stage_dir = runs_root / "agg_mm_s4k_supported" / "s5_aggregate"
+    payload = json.loads((stage_dir / "outputs" / "aggregate.json").read_text(encoding="utf-8"))
+    stage_summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
+    assert payload["multimode_conditioned_population"]["status"] == "SUPPORTED"
+    assert payload["multimode_conditioned_population"]["artifact_basis"] == "s4k_event_support_region"
+    assert payload["multimode_conditioned_population"]["common_geometry_ids"] == ["g2"]
+    assert payload["golden_geometry_support_region"]["counts"]["MULTIMODE_USABLE"] == 2
+    assert payload["golden_geometry_support_region"]["per_event"]["run_a"]["downstream_status_class"] == "MULTIMODE_USABLE"
+    assert stage_summary["results"]["multimode_conditioned_artifact_basis"] == "s4k_event_support_region"
+    assert stage_summary["results"]["s4k_present_events"] == 2
 
 
 def test_s5_multimode_conditioned_population_is_not_supported_when_no_event_has_221_enabled(tmp_path: Path) -> None:
