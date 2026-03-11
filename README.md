@@ -151,9 +151,17 @@ La implementacion canonica usa `contracts.log_stage_paths(ctx)` para ello.
 ### 3.5 Datos externos y politica offline-first
 
 - `data/losc/<EVENT_ID>/` es input externo read-only.
+- Desde la raiz del repo, la ubicacion operativa es `./data/losc/<EVENT_ID>/`.
+- En este checkout concreto, eso resuelve bajo `/home/ignac/work/basurin/data/losc/<EVENT_ID>/`.
 - `s1_fetch_strain` copia los HDF5 efectivamente usados a `runs/<run_id>/s1_fetch_strain/inputs/{H1,L1}.h5`.
 - La trazabilidad de esos inputs queda en `runs/<run_id>/s1_fetch_strain/outputs/provenance.json`.
 - Cuando un input externo se ancla dentro del run, debe quedar bajo `external_inputs/` o equivalente y hasheado.
+
+Regla practica:
+
+- `data/losc/...` no pertenece al arbol auditable del run.
+- `data/losc/...` no sustituye `RUN_VALID`.
+- Los experimentos MALDA y los stages canonicos solo pueden escribir bajo `runs/<run_id>/...`.
 
 ### 3.6 Canonico vs experimento
 
@@ -324,6 +332,55 @@ python -m mvp.experiment_offline_batch \
 ### 7.3 Sobre los stages geometricos explicitos
 
 `s4g/s4h/s4i/s4j` tienen CLI propia y forman la rama mas directamente alineada con el objetivo "region compatible por modo + interseccion + Hawking". Sin embargo, requieren que sus inputs observacionales esten presentes bajo el run y actualmente no estan orquestados por defecto dentro de `python -m mvp.pipeline multimode`.
+
+### 7.4 Flujo MALDA estricto sobre runs gobernados
+
+Los entrypoints MALDA actuales relevantes para discovery simbolico son:
+
+- `malda/10_build_event_feature_table.py`
+- `malda/11_kan_pysr_discovery.py`
+- `malda/12_validate_formula_candidates.py`
+
+Contrato operativo:
+
+- `10_build_event_feature_table.py` lee del catalogo local del repo (`gwtc_quality_events.csv`, `gwtc_events_t0.json`) y no necesita outputs canonicos upstream.
+- Aun asi, si vas a colgar MALDA de BASURIN con gobernanza estricta, debes ejecutarlo sobre un `run_id` que ya tenga `runs/<run_id>/RUN_VALID/verdict.json` con `PASS`.
+- `11_kan_pysr_discovery.py` consume el `event_features.csv` emitido por `step 10`.
+- `12_validate_formula_candidates.py` consume `event_features.csv` + `discovery_summary.json` y exige `RUN_VALID == PASS`.
+- La secuencia valida es siempre `10 -> 11 -> 12` dentro del mismo `run_id`.
+
+Rutas emitidas por MALDA bajo un run gobernado:
+
+- `runs/<run_id>/experiment/malda_feature_table/outputs/event_features.csv`
+- `runs/<run_id>/experiment/malda_discovery/outputs/discovery_summary.json`
+- `runs/<run_id>/experiment/malda_formula_validation/outputs/formula_validation.json`
+
+Ejemplo estricto reutilizando un run ya gobernado:
+
+```bash
+export BASURIN_RUNS_ROOT=/home/ignac/work/basurin/runs
+
+python malda/10_build_event_feature_table.py \
+  --run-id synth_family_router_smoke \
+  --bbh-only
+
+python malda/11_kan_pysr_discovery.py \
+  --run-id synth_family_router_smoke \
+  --feature-policy claim_grade_symmetric \
+  --targets E_rad_frac,af,F_220_dimless,f_ratio_221_220 \
+  --heartbeat-seconds 10 \
+  --bbh-only
+
+python malda/12_validate_formula_candidates.py \
+  --run-id synth_family_router_smoke \
+  --targets E_rad_frac,af,F_220_dimless,f_ratio_221_220 \
+  --bootstrap-samples 200
+```
+
+Regla de interpretacion:
+
+- Si un `run_id` no tiene `RUN_VALID/verdict.json`, MALDA discovery puede haberse ejecutado como experimento local, pero `step 12` debe abortar por contrato.
+- Si quieres gobernanza estricta, no "repares" un run a mano creando `RUN_VALID`; cuelga MALDA de un run canonico ya valido o crea primero ese run con el pipeline canónico.
 
 ## 8. Rutas y artefactos clave
 

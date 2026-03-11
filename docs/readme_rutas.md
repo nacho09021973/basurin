@@ -27,6 +27,10 @@ Objetivo: que una IA (o humano) no pierda 5–6 horas diarias por confundir `RUN
   - `runs/<run_id>/external_inputs/...`
   - `runs/<run_id>/<stage>/outputs/`
   - `runs/<run_id>/experiment/<name>/`
+- **MALDA sobre un run gobernado:**
+  - `runs/<RUN_ID>/experiment/malda_feature_table/outputs/event_features.csv`
+  - `runs/<RUN_ID>/experiment/malda_discovery/outputs/discovery_summary.json`
+  - `runs/<RUN_ID>/experiment/malda_formula_validation/outputs/formula_validation.json`
 - **Ejemplo NetCDF contra release externo:**
   - `runs/ext_220_210_20260227T090000Z/external_inputs/siegel_220_210/Users/RichardFineMan/Downloads/data_release/220_210/<file>.nc`
 
@@ -101,6 +105,14 @@ Ruta canónica (input externo *read-only*):
 
 `data/losc/<EVENT_ID>/`
 
+Ruta real desde la raíz del repo:
+
+`./data/losc/<EVENT_ID>/`
+
+En este checkout actual:
+
+`/home/ignac/work/basurin/data/losc/<EVENT_ID>/`
+
 Precheck canónico:
 
 ```bash
@@ -133,6 +145,8 @@ Procedimiento completo de bootstrap/descarga/poblado: ver `README.md` en la secc
 
 **Nota de gobernanza**: `data/losc/...` es input externo. El árbol auditable del run empieza en `runs/<RUN_ID>/...`.
 
+**Nota MALDA**: `malda/10_build_event_feature_table.py` lee del catálogo local del repo, no de `data/losc/...`, pero sigue colgándose de un `run_id` BASURIN para escribir sus outputs bajo `runs/<RUN_ID>/experiment/...`.
+
 
 ## 0) Regla de oro (léela primero)
 
@@ -150,6 +164,56 @@ Si eso no coincide con el árbol real donde está `RUN_VALID/verdict.json`, el s
 - `runs/<run_id>/external_inputs/...`: anclaje determinista de releases externos (por ejemplo, `siegel_220_210.tar.gz`) con hash verificable para trazabilidad.
 - `runs/<run_id>/<stage>/outputs/`: artefactos producidos por stages. Deben convivir con `manifest.json` y `stage_summary.json`, incluyendo hashes SHA256.
 - `runs/<run_id>/experiment/<name>/`: espacio para experimentos; no debe mutar artefactos canónicos de stages ya emitidos.
+
+### MALDA: rutas exactas y orden estricto
+
+Flujo soportado hoy:
+
+1. `malda/10_build_event_feature_table.py`
+2. `malda/11_kan_pysr_discovery.py`
+3. `malda/12_validate_formula_candidates.py`
+
+Contrato:
+
+- `step 10` escribe en `runs/<RUN_ID>/experiment/malda_feature_table/`.
+- `step 11` escribe en `runs/<RUN_ID>/experiment/malda_discovery/`.
+- `step 12` escribe en `runs/<RUN_ID>/experiment/malda_formula_validation/`.
+- `step 12` exige que exista `runs/<RUN_ID>/RUN_VALID/verdict.json` con `PASS`.
+- Si quieres gobernanza estricta, no uses un `RUN_ID` "huérfano" creado solo para MALDA; reutiliza un run canónico ya válido o crea primero ese run con el pipeline principal.
+
+Rutas de trabajo:
+
+- `runs/<RUN_ID>/experiment/malda_feature_table/outputs/event_features.csv`
+- `runs/<RUN_ID>/experiment/malda_discovery/outputs/discovery_summary.json`
+- `runs/<RUN_ID>/experiment/malda_formula_validation/outputs/formula_validation.json`
+
+Ejemplo estricto:
+
+```bash
+export BASURIN_RUNS_ROOT=/home/ignac/work/basurin/runs
+
+python malda/10_build_event_feature_table.py \
+  --run-id synth_family_router_smoke \
+  --bbh-only
+
+python malda/11_kan_pysr_discovery.py \
+  --run-id synth_family_router_smoke \
+  --feature-policy claim_grade_symmetric \
+  --targets E_rad_frac,af,F_220_dimless,f_ratio_221_220 \
+  --heartbeat-seconds 10 \
+  --bbh-only
+
+python malda/12_validate_formula_candidates.py \
+  --run-id synth_family_router_smoke \
+  --targets E_rad_frac,af,F_220_dimless,f_ratio_221_220 \
+  --bootstrap-samples 200
+```
+
+Anti-pérdida-de-tiempo:
+
+- `data/losc/...` no crea `RUN_VALID`.
+- `event_features.csv` no sustituye `RUN_VALID`.
+- Si `runs/<RUN_ID>/RUN_VALID/verdict.json` no existe, `step 12` debe fallar.
 
 ### Rutas de auditoría LOSC/t0 y batch offline
 
@@ -440,4 +504,3 @@ runs/<RUN_ID>/experiment/t0_sweep_full_seed<seed>/outputs/t0_sweep_full_results.
 ```
 
 Si falta ese directorio/JSON, el oráculo imprime la ruta esperada exacta y el comando para regenerar el sweep (`phase=run`)
-
