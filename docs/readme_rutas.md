@@ -219,6 +219,8 @@ Anti-pérdida-de-tiempo:
 
 ### Golden geometry explícita: artefacto canónico por evento
 
+`python -m mvp.pipeline multimode` ya materializa por defecto los inputs observacionales de `s4g/s4h`, ejecuta `s4g -> s4h -> s4i -> s4j -> s4k` y degrada a `MODE220_PLUS_HAWKING` cuando `221` no es usable.
+
 Si ejecutas la rama explícita `s4g -> s4h -> s4i -> s4j`, el artefacto downstream recomendado ya no es mirar cuatro JSON por separado, sino:
 
 - `runs/<RUN_ID>/s4k_event_support_region/outputs/event_support_region.json`

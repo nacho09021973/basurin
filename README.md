@@ -266,7 +266,7 @@ En el estado local inspeccionado para esta reescritura, ese subconjunto pasa (`5
 Implementado hoy no significa que ya exista una superficie cientifica definitivamente cerrada. En particular:
 
 - la ruta explicita `220 -> 221 -> interseccion -> Hawking` existe en stages separados, pero el artefacto canonico unico por evento todavia no esta fijado como salida unificada del pipeline multimodo completo;
-- la ruta explicita `220 -> 221 -> interseccion -> Hawking` ya puede consolidarse en `s4k_event_support_region`, pero esa rama todavia no esta orquestada por defecto dentro de `python -m mvp.pipeline multimode`;
+- la ruta explicita `220 -> 221 -> interseccion -> Hawking` ya puede consolidarse en `s4k_event_support_region` y ahora se orquesta por defecto dentro de `python -m mvp.pipeline multimode`, degradando conservadoramente a `220 + Hawking` cuando `221` no es usable;
 - existen handlers de familia y agregacion poblacional, pero la inferencia poblacional final basada en regiones canonicas por evento sigue siendo objetivo de diseno, no conclusion cerrada;
 - `experiment_population_kerr.py` existe, pero es un experimento no canonico y no debe confundirse con el stage poblacional definitivo que consumira artefactos geometricos por evento.
 
@@ -333,7 +333,7 @@ python -m mvp.experiment_offline_batch \
 
 ### 7.3 Sobre los stages geometricos explicitos
 
-`s4g/s4h/s4i/s4j` tienen CLI propia y forman la rama mas directamente alineada con el objetivo "region compatible por modo + interseccion + Hawking". Sin embargo, requieren que sus inputs observacionales esten presentes bajo el run y actualmente no estan orquestados por defecto dentro de `python -m mvp.pipeline multimode`.
+`s4g/s4h/s4i/s4j` tienen CLI propia y forman la rama mas directamente alineada con el objetivo "region compatible por modo + interseccion + Hawking". `python -m mvp.pipeline multimode` ahora materializa por defecto los inputs observacionales de `s4g/s4h`, ejecuta esa rama explícita y consolida `s4k_event_support_region`; si `221` no es usable, la ruta degrada de forma conservadora a `220 + Hawking` en lugar de abortar la región geométrica por evento.
 
 ### 7.4 Flujo MALDA estricto sobre runs gobernados
 
