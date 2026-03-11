@@ -112,6 +112,40 @@ class _FakeKAN:
         Path(folder).mkdir(parents=True, exist_ok=True)
 
 
+class _FakeTorchTensor:
+    def __init__(self, data: object) -> None:
+        self._data = np.asarray(data)
+
+    def __getitem__(self, idx: object) -> "_FakeTorchTensor":
+        if isinstance(idx, _FakeTorchTensor):
+            idx = idx._data
+        return _FakeTorchTensor(self._data[idx])
+
+    def unsqueeze(self, axis: int) -> "_FakeTorchTensor":
+        return _FakeTorchTensor(np.expand_dims(self._data, axis))
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+
+class _FakeTorchModule(types.ModuleType):
+    def __init__(self) -> None:
+        super().__init__("torch")
+        self.float32 = object()
+        self.cuda = types.SimpleNamespace(
+            is_available=lambda: False,
+            manual_seed_all=lambda seed: None,
+        )
+
+    @staticmethod
+    def manual_seed(seed: int) -> None:
+        return None
+
+    @staticmethod
+    def tensor(data: object, dtype: object = None, device: str | None = None) -> _FakeTorchTensor:
+        return _FakeTorchTensor(data)
+
+
 @pytest.mark.parametrize(
     ("target_name", "blocked_features"),
     [
@@ -284,7 +318,9 @@ def test_run_kan_uses_fit_and_keeps_backend_under_outputs(
 ) -> None:
     fake_kan = types.ModuleType("kan")
     fake_kan.KAN = _FakeKAN
+    fake_torch = _FakeTorchModule()
     monkeypatch.setitem(sys.modules, "kan", fake_kan)
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
 
     out_dir = tmp_path / "runs" / "demo_run" / "experiment" / "malda_discovery" / "outputs"
     result = _MODULE.run_kan(
