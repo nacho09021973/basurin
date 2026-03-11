@@ -137,6 +137,42 @@ def test_s4h_contract_has_atlas_external_input():
     assert "atlas" in contract.external_inputs
 
 
+def test_s4h_skips_cleanly_when_mode221_obs_is_absent(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    os.environ["BASURIN_RUNS_ROOT"] = str(runs_root)
+
+    run_id = "s4h_skip_pytest"
+    run_dir = runs_root / run_id
+    (run_dir / "RUN_VALID").mkdir(parents=True)
+    (run_dir / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}\n', encoding="utf-8")
+
+    cp = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mvp.s4h_mode221_geometry_filter",
+            "--run-id",
+            run_id,
+            "--atlas-path",
+            str((REPO_ROOT / "mvp" / "test_atlas_fixture.json").resolve()),
+        ],
+        cwd=REPO_ROOT,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+    )
+
+    assert cp.returncode == 0, cp.stderr
+    stage_dir = run_dir / "s4h_mode221_geometry_filter"
+    payload = json.loads((stage_dir / "outputs" / "mode221_filter.json").read_text(encoding="utf-8"))
+    summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
+
+    assert payload["verdict"] == "SKIPPED_221_UNAVAILABLE"
+    assert payload["n_passed"] == 0
+    assert summary["verdict"] == "PASS"
+    assert summary["results"]["verdict"] == "SKIPPED_221_UNAVAILABLE"
+
+
 # ── Deprecation test ────────────────────────────────────────────────────────
 
 def test_t0_sweep_deprecation_warning():
