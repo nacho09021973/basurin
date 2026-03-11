@@ -149,6 +149,23 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            s4k_out = run_dir / "s4k_event_support_region" / "outputs"
+            s4k_out.mkdir(parents=True, exist_ok=True)
+            (s4k_out / "event_support_region.json").write_text(
+                json.dumps(
+                    {
+                        "analysis_path": "MULTIMODE_INTERSECTION",
+                        "support_region_status": "SUPPORT_REGION_AVAILABLE",
+                        "n_final_geometries": 507,
+                        "downstream_status": {
+                            "class": "GEOMETRY_PRESENT_BUT_NONINFORMATIVE",
+                            "reasons": ["multimode_viability=RINGDOWN_NONINFORMATIVE"],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
             parsed = pipeline._parse_multimode_results(runs_root, run_id)
 
             self.assertEqual(parsed["s4c_status"], "SKIPPED_MULTIMODE_GATE")
@@ -158,6 +175,14 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                 parsed["multimode_viability_reasons"],
                 ["rel_iqr_f220=0.833 > 0.5: fundamental frequency poorly constrained"],
             )
+            self.assertEqual(parsed["downstream_status_class"], "GEOMETRY_PRESENT_BUT_NONINFORMATIVE")
+            self.assertEqual(
+                parsed["downstream_status_reasons"],
+                ["multimode_viability=RINGDOWN_NONINFORMATIVE"],
+            )
+            self.assertEqual(parsed["support_region_status"], "SUPPORT_REGION_AVAILABLE")
+            self.assertEqual(parsed["support_region_n_final"], 507)
+            self.assertEqual(parsed["support_region_analysis_path"], "MULTIMODE_INTERSECTION")
 
     def test_parse_multimode_results_propagates_singlemode_only_out_of_domain_family_chain(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -369,6 +394,22 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                         json.dumps({"status": "EVALUATED", "assessment": "SUPPORTED", "reason": "test"}),
                         encoding="utf-8",
                     )
+                    s4k_out = out_root / run_id / "s4k_event_support_region" / "outputs"
+                    s4k_out.mkdir(parents=True, exist_ok=True)
+                    (s4k_out / "event_support_region.json").write_text(
+                        json.dumps(
+                            {
+                                "analysis_path": "MULTIMODE_INTERSECTION",
+                                "support_region_status": "SUPPORT_REGION_AVAILABLE",
+                                "n_final_geometries": 507,
+                                "downstream_status": {
+                                    "class": "MULTIMODE_USABLE",
+                                    "reasons": ["support_region_status=SUPPORT_REGION_AVAILABLE"],
+                                },
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
 
                 timeline["stages"].append(
                     {
@@ -410,6 +451,20 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
             self.assertEqual(timeline["multimode_results"]["extraction_quality"], "INSUFFICIENT_DATA")
             self.assertEqual(timeline["multimode_results"]["primary_family"], "GR_KERR_BH")
             self.assertEqual(timeline["multimode_results"]["ratio_rf_consistent"], True)
+            self.assertEqual(timeline["multimode_results"]["downstream_status_class"], "MULTIMODE_USABLE")
+            self.assertEqual(
+                timeline["multimode_results"]["downstream_status_reasons"],
+                ["support_region_status=SUPPORT_REGION_AVAILABLE"],
+            )
+            self.assertEqual(
+                timeline["multimode_results"]["support_region_status"],
+                "SUPPORT_REGION_AVAILABLE",
+            )
+            self.assertEqual(timeline["multimode_results"]["support_region_n_final"], 507)
+            self.assertEqual(
+                timeline["multimode_results"]["support_region_analysis_path"],
+                "MULTIMODE_INTERSECTION",
+            )
             self.assertEqual(
                 timeline["multimode_results"]["family_assessments"]["GR_KERR_BH"]["assessment"],
                 "SUPPORTED",

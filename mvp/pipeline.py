@@ -527,6 +527,11 @@ def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
         "primary_family": None,
         "families_to_run": [],
         "family_assessments": {},
+        "downstream_status_class": None,
+        "downstream_status_reasons": [],
+        "support_region_status": None,
+        "support_region_n_final": None,
+        "support_region_analysis_path": None,
     }
 
     def _coerce_reason_list(value: Any) -> list[str]:
@@ -609,6 +614,29 @@ def _parse_multimode_results(out_root: Path, run_id: str) -> dict[str, Any]:
                 program_classification = fallback.get("program_classification")
                 if isinstance(program_classification, str):
                     results["program_classification"] = program_classification
+
+    s4k_path = out_root / run_id / "s4k_event_support_region" / "outputs" / "event_support_region.json"
+    if s4k_path.exists():
+        try:
+            payload_s4k = json.loads(s4k_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"[pipeline] WARNING: cannot parse {s4k_path}: {exc}", flush=True)
+        else:
+            downstream = payload_s4k.get("downstream_status")
+            if isinstance(downstream, dict):
+                downstream_class = downstream.get("class")
+                if isinstance(downstream_class, str):
+                    results["downstream_status_class"] = downstream_class
+                results["downstream_status_reasons"] = _coerce_reason_list(downstream.get("reasons"))
+            support_region_status = payload_s4k.get("support_region_status")
+            if isinstance(support_region_status, str):
+                results["support_region_status"] = support_region_status
+            n_final_geometries = payload_s4k.get("n_final_geometries")
+            if n_final_geometries is not None:
+                results["support_region_n_final"] = n_final_geometries
+            analysis_path = payload_s4k.get("analysis_path")
+            if isinstance(analysis_path, str):
+                results["support_region_analysis_path"] = analysis_path
 
     router_path = out_root / run_id / "s8_family_router" / "outputs" / "family_router.json"
     if router_path.exists():
@@ -1007,6 +1035,11 @@ def run_multimode_event(
             "ratio_informativity_class": None,
             "ratio_n_compatible": None,
             "family_assessments": {},
+            "downstream_status_class": None,
+            "downstream_status_reasons": [],
+            "support_region_status": None,
+            "support_region_n_final": None,
+            "support_region_analysis_path": None,
         },
     }
     _write_timeline(out_root, run_id, timeline)
