@@ -130,6 +130,53 @@ def test_s5_event_row_schema_stable(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stderr
 
     payload = json.loads((runs_root / run_id / "s5_event_row" / "outputs" / "event_row.json").read_text(encoding="utf-8"))
-    assert {"schema_version", "run_id", "subrun_id", "event_window", "s3b", "s4c", "geometry", "artifacts"}.issubset(payload.keys())
+    assert {"schema_version", "run_id", "subrun_id", "event_window", "s3b", "s4c", "s4k", "geometry", "artifacts"}.issubset(payload.keys())
     assert {"modes", "verdict", "quality_flags"}.issubset(payload["s3b"].keys())
     assert {"chi_best", "d2_min", "deltas", "verdict"}.issubset(payload["s4c"].keys())
+    assert payload["s4k"] is None
+
+
+def test_s5_event_row_collects_optional_s4k_event_support_region(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    run_id = "run_s4k"
+    seed = 303
+    t0_ms = 15
+    runs_root, subrun_root = _init_base_layout(tmp_path, run_id, seed, t0_ms)
+
+    _write_json(subrun_root / "s2_ringdown_window" / "outputs" / "window_meta.json", {"event_id": "GW150914", "duration_s": 0.05})
+    _write_json(
+        subrun_root / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json",
+        {
+            "results": {"verdict": "OK", "quality_flags": []},
+            "modes": [
+                {"label": "220", "ln_f": 1.0, "ln_Q": 2.0, "fit": {"stability": {"valid_fraction": 1.0, "lnf_span": 0.1, "lnQ_span": 0.2, "n_failed": 0}}},
+                {"label": "221", "ln_f": 1.2, "ln_Q": 2.2, "fit": {"stability": {"valid_fraction": 0.9, "lnf_span": 0.2, "lnQ_span": 0.3, "n_failed": 1}}},
+            ],
+        },
+    )
+    _write_json(subrun_root / "s4c_kerr_consistency" / "outputs" / "kerr_consistency.json", {"chi_best": 0.5, "d2_min": 0.9, "delta_logfreq": 0.01, "delta_logQ": 0.02, "verdict": "PASS"})
+    _write_json(
+        subrun_root / "s4k_event_support_region" / "outputs" / "event_support_region.json",
+        {
+            "analysis_path": "MULTIMODE_INTERSECTION",
+            "support_region_status": "SUPPORT_REGION_AVAILABLE",
+            "domain_status": "UNKNOWN",
+            "final_geometry_ids": ["geo_A", "geo_B"],
+            "downstream_status": {"class": "GEOMETRY_PRESENT_BUT_NONINFORMATIVE", "reasons": ["test"]},
+            "multimode_viability": {"class": "RINGDOWN_NONINFORMATIVE", "reasons": []},
+        },
+    )
+
+    proc = subprocess.run(_cmd(repo_root, runs_root, run_id, seed, t0_ms), cwd=repo_root, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+
+    stage_dir = runs_root / run_id / "s5_event_row"
+    payload = json.loads((stage_dir / "outputs" / "event_row.json").read_text(encoding="utf-8"))
+    summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
+    assert payload["s4k"]["analysis_path"] == "MULTIMODE_INTERSECTION"
+    assert payload["s4k"]["support_region_status"] == "SUPPORT_REGION_AVAILABLE"
+    assert payload["s4k"]["n_final_geometries"] == 2
+    assert payload["s4k"]["downstream_status"]["class"] == "GEOMETRY_PRESENT_BUT_NONINFORMATIVE"
+    assert payload["artifacts"]["event_support_region"]["path"].endswith("s4k_event_support_region/outputs/event_support_region.json")
+    assert summary["results"]["s4k_present"] is True
+    assert summary["results"]["s4k_downstream_status_class"] == "GEOMETRY_PRESENT_BUT_NONINFORMATIVE"
