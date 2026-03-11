@@ -540,6 +540,9 @@ def run_kan(
         print("  Install with: pip install pykan torch", file=sys.stderr)
         return {"status": "skipped", "reason": "pykan not installed"}
 
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"[KAN:{target_name}] device={device}  X={X.shape}  features={feat_names}")
 
@@ -887,15 +890,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # Seed all RNGs
+    # Seed numpy here; torch seeding happens lazily inside run_kan so PySR/juliacall
+    # can initialize first when both engines are enabled.
     np.random.seed(args.seed)
-    try:
-        import torch
-        torch.manual_seed(args.seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(args.seed)
-    except ImportError:
-        pass
 
     runs_root = resolve_out_root("runs")
     validate_run_id(args.run_id, runs_root)
@@ -1044,19 +1041,6 @@ def main(argv: list[str] | None = None) -> int:
         features_by_target[target_name] = list(feat_names)
         analysis_mode_by_target[target_name] = analysis_mode
 
-        # KAN
-        if not args.no_kan:
-            kan_result = run_kan(
-                X, y, feat_names, target_name, outputs_dir,
-                n_epochs=args.kan_epochs,
-                seed=args.seed,
-                timeline=timeline,
-                heartbeat_seconds=args.heartbeat_seconds,
-            )
-            target_result["kan"] = kan_result
-        else:
-            target_result["kan"] = {"status": "skipped", "reason": "--no-kan flag"}
-
         # PySR
         if not args.no_pysr:
             pysr_result = run_pysr(
@@ -1075,6 +1059,19 @@ def main(argv: list[str] | None = None) -> int:
             target_result["pysr"] = pysr_result
         else:
             target_result["pysr"] = {"status": "skipped", "reason": "--no-pysr flag"}
+
+        # KAN runs after PySR so juliacall can initialize before torch when both are enabled.
+        if not args.no_kan:
+            kan_result = run_kan(
+                X, y, feat_names, target_name, outputs_dir,
+                n_epochs=args.kan_epochs,
+                seed=args.seed,
+                timeline=timeline,
+                heartbeat_seconds=args.heartbeat_seconds,
+            )
+            target_result["kan"] = kan_result
+        else:
+            target_result["kan"] = {"status": "skipped", "reason": "--no-kan flag"}
 
         all_results["targets"][target_name] = target_result
         timeline.record(

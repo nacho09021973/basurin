@@ -380,3 +380,55 @@ def test_main_records_claim_grade_defaults(
     assert stage_summary["results"]["analysis_mode_by_target"]["S_f"] == "claim_grade"
     assert (stage_dir / "outputs" / "runtime_timeline.json").exists()
     assert (stage_dir / "outputs" / "runtime_timeline.jsonl").exists()
+
+
+def test_main_runs_pysr_before_kan_when_both_enabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runs_root = tmp_path / "runsroot_order"
+    table_path = tmp_path / "inputs" / "event_features_order.csv"
+    _write_feature_table(table_path)
+
+    call_order: list[str] = []
+
+    def _fake_run_pysr(*args, **kwargs):
+        call_order.append("pysr")
+        return {
+            "status": "ok",
+            "target": "af",
+            "n_events": 5,
+            "best_equation": {},
+            "pareto_equations": [],
+            "pareto_csv": None,
+        }
+
+    def _fake_run_kan(*args, **kwargs):
+        call_order.append("kan")
+        return {
+            "status": "ok",
+            "target": "af",
+            "n_events": 5,
+            "train_loss": 0.1,
+            "test_loss": 0.2,
+            "feature_importances": {},
+            "symbolic_suggestions": [],
+        }
+
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    monkeypatch.setattr(_MODULE, "run_pysr", _fake_run_pysr)
+    monkeypatch.setattr(_MODULE, "run_kan", _fake_run_kan)
+
+    rc = _MODULE.main(
+        [
+            "--run-id",
+            "malda_order_smoke",
+            "--feature-table",
+            str(table_path),
+            "--targets",
+            "af",
+        ]
+    )
+
+    assert rc == 0
+    assert call_order == ["pysr", "kan"]
