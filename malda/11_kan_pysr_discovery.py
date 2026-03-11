@@ -54,7 +54,10 @@ import argparse
 import json
 import math
 import sys
+import threading
+import time
 import warnings
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -217,6 +220,114 @@ LOG_TRANSFORM_COLS = {
 }
 
 
+class RuntimeTimeline:
+    """Incremental runtime timeline for long-running discovery tasks."""
+
+    def __init__(self, jsonl_path: Path) -> None:
+        self.jsonl_path = jsonl_path
+        self._events: list[dict[str, Any]] = []
+        self._lock = threading.Lock()
+        self._t0 = time.monotonic()
+        self.jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _timestamp(self) -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def record(self, event: str, **payload: Any) -> dict[str, Any]:
+        entry = {
+            "event": event,
+            "timestamp": self._timestamp(),
+            "elapsed_s": round(time.monotonic() - self._t0, 3),
+            **payload,
+        }
+        line = json.dumps(entry, sort_keys=True)
+        with self._lock:
+            self._events.append(entry)
+            with self.jsonl_path.open("a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+        print(f"[timeline +{entry['elapsed_s']:.1f}s] {event} {self._format_payload(payload)}")
+        return entry
+
+    def snapshot(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return list(self._events)
+
+    @staticmethod
+    def _format_payload(payload: dict[str, Any]) -> str:
+        parts = []
+        for key in ("target", "step", "status", "duration_s", "heartbeat_interval_s", "target_index", "total_targets"):
+            if key in payload:
+                parts.append(f"{key}={payload[key]}")
+        if "message" in payload:
+            parts.append(f"message={payload['message']}")
+        if "error" in payload:
+            parts.append(f"error={payload['error']}")
+        return " ".join(parts)
+
+
+def run_with_heartbeat(
+    fn,
+    *,
+    timeline: RuntimeTimeline | None,
+    target_name: str,
+    step_name: str,
+    heartbeat_seconds: float,
+):
+    """Run a long operation while emitting periodic heartbeat events."""
+    step_t0 = time.monotonic()
+    if timeline is not None:
+        timeline.record(
+            "step_started",
+            target=target_name,
+            step=step_name,
+            status="running",
+            heartbeat_interval_s=heartbeat_seconds,
+        )
+
+    stop_event = threading.Event()
+
+    def _heartbeat_loop() -> None:
+        while not stop_event.wait(heartbeat_seconds):
+            if timeline is not None:
+                timeline.record(
+                    "step_heartbeat",
+                    target=target_name,
+                    step=step_name,
+                    status="running",
+                    duration_s=round(time.monotonic() - step_t0, 3),
+                    heartbeat_interval_s=heartbeat_seconds,
+                )
+
+    heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
+    heartbeat_thread.start()
+    try:
+        result = fn()
+    except Exception as exc:
+        if timeline is not None:
+            timeline.record(
+                "step_failed",
+                target=target_name,
+                step=step_name,
+                status="failed",
+                duration_s=round(time.monotonic() - step_t0, 3),
+                error=f"{type(exc).__name__}: {exc}",
+            )
+        raise
+    finally:
+        stop_event.set()
+        heartbeat_thread.join(timeout=max(heartbeat_seconds, 0.1) + 0.5)
+
+    if timeline is not None:
+        timeline.record(
+            "step_completed",
+            target=target_name,
+            step=step_name,
+            status="completed",
+            duration_s=round(time.monotonic() - step_t0, 3),
+        )
+    return result
+
+
 def resolve_input_features(target_name: str, feature_policy: str) -> tuple[list[str], str]:
     """Return base input features for a target before any transformations."""
     if feature_policy == "strict_premerger":
@@ -362,6 +473,8 @@ def run_kan(
     n_epochs: int = 200,
     grid: int = 5,
     seed: int = 42,
+    timeline: RuntimeTimeline | None = None,
+    heartbeat_seconds: float = 30.0,
 ) -> dict[str, Any]:
     """Train a KAN on X->y, return activation summary."""
     try:
@@ -415,9 +528,18 @@ def run_kan(
         ckpt_path=str(kan_backend_dir),
     )
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        results = model.fit(dataset, opt="Adam", steps=n_epochs, lamb=0.01, display_metrics=None)
+    def _fit_kan():
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return model.fit(dataset, opt="Adam", steps=n_epochs, lamb=0.01, display_metrics=None)
+
+    results = run_with_heartbeat(
+        _fit_kan,
+        timeline=timeline,
+        target_name=target_name,
+        step_name="kan_fit",
+        heartbeat_seconds=heartbeat_seconds,
+    )
 
     train_loss = float(results["train_loss"][-1]) if results.get("train_loss") else float("nan")
     test_loss = float(results["test_loss"][-1]) if results.get("test_loss") else float("nan")
@@ -489,6 +611,8 @@ def run_pysr(
     ncycles_per_iteration: int = 800,
     use_gpu: bool = False,
     seed: int = 42,
+    timeline: RuntimeTimeline | None = None,
+    heartbeat_seconds: float = 30.0,
 ) -> dict[str, Any]:
     """Run PySR symbolic regression on X->y."""
     try:
@@ -543,9 +667,18 @@ def run_pysr(
         random_state=seed,
     )
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        model.fit(X, y, variable_names=feat_names)
+    def _fit_pysr():
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return model.fit(X, y, variable_names=feat_names)
+
+    run_with_heartbeat(
+        _fit_pysr,
+        timeline=timeline,
+        target_name=target_name,
+        step_name="pysr_fit",
+        heartbeat_seconds=heartbeat_seconds,
+    )
 
     # Collect Pareto frontier
     try:
@@ -691,6 +824,12 @@ def main(argv: list[str] | None = None) -> int:
         default=42,
         help="Random seed for reproducibility (governs numpy, torch, and PySR)",
     )
+    parser.add_argument(
+        "--heartbeat-seconds",
+        type=float,
+        default=30.0,
+        help="Seconds between runtime heartbeat messages for long KAN/PySR fits (default: 30)",
+    )
     args = parser.parse_args(argv)
 
     # Seed all RNGs
@@ -708,6 +847,16 @@ def main(argv: list[str] | None = None) -> int:
     stage_dir = runs_root / args.run_id / "experiment" / "malda_discovery"
     outputs_dir = stage_dir / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
+    timeline_jsonl_path = outputs_dir / "runtime_timeline.jsonl"
+    timeline_json_path = outputs_dir / "runtime_timeline.json"
+    timeline = RuntimeTimeline(timeline_jsonl_path)
+    timeline.record(
+        "stage_started",
+        target="all",
+        step="stage",
+        status="running",
+        message="malda_discovery started",
+    )
 
     search_config = resolve_search_config(
         args.feature_policy,
@@ -726,6 +875,16 @@ def main(argv: list[str] | None = None) -> int:
     args.pysr_population_size = int(search_config["pysr_population_size"])
     args.pysr_ncycles_per_iteration = int(search_config["pysr_ncycles_per_iteration"])
     args.kan_epochs = int(search_config["kan_epochs"])
+    timeline.record(
+        "config_resolved",
+        target="all",
+        step="config",
+        status="resolved",
+        message=(
+            f"policy={args.feature_policy} pysr_iterations={args.pysr_iterations} "
+            f"pysr_maxsize={args.pysr_maxsize} kan_epochs={args.kan_epochs}"
+        ),
+    )
 
     # Resolve feature table path
     table_path = Path(args.feature_table) if args.feature_table else (
@@ -761,12 +920,22 @@ def main(argv: list[str] | None = None) -> int:
     analysis_mode_by_target: dict[str, str] = {}
 
     # Per-target loop
-    for target_name, target_desc in active_targets.items():
+    total_targets = len(active_targets)
+    for target_index, (target_name, target_desc) in enumerate(active_targets.items(), start=1):
         print(f"\n{'='*60}")
         print(f"TARGET: {target_name}  ({target_desc})")
         print("="*60)
 
         inputs, analysis_mode = resolve_input_features(target_name, args.feature_policy)
+        timeline.record(
+            "target_started",
+            target=target_name,
+            step="target",
+            status="running",
+            target_index=target_index,
+            total_targets=total_targets,
+            message=f"analysis_mode={analysis_mode}",
+        )
 
         try:
             X, y, feat_names = prepare_XY(cols, data, target_name, inputs)
@@ -782,10 +951,28 @@ def main(argv: list[str] | None = None) -> int:
             }
             features_by_target[target_name] = []
             analysis_mode_by_target[target_name] = analysis_mode
+            timeline.record(
+                "target_skipped",
+                target=target_name,
+                step="target",
+                status="skipped",
+                target_index=target_index,
+                total_targets=total_targets,
+                error=str(exc),
+            )
             continue
 
         print(f"  n_valid={len(y)}  features={feat_names}")
         print(f"  y stats: min={y.min():.4f}  max={y.max():.4f}  mean={y.mean():.4f}  std={y.std():.4f}")
+        timeline.record(
+            "target_prepared",
+            target=target_name,
+            step="prepare_xy",
+            status="completed",
+            target_index=target_index,
+            total_targets=total_targets,
+            message=f"n_valid={len(y)} features={feat_names}",
+        )
 
         target_result: dict[str, Any] = {
             "description": target_desc,
@@ -808,6 +995,8 @@ def main(argv: list[str] | None = None) -> int:
                 X, y, feat_names, target_name, outputs_dir,
                 n_epochs=args.kan_epochs,
                 seed=args.seed,
+                timeline=timeline,
+                heartbeat_seconds=args.heartbeat_seconds,
             )
             target_result["kan"] = kan_result
         else:
@@ -825,12 +1014,23 @@ def main(argv: list[str] | None = None) -> int:
                 ncycles_per_iteration=args.pysr_ncycles_per_iteration,
                 use_gpu=args.gpu,
                 seed=args.seed,
+                timeline=timeline,
+                heartbeat_seconds=args.heartbeat_seconds,
             )
             target_result["pysr"] = pysr_result
         else:
             target_result["pysr"] = {"status": "skipped", "reason": "--no-pysr flag"}
 
         all_results["targets"][target_name] = target_result
+        timeline.record(
+            "target_completed",
+            target=target_name,
+            step="target",
+            status="completed",
+            target_index=target_index,
+            total_targets=total_targets,
+            message=f"n_valid={target_result['n_valid']}",
+        )
 
     # Aggregate Pareto frontier across all targets
     all_equations: list[dict] = []
@@ -892,10 +1092,21 @@ def main(argv: list[str] | None = None) -> int:
     write_json_atomic(summary_path, summary_rows)
     print(f"[11_discovery] Summary: {summary_path}")
 
+    timeline.record(
+        "stage_completed",
+        target="all",
+        step="stage",
+        status="completed",
+        message="malda_discovery finished",
+    )
+    write_json_atomic(timeline_json_path, timeline.snapshot())
+
     # --- Manifest + stage_summary ---
     artifacts: dict[str, Any] = {
         "discovery_results": results_path,
         "discovery_summary": summary_path,
+        "runtime_timeline_json": timeline_json_path,
+        "runtime_timeline_jsonl": timeline_jsonl_path,
     }
     if combined_path.exists():
         artifacts["pareto_frontier_all"] = combined_path
@@ -921,6 +1132,7 @@ def main(argv: list[str] | None = None) -> int:
             "pysr_ncycles_per_iteration": args.pysr_ncycles_per_iteration,
             "kan_epochs": args.kan_epochs,
             "gpu": args.gpu,
+            "heartbeat_seconds": args.heartbeat_seconds,
             "feature_table": str(table_path),
         },
         "results": {

@@ -4,6 +4,7 @@ import csv
 import importlib.util
 import json
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -174,6 +175,28 @@ def test_claim_grade_reduces_inputs_to_primitive_inspiral_features() -> None:
     assert "eta" not in feat_names
 
 
+def test_runtime_timeline_emits_heartbeat_and_persists_jsonl(tmp_path: Path) -> None:
+    timeline = _MODULE.RuntimeTimeline(tmp_path / "timeline.jsonl")
+
+    result = _MODULE.run_with_heartbeat(
+        lambda: (time.sleep(0.03), "ok")[1],
+        timeline=timeline,
+        target_name="af",
+        step_name="pysr_fit",
+        heartbeat_seconds=0.01,
+    )
+
+    events = timeline.snapshot()
+    event_names = [event["event"] for event in events]
+    lines = (tmp_path / "timeline.jsonl").read_text(encoding="utf-8").splitlines()
+
+    assert result == "ok"
+    assert event_names[0] == "step_started"
+    assert "step_heartbeat" in event_names
+    assert event_names[-1] == "step_completed"
+    assert len(lines) == len(events)
+
+
 def test_run_pysr_uses_backend_directory_and_exports_pareto_csv(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -290,6 +313,7 @@ def test_main_records_strict_feature_policy_and_final_features(
 
     assert rc == 0
     assert stage_summary["config"]["feature_policy"] == "strict_premerger"
+    assert stage_summary["config"]["heartbeat_seconds"] == 30.0
     assert stage_summary["config"]["pysr_iterations"] == _MODULE.SEARCH_DEFAULTS["strict_premerger"]["pysr_iterations"]
     assert stage_summary["config"]["pysr_maxsize"] == _MODULE.SEARCH_DEFAULTS["strict_premerger"]["pysr_maxsize"]
     assert stage_summary["config"]["pysr_parsimony"] == _MODULE.SEARCH_DEFAULTS["strict_premerger"]["pysr_parsimony"]
@@ -315,6 +339,10 @@ def test_main_records_strict_feature_policy_and_final_features(
     assert "Mf" not in stage_summary["results"]["features_by_target"]["S_f"]
     assert "xi_f" not in stage_summary["results"]["features_by_target"]["S_f"]
     assert stage_summary["results"]["analysis_mode_by_target"]["Q_220"] == "discovery"
+    assert (stage_dir / "outputs" / "runtime_timeline.json").exists()
+    assert (stage_dir / "outputs" / "runtime_timeline.jsonl").exists()
+    assert "runtime_timeline_json" in stage_summary["outputs"]
+    assert "runtime_timeline_jsonl" in stage_summary["outputs"]
 
 
 def test_main_records_claim_grade_defaults(
@@ -344,8 +372,11 @@ def test_main_records_claim_grade_defaults(
 
     assert rc == 0
     assert stage_summary["config"]["feature_policy"] == "claim_grade"
+    assert stage_summary["config"]["heartbeat_seconds"] == 30.0
     assert stage_summary["config"]["pysr_maxsize"] == _MODULE.SEARCH_DEFAULTS["claim_grade"]["pysr_maxsize"]
     assert stage_summary["config"]["pysr_parsimony"] == _MODULE.SEARCH_DEFAULTS["claim_grade"]["pysr_parsimony"]
     assert stage_summary["config"]["pysr_iterations"] == _MODULE.SEARCH_DEFAULTS["claim_grade"]["pysr_iterations"]
     assert stage_summary["results"]["features_by_target"]["S_f"] == ["log_m1_src", "log_m2_src", "chi_eff"]
     assert stage_summary["results"]["analysis_mode_by_target"]["S_f"] == "claim_grade"
+    assert (stage_dir / "outputs" / "runtime_timeline.json").exists()
+    assert (stage_dir / "outputs" / "runtime_timeline.jsonl").exists()
