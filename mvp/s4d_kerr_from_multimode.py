@@ -8,6 +8,7 @@ Canonical stage (Phase B):
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
 import os
@@ -46,6 +47,10 @@ SPIN_PHYSICAL_FLOOR_WARNING_MSG = "Spin posterior saturated at A_MIN=0 (physical
 MULTIMODE_OK = "MULTIMODE_OK"
 SINGLEMODE_ONLY = "SINGLEMODE_ONLY"
 RINGDOWN_NONINFORMATIVE = "RINGDOWN_NONINFORMATIVE"
+CATALOG_CANDIDATE_PATHS = (
+    Path(__file__).resolve().parents[1] / "gwtc_quality_events.csv",
+    Path(__file__).resolve().parents[1] / "data" / "losc" / "gwtc_all_events.csv",
+)
 
 
 def _base_params() -> dict[str, Any]:
@@ -116,14 +121,6 @@ def _to_float(value: Any) -> float | None:
     return out
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[1]
-
-
-def _event_metadata_path(event_id: str) -> Path:
-    return _repo_root() / "docs" / "ringdown" / "event_metadata" / f"{event_id}_metadata.json"
-
-
 def _load_json_object(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -139,6 +136,50 @@ def _compatible_geometry_count(payload: dict[str, Any]) -> int:
     if isinstance(compatible, list):
         return len(compatible)
     return 0
+
+
+def _lookup_catalog_row(event_id: str) -> dict[str, str] | None:
+    for path in CATALOG_CANDIDATE_PATHS:
+        if not path.exists():
+            continue
+        with path.open("r", encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh)
+            for row in reader:
+                if str(row.get("event", "")).strip() == event_id:
+                    return row
+    return None
+
+
+def _classify_source_kind_from_masses(m1_source: Any, m2_source: Any) -> str | None:
+    m1 = _to_float(m1_source)
+    m2 = _to_float(m2_source)
+    if m1 is None or m2 is None or m1 <= 0.0 or m2 <= 0.0:
+        return None
+    if m1 < 3.0 and m2 < 3.0:
+        return "BNS"
+    if (m1 < 3.0 <= m2) or (m2 < 3.0 <= m1):
+        return "NSBH"
+    return "BBH"
+
+
+def _load_event_catalog_metadata(event_id: str | None) -> dict[str, Any]:
+    if event_id is None:
+        return {}
+    row = _lookup_catalog_row(event_id)
+    if row is None:
+        return {}
+    source_kind = _classify_source_kind_from_masses(
+        row.get("m1_source") or row.get("mass_1_source"),
+        row.get("m2_source") or row.get("mass_2_source"),
+    )
+    metadata: dict[str, Any] = {
+        "event_id": event_id,
+        "catalog": row.get("catalog"),
+        "classification_source": "catalog_mass_threshold" if source_kind is not None else "unknown",
+    }
+    if source_kind is not None:
+        metadata["source_class"] = source_kind
+    return metadata
 
 
 def _resolve_fallback_path(run_dir: Path) -> str:
@@ -1012,7 +1053,6 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
             run_provenance = {}
 
     event_id = _extract_event_id(run_provenance)
-    event_metadata_path = _event_metadata_path(event_id) if event_id is not None else None
 
     inputs = check_inputs(
         ctx,
@@ -1024,7 +1064,6 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
         optional={
             "model_comparison": model_comparison_path,
             "run_provenance": run_provenance_path,
-            **({"event_metadata": event_metadata_path} if event_metadata_path is not None and event_metadata_path.exists() else {}),
         },
     )
     input_by_label = {row.get("label", ""): row for row in inputs}
@@ -1120,12 +1159,7 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
             n_compatible=n_compatible,
         )
 
-    event_metadata: dict[str, Any] = {}
-    if event_metadata_path is not None and event_metadata_path.exists():
-        try:
-            event_metadata = _load_json_object(event_metadata_path)
-        except Exception:
-            event_metadata = {}
+    event_metadata = _load_event_catalog_metadata(event_id)
 
     domain_guard = _evaluate_domain_guard(
         multimode=multimode,

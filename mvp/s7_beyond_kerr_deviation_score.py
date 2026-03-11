@@ -8,6 +8,7 @@ the tuple declared in ``VERDICT_TAXONOMY`` below.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import logging
 import math
@@ -35,6 +36,10 @@ BNS_MAX_REMNANT_MASS_MSUN_MAX = 15.0
 logger = logging.getLogger(__name__)
 NON_INDEPENDENT = "NON_INDEPENDENT"
 DOMAIN_OUT_OF_DOMAIN = "OUT_OF_DOMAIN"
+CATALOG_CANDIDATE_PATHS = (
+    _here.parents[1] / "gwtc_quality_events.csv",
+    _here.parents[1] / "data" / "losc" / "gwtc_all_events.csv",
+)
 VERDICT_TAXONOMY = (
     "GR_CONSISTENT",
     "GR_TENSION",
@@ -207,6 +212,40 @@ def _resolve_bns_mass_upper_bound_msun() -> float:
     return clamped
 
 
+def _classify_source_kind_from_masses(m1_source: Any, m2_source: Any) -> str | None:
+    m1 = _to_float(m1_source)
+    m2 = _to_float(m2_source)
+    if m1 is None or m2 is None or m1 <= 0.0 or m2 <= 0.0:
+        return None
+    if m1 < 3.0 and m2 < 3.0:
+        return "BNS"
+    if (m1 < 3.0 <= m2) or (m2 < 3.0 <= m1):
+        return "NSBH"
+    return "BBH"
+
+
+def _to_float(value: Any) -> float | None:
+    try:
+        out = float(value)
+    except Exception:
+        return None
+    if not math.isfinite(out):
+        return None
+    return out
+
+
+def _lookup_catalog_row(event_id: str) -> dict[str, str] | None:
+    for path in CATALOG_CANDIDATE_PATHS:
+        if not path.exists():
+            continue
+        with path.open("r", encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh)
+            for row in reader:
+                if str(row.get("event", "")).strip() == event_id:
+                    return row
+    return None
+
+
 def _validate_metadata_for_source_inference(metadata: dict[str, Any]) -> str | None:
     preferred_families = metadata.get("preferred_families")
     if preferred_families is not None and not isinstance(preferred_families, list):
@@ -238,11 +277,21 @@ def _load_event_metadata_for_run(run_dir: Path) -> dict[str, Any]:
     event_id = invocation.get("event_id")
     if not isinstance(event_id, str) or not event_id.strip():
         return {"_metadata_lookup": "not_requested"}
-    metadata_path = _here.parents[1] / "docs" / "ringdown" / "event_metadata" / f"{event_id}_metadata.json"
-    if not metadata_path.exists():
+    catalog_row = _lookup_catalog_row(event_id.strip())
+    if catalog_row is None:
         return {"_metadata_lookup": "missing", "event_id": event_id}
-    metadata = _load_json_object(metadata_path)
-    metadata["_metadata_lookup"] = "found"
+    source_kind = _classify_source_kind_from_masses(
+        catalog_row.get("m1_source") or catalog_row.get("mass_1_source"),
+        catalog_row.get("m2_source") or catalog_row.get("mass_2_source"),
+    )
+    metadata: dict[str, Any] = {
+        "_metadata_lookup": "found",
+        "event_id": event_id,
+        "catalog": catalog_row.get("catalog"),
+        "classification_source": "catalog_mass_threshold" if source_kind is not None else "unknown",
+    }
+    if source_kind is not None:
+        metadata["source_class"] = source_kind
     return metadata
 
 
@@ -276,9 +325,9 @@ def _astrophysical_consistency(*, M_final: float, metadata: dict[str, Any]) -> d
         "source_kind": source_kind,
         "status": "NOT_APPLICABLE" if lookup_state == "not_requested" else "METADATA_INSUFFICIENT",
         "reason": (
-            "event metadata lookup was not requested for this run"
+            "event catalog lookup was not requested for this run"
             if lookup_state == "not_requested"
-            else "event metadata is insufficient to classify source kind for astrophysical checks"
+            else "event catalog data are insufficient to classify source kind for astrophysical checks"
         ),
         "mass_upper_bound_msun": None,
     }
