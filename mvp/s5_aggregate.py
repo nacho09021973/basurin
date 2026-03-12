@@ -134,12 +134,12 @@ def _event_id_from_source_run(run_id: str) -> str | None:
 
 
 def _safe_event_id(run_id: str, payload_event_id: Any) -> str:
-    """Resolve event_id using source_run naming first, payload as fallback."""
+    """Resolve event_id contract-first, using run_id parsing only as a fallback."""
+    if isinstance(payload_event_id, str) and payload_event_id.strip():
+        return payload_event_id.strip()
     from_run = _event_id_from_source_run(run_id)
     if from_run:
         return from_run
-    if isinstance(payload_event_id, str) and payload_event_id.strip():
-        return payload_event_id.strip()
     return "unknown"
 
 

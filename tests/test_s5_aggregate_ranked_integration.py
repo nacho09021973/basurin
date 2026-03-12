@@ -18,6 +18,7 @@ def _mk_run(
     *,
     ranked: list[int] | None,
     compatible: list[int] | None,
+    event_id: str | None = None,
     viability_class: str = "MULTIMODE_OK",
     viability_reasons: list[str] | None = None,
     s3b_verdict: str = "PASS",
@@ -26,6 +27,7 @@ def _mk_run(
     s4k_downstream_status: str | None = None,
     s4k_final: list[str] | None = None,
 ) -> None:
+    event_id = event_id or run_id
     rv = runs_root / run_id / "RUN_VALID"
     rv.mkdir(parents=True, exist_ok=True)
     (rv / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
@@ -33,7 +35,7 @@ def _mk_run(
     s4_out = runs_root / run_id / "s4_geometry_filter" / "outputs"
     s4_out.mkdir(parents=True, exist_ok=True)
     (s4_out / "compatible_set.json").write_text(json.dumps({
-        "event_id": run_id,
+        "event_id": event_id,
         "metric": "euclidean_log",
         "n_atlas": 5,
         "ranked_all": [{"geometry_id": f"g{i}"} for i in range(5)],
@@ -49,7 +51,7 @@ def _mk_run(
         s6b_out.mkdir(parents=True, exist_ok=True)
         (s6b_out / "ranked_geometries.json").write_text(json.dumps({
             "schema_version": "mvp_s6b_ranked_v1",
-            "event_id": run_id,
+            "event_id": event_id,
             "atlas_id": "unknown",
             "n_atlas": 5,
             "ranked": [{"atlas_index": i, "score": 1.0 / (1 + j)} for j, i in enumerate(ranked)],
@@ -184,6 +186,34 @@ def test_s5_aggregate_fallback_to_s3_when_s3b_absent(tmp_path: Path) -> None:
     assert "MISSING_S3B_UPSTREAM:run_a" in payload["warnings"]
     assert payload["multimode_viability"]["per_event"]["run_a"]["reasons"] == ["MISSING_S3B_UPSTREAM"]
     assert payload["multimode_viability"]["per_event"]["run_a"]["metrics"] == {}
+
+
+def test_s5_aggregate_prefers_payload_event_id_over_run_id_suffix(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "mvp_GW200129_065458_area_strict_20260312T132701Z"
+    _mk_run(
+        runs_root,
+        run_id,
+        ranked=[0, 1],
+        compatible=[0],
+        event_id="GW200129_065458",
+    )
+
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s5_aggregate.py"),
+        "--out-run",
+        "agg_event_id_contract",
+        "--source-runs",
+        run_id,
+    ]
+    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, proc.stderr
+
+    agg_path = runs_root / "agg_event_id_contract" / "s5_aggregate" / "outputs" / "aggregate.json"
+    payload = json.loads(agg_path.read_text(encoding="utf-8"))
+    assert payload["events"][0]["event_id"] == "GW200129_065458"
 
 
 def test_s5_multimode_conditioned_population_is_insufficient_with_one_eligible_event(tmp_path: Path) -> None:
