@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import math
 from pathlib import Path
@@ -9,6 +10,17 @@ from basurin_io import sha256_file, write_json_atomic
 from mvp.contracts import finalize, init_stage
 from mvp.kerr_qnm_fits import kerr_qnm
 import mvp.s7_beyond_kerr_deviation_score as s7
+
+
+def _write_catalog_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
+    fieldnames = ["event", "catalog", "m1_source", "m2_source"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({name: row.get(name, "") for name in fieldnames})
+    return path
 
 
 def _mode_payload(
@@ -261,6 +273,11 @@ def test_sigma_floor_when_iqr_is_zero(tmp_path: Path, monkeypatch) -> None:
 def test_marks_astro_inconsistent_for_bns_high_mass(tmp_path: Path, monkeypatch) -> None:
     runs_root = tmp_path / "runs"
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    catalog_path = _write_catalog_csv(
+        tmp_path / "catalog.csv",
+        [{"event": "GW170817", "catalog": "TEST", "m1_source": 1.46, "m2_source": 1.27}],
+    )
+    monkeypatch.setattr(s7, "CATALOG_CANDIDATE_PATHS", (catalog_path,))
     run_id = "s7_astro_bns_high_mass"
     _seed_upstream(runs_root / run_id, m_final=68.0, chi_final=0.69, f_scale=1.0, tau_scale=1.0)
     write_json_atomic(
@@ -277,6 +294,11 @@ def test_marks_astro_inconsistent_for_bns_high_mass(tmp_path: Path, monkeypatch)
 def test_astro_consistency_not_applicable_for_bbh(tmp_path: Path, monkeypatch) -> None:
     runs_root = tmp_path / "runs"
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    catalog_path = _write_catalog_csv(
+        tmp_path / "catalog.csv",
+        [{"event": "GW150914", "catalog": "TEST", "m1_source": 34.6, "m2_source": 30.0}],
+    )
+    monkeypatch.setattr(s7, "CATALOG_CANDIDATE_PATHS", (catalog_path,))
     run_id = "s7_astro_bbh"
     _seed_upstream(runs_root / run_id, m_final=68.0, chi_final=0.69, f_scale=1.0, tau_scale=1.0)
     write_json_atomic(
@@ -293,6 +315,11 @@ def test_astro_consistency_not_applicable_for_bbh(tmp_path: Path, monkeypatch) -
 def test_bns_mass_prior_boundary_respects_equal_limit(tmp_path: Path, monkeypatch) -> None:
     runs_root = tmp_path / "runs"
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    catalog_path = _write_catalog_csv(
+        tmp_path / "catalog.csv",
+        [{"event": "GW170817", "catalog": "TEST", "m1_source": 1.46, "m2_source": 1.27}],
+    )
+    monkeypatch.setattr(s7, "CATALOG_CANDIDATE_PATHS", (catalog_path,))
     run_id = "s7_astro_bns_boundary"
     _seed_upstream(runs_root / run_id, m_final=10.0, chi_final=0.69, f_scale=1.0, tau_scale=1.0)
     write_json_atomic(
@@ -309,6 +336,11 @@ def test_bns_mass_prior_is_configurable_from_env(tmp_path: Path, monkeypatch) ->
     runs_root = tmp_path / "runs"
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
     monkeypatch.setenv("BASURIN_BNS_MAX_REMNANT_MASS_MSUN", "5.0")
+    catalog_path = _write_catalog_csv(
+        tmp_path / "catalog.csv",
+        [{"event": "GW170817", "catalog": "TEST", "m1_source": 1.46, "m2_source": 1.27}],
+    )
+    monkeypatch.setattr(s7, "CATALOG_CANDIDATE_PATHS", (catalog_path,))
     run_id = "s7_astro_bns_custom_bound"
     _seed_upstream(runs_root / run_id, m_final=6.0, chi_final=0.69, f_scale=1.0, tau_scale=1.0)
     write_json_atomic(
