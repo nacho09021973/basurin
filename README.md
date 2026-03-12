@@ -386,6 +386,30 @@ Artefactos emitidos:
 - `runs/<run_id>/experiment/dt_start_sweep_multimode/outputs/dt_start_sweep_summary.csv`
 - `runs/<run_id>/experiment/dt_start_sweep_multimode/outputs/recommendation.json`
 
+### 7.3d Experimento de barrido de `window_duration_s`
+
+Si una banda y un `dt_start_s` fijos siguen dejando `220` edge-locked, el siguiente knob útil es `window_duration_s`. `experiment_window_duration_sweep_multimode.py` lanza subruns sobre una banda fija y un `dt_start_s` fijo, y resume si el problema mejora o empeora al acortar/alargar la ventana de ringdown.
+
+Ejemplo:
+
+```bash
+python -m mvp.experiment_window_duration_sweep_multimode \
+  --run-id win_sweep_GW190521 \
+  --event-id GW190521_074359 \
+  --band-low 1200 \
+  --band-high 1600 \
+  --dt-start-s 0.003 \
+  --window-duration-grid-s 0.02,0.04,0.06,0.08,0.12,0.16 \
+  --atlas-default \
+  --offline
+```
+
+Artefactos emitidos:
+
+- `runs/<run_id>/experiment/window_duration_sweep_multimode/outputs/window_duration_sweep_results.json`
+- `runs/<run_id>/experiment/window_duration_sweep_multimode/outputs/window_duration_sweep_summary.csv`
+- `runs/<run_id>/experiment/window_duration_sweep_multimode/outputs/recommendation.json`
+
 ### 7.4 Flujo MALDA estricto sobre runs gobernados
 
 Los entrypoints MALDA actuales relevantes para discovery simbolico son:

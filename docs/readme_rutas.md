@@ -286,6 +286,28 @@ runs/<RUN_ID>/experiment/dt_start_sweep_multimode/runsroot/<SUBRUN_ID>/
 
 Cada `<SUBRUN_ID>` es un run completo de `python -m mvp.pipeline multimode` sobre una banda fija y un `dt_start_s` distinto. El objetivo es separar si el colapso del `220` viene del borde de banda o del arranque temporal del recorte.
 
+### Experimento de barrido de `window_duration_s`
+
+Ruta canónica del experimento:
+
+```text
+runs/<RUN_ID>/experiment/window_duration_sweep_multimode/
+```
+
+Artefactos principales:
+
+- `runs/<RUN_ID>/experiment/window_duration_sweep_multimode/outputs/window_duration_sweep_results.json`
+- `runs/<RUN_ID>/experiment/window_duration_sweep_multimode/outputs/window_duration_sweep_summary.csv`
+- `runs/<RUN_ID>/experiment/window_duration_sweep_multimode/outputs/recommendation.json`
+
+Subruns aislados por `window_duration_s`:
+
+```text
+runs/<RUN_ID>/experiment/window_duration_sweep_multimode/runsroot/<SUBRUN_ID>/
+```
+
+Cada `<SUBRUN_ID>` es un run completo de `python -m mvp.pipeline multimode` sobre banda fija, `dt_start_s` fijo y una duración de ventana distinta. El objetivo es ver si el colapso del `220` viene de una ventana demasiado corta/larga o del estimador mismo.
+
 ### Rutas de auditoría LOSC/t0 y batch offline
 
 > En CLI de pipeline/batch, usa `--window-catalog` para s2. Alias soportado: `--t0-catalog`.
