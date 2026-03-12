@@ -261,6 +261,27 @@ class HiddenGeometry:
         R = self.ricci_scalar(z)
         return (1.0 - D / 2.0) * R
 
+    def curvature_type(self) -> str:
+        """
+        Clasifica la geometría según el tipo de curvatura del bulk.
+
+        Devuelve uno de:
+          - "hyperbolic" : curvatura seccional negativa (K < 0)
+                           Familias: ads, lifshitz, hyperscaling, deformed, dpbrane
+          - "unknown"    : sin garantía holográfica (family == "unknown")
+
+        Notas:
+          - AdS puro:          R = -d(d+1)/L²  < 0  → hiperbólico
+          - Lifshitz:          modifica el exponente temporal pero preserva K < 0
+          - Hyperscaling:      violación del exponente θ; sigue siendo asintóticamente hiperbólico
+          - Deformed:          deformación suave de AdS; curvatura dominantemente negativa
+          - Dp-brane:          near-horizon efectivamente hiperbólico (D3-brana recupera AdS₅)
+          - Unknown:           no apto para cálculos que asuman curvatura definida
+        """
+        if self.family in {"ads", "lifshitz", "hyperscaling", "deformed", "dpbrane"}:
+            return "hyperbolic"
+        return "unknown"
+
     def effective_central_charge(self, n_points: int = 256) -> float:
         """
         Observable de borde tipo "central charge" toy.
@@ -289,6 +310,46 @@ class HiddenGeometry:
         integrand = np.exp((self.d - 1) * A)
         c_eff = float(np.trapz(integrand, z))
         return c_eff
+
+# ============================================================
+#  CLASIFICACIÓN DE TOPOLOGÍA
+# ============================================================
+
+#: Familias cuya curvatura seccional del bulk es estrictamente negativa (K < 0).
+HYPERBOLIC_FAMILIES: frozenset[str] = frozenset(
+    {"ads", "lifshitz", "hyperscaling", "deformed", "dpbrane"}
+)
+
+
+def classify_geometry_topology(family: str) -> str:
+    """
+    Devuelve el tipo topológico de una familia de geometría de bulk.
+
+    Parameters
+    ----------
+    family : str
+        Valor del campo ``HiddenGeometry.family``
+        (p.ej. "ads", "lifshitz", "hyperscaling", "deformed", "dpbrane", "unknown").
+
+    Returns
+    -------
+    str
+        ``"hyperbolic"`` si la familia corresponde a un espacio de curvatura
+        seccional negativa (K < 0), ``"unknown"`` en caso contrario.
+
+    Examples
+    --------
+    >>> classify_geometry_topology("ads")
+    'hyperbolic'
+    >>> classify_geometry_topology("lifshitz")
+    'hyperbolic'
+    >>> classify_geometry_topology("unknown")
+    'unknown'
+    """
+    if family in HYPERBOLIC_FAMILIES:
+        return "hyperbolic"
+    return "unknown"
+
 
 # ============================================================
 #  GEOMETRÍA BASE
