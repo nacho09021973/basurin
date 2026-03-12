@@ -335,6 +335,34 @@ python -m mvp.experiment_offline_batch \
 
 `s4g/s4h/s4i/s4j` tienen CLI propia y forman la rama mas directamente alineada con el objetivo "region compatible por modo + interseccion + Hawking". `python -m mvp.pipeline multimode` ahora materializa por defecto los inputs observacionales de `s4g/s4h`, ejecuta esa rama explícita y consolida `s4k_event_support_region`; si `221` no es usable, la ruta degrada de forma conservadora a `220 + Hawking` en lugar de abortar la región geométrica por evento.
 
+### 7.3b Experimento de barrido de bandas multimodo
+
+Cuando `s3_ringdown_estimates` parece clavarse en el borde de banda o en el floor de `tau`, no hace falta probar manualmente una banda cada vez. `experiment_band_sweep_multimode.py` lanza subruns aislados de `python -m mvp.pipeline multimode` para un mismo evento y resume por banda:
+
+- `f_hz`, `tau_s` y `Q` estimados por `s3`
+- `n_geometries_accepted` en `s4g_mode220_geometry_filter`
+- `support_region_status` y `support_region_n_final` del top-level
+- diagnóstico automático (`LIKELY_EDGE_LOCKED_220`, `FOUND_NONEMPTY_SUPPORT_REGION`, etc.)
+- una recomendación final en `recommendation.json`
+
+Ejemplo:
+
+```bash
+python -m mvp.experiment_band_sweep_multimode \
+  --run-id band_sweep_GW190521 \
+  --event-id GW190521_074359 \
+  --bands 150-400,400-800,800-1200,1200-1600 \
+  --atlas-default \
+  --offline
+```
+
+Artefactos emitidos:
+
+- `runs/<run_id>/experiment/band_sweep_multimode/outputs/band_sweep_results.json`
+- `runs/<run_id>/experiment/band_sweep_multimode/outputs/band_sweep_summary.csv`
+- `runs/<run_id>/experiment/band_sweep_multimode/outputs/recommendation.json`
+- subruns completos bajo `runs/<run_id>/experiment/band_sweep_multimode/runsroot/<subrun_id>/...`
+
 ### 7.4 Flujo MALDA estricto sobre runs gobernados
 
 Los entrypoints MALDA actuales relevantes para discovery simbolico son:

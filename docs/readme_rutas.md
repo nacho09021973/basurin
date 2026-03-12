@@ -242,6 +242,28 @@ Regla práctica:
 - `downstream_status.class` resume la legibilidad downstream del artefacto: `MULTIMODE_USABLE`, `GEOMETRY_PRESENT_BUT_NONINFORMATIVE`, `OUT_OF_DOMAIN` o `NO_SUPPORT_REGION`.
 - `s5_aggregate` consume este artefacto cuando existe y, si hay suficientes eventos `MULTIMODE_USABLE`, usa `s4k_event_support_region` como base preferente para `multimode_conditioned_population`.
 
+### Experimento de barrido de bandas multimodo
+
+Ruta canónica del experimento:
+
+```text
+runs/<RUN_ID>/experiment/band_sweep_multimode/
+```
+
+Artefactos principales:
+
+- `runs/<RUN_ID>/experiment/band_sweep_multimode/outputs/band_sweep_results.json`
+- `runs/<RUN_ID>/experiment/band_sweep_multimode/outputs/band_sweep_summary.csv`
+- `runs/<RUN_ID>/experiment/band_sweep_multimode/outputs/recommendation.json`
+
+Subruns aislados por banda:
+
+```text
+runs/<RUN_ID>/experiment/band_sweep_multimode/runsroot/<SUBRUN_ID>/
+```
+
+Cada `<SUBRUN_ID>` es un run completo de `python -m mvp.pipeline multimode` con un par `band_low/band_high` distinto. El objetivo no es mutar stages canónicos aguas arriba, sino producir un diagnóstico operativo sobre si la banda actual deja `220` edge-locked, si `s4g` acepta alguna geometría y si aparece una región final no vacía.
+
 ### Rutas de auditoría LOSC/t0 y batch offline
 
 > En CLI de pipeline/batch, usa `--window-catalog` para s2. Alias soportado: `--t0-catalog`.
