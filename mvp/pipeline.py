@@ -1134,6 +1134,7 @@ def run_multimode_event(
     s3b_n_bootstrap: int = 200,
     s3b_seed: int = 12345,
     s3b_method: str = "hilbert_peakband",
+    estimator: str = "spectral",
     offline: bool = False,
 ) -> tuple[int, str]:
     event_id = _require_nonempty_event_id(event_id, "--event-id")
@@ -1155,7 +1156,7 @@ def run_multimode_event(
         event_id=event_id,
         events=None,
         atlas_path=atlas_path,
-        estimator=s3b_method,
+        estimator=estimator,
         key_params={
             "epsilon": epsilon,
             "band_low": band_low,
@@ -1292,17 +1293,87 @@ def run_multimode_event(
                 _write_timeline(out_root, run_id, timeline)
                 return rc, run_id
 
+    # Stage 3: Ringdown estimates — select estimator
     s3_args = ["--run", run_id, "--band-low", str(band_low), "--band-high", str(band_high)]
+    estimates_path_override = None
 
-    rc = _run_stage("s3_ringdown_estimates.py", s3_args, "s3_ringdown_estimates", out_root, run_id, timeline, stage_timeout_s)
-    if rc != 0:
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
-        return rc, run_id
+    if estimator == "hilbert":
+        rc = _run_stage(
+            "s3_ringdown_estimates.py",
+            s3_args + ["--method", "hilbert_envelope"],
+            "s3_ringdown_estimates",
+            out_root, run_id, timeline, stage_timeout_s,
+        )
+        if rc != 0:
+            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+            _write_timeline(out_root, run_id, timeline)
+            return rc, run_id
+
+    elif estimator == "spectral":
+        rc = _run_stage(
+            "s3_ringdown_estimates.py",
+            s3_args + ["--method", "spectral_lorentzian"],
+            "s3_ringdown_estimates",
+            out_root, run_id, timeline, stage_timeout_s,
+        )
+        if rc != 0:
+            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+            _write_timeline(out_root, run_id, timeline)
+            return rc, run_id
+
+    elif estimator == "dual":
+        rc = _run_stage(
+            "s3_ringdown_estimates.py",
+            s3_args + ["--method", "hilbert_envelope"],
+            "s3_ringdown_estimates",
+            out_root, run_id, timeline, stage_timeout_s,
+        )
+        if rc != 0:
+            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+            _write_timeline(out_root, run_id, timeline)
+            return rc, run_id
+
+        rc = _run_stage(
+            "s3_spectral_estimates.py",
+            s3_args,
+            "s3_spectral_estimates",
+            out_root, run_id, timeline, stage_timeout_s,
+        )
+        if rc != 0:
+            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+            _write_timeline(out_root, run_id, timeline)
+            return rc, run_id
+
+        rc = _run_stage(
+            "experiment_dual_method.py",
+            ["--run", run_id, "--band-low", str(band_low), "--band-high", str(band_high)],
+            "experiment_dual_method",
+            out_root, run_id, timeline, stage_timeout_s,
+        )
+        if rc != 0:
+            print(f"[pipeline] WARNING: dual method gate failed (exit={rc}), continuing", file=sys.stderr, flush=True)
+
+        dual_path = out_root / run_id / "experiment" / "DUAL_METHOD_V1" / "dual_method_comparison.json"
+        recommendation = "spectral"
+        if dual_path.exists():
+            try:
+                with open(dual_path, "r", encoding="utf-8") as f:
+                    dual = json.load(f)
+                recommendation = dual.get("recommendation", "spectral")
+            except Exception:
+                pass
+
+        if recommendation == "spectral":
+            estimates_path_override = "s3_spectral_estimates/outputs/spectral_estimates.json"
+        timeline["dual_method_recommendation"] = recommendation
+
+    else:
+        print(f"[pipeline] ERROR: unknown estimator '{estimator}'", file=sys.stderr)
+        return 2, run_id
 
     s3b_args = [
         "--run-id", run_id,
-        "--s3-estimates", f"{run_id}/s3_ringdown_estimates/outputs/estimates.json",
+        "--s3-estimates", f"{run_id}/{estimates_path_override or 's3_ringdown_estimates/outputs/estimates.json'}",
         "--n-bootstrap", str(s3b_n_bootstrap),
         "--seed", str(s3b_seed),
         "--method", s3b_method,
@@ -1669,6 +1740,10 @@ def main() -> int:
         help="Skip s1 download if outputs already exist and params match",
     )
     sp_multimode.add_argument("--with-t0-sweep", action="store_true", default=False)
+    sp_multimode.add_argument(
+        "--estimator", choices=["hilbert", "spectral", "dual"], default="spectral",
+        help="Estimator for s3 (spectral/hilbert/dual)",
+    )
     sp_multimode.add_argument("--s3b-n-bootstrap", type=int, default=200)
     sp_multimode.add_argument("--s3b-seed", type=int, default=12345)
     sp_multimode.add_argument(
@@ -1812,6 +1887,7 @@ def main() -> int:
             s3b_n_bootstrap=args.s3b_n_bootstrap,
             s3b_seed=args.s3b_seed,
             s3b_method=args.s3b_method,
+            estimator=args.estimator,
             local_hdf5=args.local_hdf5,
             offline=args.offline,
         )

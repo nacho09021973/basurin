@@ -159,6 +159,96 @@ class TestMultimodeWiring(unittest.TestCase):
             expected_method = "spectral_two_pass" if idx_call == 1 else "hilbert_peakband"
             self.assertEqual(args[m_idx + 1], expected_method)
 
+    def test_dual_estimator_runs_dual_method_pipeline(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        def fake_run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s=None):
+            calls.append({"script": script, "label": label, "args": list(args), "run_id": run_id})
+            stage_dir = out_root / run_id / label / "outputs"
+            stage_dir.mkdir(parents=True, exist_ok=True)
+            if label == "s3_ringdown_estimates":
+                _write_fake_s3_estimates(out_root, run_id)
+            if label == "s3_spectral_estimates":
+                spec_dir = out_root / run_id / "s3_spectral_estimates" / "outputs"
+                spec_dir.mkdir(parents=True, exist_ok=True)
+                (spec_dir / "spectral_estimates.json").write_text(
+                    json.dumps({
+                        "combined": {
+                            "f_hz": 260.0,
+                            "tau_s": 0.005,
+                            "Q": 4.084070449666731,
+                            "sigma_f_hz": 4.0,
+                            "sigma_tau_s": 0.0004,
+                            "sigma_Q": 0.3,
+                        },
+                        "combined_uncertainty": {
+                            "sigma_f_hz": 4.0,
+                            "sigma_tau_s": 0.0004,
+                            "sigma_Q": 0.3,
+                        },
+                    }),
+                    encoding="utf-8",
+                )
+            if label == "experiment_dual_method":
+                exp_dir = out_root / run_id / "experiment" / "DUAL_METHOD_V1"
+                exp_dir.mkdir(parents=True, exist_ok=True)
+                (exp_dir / "dual_method_comparison.json").write_text(
+                    json.dumps({"recommendation": "spectral"}),
+                    encoding="utf-8",
+                )
+            if label == "s3b_multimode_estimates":
+                _write_fake_s3b_outputs(out_root, run_id)
+            if label == "s8_family_router":
+                (stage_dir / "family_router.json").write_text(
+                    json.dumps({"primary_family": "GR_KERR_BH", "families_to_run": ["GR_KERR_BH"]}),
+                    encoding="utf-8",
+                )
+            if label == "s4e_kerr_ratio_filter":
+                (stage_dir / "ratio_filter_result.json").write_text(
+                    json.dumps({"kerr_consistency": {"Rf_consistent": True}, "diagnostics": {"informativity_class": "LOW"}, "filtering": {"n_ratio_compatible": 1}}),
+                    encoding="utf-8",
+                )
+            timeline["stages"].append({
+                "stage": label,
+                "script": script,
+                "command": [script] + list(args),
+                "started_utc": "now",
+                "ended_utc": "now",
+                "duration_s": 0.0,
+                "returncode": 0,
+                "timed_out": False,
+            })
+            pipeline._write_timeline(out_root, run_id, timeline)
+            return 0
+
+        with mock.patch.object(pipeline, "_run_stage", side_effect=fake_run_stage):
+            with mock.patch.object(pipeline, "_parse_multimode_results", return_value={}):
+                with mock.patch.dict("os.environ", {"BASURIN_RUNS_ROOT": str(Path("/tmp") / "basurin_wiring_test_dual")}, clear=False):
+                    rc, _ = pipeline.run_multimode_event(
+                        event_id="GW150914",
+                        atlas_path="mvp/test_atlas_fixture.json",
+                        run_id="wire_dual",
+                        synthetic=True,
+                        estimator="dual",
+                    )
+                    self.assertEqual(rc, 0)
+
+        labels = [c["label"] for c in calls]
+        self.assertIn("s3_ringdown_estimates", labels)
+        self.assertIn("s3_spectral_estimates", labels)
+        self.assertIn("experiment_dual_method", labels)
+
+        s3_call = next(c for c in calls if c["label"] == "s3_ringdown_estimates")
+        self.assertIn("--method", s3_call["args"])
+        self.assertIn("hilbert_envelope", s3_call["args"])
+
+        s3b_call = next(c for c in calls if c["label"] == "s3b_multimode_estimates")
+        idx = s3b_call["args"].index("--s3-estimates")
+        self.assertEqual(
+            s3b_call["args"][idx + 1],
+            "wire_dual/s3_spectral_estimates/outputs/spectral_estimates.json",
+        )
+
 
 class TestMultimodePipelineBehavior(unittest.TestCase):
     def test_parse_multimode_results_tracks_viability_and_s4d_status(self) -> None:
