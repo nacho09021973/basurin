@@ -902,7 +902,7 @@ def run_single_event(
     offline: bool = False,
     offline_s2: bool = False,
     t0_catalog: str | None = None,
-    estimator: str = "spectral",
+    estimator: str = "dual",
 ) -> tuple[int, str]:
     """Run full pipeline for a single event. Returns (exit_code, run_id)."""
     event_id = _require_nonempty_event_id(event_id, "--event-id")
@@ -1144,7 +1144,7 @@ def run_multimode_event(
     s3b_n_bootstrap: int = 200,
     s3b_seed: int = 12345,
     s3b_method: str = "hilbert_peakband",
-    estimator: str = "spectral",
+    estimator: str = "dual",
     offline: bool = False,
 ) -> tuple[int, str]:
     event_id = _require_nonempty_event_id(event_id, "--event-id")
@@ -1517,7 +1517,7 @@ def run_multi_event(
         agg_run_id = f"mvp_aggregate_{_ts()}"
 
     out_root = resolve_out_root("runs")
-    estimator = kwargs.get("estimator", "spectral")
+    estimator = kwargs.get("estimator", "dual")
 
     events = [_require_nonempty_event_id(e, "--events") for e in events]
 
@@ -1682,9 +1682,8 @@ def main() -> int:
         help="Alias supported for compatibility; pass PATH as --window-catalog to s2_ringdown_window",
     )
     sp_single.add_argument(
-        "--estimator", choices=["hilbert", "spectral", "dual"], default="spectral",
-        
-        help="Estimator to use for s3: spectral (default), hilbert (legacy), or dual (both + gate)",
+        "--estimator", choices=["hilbert", "spectral", "dual"], default="dual",
+        help="Estimator to use for s3: dual (default), spectral, or hilbert (legacy)",
 
     )
 
@@ -1720,8 +1719,8 @@ def main() -> int:
     )
     sp_multi.add_argument("--offline", action="store_true", default=False)
     sp_multi.add_argument(
-        "--estimator", choices=["hilbert", "spectral", "dual"], default="spectral",
-        help="Estimator for s3 (spectral/hilbert/dual)",
+        "--estimator", choices=["hilbert", "spectral", "dual"], default="dual",
+        help="Estimator for s3 (dual/spectral/hilbert)",
     )
     sp_multi.add_argument(
         "--catalog-path", default=None,
@@ -1751,8 +1750,8 @@ def main() -> int:
     )
     sp_multimode.add_argument("--with-t0-sweep", action="store_true", default=False)
     sp_multimode.add_argument(
-        "--estimator", choices=["hilbert", "spectral", "dual"], default="spectral",
-        help="Estimator for s3 (spectral/hilbert/dual)",
+        "--estimator", choices=["hilbert", "spectral", "dual"], default="dual",
+        help="Estimator for s3 (dual/spectral/hilbert)",
     )
     sp_multimode.add_argument("--s3b-n-bootstrap", type=int, default=200)
     sp_multimode.add_argument("--s3b-seed", type=int, default=12345)
@@ -1791,8 +1790,8 @@ def main() -> int:
     sp_batch.add_argument("--stage-timeout-s", type=float, default=None)
     sp_batch.add_argument("--reuse-strain", action="store_true", default=False)
     sp_batch.add_argument(
-        "--estimator", choices=["hilbert", "spectral", "dual"], default="spectral",
-        help="Estimator for s3 (spectral/hilbert/dual)",
+        "--estimator", choices=["hilbert", "spectral", "dual"], default="dual",
+        help="Estimator for s3 (dual/spectral/hilbert)",
     )
     sp_batch.add_argument(
         "--catalog-path", default=None,

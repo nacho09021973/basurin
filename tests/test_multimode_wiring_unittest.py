@@ -126,6 +126,7 @@ class TestMultimodeWiring(unittest.TestCase):
                         synthetic=True,
                         band_low=120.0,
                         band_high=280.0,
+                        estimator="spectral",
                     )
                     self.assertEqual(rc, 0)
 
@@ -137,6 +138,7 @@ class TestMultimodeWiring(unittest.TestCase):
                         band_low=180.0,
                         band_high=360.0,
                         s3b_method="spectral_two_pass",
+                        estimator="spectral",
                     )
                     self.assertEqual(rc, 0)
 
@@ -638,6 +640,7 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                         atlas_path="mvp/test_atlas_fixture.json",
                         synthetic=True,
                         duration_s=4.0,
+                        estimator="spectral",
                     )
 
             self.assertEqual(rc, 0)

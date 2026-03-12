@@ -124,13 +124,13 @@ class TestPipelineEstimatorArg:
         assert "estimator" in sig.parameters, \
             "run_single_event should have an 'estimator' parameter"
 
-    def test_default_estimator_is_spectral(self):
+    def test_default_estimator_is_dual(self):
         import inspect
         from mvp.pipeline import run_single_event
         sig = inspect.signature(run_single_event)
         default = sig.parameters["estimator"].default
-        assert default == "spectral", (
-            f"Expected default estimator 'spectral', got '{default}'"
+        assert default == "dual", (
+            f"Expected default estimator 'dual', got '{default}'"
         )
 
     def test_pipeline_has_batch_mode(self):

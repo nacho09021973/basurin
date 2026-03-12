@@ -270,6 +270,36 @@ Implementado hoy no significa que ya exista una superficie cientifica definitiva
 - existen handlers de familia y agregacion poblacional, pero la inferencia poblacional final basada en regiones canonicas por evento sigue siendo objetivo de diseno, no conclusion cerrada;
 - `experiment_population_kerr.py` existe, pero es un experimento no canonico y no debe confundirse con el stage poblacional definitivo que consumira artefactos geometricos por evento.
 
+## 6.3 Estado operativo a 12 de marzo de 2026
+
+A fecha de 12 de marzo de 2026, la superficie operativa relevante del pipeline ha quedado asi:
+
+- la ruta explicita `220 -> Hawking` ya funciona de forma estable en cohorte real BBH y produce `s4k_event_support_region` no vacio en la mayoria de eventos;
+- el vaciado artificial observado inicialmente en `s4g` se debia a una degeneracion del ajuste Lorentziano en `s3_ringdown_estimates`;
+- `mvp/gwtc_events.py` ya se resuelve desde `gwtc_quality_events.csv` para exponer `m_final_msun` y `snr_network` en toda la cohorte disponible;
+- `s3_ringdown_estimates` ya expande la banda de entrada antes del bandpass cuando existe hint Kerr y la banda fija original cortaria la frecuencia esperada del modo 220;
+- el estimador `dual` ha dejado de tratarse como fallback exotico y pasa a ser la politica normal del proyecto para runs reales y poblacionales.
+
+Decision operativa vigente:
+
+- `python -m mvp.pipeline single|multi|multimode|batch` usa ahora `--estimator dual` por defecto;
+- `spectral` queda como baseline historico/comparativo;
+- `hilbert` queda como ruta legacy;
+- la interpretacion poblacional actual debe hacerse sobre `golden_geometry_support_region`, no sobre interseccion multimodo estricta.
+
+Resultado poblacional de referencia previo al cambio de default:
+
+- cohorte BBH agregada: `49` eventos;
+- `42/49` con `GEOMETRY_PRESENT_BUT_NONINFORMATIVE`;
+- `7/49` con `NO_SUPPORT_REGION`;
+- `0/49` con `MULTIMODE_USABLE`.
+
+Resultado de rescate con `dual` sobre los `7` fallidos:
+
+- `7/7` pasan a `SUPPORT_REGION_AVAILABLE`;
+- todos quedan como `GEOMETRY_PRESENT_BUT_NONINFORMATIVE`;
+- por tanto, `dual` no es un ajuste cosmetico sino una mejora operativa real del baseline.
+
 ## 7. Uso y ejemplos
 
 Los ejemplos siguientes usan CLIs verificadas en el repositorio actual. Ajuste atlas, catalogos y datasets externos de acuerdo con [`docs/readme_rutas.md`](docs/readme_rutas.md).
@@ -285,7 +315,7 @@ python -m mvp.pipeline single \
   --synthetic
 ```
 
-Pipeline multimodo sintetico:
+Pipeline multimodo sintetico (usa `dual` por defecto):
 
 ```bash
 python -m mvp.pipeline multimode \
@@ -312,7 +342,7 @@ Antes de ejecutar datos reales, verifique la visibilidad de HDF5 locales:
 python tools/losc_precheck.py --event-id GW150914 --losc-root data/losc
 ```
 
-Pipeline single consumiendo catalogo de `t0` ya auditado:
+Pipeline single consumiendo catalogo de `t0` ya auditado (usa `dual` por defecto):
 
 ```bash
 python -m mvp.pipeline single \
@@ -322,7 +352,7 @@ python -m mvp.pipeline single \
   --window-catalog "runs/<AUDIT_RUN>/experiment/losc_quality/t0_catalog_gwosc_v2.json"
 ```
 
-Batch offline-first:
+Batch offline-first (usa `dual` por defecto):
 
 ```bash
 python -m mvp.experiment_offline_batch \
@@ -333,7 +363,7 @@ python -m mvp.experiment_offline_batch \
 
 ### 7.3 Sobre los stages geometricos explicitos
 
-`s4g/s4h/s4i/s4j` tienen CLI propia y forman la rama mas directamente alineada con el objetivo "region compatible por modo + interseccion + Hawking". `python -m mvp.pipeline multimode` ahora materializa por defecto los inputs observacionales de `s4g/s4h`, ejecuta esa rama explícita y consolida `s4k_event_support_region`; si `221` no es usable, la ruta degrada de forma conservadora a `220 + Hawking` en lugar de abortar la región geométrica por evento.
+`s4g/s4h/s4i/s4j` tienen CLI propia y forman la rama mas directamente alineada con el objetivo "region compatible por modo + interseccion + Hawking". `python -m mvp.pipeline multimode` ahora materializa por defecto los inputs observacionales de `s4g/s4h`, ejecuta esa rama explícita y consolida `s4k_event_support_region`; si `221` no es usable, la ruta degrada de forma conservadora a `220 + Hawking` en lugar de abortar la región geométrica por evento. Desde el 12 de marzo de 2026, el estimador por defecto para esta ruta es `dual`.
 
 ### 7.3b Experimento de barrido de bandas multimodo
 
