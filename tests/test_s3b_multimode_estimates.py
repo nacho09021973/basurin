@@ -363,6 +363,51 @@ def test_spectral_two_pass_converts_lntau_to_lnq_for_stability_and_sigma() -> No
     assert np.isclose(mode["fit"]["stability"]["lnQ_p50"], expected_p50, atol=1e-12)
 
 
+def test_template_220_rejects_nonfinite_estimate_before_lstsq() -> None:
+    signal = np.linspace(-1.0, 1.0, 512)
+
+    try:
+        _MODULE._template_220(
+            signal,
+            4096.0,
+            {"f_hz": float("nan"), "Q": float("nan"), "tau_s": float("nan")},
+        )
+    except ValueError as exc:
+        assert "invalid template estimate" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for non-finite template estimate")
+
+
+def test_estimate_221_spectral_two_pass_rejects_invalid_220_estimate_without_lstsq() -> None:
+    signal = np.linspace(-1.0, 1.0, 512)
+    original_estimate_220 = _MODULE._estimate_220_spectral
+    original_lstsq = np.linalg.lstsq
+    calls = {"count": 0}
+
+    def _fake_estimate_220(_signal: np.ndarray, _fs: float, *, band_low: float, band_high: float) -> dict[str, float]:
+        _ = band_low, band_high
+        return {"f_hz": float("nan"), "Q": float("nan"), "tau_s": float("nan")}
+
+    def _counting_lstsq(*args, **kwargs):
+        calls["count"] += 1
+        return original_lstsq(*args, **kwargs)
+
+    _MODULE._estimate_220_spectral = _fake_estimate_220
+    np.linalg.lstsq = _counting_lstsq
+    try:
+        try:
+            _MODULE._estimate_221_spectral_two_pass(signal, 4096.0, band_low=150.0, band_high=400.0)
+        except ValueError as exc:
+            assert "invalid template estimate" in str(exc)
+        else:
+            raise AssertionError("expected ValueError for invalid spectral 220 estimate")
+    finally:
+        _MODULE._estimate_220_spectral = original_estimate_220
+        np.linalg.lstsq = original_lstsq
+
+    assert calls["count"] == 0
+
+
 def _stable_estimator(signal: np.ndarray, fs: float) -> dict[str, float]:
     _ = signal, fs
     return {"f_hz": 250.0, "Q": 12.0, "tau_s": 12.0 / (np.pi * 250.0)}

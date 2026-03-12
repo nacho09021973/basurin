@@ -342,17 +342,27 @@ def _estimate_220_spectral(signal: np.ndarray, fs: float, *, band_low: float, ba
     return _estimate_spectral(signal, fs, band_low=band_220[0], band_high=band_220[1])
 
 
+def _coerce_positive_finite_estimate(est: dict[str, float], key: str) -> float:
+    value = est.get(key)
+    coerced = float(value)
+    if not math.isfinite(coerced) or coerced <= 0.0:
+        raise ValueError(f"invalid template estimate: {key}={value!r}")
+    return coerced
+
+
 def _template_220(signal: np.ndarray, fs: float, est220: dict[str, float]) -> np.ndarray:
     from numpy.linalg import lstsq
 
     t = np.arange(signal.size, dtype=float) / fs
-    f = float(est220["f_hz"])
-    tau = float(est220["tau_s"])
+    f = _coerce_positive_finite_estimate(est220, "f_hz")
+    tau = _coerce_positive_finite_estimate(est220, "tau_s")
     env = np.exp(-t / tau)
     w = 2.0 * math.pi * f
     b1 = env * np.cos(w * t)
     b2 = env * np.sin(w * t)
     X = np.vstack([b1, b2]).T
+    if not np.all(np.isfinite(X)):
+        raise ValueError("invalid template estimate: non-finite 220 design matrix")
     coeffs, *_ = lstsq(X, signal, rcond=None)
     return (X @ coeffs).astype(float)
 
