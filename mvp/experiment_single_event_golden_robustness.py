@@ -156,6 +156,7 @@ def _load_source_inputs_for_geometry_filters(
         mode220: {obs_f_hz, obs_tau_s, sigma_f_hz, sigma_tau_s} or None
         mode221: {obs_f_hz, obs_tau_s, sigma_f_hz, sigma_tau_s} or None (if unavailable)
         area_data: {geometry_id: {area_final, area_initial}} (may be empty)
+        area_constraint_applied: bool
         mode221_available: bool
 
     Returns None if the essential mode-220 inputs cannot be loaded.
@@ -208,6 +209,7 @@ def _load_source_inputs_for_geometry_filters(
 
     # --- Area data (from s4j output; optional) ---
     area_data: dict[str, dict[str, float]] = {}
+    area_constraint_applied = False
     s4j_path = run_dir / S4J_OUTPUT_REL
     if s4j_path.exists():
         try:
@@ -215,6 +217,11 @@ def _load_source_inputs_for_geometry_filters(
             raw_area = s4j_data.get("area_data", {})
             if isinstance(raw_area, dict):
                 area_data = raw_area
+            area_constraint_applied = bool(
+                s4j_data.get("area_constraint_applied")
+                if isinstance(s4j_data.get("area_constraint_applied"), bool)
+                else area_data
+            )
         except Exception:
             pass
 
@@ -223,6 +230,7 @@ def _load_source_inputs_for_geometry_filters(
         "mode221": mode221,
         "mode221_available": mode221_available,
         "area_data": area_data,
+        "area_constraint_applied": area_constraint_applied,
     }
 
 
@@ -284,6 +292,7 @@ def _evaluate_single_scenario(
     mode221: dict[str, float] | None = source_inputs.get("mode221")
     mode221_available: bool = source_inputs.get("mode221_available", False)
     area_data: dict[str, dict[str, float]] = source_inputs.get("area_data", {})
+    area_constraint_applied: bool = bool(source_inputs.get("area_constraint_applied", False))
 
     # Apply sigma_scale
     sf_220 = mode220["sigma_f_hz"] * sigma_scale
@@ -324,6 +333,7 @@ def _evaluate_single_scenario(
             common_geometry_ids=common_ids,
             area_data=area_data,
             area_tolerance=area_tolerance,
+            require_area_data=area_constraint_applied,
         )
 
         sg_id = singleton_geometry_id(golden_ids)
