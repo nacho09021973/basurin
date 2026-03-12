@@ -4,7 +4,7 @@
 
 Este documento resume la campaña operativa que cerró el 12 de marzo de 2026 sobre la cohorte BBH de BASURIN. El objetivo fue responder tres preguntas:
 
-1. Por qué la ruta `220 + Hawking` estaba devolviendo regiones vacías en casi toda la cohorte.
+1. Por qué la ruta monomodo explícita estaba devolviendo regiones vacías en casi toda la cohorte.
 2. Qué cambios de software eran legítimos y cuáles no debían hacerse.
 3. Qué estimador debe considerarse baseline real del pipeline a partir de ahora.
 
@@ -42,7 +42,7 @@ Resumen:
 - `7/49` con `NO_SUPPORT_REGION`;
 - `0/49` con `MULTIMODE_USABLE`.
 
-Conclusión: BASURIN ya no estaba vacío, pero seguía siendo una población dominada por soporte monomodo condicionado (`MODE220_PLUS_HAWKING`) y no por multimodo fuerte.
+Conclusión: BASURIN ya no estaba vacío, pero seguía siendo una población dominada por soporte monomodo condicionado y no por multimodo fuerte.
 
 ## Mejora A: gwtc_events.py respaldado por CSV
 
@@ -115,11 +115,22 @@ Interpretación:
 Incluso con `dual`, la población actual no debe venderse como “multimodo fuerte”. Lo que BASURIN está dando hoy es otra cosa, y es valiosa:
 
 - una cohorte amplia de eventos BBH con región geométrica final no vacía;
-- una ruta dominante `MODE220_PLUS_HAWKING`;
+- una ruta dominante `MODE220_NO_AREA_CONSTRAINT` en la cohorte canónica actual;
 - semántica conservadora vía `s4k_event_support_region`;
 - distinción clara entre `GEOMETRY_PRESENT_BUT_NONINFORMATIVE` y `NO_SUPPORT_REGION`.
 
 El objeto correcto para población no es la intersección multimodo estricta, sino `golden_geometry_support_region`.
+
+Matiz importante:
+
+- `s4j_hawking_area_filter` solo aplica una restricción física efectiva cuando recibe `s4j_hawking_area_filter/inputs/area_obs.json`;
+- si ese input falta, `s4j` actúa como pass-through y ahora lo declara explícitamente con `area_constraint_applied=false`;
+- por tanto, la cohorte dual agregada del 12 de marzo de 2026 no debe describirse como “post-Hawking” sino como población `MODE220_NO_AREA_CONSTRAINT`.
+
+La evidencia operativa de esa semántica quedó en:
+
+- `runs/mvp_aggregate_dual_semantic_20260312T123500Z/s5_aggregate/outputs/aggregate.json`, donde `49/49` eventos caen en `MODE220_NO_AREA_CONSTRAINT`;
+- un único run legacy bajo `runs/` con `area_obs.json` real y recorte efectivo (`mvp_GW150914_multimode_t0sweep_fixed_20260306T114521Z`), que sirve como demostración de que `s4j` sí filtra cuando recibe datos.
 
 ## Siguiente paso operativo
 

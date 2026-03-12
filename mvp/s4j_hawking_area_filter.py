@@ -78,10 +78,12 @@ def main(argv: list[str] | None = None) -> int:
         s4i_data = json.loads(s4i_path.read_text(encoding="utf-8"))
         common_ids: list[str] = s4i_data.get("common_geometry_ids", [])
 
+        area_obs_present = area_obs_path.exists()
         area_data: dict[str, dict[str, float]] = {}
-        if area_obs_path.exists():
+        if area_obs_present:
             area_obs = json.loads(area_obs_path.read_text(encoding="utf-8"))
             area_data = area_obs.get("area_data", {})
+        area_constraint_applied = bool(area_obs_present and area_data)
 
         golden_ids = filter_area_law(
             common_geometry_ids=common_ids,
@@ -99,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
             "stage": STAGE,
             "area_tolerance": args.area_tolerance,
             "n_common_input": len(common_ids),
+            "area_obs_present": area_obs_present,
+            "area_constraint_applied": area_constraint_applied,
             "area_data": area_data,
             "golden_geometry_ids": golden_ids,
             "n_golden": len(golden_ids),
@@ -114,6 +118,9 @@ def main(argv: list[str] | None = None) -> int:
             results={
                 "area_tolerance": float(args.area_tolerance),
                 "n_common_input": len(common_ids),
+                "area_obs_present": area_obs_present,
+                "area_constraint_applied": area_constraint_applied,
+                "n_area_entries": len(area_data),
                 "n_golden": len(golden_ids),
                 "verdict": verdict,
             },

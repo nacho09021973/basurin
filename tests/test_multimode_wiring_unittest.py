@@ -766,7 +766,7 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                     (stage_dir / "event_support_region.json").write_text(
                         json.dumps(
                             {
-                                "analysis_path": "MODE220_PLUS_HAWKING",
+                                "analysis_path": "MODE220_NO_AREA_CONSTRAINT",
                                 "support_region_status": "SUPPORT_REGION_AVAILABLE",
                                 "n_final_geometries": 2,
                                 "downstream_status": {
@@ -855,7 +855,7 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
             self.assertEqual(timeline["multimode_results"]["fallback_path"], "220_HAWKING")
             self.assertEqual(
                 timeline["multimode_results"]["support_region_analysis_path"],
-                "MODE220_PLUS_HAWKING",
+                "MODE220_NO_AREA_CONSTRAINT",
             )
             self.assertEqual(
                 timeline["multimode_results"]["downstream_status_class"],

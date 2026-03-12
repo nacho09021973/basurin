@@ -274,6 +274,9 @@ def test_s4k_consolidates_explicit_branch_into_single_event_artifact(tmp_path: P
         json.dumps(
             {
                 "schema_name": "golden_geometry_per_event",
+                "area_obs_present": True,
+                "area_constraint_applied": True,
+                "area_data": {"geo_A": {"area_final": 2.0, "area_initial": 1.0}},
                 "golden_geometry_ids": ["geo_A"],
                 "verdict": "PASS",
             }
@@ -323,10 +326,116 @@ def test_s4k_consolidates_explicit_branch_into_single_event_artifact(tmp_path: P
     assert payload["mode_221_region"]["geometry_ids"] == ["geo_A"]
     assert payload["common_intersection"]["geometry_ids"] == ["geo_A"]
     assert payload["hawking_filtered_region"]["golden_geometry_ids"] == ["geo_A"]
+    assert payload["hawking_filtered_region"]["area_constraint_applied"] is True
+    assert payload["hawking_constraint_applied"] is True
 
     assert stage_summary["verdict"] == "PASS"
     assert stage_summary["results"]["analysis_path"] == "MULTIMODE_INTERSECTION"
+    assert stage_summary["results"]["hawking_constraint_applied"] is True
     assert stage_summary["results"]["support_region_status"] == "SUPPORT_REGION_AVAILABLE"
     assert stage_summary["results"]["downstream_status_class"] == "MULTIMODE_USABLE"
     assert stage_summary["results"]["domain_status"] == "IN_DOMAIN"
     assert stage_summary["results"]["n_final"] == 1
+
+
+def test_s4k_marks_no_area_constraint_in_analysis_path(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    os.environ["BASURIN_RUNS_ROOT"] = str(runs_root)
+
+    run_id = "s4k_no_area_pytest"
+    run_dir = runs_root / run_id
+    (run_dir / "RUN_VALID").mkdir(parents=True)
+    (run_dir / "RUN_VALID" / "verdict.json").write_text('{\"verdict\":\"PASS\"}\n', encoding="utf-8")
+    (run_dir / "run_provenance.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "run_provenance_v1",
+                "run_id": run_id,
+                "invocation": {"event_id": "GW150914"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    (run_dir / "s3b_multimode_estimates").mkdir(parents=True, exist_ok=True)
+    (run_dir / "s3b_multimode_estimates" / "stage_summary.json").write_text(
+        json.dumps(
+            {
+                "multimode_viability": {"class": "SINGLEMODE_ONLY", "reasons": ["test"]},
+                "systematics_gate": {"verdict_auto": "PASS"},
+                "science_evidence": {"status": "NOT_EVALUATED"},
+                "annotations": {"rf_quantiles_source": "test"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    (run_dir / "s4g_mode220_geometry_filter" / "outputs").mkdir(parents=True, exist_ok=True)
+    (run_dir / "s4g_mode220_geometry_filter" / "outputs" / "mode220_filter.json").write_text(
+        json.dumps(
+            {
+                "schema_name": "golden_geometry_mode_filter",
+                "accepted_geometry_ids": ["geo_A", "geo_B"],
+                "verdict": "PASS",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    (run_dir / "s4h_mode221_geometry_filter" / "outputs").mkdir(parents=True, exist_ok=True)
+    (run_dir / "s4h_mode221_geometry_filter" / "outputs" / "mode221_filter.json").write_text(
+        json.dumps(
+            {
+                "schema_name": "golden_geometry_mode_filter",
+                "geometry_ids": [],
+                "verdict": "SKIPPED_221_UNAVAILABLE",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    (run_dir / "s4i_common_geometry_intersection" / "outputs").mkdir(parents=True, exist_ok=True)
+    (run_dir / "s4i_common_geometry_intersection" / "outputs" / "common_intersection.json").write_text(
+        json.dumps(
+            {
+                "schema_name": "golden_geometry_common",
+                "common_geometry_ids": ["geo_A", "geo_B"],
+                "mode221_skipped": True,
+                "verdict": "PASS",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    (run_dir / "s4j_hawking_area_filter" / "outputs").mkdir(parents=True, exist_ok=True)
+    (run_dir / "s4j_hawking_area_filter" / "outputs" / "hawking_area_filter.json").write_text(
+        json.dumps(
+            {
+                "schema_name": "golden_geometry_per_event",
+                "area_obs_present": False,
+                "area_constraint_applied": False,
+                "area_data": {},
+                "golden_geometry_ids": ["geo_A", "geo_B"],
+                "verdict": "PASS",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cp = subprocess.run(
+        ["python", "-m", "mvp.s4k_event_support_region", "--run-id", run_id],
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+    assert cp.returncode == 0, f"stdout:\n{cp.stdout}\nstderr:\n{cp.stderr}"
+
+    stage_dir = run_dir / "s4k_event_support_region"
+    payload = json.loads((stage_dir / "outputs" / "event_support_region.json").read_text(encoding="utf-8"))
+    stage_summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
+
+    assert payload["analysis_path"] == "MODE220_NO_AREA_CONSTRAINT"
+    assert payload["hawking_constraint_applied"] is False
+    assert payload["hawking_filtered_region"]["area_constraint_applied"] is False
+    assert stage_summary["results"]["analysis_path"] == "MODE220_NO_AREA_CONSTRAINT"
+    assert stage_summary["results"]["hawking_constraint_applied"] is False

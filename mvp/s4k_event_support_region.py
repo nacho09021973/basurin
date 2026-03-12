@@ -43,7 +43,9 @@ OUTPUT_FILE = "event_support_region.json"
 DOMAIN_STATUS_UNKNOWN = "UNKNOWN"
 DOMAIN_OUT_OF_DOMAIN = "OUT_OF_DOMAIN"
 ANALYSIS_PATH_MULTIMODE = "MULTIMODE_INTERSECTION"
+ANALYSIS_PATH_MULTIMODE_NO_AREA_CONSTRAINT = "MULTIMODE_INTERSECTION_NO_AREA_CONSTRAINT"
 ANALYSIS_PATH_MODE220_FALLBACK = "MODE220_PLUS_HAWKING"
+ANALYSIS_PATH_MODE220_NO_AREA_CONSTRAINT = "MODE220_NO_AREA_CONSTRAINT"
 SUPPORT_REGION_AVAILABLE = "SUPPORT_REGION_AVAILABLE"
 HAWKING_FILTER_EMPTY = "HAWKING_FILTER_EMPTY"
 NO_COMMON_REGION = "NO_COMMON_REGION"
@@ -107,6 +109,20 @@ def _extract_multimode_viability_class(multimode_viability: Any) -> str | None:
     if isinstance(value, str) and value.strip():
         return value
     return None
+
+
+def _extract_hawking_constraint_applied(payload: dict[str, Any]) -> bool:
+    value = payload.get("area_constraint_applied")
+    if isinstance(value, bool):
+        return value
+    area_data = payload.get("area_data")
+    return isinstance(area_data, dict) and bool(area_data)
+
+
+def _derive_analysis_path(*, mode221_skipped: bool, hawking_constraint_applied: bool) -> str:
+    if mode221_skipped:
+        return ANALYSIS_PATH_MODE220_FALLBACK if hawking_constraint_applied else ANALYSIS_PATH_MODE220_NO_AREA_CONSTRAINT
+    return ANALYSIS_PATH_MULTIMODE if hawking_constraint_applied else ANALYSIS_PATH_MULTIMODE_NO_AREA_CONSTRAINT
 
 
 def _derive_downstream_status(
@@ -188,7 +204,11 @@ def main(argv: list[str] | None = None) -> int:
         mode221_skipped = bool(s4i_payload.get("mode221_skipped")) or (
             s4h_payload.get("verdict") == VERDICT_SKIPPED_221_UNAVAILABLE
         )
-        analysis_path = ANALYSIS_PATH_MODE220_FALLBACK if mode221_skipped else ANALYSIS_PATH_MULTIMODE
+        hawking_constraint_applied = _extract_hawking_constraint_applied(s4j_payload)
+        analysis_path = _derive_analysis_path(
+            mode221_skipped=mode221_skipped,
+            hawking_constraint_applied=hawking_constraint_applied,
+        )
         support_region_status = _derive_support_region_status(
             final_ids=golden_geometry_ids,
             common_ids=common_geometry_ids,
@@ -220,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
             "stage": STAGE,
             "analysis_path": analysis_path,
             "support_region_status": support_region_status,
+            "hawking_constraint_applied": hawking_constraint_applied,
             "final_geometry_ids": golden_geometry_ids,
             "n_final_geometries": len(golden_geometry_ids),
             "domain_status": domain_status,
@@ -250,6 +271,8 @@ def main(argv: list[str] | None = None) -> int:
             },
             "hawking_filtered_region": {
                 "verdict": s4j_payload.get("verdict", "UNKNOWN"),
+                "area_obs_present": bool(s4j_payload.get("area_obs_present", False)),
+                "area_constraint_applied": hawking_constraint_applied,
                 "n_golden": len(golden_geometry_ids),
                 "golden_geometry_ids": golden_geometry_ids,
                 "source_artifact": _relative_to_run(ctx.run_dir, s4j_path),
@@ -274,6 +297,7 @@ def main(argv: list[str] | None = None) -> int:
             results={
                 "analysis_path": analysis_path,
                 "support_region_status": support_region_status,
+                "hawking_constraint_applied": hawking_constraint_applied,
                 "multimode_viability_class": (
                     payload["multimode_viability"].get("class")
                     if isinstance(payload.get("multimode_viability"), dict)
