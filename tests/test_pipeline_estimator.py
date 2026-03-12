@@ -71,6 +71,33 @@ class TestGWTCEvents:
         assert len(events) >= 10
         assert "GW150914" in events
 
+    def test_csv_backed_o3_event_exposes_mass_and_snr(self):
+        from mvp.gwtc_events import get_event
+        ev = get_event("GW190706_222641")
+        assert ev is not None
+        assert ev["m_final_msun"] == pytest.approx(107.3)
+        assert ev["snr_network"] == pytest.approx(13.4)
+        assert "chi_final" in ev
+
+    def test_preflight_skips_partial_catalog_entry_without_chi_final(self, tmp_path, monkeypatch):
+        from mvp import pipeline
+        monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path / "runs"))
+        monkeypatch.setattr("mvp.gwtc_events.get_event", lambda _event_id: {
+            "m_final_msun": 107.3,
+            "snr_network": 13.4,
+            "chi_final": None,
+        })
+        result = pipeline._run_preflight_viability(
+            tmp_path / "runs",
+            "partial_catalog_run",
+            "GW190706_222641",
+            0.003,
+            0.06,
+            {"stages": []},
+        )
+        assert result is None
+        assert not (tmp_path / "runs" / "partial_catalog_run" / "preflight_viability").exists()
+
 
 class TestS4EstimatesPath:
     """Test that s4_geometry_filter accepts --estimates-path override."""

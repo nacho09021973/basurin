@@ -251,6 +251,37 @@ class TestKerrCenteredBand:
         assert legacy["f_hz"] > 300.0
         assert abs(kerr["f_hz"] - 250.0) < 20.0
 
+    def test_input_band_expands_downward_for_low_kerr_hint(self):
+        low, high, half_width = s3_mod._expand_input_band_for_kerr_hint(
+            requested_band_low=150.0,
+            requested_band_high=400.0,
+            kerr_f220_hz=124.0,
+            width_factor=5.0,
+            min_half_width_hz=10.0,
+            q_ref=12.0,
+            f_min_floor_hz=10.0,
+            nyquist_hz=SAMPLE_RATE / 2.0,
+        )
+        assert low < 150.0
+        assert high >= 400.0
+        assert half_width > 0.0
+
+    def test_input_band_expands_upward_for_high_kerr_hint(self):
+        low, high, half_width = s3_mod._expand_input_band_for_kerr_hint(
+            requested_band_low=150.0,
+            requested_band_high=400.0,
+            kerr_f220_hz=561.0,
+            width_factor=5.0,
+            min_half_width_hz=10.0,
+            q_ref=12.0,
+            f_min_floor_hz=10.0,
+            nyquist_hz=SAMPLE_RATE / 2.0,
+        )
+        assert low <= 150.0
+        assert high > 400.0
+        assert high < SAMPLE_RATE / 2.0
+        assert half_width > 0.0
+
 
 class TestBiasComparison:
     """spectral_lorentzian corrects the known hilbert_envelope bias."""

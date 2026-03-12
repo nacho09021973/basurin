@@ -1,23 +1,40 @@
-"""GWTC catalog events: final mass, final spin, and network SNR.
+"""GWTC catalog events: remnant mass, optional final spin, and network SNR.
 
-Static reference data for confirmed BBH merger events from GWTC-1/2/3.
+Primary source for event-level remnant metadata is the local quality catalog
+``gwtc_quality_events.csv`` at repository root.  This provides broad cohort
+coverage for ``final_mass_source`` and ``snr``.
 
-Source:
-    GWTC-1: Abbott et al. (2019), PRX 9, 031040 (arXiv:1811.12907)
-    GWTC-2: Abbott et al. (2021), PRX 11, 021053 (arXiv:2010.14527)
-    GWTC-3: Abbott et al. (2023), PRX 13, 041039 (arXiv:2111.03606)
-
-Values are posterior medians from the LVC parameter estimation release.
-Uncertainties in the catalog posteriors are NOT propagated here — this is
-a first-pass catalog for diagnostic purposes. See docstring of
-compute_deviation_distribution() in s5_aggregate.py for caveats.
+Only a small subset of legacy events has curated ``chi_final`` values in this
+module.  For all other events the catalog entry is partial: callers may use
+``m_final_msun`` and ``snr_network`` directly, but must tolerate
+``chi_final is None``.
 """
 from __future__ import annotations
 
+import csv
+from pathlib import Path
 from typing import Any
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_QUALITY_CSV = _REPO_ROOT / "gwtc_quality_events.csv"
+
+# Curated legacy chi_final medians used by preflight/Kerr-centered helpers.
+# Keep these explicit until we have a trustworthy cohort-wide remnant-spin source.
+_LEGACY_CHI_FINAL: dict[str, float] = {
+    "GW150914": 0.67,
+    "GW151226": 0.74,
+    "GW170104": 0.64,
+    "GW170608": 0.69,
+    "GW170729": 0.81,
+    "GW170809": 0.70,
+    "GW170814": 0.72,
+    "GW170818": 0.67,
+    "GW170823": 0.71,
+    "GW190521": 0.72,
+}
+
 # fmt: off
-GWTC_EVENTS: dict[str, dict[str, float]] = {
+_LEGACY_EVENTS: dict[str, dict[str, float | None]] = {
     # Event        M_final (M_sun)   chi_final    SNR_network
     "GW150914": {"m_final_msun": 62.2,  "chi_final": 0.67, "snr_network": 24.4},
     "GW151226": {"m_final_msun": 20.8,  "chi_final": 0.74, "snr_network": 13.0},
@@ -32,18 +49,65 @@ GWTC_EVENTS: dict[str, dict[str, float]] = {
 }
 # fmt: on
 
+
+def _as_float(value: str | None) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = float(text)
+    except ValueError:
+        return None
+    return parsed if parsed == parsed else None
+
+
+def _load_quality_catalog() -> dict[str, dict[str, float | None]]:
+    catalog: dict[str, dict[str, float | None]] = {k: dict(v) for k, v in _LEGACY_EVENTS.items()}
+    if not _QUALITY_CSV.exists():
+        return catalog
+
+    with _QUALITY_CSV.open(encoding="utf-8", newline="") as f:
+        rows = csv.DictReader(f)
+        for row in rows:
+            event_id = (row.get("event") or "").strip()
+            if not event_id:
+                continue
+            m_final = _as_float(row.get("final_mass_source"))
+            snr_network = _as_float(row.get("snr"))
+            if m_final is None and snr_network is None:
+                continue
+
+            entry = dict(catalog.get(event_id, {}))
+            if m_final is not None:
+                entry["m_final_msun"] = m_final
+            if snr_network is not None:
+                entry["snr_network"] = snr_network
+            if event_id in _LEGACY_CHI_FINAL:
+                entry["chi_final"] = _LEGACY_CHI_FINAL[event_id]
+            else:
+                entry.setdefault("chi_final", None)
+            catalog[event_id] = entry
+
+    return catalog
+
+
+GWTC_EVENTS: dict[str, dict[str, float | None]] = _load_quality_catalog()
+
 # Citation string for use in JSON provenance fields
 GWTC_CITATION = (
-    "GWTC-1 (arXiv:1811.12907), GWTC-2 (arXiv:2010.14527), "
-    "GWTC-3 (arXiv:2111.03606); values are posterior medians."
+    "gwtc_quality_events.csv (local quality catalog for final_mass_source and snr); "
+    "legacy curated chi_final medians for GWTC-1 + GW190521."
 )
 
 
-def get_event(event_id: str) -> dict[str, float] | None:
+def get_event(event_id: str) -> dict[str, float | None] | None:
     """Return catalog entry for event_id, or None if not found."""
-    return GWTC_EVENTS.get(event_id)
+    entry = GWTC_EVENTS.get(event_id)
+    return dict(entry) if entry is not None else None
 
 
 def list_events() -> list[str]:
-    """Return sorted list of all event IDs in the catalog."""
+    """Return sorted list of all known event IDs."""
     return sorted(GWTC_EVENTS.keys())

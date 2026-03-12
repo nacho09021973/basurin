@@ -358,11 +358,21 @@ def _run_preflight_viability(
         print(f"[pipeline] preflight: event {event_id} not in GWTC catalog, skipping preflight", flush=True)
         return None
 
+    m_final = event_params.get("m_final_msun")
+    chi_final = event_params.get("chi_final")
+    if m_final is None or chi_final is None:
+        print(
+            f"[pipeline] preflight: event {event_id} has partial catalog entry "
+            f"(m_final={m_final}, chi_final={chi_final}), skipping preflight",
+            flush=True,
+        )
+        return None
+
     rho_ringdown = event_params.get("snr_network", 0.0) * 0.33
     result = preflight_viability(
         event_id=event_id,
-        m_final_msun=event_params["m_final_msun"],
-        chi_final=event_params["chi_final"],
+        m_final_msun=m_final,
+        chi_final=chi_final,
         rho_total=rho_ringdown,
         t0_s=dt_start_s,
         T_s=window_duration_s,

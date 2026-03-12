@@ -54,6 +54,36 @@ def _compute_kerr_centered_band(
     return f_low, f_high, half_width_hz
 
 
+def _expand_input_band_for_kerr_hint(
+    *,
+    requested_band_low: float,
+    requested_band_high: float,
+    kerr_f220_hz: float,
+    width_factor: float,
+    min_half_width_hz: float,
+    q_ref: float,
+    f_min_floor_hz: float,
+    nyquist_hz: float,
+) -> tuple[float, float, float]:
+    """Expand the *input* bandpass so the Kerr-centered fit band is not clipped away.
+
+    This solves the failure mode where the spectral fitter asks for a Kerr-centered
+    band around ``f220_kerr_hz`` but the initial Butterworth bandpass has already
+    removed that frequency because the requested input band was fixed too narrowly
+    (for example, default ``150–400 Hz`` while ``f220`` is below 150 Hz).
+    """
+    kerr_low, kerr_high, half_width_hz = _compute_kerr_centered_band(
+        f220_kerr_hz=float(kerr_f220_hz),
+        width_factor=width_factor,
+        min_half_width_hz=min_half_width_hz,
+        q_ref=q_ref,
+        f_min_floor_hz=f_min_floor_hz,
+    )
+    input_low = max(float(f_min_floor_hz), min(float(requested_band_low), float(kerr_low)))
+    input_high = min(float(nyquist_hz) * 0.95, max(float(requested_band_high), float(kerr_high)))
+    return input_low, input_high, half_width_hz
+
+
 def _resolve_f220_kerr_hz(event_id: str) -> float | None:
     """Resolve Kerr f220 from catalog remnant mass/spin when available."""
     evt = get_event(event_id)
@@ -329,12 +359,25 @@ def estimate_ringdown_spectral(
     if n < 16:
         return dict(_nan_result)
 
-    band_low, band_high = float(band_hz[0]), float(band_hz[1])
+    requested_band_low, requested_band_high = float(band_hz[0]), float(band_hz[1])
+    band_low, band_high = requested_band_low, requested_band_high
     nyquist = sample_rate / 2.0
     if band_high >= nyquist:
         band_high = nyquist * 0.95
     if band_low >= band_high:
         return dict(_nan_result)
+
+    if kerr_centered_band and kerr_f220_hz is not None and math.isfinite(kerr_f220_hz):
+        band_low, band_high, _ = _expand_input_band_for_kerr_hint(
+            requested_band_low=band_low,
+            requested_band_high=band_high,
+            kerr_f220_hz=float(kerr_f220_hz),
+            width_factor=band_width_factor,
+            min_half_width_hz=min_half_width_hz,
+            q_ref=q_ref,
+            f_min_floor_hz=f_min_floor_hz,
+            nyquist_hz=nyquist,
+        )
 
     # Bandpass filter before computing PSD to focus on the ringdown band
     try:
