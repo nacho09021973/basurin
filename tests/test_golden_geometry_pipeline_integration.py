@@ -227,7 +227,7 @@ def test_s4f_builds_area_obs_and_s4j_consumes_canonical_output(tmp_path: Path) -
 
     (run_dir / "s4i_common_geometry_intersection" / "outputs").mkdir(parents=True, exist_ok=True)
     (run_dir / "s4i_common_geometry_intersection" / "outputs" / "common_intersection.json").write_text(
-        json.dumps({"common_geometry_ids": ["geo_pass", "geo_fail"], "mode221_skipped": True, "verdict": "PASS"}),
+        json.dumps({"common_geometry_ids": ["geo_pass", "geo_fail", "geo_missing"], "mode221_skipped": True, "verdict": "PASS"}),
         encoding="utf-8",
     )
 
@@ -274,6 +274,7 @@ def test_s4f_builds_area_obs_and_s4j_consumes_canonical_output(tmp_path: Path) -
     assert payload["area_constraint_applied"] is True
     assert payload["golden_geometry_ids"] == ["geo_pass"]
     assert payload["n_golden"] == 1
+    assert payload["n_missing_area_data"] == 1
 
 def test_s4k_consolidates_explicit_branch_into_single_event_artifact(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"

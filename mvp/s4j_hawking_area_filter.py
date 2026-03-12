@@ -39,12 +39,14 @@ def filter_area_law(
     common_geometry_ids: list[str],
     area_data: dict[str, dict[str, float]],
     area_tolerance: float,
+    require_area_data: bool,
 ) -> list[str]:
     passed: list[str] = []
     for gid in common_geometry_ids:
         geo_areas = area_data.get(gid)
         if geo_areas is None:
-            passed.append(gid)
+            if not require_area_data:
+                passed.append(gid)
             continue
         area_f = float(geo_areas["area_final"])
         area_i = float(geo_areas["area_initial"])
@@ -107,11 +109,13 @@ def main(argv: list[str] | None = None) -> int:
         area_obs_source = (str(chosen_area_obs_path.relative_to(ctx.run_dir)) if chosen_area_obs_path is not None else None)
         area_data: dict[str, dict[str, float]] = area_obs.get("area_data", {}) if isinstance(area_obs.get("area_data"), dict) else {}
         area_constraint_applied = bool(area_obs_present and area_data)
+        n_missing_area_data = sum(1 for gid in common_ids if gid not in area_data)
 
         golden_ids = filter_area_law(
             common_geometry_ids=common_ids,
             area_data=area_data,
             area_tolerance=args.area_tolerance,
+            require_area_data=area_constraint_applied,
         )
 
         verdict = VERDICT_PASS if golden_ids else VERDICT_NO_GOLDEN_GEOMETRIES
@@ -130,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
             "area_data": area_data,
             "golden_geometry_ids": golden_ids,
             "n_golden": len(golden_ids),
+            "n_missing_area_data": n_missing_area_data,
             "verdict": verdict,
         }
 
@@ -146,6 +151,7 @@ def main(argv: list[str] | None = None) -> int:
                 "area_obs_source": area_obs_source,
                 "area_constraint_applied": area_constraint_applied,
                 "n_area_entries": len(area_data),
+                "n_missing_area_data": n_missing_area_data,
                 "n_golden": len(golden_ids),
                 "verdict": verdict,
             },
