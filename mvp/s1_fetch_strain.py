@@ -408,6 +408,59 @@ def _load_local_hdf5(path: Path) -> tuple[np.ndarray, float, float | None, str]:
     return values, float(1.0 / float(xspacing)), gps_start, "h5py"
 
 
+def _crop_local_strain_to_requested_window(
+    strain: np.ndarray,
+    *,
+    detector: str,
+    sample_rate_hz: float,
+    gps_start_local: float | None,
+    gps_start_target: float | None,
+    duration_s: float,
+) -> tuple[np.ndarray, float | None, dict[str, Any]]:
+    details: dict[str, Any] = {
+        "applied": False,
+        "source_n_samples": int(strain.size),
+        "output_n_samples": int(strain.size),
+        "source_gps_start": None if gps_start_local is None else float(gps_start_local),
+        "output_gps_start": None if gps_start_local is None else float(gps_start_local),
+        "duration_s": float(duration_s),
+        "reason": None,
+    }
+    if strain.ndim != 1 or strain.size == 0:
+        raise ValueError(f"{detector} local strain must be a non-empty 1-D array")
+    if gps_start_local is None:
+        details["reason"] = "missing_local_gps_start"
+        return strain, gps_start_local, details
+    if gps_start_target is None:
+        details["reason"] = "missing_target_gps_start"
+        return strain, gps_start_local, details
+    if duration_s <= 0.0:
+        raise ValueError(f"{detector} duration_s must be > 0")
+    if sample_rate_hz <= 0.0:
+        raise ValueError(f"{detector} sample_rate_hz must be > 0")
+
+    n_out = int(round(duration_s * sample_rate_hz))
+    if n_out <= 0:
+        raise ValueError(f"{detector} requested window has zero samples")
+
+    i_start = int(round((gps_start_target - gps_start_local) * sample_rate_hz))
+    i_end = i_start + n_out
+    if i_start < 0 or i_end > int(strain.size):
+        details["reason"] = "requested_window_out_of_bounds"
+        return strain, gps_start_local, details
+
+    cropped = np.asarray(strain[i_start:i_end], dtype=np.float64).copy()
+    details.update(
+        {
+            "applied": True,
+            "output_n_samples": int(cropped.size),
+            "output_gps_start": float(gps_start_target),
+            "reason": "cropped_to_requested_window",
+        }
+    )
+    return cropped, float(gps_start_target), details
+
+
 def _max_nonfinite_fraction() -> float:
     raw = os.environ.get("BASURIN_MAX_NONFINITE_FRACTION", "").strip()
     if not raw:
@@ -790,8 +843,7 @@ def main() -> int:
 
     try:
         if local_mode:
-            gps_center = None
-            gps_start = None
+            gps_center = _fetch_gps_center(args.event_id)
         elif args.synthetic:
             gps_center = 1126259462.4204
         else:
@@ -803,6 +855,8 @@ def main() -> int:
             gps_center = _fetch_gps_center(args.event_id)
         if gps_center is not None:
             gps_start = gps_center - args.duration_s / 2.0
+        else:
+            gps_start = None
 
         strains: dict[str, np.ndarray] = {}
         sha_by_det: dict[str, str] = {}
@@ -811,6 +865,7 @@ def main() -> int:
 
         local_inputs_rel: dict[str, str] = {}
         sanitization_by_det: dict[str, dict[str, Any]] = {}
+        window_crop_by_det: dict[str, dict[str, Any]] = {}
         max_nonfinite_fraction = _max_nonfinite_fraction()
 
         for i, det in enumerate(detectors, 1):
@@ -832,9 +887,22 @@ def main() -> int:
                 shutil.copy2(src, dst)
                 local_inputs_rel[det] = str(dst.relative_to(ctx.stage_dir))
                 strain, sr, gps_start_local, library_version = _load_local_hdf5(dst)
-                if gps_start is None and gps_start_local is not None:
-                    gps_start = gps_start_local
-                    gps_center = gps_start + args.duration_s / 2.0
+                strain, gps_start_cropped, crop_details = _crop_local_strain_to_requested_window(
+                    np.asarray(strain, dtype=np.float64),
+                    detector=det,
+                    sample_rate_hz=sr,
+                    gps_start_local=gps_start_local,
+                    gps_start_target=gps_start,
+                    duration_s=args.duration_s,
+                )
+                window_crop_by_det[det] = crop_details
+                if gps_start is None:
+                    if gps_start_cropped is not None:
+                        gps_start = gps_start_cropped
+                        gps_center = gps_start + args.duration_s / 2.0
+                    elif gps_start_local is not None:
+                        gps_start = gps_start_local
+                        gps_center = gps_start + args.duration_s / 2.0
                 print(f"[s1_fetch_strain] Local HDF5 OK: {det}, n={strain.size}, fs={sr}", flush=True)
             else:
                 if args.offline:
@@ -898,6 +966,7 @@ def main() -> int:
             provenance["local_input_sha256"] = {
                 det: sha256_file(ctx.stage_dir / provenance["local_inputs"][det]) for det in provenance["local_inputs"]
             }
+            provenance["local_window_crop"] = window_crop_by_det
         prov_path = ctx.outputs_dir / "provenance.json"
         write_json_atomic(prov_path, provenance)
 
@@ -917,6 +986,7 @@ def main() -> int:
                 "detectors": detectors,
                 "sample_rate_hz": sample_rate_hz,
                 "strain_sanitization": sanitization_by_det,
+                "local_window_crop": window_crop_by_det if local_mode else {},
             },
         )
         _write_run_valid_verdict(args.run, "PASS", "s1_fetch_strain completed successfully")

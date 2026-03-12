@@ -137,6 +137,26 @@ def test_sanitize_strain_array_interpolates_small_nonfinite_spans() -> None:
     assert details["method"] == "linear_interp_nonfinite"
 
 
+def test_crop_local_strain_to_requested_window_uses_32s_target() -> None:
+    strain = np.arange(20.0, dtype=np.float64)
+
+    cropped, gps_start_out, details = s1_fetch_strain._crop_local_strain_to_requested_window(
+        strain,
+        detector="H1",
+        sample_rate_hz=2.0,
+        gps_start_local=100.0,
+        gps_start_target=103.0,
+        duration_s=4.0,
+    )
+
+    assert cropped.tolist() == pytest.approx([6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0])
+    assert gps_start_out == pytest.approx(103.0)
+    assert details["applied"] is True
+    assert details["source_n_samples"] == 20
+    assert details["output_n_samples"] == 8
+    assert details["reason"] == "cropped_to_requested_window"
+
+
 def test_reuse_if_present_rejects_cached_nonfinite_and_refetches_local(monkeypatch, tmp_path: Path):
     runs_root = tmp_path / "runs"
     run_id = "reuse_nonfinite"
@@ -177,7 +197,7 @@ def test_reuse_if_present_rejects_cached_nonfinite_and_refetches_local(monkeypat
         return np.array([10.0, 11.0, 12.0], dtype=np.float64), 4096.0, 100.0, "stub"
 
     monkeypatch.setattr(s1_fetch_strain, "_load_local_hdf5", _fake_load)
-    monkeypatch.setattr(s1_fetch_strain, "_fetch_gps_center", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no gwosc")))
+    monkeypatch.setattr(s1_fetch_strain, "_fetch_gps_center", lambda *_a, **_k: 102.0)
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -204,6 +224,58 @@ def test_reuse_if_present_rejects_cached_nonfinite_and_refetches_local(monkeypat
     assert payload["H1"].tolist() == pytest.approx([10.0, 11.0, 12.0])
 
 
+def test_local_hdf5_is_cropped_before_nonfinite_checks(monkeypatch, tmp_path: Path):
+    runs_root = tmp_path / "runs"
+    run_id = "crop_before_sanitize"
+    run_valid = runs_root / run_id / "RUN_VALID"
+    run_valid.mkdir(parents=True, exist_ok=True)
+    (run_valid / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    local_h1 = tmp_path / "H1_windowed.hdf5"
+    local_h1.write_bytes(b"placeholder")
+
+    def _fake_load(_path):
+        arr = np.arange(20.0, dtype=np.float64)
+        arr[:4] = np.nan
+        arr[-4:] = np.inf
+        return arr, 2.0, 100.0, "stub"
+
+    monkeypatch.setattr(s1_fetch_strain, "_load_local_hdf5", _fake_load)
+    monkeypatch.setattr(s1_fetch_strain, "_fetch_gps_center", lambda *_a, **_k: 106.0)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "s1_fetch_strain.py",
+            "--run",
+            run_id,
+            "--event-id",
+            "GW150914",
+            "--detectors",
+            "H1",
+            "--duration-s",
+            "4",
+            "--local-hdf5",
+            f"H1={local_h1}",
+        ],
+    )
+
+    rc = s1_fetch_strain.main()
+    assert rc == 0
+
+    out = runs_root / run_id / "s1_fetch_strain" / "outputs"
+    payload = np.load(out / "strain.npz")
+    assert payload["H1"].tolist() == pytest.approx([8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0])
+    assert np.isfinite(payload["H1"]).all()
+
+    provenance = json.loads((out / "provenance.json").read_text(encoding="utf-8"))
+    crop = provenance["local_window_crop"]["H1"]
+    assert crop["applied"] is True
+    assert crop["output_n_samples"] == 8
+    assert crop["output_gps_start"] == pytest.approx(104.0)
+    assert provenance["strain_sanitization"]["H1"]["applied"] is False
+
+
 def test_local_hdf5_nonfinite_samples_are_sanitized_and_recorded(monkeypatch, tmp_path: Path):
     runs_root = tmp_path / "runs"
     run_id = "sanitize_local"
@@ -219,6 +291,7 @@ def test_local_hdf5_nonfinite_samples_are_sanitized_and_recorded(monkeypatch, tm
         return np.array([0.0, np.nan, 2.0, np.inf, 4.0], dtype=np.float64), 4096.0, 100.0, "stub"
 
     monkeypatch.setattr(s1_fetch_strain, "_load_local_hdf5", _fake_load)
+    monkeypatch.setattr(s1_fetch_strain, "_fetch_gps_center", lambda *_a, **_k: 102.0)
     monkeypatch.setattr(
         "sys.argv",
         [
