@@ -37,6 +37,7 @@ from mvp.contracts import init_stage, finalize, abort, check_inputs
 from basurin_io import resolve_out_root, write_json_atomic, sha256_file, utc_now_iso
 
 STAGE = "s1_fetch_strain"
+DEFAULT_T0_REFERENCE_CATALOG = Path(__file__).resolve().parents[1] / "gwtc_events_t0.json"
 
 
 def _run_valid_verdict_path(run_id: str) -> Path:
@@ -130,15 +131,25 @@ def _generate_synthetic_strain(
 
 
 def _fetch_gps_center(event_id: str) -> float:
-    local = Path("docs/ringdown/event_metadata") / f"{event_id}_metadata.json"
-    if local.exists():
-        print(f"[s1_fetch_strain] GPS lookup: reading local metadata {local}", flush=True)
-        with open(local, "r", encoding="utf-8") as f:
-            meta = json.load(f)
-        for key in ("t_coalescence_gps", "gps", "GPS", "gpstime"):
-            if key in meta:
-                print(f"[s1_fetch_strain] GPS resolved from local file: {meta[key]}", flush=True)
-                return float(meta[key])
+    lookup_keys = [event_id]
+    if "_" in event_id:
+        lookup_keys.append(event_id.split("_", 1)[0])
+    if DEFAULT_T0_REFERENCE_CATALOG.exists():
+        print(
+            f"[s1_fetch_strain] GPS lookup: reading canonical catalog {DEFAULT_T0_REFERENCE_CATALOG}",
+            flush=True,
+        )
+        with open(DEFAULT_T0_REFERENCE_CATALOG, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+        if isinstance(catalog, dict):
+            for lookup_key in lookup_keys:
+                entry = catalog.get(lookup_key)
+                if not isinstance(entry, dict):
+                    continue
+                for key in ("GPS", "gps", "t0_gps", "event_time_gps", "gpstime", "gps_time"):
+                    if key in entry:
+                        print(f"[s1_fetch_strain] GPS resolved from canonical catalog: {entry[key]}", flush=True)
+                        return float(entry[key])
     print(f"[s1_fetch_strain] GPS lookup: querying GWOSC API for {event_id} ...", flush=True)
     try:
         import requests
@@ -171,7 +182,7 @@ def _fetch_gps_center(event_id: str) -> float:
         print(f"[s1_fetch_strain] GWOSC API error: {exc}", flush=True)
     raise RuntimeError(
         f"Cannot resolve GPS center for {event_id}. "
-        f"Add metadata to docs/ringdown/event_metadata/{event_id}_metadata.json"
+        f"Add the event to {DEFAULT_T0_REFERENCE_CATALOG}"
     )
 
 
@@ -191,8 +202,8 @@ def _resolve_local_hdf5_mappings(items: list[str], event_id: str | None) -> dict
         path_expr = path_raw.strip()
         if not sep:
             raise ValueError(f"Invalid --local-hdf5 entry '{item}'. Expected DET=PATH")
-        if det not in {"H1", "L1"}:
-            raise ValueError(f"Invalid detector in --local-hdf5: {det}. Allowed: H1,L1")
+        if det not in {"H1", "L1", "V1"}:
+            raise ValueError(f"Invalid detector in --local-hdf5: {det}. Allowed: H1,L1,V1")
         if det in local_by_det:
             raise ValueError(f"Duplicate --local-hdf5 detector: {det}")
         local_by_det[det] = _resolve_hdf5_candidate(path_expr, det, event_id=event_id)
@@ -217,6 +228,7 @@ def match_hdf5_files(event_dir: Path) -> dict[str, list[Path]]:
         "all": all_files,
         "H1": [p for p in all_files if "H1" in p.name.upper()],
         "L1": [p for p in all_files if "L1" in p.name.upper()],
+        "V1": [p for p in all_files if "V1" in p.name.upper()],
     }
 
 
@@ -249,6 +261,7 @@ def _resolve_event_hdf5_or_die(*, hdf5_root: Path, event_id: str, detectors: lis
         f"h5_count={len(matches.get('all', []))}",
         f"match_count_H1={len(matches.get('H1', []))}",
         f"match_count_L1={len(matches.get('L1', []))}",
+        f"match_count_V1={len(matches.get('V1', []))}",
         "Patrones buscados por detector:",
     ]
     for det in detectors:
@@ -260,7 +273,7 @@ def _resolve_event_hdf5_or_die(*, hdf5_root: Path, event_id: str, detectors: lis
         [
             "Guía de resolución:",
             "  A) mount/symlink roto: data/losc no apunta al cache real.",
-            "  B) naming: hay .h5/.hdf5 pero no casan H1/L1; crear symlinks H1.h5 y L1.h5.",
+            "  B) naming: hay .h5/.hdf5 pero no casan detectores; crear symlinks coherentes por detector (H1/L1/V1).",
             f"Precheck: python tools/losc_precheck.py --event-id {event_id} --losc-root {hdf5_root.resolve()}",
             f"Comprobación sugerida: find {event_dir} \\( -iname '*.hdf5' -o -iname '*.h5' \\) -type f",
             "Ejemplo explícito (--local-hdf5):",
@@ -587,7 +600,8 @@ def main() -> int:
         metavar="DET=PATH",
         help=(
             "Use local/offline HDF5 per detector (repeatable, DET=PATH). "
-            "If omitted, auto-resolves from <hdf5-root>/<EVENT_ID>/ using *H1*.hdf5|*.h5 and *L1*.hdf5|*.h5."
+            "If omitted, auto-resolves from <hdf5-root>/<EVENT_ID>/ using the best available detector pair "
+            "among H1/L1/V1."
         ),
     )
     ap.add_argument(

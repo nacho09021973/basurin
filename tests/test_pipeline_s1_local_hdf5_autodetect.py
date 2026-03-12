@@ -9,7 +9,7 @@ def _extract_local_hdf5_paths(args: list[str]) -> list[str]:
     for idx, arg in enumerate(args):
         if arg == "--local-hdf5":
             det, path = args[idx + 1].split("=", 1)
-            assert det in {"H1", "L1"}
+            assert det in {"H1", "L1", "V1"}
             paths.append(path)
     return paths
 
@@ -95,3 +95,51 @@ def test_build_s0_oracle_args_offline_autodetects_h1_l1(monkeypatch, tmp_path):
     assert f"H1={(losc_dir / 'zzz_H1_big.h5').resolve().as_posix()}" in args
     assert f"L1={(losc_dir / 'aaa_L1_big.hdf5').resolve().as_posix()}" in args
     assert all(os.path.isabs(path) for path in _extract_local_hdf5_paths(args))
+
+
+def test_build_s1_fetch_args_falls_back_to_l1_v1_when_h1_is_missing(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    event_id = "GW200112_155838"
+    losc_dir = tmp_path / "data" / "losc" / event_id
+    losc_dir.mkdir(parents=True)
+    (losc_dir / "L-L1_GWOSC_4KHZ_R1-1262877888-4096.hdf5").write_text("dummy")
+    (losc_dir / "V-V1_GWOSC_4KHZ_R1-1262877888-4096.hdf5").write_text("dummy")
+
+    from mvp.pipeline import _build_s1_fetch_args
+
+    args = _build_s1_fetch_args(
+        run_id="run123",
+        event_id=event_id,
+        duration_s=32.0,
+        synthetic=False,
+        reuse_strain=False,
+        local_hdf5=None,
+        offline=False,
+    )
+
+    assert args.count("--local-hdf5") == 2
+    assert f"L1={(losc_dir / 'L-L1_GWOSC_4KHZ_R1-1262877888-4096.hdf5').resolve().as_posix()}" in args
+    assert f"V1={(losc_dir / 'V-V1_GWOSC_4KHZ_R1-1262877888-4096.hdf5').resolve().as_posix()}" in args
+
+
+def test_build_s0_oracle_args_offline_falls_back_to_l1_v1(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    event_id = "GW200112_155838"
+    losc_dir = tmp_path / "data" / "losc" / event_id
+    losc_dir.mkdir(parents=True)
+    (losc_dir / "L1.h5").write_text("dummy")
+    (losc_dir / "V1.h5").write_text("dummy")
+
+    from mvp.pipeline import _build_s0_oracle_args
+
+    args = _build_s0_oracle_args(
+        run_id="run123",
+        event_id=event_id,
+        local_hdf5=None,
+        offline=True,
+    )
+
+    assert "--require-offline" in args
+    assert args.count("--local-hdf5") == 2
+    assert f"L1={(losc_dir / 'L1.h5').resolve().as_posix()}" in args
+    assert f"V1={(losc_dir / 'V1.h5').resolve().as_posix()}" in args

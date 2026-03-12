@@ -2,11 +2,11 @@
 
 Covers three resolution paths (Gap 6 from test_coverage_proposal.md):
   Path 1 — Legacy windows-array catalog schema
-  Path 2 — Event metadata file (t_coalescence_gps / t0_ref_gps / GPS key priority)
+  Path 2 — Canonical reference catalog fallback (`gwtc_events_t0.json`)
   Path 3 — RuntimeError when neither source yields a value
 
 The original tests cover Schema A (nested dict) and Schema B (scalar value).
-Additions below cover the legacy windows schema and the metadata-file fallback.
+Additions below cover the legacy windows schema and the canonical reference-catalog fallback.
 """
 from __future__ import annotations
 
@@ -45,8 +45,11 @@ def test_resolve_t0_gps_schema_b_scalar_value(tmp_path: Path) -> None:
     assert source == str(catalog_path)
 
 
-def test_resolve_t0_gps_event_missing_includes_sources_attempted(tmp_path: Path) -> None:
+def test_resolve_t0_gps_event_missing_includes_sources_attempted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     catalog_path = _write_catalog(tmp_path / "catalog_missing.json", {"GW150914": {"t0_gps": 1126259462.4}})
+    monkeypatch.setattr("mvp.s2_ringdown_window.DEFAULT_T0_REFERENCE_CATALOG", tmp_path / "missing_gwtc_events_t0.json")
 
     with pytest.raises(RuntimeError, match=r"missing_t0_gps_offline") as exc:
         _resolve_t0_gps("GW190521", catalog_path, offline=True, run_dir=tmp_path / "runs" / "rid")
@@ -123,88 +126,79 @@ def test_resolve_t0_gps_legacy_windows_missing_value_gps_raises(
 
 
 # ---------------------------------------------------------------------------
-# Path 2 — Metadata file fallback (previously untested in isolation)
+# Path 2 — Canonical reference catalog fallback (previously untested in isolation)
 # ---------------------------------------------------------------------------
 
 
-def _write_metadata(tmp_path: Path, event_id: str, payload: dict) -> Path:
-    meta_dir = tmp_path / "docs" / "ringdown" / "event_metadata"
-    meta_dir.mkdir(parents=True, exist_ok=True)
-    meta_path = meta_dir / f"{event_id}_metadata.json"
-    meta_path.write_text(json.dumps(payload), encoding="utf-8")
-    return meta_path
+def _write_reference_catalog(path: Path, payload: dict) -> Path:
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
 
 
-def test_resolve_t0_gps_metadata_t_coalescence_gps(
+def test_resolve_t0_gps_reference_catalog_t0_gps(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """t_coalescence_gps takes highest priority in metadata file."""
-    _write_metadata(tmp_path, "GW_TEST", {"t_coalescence_gps": 1234567890.1, "GPS": 9999.9})
+    reference_catalog = _write_reference_catalog(
+        tmp_path / "gwtc_events_t0.json",
+        {"GW_TEST": {"t0_gps": 1234567890.1, "GPS": 9999.9}},
+    )
     nonexistent_catalog = tmp_path / "no_catalog.json"
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mvp.s2_ringdown_window.DEFAULT_T0_REFERENCE_CATALOG", reference_catalog)
 
     resolved = _resolve_t0_gps("GW_TEST", nonexistent_catalog)
     assert isinstance(resolved, tuple) and len(resolved) == 4
     t0_gps, source, _lookup_key, _gwosc_cache = resolved
 
     assert t0_gps == pytest.approx(1234567890.1)
+    assert source == str(reference_catalog)
 
 
-def test_resolve_t0_gps_metadata_t0_ref_gps_priority(
+def test_resolve_t0_gps_reference_catalog_gps_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """t0_ref_gps wins when t_coalescence_gps is absent."""
-    _write_metadata(tmp_path, "GW_PRIO", {"t0_ref_gps": 1111111111.0, "GPS": 9999.0})
+    reference_catalog = _write_reference_catalog(
+        tmp_path / "gwtc_events_t0.json",
+        {"GW_PRIO": {"GPS": 1111111111.0}},
+    )
     nonexistent_catalog = tmp_path / "no_catalog.json"
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mvp.s2_ringdown_window.DEFAULT_T0_REFERENCE_CATALOG", reference_catalog)
 
     resolved = _resolve_t0_gps("GW_PRIO", nonexistent_catalog)
     assert isinstance(resolved, tuple) and len(resolved) == 4
     t0_gps, source, _lookup_key, _gwosc_cache = resolved
 
     assert t0_gps == pytest.approx(1111111111.0)
+    assert source == str(reference_catalog)
 
 
-def test_resolve_t0_gps_metadata_gps_fallback(
+def test_resolve_t0_gps_reference_catalog_event_time_gps_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """GPS key is used when neither t_coalescence_gps nor t0_ref_gps are present."""
-    _write_metadata(tmp_path, "GW_GPS", {"GPS": 1126259462.4})
+    reference_catalog = _write_reference_catalog(
+        tmp_path / "gwtc_events_t0.json",
+        {"GW_EVTIME": {"event_time_gps": 1010101010.5}},
+    )
     nonexistent_catalog = tmp_path / "no_catalog.json"
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mvp.s2_ringdown_window.DEFAULT_T0_REFERENCE_CATALOG", reference_catalog)
 
-    resolved = _resolve_t0_gps("GW_GPS", nonexistent_catalog)
+    resolved = _resolve_t0_gps("GW_EVTIME", nonexistent_catalog)
     assert isinstance(resolved, tuple) and len(resolved) == 4
     t0_gps, source, _lookup_key, _gwosc_cache = resolved
 
-    assert t0_gps == pytest.approx(1126259462.4)
+    assert t0_gps == pytest.approx(1010101010.5)
+    assert source == str(reference_catalog)
 
 
 # ---------------------------------------------------------------------------
 # Path 3 — RuntimeError when neither catalog nor metadata exists
 # ---------------------------------------------------------------------------
 
-
-
-
-def test_resolve_t0_gps_metadata_event_time_gps_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _write_metadata(tmp_path, "GW_EVTIME", {"event_time_gps": 1010101010.5})
-    nonexistent_catalog = tmp_path / "no_catalog.json"
-    monkeypatch.chdir(tmp_path)
-
-    t0_gps, source, _lookup_key, _gwosc_cache = _resolve_t0_gps("GW_EVTIME", nonexistent_catalog)
-    assert t0_gps == pytest.approx(1010101010.5)
-    assert source.endswith("GW_EVTIME_metadata.json")
-
 def test_resolve_t0_gps_no_catalog_no_metadata_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No catalog file and no metadata file → RuntimeError mentioning event_id."""
+    """No window catalog and no canonical reference catalog → RuntimeError mentioning event_id."""
     nonexistent_catalog = tmp_path / "no_catalog.json"
-    # chdir ensures docs/ringdown/event_metadata doesn't exist relative to cwd
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mvp.s2_ringdown_window.DEFAULT_T0_REFERENCE_CATALOG", tmp_path / "missing_gwtc_events_t0.json")
 
     with pytest.raises(RuntimeError, match="GW_UNKNOWN"):
         _resolve_t0_gps("GW_UNKNOWN", nonexistent_catalog, offline=True, run_dir=tmp_path / "runs" / "rid")
@@ -214,7 +208,7 @@ def test_resolve_t0_gps_offline_without_sources_raises_stable_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     nonexistent_catalog = tmp_path / "no_catalog.json"
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mvp.s2_ringdown_window.DEFAULT_T0_REFERENCE_CATALOG", tmp_path / "missing_gwtc_events_t0.json")
 
     with pytest.raises(RuntimeError, match="missing_t0_gps_offline") as exc:
         _resolve_t0_gps("GW_OFFLINE", nonexistent_catalog, offline=True, run_dir=tmp_path / "runs" / "r1")
@@ -228,7 +222,7 @@ def test_resolve_t0_gps_online_fetch_creates_run_cache_and_reuses(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     nonexistent_catalog = tmp_path / "no_catalog.json"
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mvp.s2_ringdown_window.DEFAULT_T0_REFERENCE_CATALOG", tmp_path / "missing_gwtc_events_t0.json")
 
     calls: list[str] = []
 

@@ -98,18 +98,38 @@ def test_match_hdf5_files_is_deterministic_and_filters_extensions(tmp_path: Path
     event_dir.mkdir()
     (event_dir / "b_L1.h5").write_bytes(b"1")
     (event_dir / "a_H1.hdf5").write_bytes(b"2")
+    (event_dir / "c_V1.hdf5").write_bytes(b"3")
     (event_dir / "c_H1.txt").write_text("x", encoding="utf-8")
 
     matches_1 = s1_fetch_strain.match_hdf5_files(event_dir)
     matches_2 = s1_fetch_strain.match_hdf5_files(event_dir)
 
-    assert [p.name for p in matches_1["all"]] == ["a_H1.hdf5", "b_L1.h5"]
+    assert [p.name for p in matches_1["all"]] == ["a_H1.hdf5", "b_L1.h5", "c_V1.hdf5"]
     assert [p.name for p in matches_1["H1"]] == ["a_H1.hdf5"]
     assert [p.name for p in matches_1["L1"]] == ["b_L1.h5"]
+    assert [p.name for p in matches_1["V1"]] == ["c_V1.hdf5"]
     assert [p.name for p in matches_2["all"]] == [p.name for p in matches_1["all"]]
 
 
 def test_match_hdf5_files_no_throw_on_missing_dir(tmp_path: Path) -> None:
     missing = tmp_path / "does_not_exist"
     matches = s1_fetch_strain.match_hdf5_files(missing)
-    assert matches == {"all": [], "H1": [], "L1": []}
+    assert matches == {"all": [], "H1": [], "L1": [], "V1": []}
+
+
+def test_autoresolve_hdf5_root_accepts_l1_v1_pair(tmp_path: Path) -> None:
+    event_dir = tmp_path / "data" / "losc" / "GW200112_155838"
+    event_dir.mkdir(parents=True)
+    l1 = event_dir / "L-L1_GWOSC_4KHZ_R1-1262877888-4096.hdf5"
+    v1 = event_dir / "V-V1_GWOSC_4KHZ_R1-1262877888-4096.hdf5"
+    l1.write_bytes(b"l1")
+    v1.write_bytes(b"v1")
+
+    resolved = s1_fetch_strain._resolve_event_hdf5_or_die(
+        hdf5_root=tmp_path / "data" / "losc",
+        event_id="GW200112_155838",
+        detectors=["L1", "V1"],
+    )
+
+    assert resolved["L1"] == l1.resolve()
+    assert resolved["V1"] == v1.resolve()

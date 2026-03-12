@@ -25,6 +25,7 @@ def match_hdf5_files(event_dir: Path) -> dict[str, list[Path]]:
         "all": all_files,
         "H1": [p for p in all_files if "H1" in p.name.upper()],
         "L1": [p for p in all_files if "L1" in p.name.upper()],
+        "V1": [p for p in all_files if "V1" in p.name.upper()],
     }
 
 
@@ -47,15 +48,19 @@ def main() -> int:
     print(f"h5_count={len(matches['all'])}")
     print(f"match_count_H1={len(matches['H1'])}")
     print(f"match_count_L1={len(matches['L1'])}")
+    print(f"match_count_V1={len(matches['V1'])}")
 
     if not event_dir.is_dir():
         print("FAIL: EVENT_DIR no existe (rama A: mount/symlink roto o no visible).")
         return 2
-    if matches["H1"] and matches["L1"]:
-        print("PASS: hay al menos un H1 y un L1 con extensión .h5/.hdf5.")
+    detectors_present = [det for det in ("H1", "L1", "V1") if matches[det]]
+    if len(detectors_present) >= 2:
+        print(
+            "PASS: hay al menos dos detectores entre H1/L1/V1 con extensión .h5/.hdf5."
+        )
         return 0
 
-    print("FAIL: faltan matches H1/L1 (rama B: naming; crear symlinks H1.h5 y L1.h5).")
+    print("FAIL: faltan al menos dos detectores entre H1/L1/V1 (rama B: naming; crear symlinks coherentes por detector).")
     if matches["all"]:
         print("Candidatos detectados:")
         for p in matches["all"]:

@@ -56,11 +56,16 @@ KERR_LIKE_FAMILIES = {"GR_KERR_BH", "LOW_MASS_BH_POSTMERGER"}
 
 
 def _autodetect_losc_hdf5_mappings(event_id: str) -> list[str]:
-    """Return local LOSC mappings when both detectors are present.
+    """Return local LOSC mappings for the best available detector pair.
 
     Selection is deterministic per detector:
       1) largest file size
       2) lexicographically largest file name (full path)
+
+    Preferred detector pairs:
+      1) H1+L1
+      2) H1+V1
+      3) L1+V1
     """
     losc_root = Path(os.environ.get("BASURIN_LOSC_ROOT", "data/losc"))
     event_root = losc_root / event_id
@@ -75,13 +80,11 @@ def _autodetect_losc_hdf5_mappings(event_id: str) -> list[str]:
             return None
         return sorted(files, key=lambda p: (p.stat().st_size, p.name), reverse=True)[0]
 
-    h1 = _pick("H1")
-    l1 = _pick("L1")
-    if h1 is None or l1 is None:
-        return []
-    h1_abs = h1.resolve()
-    l1_abs = l1.resolve()
-    return [f"H1={h1_abs.as_posix()}", f"L1={l1_abs.as_posix()}"]
+    picked = {det: _pick(det) for det in ("H1", "L1", "V1")}
+    for pair in (("H1", "L1"), ("H1", "V1"), ("L1", "V1")):
+        if all(picked[det] is not None for det in pair):
+            return [f"{det}={picked[det].resolve().as_posix()}" for det in pair]
+    return []
 
 
 def _build_s1_fetch_args(
