@@ -8,6 +8,7 @@ Tests:
 """
 from __future__ import annotations
 
+import csv
 import json
 import math
 import sys
@@ -104,6 +105,26 @@ class TestGWTCEvents:
         )
         assert result is None
         assert not (tmp_path / "runs" / "partial_catalog_run" / "preflight_viability").exists()
+
+    def test_problematic_rows_are_excluded_from_canonical_bbh_filter(self):
+        excluded = {"GW190706_222641", "GW190513_205428"}
+        with (REPO_ROOT / "gwtc_quality_events.csv").open(newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+
+        by_event = {row["event"]: row for row in rows}
+        for event_id in excluded:
+            row = by_event[event_id]
+            assert row["is_problematic"] == "True"
+            assert "no effective area observation" in row["quality_note"]
+
+        bbh_events = {
+            row["event"]
+            for row in rows
+            if str(row.get("is_problematic", "")).strip().lower() != "true"
+            and row.get("m2_source")
+            and float(row["m2_source"]) >= 3.0
+        }
+        assert excluded.isdisjoint(bbh_events)
 
 
 class TestS4EstimatesPath:
