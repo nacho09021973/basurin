@@ -363,6 +363,29 @@ Artefactos emitidos:
 - `runs/<run_id>/experiment/band_sweep_multimode/outputs/recommendation.json`
 - subruns completos bajo `runs/<run_id>/experiment/band_sweep_multimode/runsroot/<subrun_id>/...`
 
+### 7.3c Experimento de barrido de `dt_start_s`
+
+Cuando una banda fija sigue dando `220` edge-locked o `tau` pegado al floor, el siguiente knob útil es `dt_start_s`. `experiment_dt_start_sweep_multimode.py` lanza subruns de `python -m mvp.pipeline multimode` sobre una banda fija y resume el diagnóstico por valor de arranque temporal.
+
+Ejemplo:
+
+```bash
+python -m mvp.experiment_dt_start_sweep_multimode \
+  --run-id dt_sweep_GW190521 \
+  --event-id GW190521_074359 \
+  --band-low 1200 \
+  --band-high 1600 \
+  --dt-start-grid-s 0,0.001,0.003,0.005,0.008 \
+  --atlas-default \
+  --offline
+```
+
+Artefactos emitidos:
+
+- `runs/<run_id>/experiment/dt_start_sweep_multimode/outputs/dt_start_sweep_results.json`
+- `runs/<run_id>/experiment/dt_start_sweep_multimode/outputs/dt_start_sweep_summary.csv`
+- `runs/<run_id>/experiment/dt_start_sweep_multimode/outputs/recommendation.json`
+
 ### 7.4 Flujo MALDA estricto sobre runs gobernados
 
 Los entrypoints MALDA actuales relevantes para discovery simbolico son:
