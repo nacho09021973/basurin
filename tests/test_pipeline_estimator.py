@@ -79,6 +79,13 @@ class TestGWTCEvents:
         assert ev["snr_network"] == pytest.approx(13.4)
         assert "chi_final" in ev
 
+    def test_csv_backed_o3_event_exposes_source_masses(self):
+        from mvp.gwtc_events import get_event
+        ev = get_event("GW190706_222641")
+        assert ev is not None
+        assert ev["m1_source"] == pytest.approx(74.0)
+        assert ev["m2_source"] == pytest.approx(39.4)
+
     def test_preflight_skips_partial_catalog_entry_without_chi_final(self, tmp_path, monkeypatch):
         from mvp import pipeline
         monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path / "runs"))

@@ -53,7 +53,7 @@ class TestContractRegistry:
                        "experiment/delta_lnL_sweep", "experiment/feature_foundry", "psd_extract",
                        "experiment_ex8_area_consistency",
                        "s4g_mode220_geometry_filter", "s4h_mode221_geometry_filter",
-                       "s4i_common_geometry_intersection", "s4j_hawking_area_filter",
+                       "s4i_common_geometry_intersection", "s4f_area_observation", "s4j_hawking_area_filter",
                        "s4k_event_support_region"}
 
     def test_all_stages_registered(self):

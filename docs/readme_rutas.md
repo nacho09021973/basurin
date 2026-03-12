@@ -219,7 +219,7 @@ Anti-pérdida-de-tiempo:
 
 ### Golden geometry explícita: artefacto canónico por evento
 
-`python -m mvp.pipeline multimode` ya materializa por defecto los inputs observacionales de `s4g/s4h`, ejecuta `s4g -> s4h -> s4i -> s4j -> s4k` y degrada a `MODE220_NO_AREA_CONSTRAINT` cuando `221` no es usable y `s4j` no recibe `area_obs.json`. Si `s4j` sí recibe una restriccion de area efectiva, el path queda como `MODE220_PLUS_HAWKING`.
+`python -m mvp.pipeline multimode` ya materializa por defecto los inputs observacionales de `s4g/s4h`, ejecuta `s4g -> s4h -> s4i -> s4f -> s4j -> s4k` y degrada a `MODE220_NO_AREA_CONSTRAINT` cuando `221` no es usable o `s4f_area_observation` no produce un `area_obs.json` efectivo. Si `s4j` sí recibe una restriccion de area efectiva desde `s4f`, el path queda como `MODE220_PLUS_HAWKING`.
 
 Si ejecutas la rama explícita `s4g -> s4h -> s4i -> s4j`, el artefacto downstream recomendado ya no es mirar cuatro JSON por separado, sino:
 

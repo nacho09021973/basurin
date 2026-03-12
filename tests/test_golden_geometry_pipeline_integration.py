@@ -1,4 +1,4 @@
-"""Integration tests for the golden geometry pipeline (s4g → s4h → s4i → s4j).
+"""Integration tests for the golden geometry pipeline (s4g → s4h → s4i → s4f → s4j).
 
 Tests:
     1. s4g→s4i filename contract: S4G_OUTPUT_REL in s4i matches s4g OUTPUT_FILE.
@@ -71,6 +71,7 @@ def test_golden_stages_in_contracts():
         "s4g_mode220_geometry_filter",
         "s4h_mode221_geometry_filter",
         "s4i_common_geometry_intersection",
+        "s4f_area_observation",
         "s4j_hawking_area_filter",
         "s4k_event_support_region",
     ]
@@ -96,6 +97,18 @@ def test_s4j_contract_requires_s4i_output():
     """s4j contract must declare s4i common_intersection.json as required input."""
     contract = CONTRACTS["s4j_hawking_area_filter"]
     assert any("common_intersection.json" in inp for inp in contract.required_inputs)
+
+
+def test_s4f_contract_requires_s4i_and_run_provenance():
+    """s4f must consume the common intersection and run provenance, with atlas external input."""
+    contract = CONTRACTS["s4f_area_observation"]
+    assert contract.required_inputs == [
+        "s4i_common_geometry_intersection/outputs/common_intersection.json",
+        "run_provenance.json",
+    ]
+    assert contract.produced_outputs == ["outputs/area_obs.json"]
+    assert contract.upstream_stages == ["s4i_common_geometry_intersection"]
+    assert sorted(contract.external_inputs) == ["atlas", "gwtc_quality_catalog"]
 
 
 def test_s4k_contract_requires_consolidation_inputs():
@@ -198,6 +211,69 @@ def test_t0_sweep_deprecation_warning():
         if was_loaded:
             sys.modules[mod_name] = saved
 
+
+def test_s4f_builds_area_obs_and_s4j_consumes_canonical_output(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    os.environ["BASURIN_RUNS_ROOT"] = str(runs_root)
+
+    run_id = "s4f_to_s4j_pytest"
+    run_dir = runs_root / run_id
+    (run_dir / "RUN_VALID").mkdir(parents=True)
+    (run_dir / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}\n', encoding="utf-8")
+    (run_dir / "run_provenance.json").write_text(
+        json.dumps({"schema_version": "run_provenance_v1", "run_id": run_id, "invocation": {"event_id": "GW170817"}}),
+        encoding="utf-8",
+    )
+
+    (run_dir / "s4i_common_geometry_intersection" / "outputs").mkdir(parents=True, exist_ok=True)
+    (run_dir / "s4i_common_geometry_intersection" / "outputs" / "common_intersection.json").write_text(
+        json.dumps({"common_geometry_ids": ["geo_pass", "geo_fail"], "mode221_skipped": True, "verdict": "PASS"}),
+        encoding="utf-8",
+    )
+
+    atlas_path = tmp_path / "atlas_area_fixture.json"
+    atlas_path.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {"geometry_id": "geo_pass", "metadata": {"M_solar": 14.0, "chi": 0.0}},
+                    {"geometry_id": "geo_fail", "metadata": {"M_solar": 1.0, "chi": 0.9}},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cp = subprocess.run(
+        ["python", "-m", "mvp.s4f_area_observation", "--run-id", run_id, "--atlas-path", str(atlas_path)],
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+    assert cp.returncode == 0, f"stdout:\n{cp.stdout}\nstderr:\n{cp.stderr}"
+
+    area_obs_path = run_dir / "s4f_area_observation" / "outputs" / "area_obs.json"
+    area_obs = json.loads(area_obs_path.read_text(encoding="utf-8"))
+    assert area_obs["policy"] == "mass_only_lower_bound_v1"
+    assert area_obs["observation_status"] == "AREA_DATA_AVAILABLE"
+    assert set(area_obs["area_data"].keys()) == {"geo_pass", "geo_fail"}
+    assert area_obs["area_data"]["geo_pass"]["area_final"] > area_obs["area_data"]["geo_pass"]["area_initial"]
+    assert area_obs["area_data"]["geo_fail"]["area_final"] < area_obs["area_data"]["geo_fail"]["area_initial"]
+
+    cp = subprocess.run(
+        ["python", "-m", "mvp.s4j_hawking_area_filter", "--run-id", run_id],
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+    assert cp.returncode == 0, f"stdout:\n{cp.stdout}\nstderr:\n{cp.stderr}"
+
+    payload_path = run_dir / "s4j_hawking_area_filter" / "outputs" / "hawking_area_filter.json"
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    assert payload["area_obs_source"] == "s4f_area_observation/outputs/area_obs.json"
+    assert payload["area_constraint_applied"] is True
+    assert payload["golden_geometry_ids"] == ["geo_pass"]
+    assert payload["n_golden"] == 1
 
 def test_s4k_consolidates_explicit_branch_into_single_event_artifact(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
@@ -303,7 +379,6 @@ def test_s4k_consolidates_explicit_branch_into_single_event_artifact(tmp_path: P
         env=os.environ.copy(),
     )
     assert cp.returncode == 0, f"stdout:\n{cp.stdout}\nstderr:\n{cp.stderr}"
-
     stage_dir = run_dir / "s4k_event_support_region"
     out_path = stage_dir / "outputs" / "event_support_region.json"
     assert out_path.exists()
@@ -429,9 +504,9 @@ def test_s4k_marks_no_area_constraint_in_analysis_path(tmp_path: Path) -> None:
         env=os.environ.copy(),
     )
     assert cp.returncode == 0, f"stdout:\n{cp.stdout}\nstderr:\n{cp.stderr}"
-
     stage_dir = run_dir / "s4k_event_support_region"
-    payload = json.loads((stage_dir / "outputs" / "event_support_region.json").read_text(encoding="utf-8"))
+    out_path = stage_dir / "outputs" / "event_support_region.json"
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
     stage_summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
 
     assert payload["analysis_path"] == "MODE220_NO_AREA_CONSTRAINT"

@@ -29,7 +29,8 @@ from mvp.golden_geometry_spec import (
 
 STAGE = "s4j_hawking_area_filter"
 S4I_OUTPUT_REL = "s4i_common_geometry_intersection/outputs/common_intersection.json"
-AREA_OBS_FILE_REL = "s4j_hawking_area_filter/inputs/area_obs.json"
+CANONICAL_AREA_OBS_FILE_REL = "s4f_area_observation/outputs/area_obs.json"
+LEGACY_AREA_OBS_FILE_REL = "s4j_hawking_area_filter/inputs/area_obs.json"
 OUTPUT_FILE = "hawking_area_filter.json"
 
 
@@ -62,7 +63,8 @@ def main(argv: list[str] | None = None) -> int:
     ctx = init_stage(args.run_id, STAGE, params={"area_tolerance": float(args.area_tolerance)})
 
     s4i_path = ctx.run_dir / S4I_OUTPUT_REL
-    area_obs_path = ctx.run_dir / AREA_OBS_FILE_REL
+    canonical_area_obs_path = ctx.run_dir / CANONICAL_AREA_OBS_FILE_REL
+    legacy_area_obs_path = ctx.run_dir / LEGACY_AREA_OBS_FILE_REL
 
     if not s4i_path.exists():
         abort(
@@ -73,16 +75,37 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     try:
-        check_inputs(ctx, {"s4i_common": s4i_path}, optional={"area_obs": area_obs_path})
+        check_inputs(
+            ctx,
+            {"s4i_common": s4i_path},
+            optional={"area_obs_canonical": canonical_area_obs_path, "area_obs_legacy": legacy_area_obs_path},
+        )
 
         s4i_data = json.loads(s4i_path.read_text(encoding="utf-8"))
         common_ids: list[str] = s4i_data.get("common_geometry_ids", [])
 
-        area_obs_present = area_obs_path.exists()
-        area_data: dict[str, dict[str, float]] = {}
-        if area_obs_present:
-            area_obs = json.loads(area_obs_path.read_text(encoding="utf-8"))
-            area_data = area_obs.get("area_data", {})
+        area_obs_candidates: list[tuple[Path, dict[str, Any]]] = []
+        for candidate in (canonical_area_obs_path, legacy_area_obs_path):
+            if candidate.exists():
+                payload = json.loads(candidate.read_text(encoding="utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError(f"Expected JSON object at {candidate}, got {type(payload).__name__}")
+                area_obs_candidates.append((candidate, payload))
+
+        chosen_area_obs_path: Path | None = None
+        area_obs: dict[str, Any] = {}
+        for candidate_path, payload in area_obs_candidates:
+            raw_area = payload.get("area_data")
+            if isinstance(raw_area, dict) and raw_area:
+                chosen_area_obs_path = candidate_path
+                area_obs = payload
+                break
+        if chosen_area_obs_path is None and area_obs_candidates:
+            chosen_area_obs_path, area_obs = area_obs_candidates[0]
+
+        area_obs_present = chosen_area_obs_path is not None
+        area_obs_source = (str(chosen_area_obs_path.relative_to(ctx.run_dir)) if chosen_area_obs_path is not None else None)
+        area_data: dict[str, dict[str, float]] = area_obs.get("area_data", {}) if isinstance(area_obs.get("area_data"), dict) else {}
         area_constraint_applied = bool(area_obs_present and area_data)
 
         golden_ids = filter_area_law(
@@ -102,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
             "area_tolerance": args.area_tolerance,
             "n_common_input": len(common_ids),
             "area_obs_present": area_obs_present,
+            "area_obs_source": area_obs_source,
             "area_constraint_applied": area_constraint_applied,
             "area_data": area_data,
             "golden_geometry_ids": golden_ids,
@@ -119,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
                 "area_tolerance": float(args.area_tolerance),
                 "n_common_input": len(common_ids),
                 "area_obs_present": area_obs_present,
+                "area_obs_source": area_obs_source,
                 "area_constraint_applied": area_constraint_applied,
                 "n_area_entries": len(area_data),
                 "n_golden": len(golden_ids),

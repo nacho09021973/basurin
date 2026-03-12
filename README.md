@@ -75,7 +75,7 @@ Principio conservador:
 La implementacion actual contiene dos rutas complementarias:
 
 - **Ruta canonica actual de soporte geometrico monomodo**: `s4_geometry_filter` consume `s3_ringdown_estimates` y produce `compatible_set.json` y `ranked_all_full.json`.
-- **Ruta explicita de region geometrica por modos**: `s4g_mode220_geometry_filter`, `s4h_mode221_geometry_filter`, `s4i_common_geometry_intersection` y `s4j_hawking_area_filter` modelan explicitamente 220, 221, la interseccion comun y el filtrado por area. Si falta `s4j_hawking_area_filter/inputs/area_obs.json`, `s4j` se comporta como pass-through y `s4k` lo marca como `*_NO_AREA_CONSTRAINT`.
+- **Ruta explicita de region geometrica por modos**: `s4g_mode220_geometry_filter`, `s4h_mode221_geometry_filter`, `s4i_common_geometry_intersection`, `s4f_area_observation` y `s4j_hawking_area_filter` modelan explicitamente 220, 221, la interseccion comun, la observacion de area y el filtrado por area. Si falta `s4f_area_observation/outputs/area_obs.json` o llega vacio, `s4j` se comporta como pass-through y `s4k` lo marca como `*_NO_AREA_CONSTRAINT`.
 
 La segunda ruta ya esta implementada y registrada en contratos, pero no constituye aun el artefacto canonico unificado por evento consumido por todo el pipeline multimodo. Ese cierre pertenece todavia al roadmap cientifico.
 
@@ -208,7 +208,8 @@ Estos stages ya existen y representan mas directamente el flujo cientifico "regi
 | `s4g_mode220_geometry_filter` | Filtra el atlas con el observable del modo 220. | Implementado y contractual; no forma parte del `pipeline multimode` por defecto. |
 | `s4h_mode221_geometry_filter` | Filtra el atlas con el observable del modo 221; si falta input de 221, emite `SKIPPED_221_UNAVAILABLE`. | Implementado y contractual. |
 | `s4i_common_geometry_intersection` | Calcula la interseccion de geometrias comunes entre 220 y 221. | Implementado y contractual. |
-| `s4j_hawking_area_filter` | Aplica el filtro de area/Hawking sobre la interseccion comun cuando existe `area_obs.json`; si falta, actua como pass-through y lo declara explicitamente. | Implementado y contractual. |
+| `s4f_area_observation` | Construye la observacion canonica de area por evento a partir de la interseccion comun, el atlas y el catalogo local. | Implementado y contractual; escribe `outputs/area_obs.json` para consumo downstream. |
+| `s4j_hawking_area_filter` | Aplica el filtro de area/Hawking sobre la interseccion comun cuando existe `s4f_area_observation/outputs/area_obs.json`; si falta o llega vacio, actua como pass-through y lo declara explicitamente. | Implementado y contractual. |
 | `s4k_event_support_region` | Consolida `220`, `221`, interseccion, Hawking, `multimode_viability` y `domain_status` en un unico artefacto por evento. | Implementado y contractual; añade `downstream_status` conservador (`MULTIMODE_USABLE`, `GEOMETRY_PRESENT_BUT_NONINFORMATIVE`, `OUT_OF_DOMAIN`, `NO_SUPPORT_REGION`) para consumo downstream. |
 
 ### 4.3 Gates auxiliares que protegen la interpretacion
@@ -266,7 +267,7 @@ En el estado local inspeccionado para esta reescritura, ese subconjunto pasa (`5
 Implementado hoy no significa que ya exista una superficie cientifica definitivamente cerrada. En particular:
 
 - la ruta explicita `220 -> 221 -> interseccion -> Hawking` existe en stages separados, pero el artefacto canonico unico por evento todavia no esta fijado como salida unificada del pipeline multimodo completo;
-- la ruta explicita `220 -> 221 -> interseccion -> Hawking` ya puede consolidarse en `s4k_event_support_region` y ahora se orquesta por defecto dentro de `python -m mvp.pipeline multimode`, degradando conservadoramente a `MODE220_NO_AREA_CONSTRAINT` cuando `221` no es usable y `s4j` no recibe `area_obs.json`;
+- la ruta explicita `220 -> 221 -> interseccion -> Hawking` ya puede consolidarse en `s4k_event_support_region` y ahora se orquesta por defecto dentro de `python -m mvp.pipeline multimode`, degradando conservadoramente a `MODE220_NO_AREA_CONSTRAINT` cuando `221` no es usable y `s4f_area_observation` no produce una observacion de area efectiva;
 - existen handlers de familia y agregacion poblacional, pero la inferencia poblacional final basada en regiones canonicas por evento sigue siendo objetivo de diseno, no conclusion cerrada;
 - `experiment_population_kerr.py` existe, pero es un experimento no canonico y no debe confundirse con el stage poblacional definitivo que consumira artefactos geometricos por evento.
 
@@ -274,7 +275,7 @@ Implementado hoy no significa que ya exista una superficie cientifica definitiva
 
 A fecha de 12 de marzo de 2026, la superficie operativa relevante del pipeline ha quedado asi:
 
-- la ruta explicita `220 -> s4j` ya funciona de forma estable en cohorte real BBH y produce `s4k_event_support_region` no vacio en la mayoria de eventos, pero hoy la cohorte canónica cae en `MODE220_NO_AREA_CONSTRAINT` porque `s4j` no recibe `area_obs.json`;
+- la ruta explicita `220 -> s4j` ya funciona de forma estable en cohorte real BBH y produce `s4k_event_support_region` no vacio en la mayoria de eventos, pero hoy la cohorte canónica cae en `MODE220_NO_AREA_CONSTRAINT` cuando `s4f_area_observation` no produce `area_obs.json` efectivo;
 - el vaciado artificial observado inicialmente en `s4g` se debia a una degeneracion del ajuste Lorentziano en `s3_ringdown_estimates`;
 - `mvp/gwtc_events.py` ya se resuelve desde `gwtc_quality_events.csv` para exponer `m_final_msun` y `snr_network` en toda la cohorte disponible;
 - `s3_ringdown_estimates` ya expande la banda de entrada antes del bandpass cuando existe hint Kerr y la banda fija original cortaria la frecuencia esperada del modo 220;
@@ -363,7 +364,7 @@ python -m mvp.experiment_offline_batch \
 
 ### 7.3 Sobre los stages geometricos explicitos
 
-`s4g/s4h/s4i/s4j` tienen CLI propia y forman la rama mas directamente alineada con el objetivo "region compatible por modo + interseccion + Hawking". `python -m mvp.pipeline multimode` ahora materializa por defecto los inputs observacionales de `s4g/s4h`, ejecuta esa rama explícita y consolida `s4k_event_support_region`; si `221` no es usable y `s4j` no recibe `area_obs.json`, la ruta degrada de forma conservadora a `MODE220_NO_AREA_CONSTRAINT` en lugar de abortar la región geométrica por evento. Solo cuando `s4j` recibe una restricción de área efectiva el path queda como `MODE220_PLUS_HAWKING`. Desde el 12 de marzo de 2026, el estimador por defecto para esta ruta es `dual`.
+`s4g/s4h/s4i/s4f/s4j` tienen CLI propia y forman la rama mas directamente alineada con el objetivo "region compatible por modo + interseccion + Hawking". `python -m mvp.pipeline multimode` ahora materializa por defecto los inputs observacionales de `s4g/s4h`, ejecuta esa rama explícita y consolida `s4k_event_support_region`; si `221` no es usable y `s4f_area_observation` no produce una restricción de área efectiva, la ruta degrada de forma conservadora a `MODE220_NO_AREA_CONSTRAINT` en lugar de abortar la región geométrica por evento. Solo cuando `s4j` recibe una observación de área efectiva desde `s4f` el path queda como `MODE220_PLUS_HAWKING`. Desde el 12 de marzo de 2026, el estimador por defecto para esta ruta es `dual`.
 
 ### 7.3b Experimento de barrido de bandas multimodo
 

@@ -152,7 +152,7 @@ class TestAntiRegression:
 class TestContractCount:
     def test_total_contracts_is_10(self):
         """Registry includes oracle precheck + FASE 4/5 + explicit s4k consolidator + experiments."""
-        assert len(CONTRACTS) == 37
+        assert len(CONTRACTS) == 38
 
 
 # ── Test 4: DAG integrity with new stages ────────────────────────────────

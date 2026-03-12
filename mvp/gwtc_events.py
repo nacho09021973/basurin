@@ -1,12 +1,12 @@
-"""GWTC catalog events: remnant mass, optional final spin, and network SNR.
+"""GWTC catalog events: source masses, remnant mass, optional final spin, and network SNR.
 
-Primary source for event-level remnant metadata is the local quality catalog
+Primary source for event-level metadata is the local quality catalog
 ``gwtc_quality_events.csv`` at repository root.  This provides broad cohort
-coverage for ``final_mass_source`` and ``snr``.
+coverage for ``m1_source``, ``m2_source``, ``final_mass_source``, and ``snr``.
 
 Only a small subset of legacy events has curated ``chi_final`` values in this
-module.  For all other events the catalog entry is partial: callers may use
-``m_final_msun`` and ``snr_network`` directly, but must tolerate
+module.  For all other events the catalog entry is partial: callers may use the
+available source/remnant masses and ``snr_network`` directly, but must tolerate
 ``chi_final is None``.
 """
 from __future__ import annotations
@@ -74,12 +74,18 @@ def _load_quality_catalog() -> dict[str, dict[str, float | None]]:
             event_id = (row.get("event") or "").strip()
             if not event_id:
                 continue
+            m1_source = _as_float(row.get("m1_source"))
+            m2_source = _as_float(row.get("m2_source"))
             m_final = _as_float(row.get("final_mass_source"))
             snr_network = _as_float(row.get("snr"))
-            if m_final is None and snr_network is None:
+            if m1_source is None and m2_source is None and m_final is None and snr_network is None:
                 continue
 
             entry = dict(catalog.get(event_id, {}))
+            if m1_source is not None:
+                entry["m1_source"] = m1_source
+            if m2_source is not None:
+                entry["m2_source"] = m2_source
             if m_final is not None:
                 entry["m_final_msun"] = m_final
             if snr_network is not None:
@@ -97,7 +103,7 @@ GWTC_EVENTS: dict[str, dict[str, float | None]] = _load_quality_catalog()
 
 # Citation string for use in JSON provenance fields
 GWTC_CITATION = (
-    "gwtc_quality_events.csv (local quality catalog for final_mass_source and snr); "
+    "gwtc_quality_events.csv (local quality catalog for m1_source, m2_source, final_mass_source, and snr); "
     "legacy curated chi_final medians for GWTC-1 + GW190521."
 )
 

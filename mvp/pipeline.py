@@ -1416,6 +1416,7 @@ def run_multimode_event(
         ("s4g_mode220_geometry_filter.py", ["--run-id", run_id, "--atlas-path", atlas_path], "s4g_mode220_geometry_filter"),
         ("s4h_mode221_geometry_filter.py", ["--run-id", run_id, "--atlas-path", atlas_path], "s4h_mode221_geometry_filter"),
         ("s4i_common_geometry_intersection.py", ["--run-id", run_id], "s4i_common_geometry_intersection"),
+        ("s4f_area_observation.py", ["--run-id", run_id, "--atlas-path", atlas_path], "s4f_area_observation"),
         ("s4j_hawking_area_filter.py", ["--run-id", run_id], "s4j_hawking_area_filter"),
     ]
     for script, args, label in explicit_stage_specs:

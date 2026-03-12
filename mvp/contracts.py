@@ -480,6 +480,22 @@ CONTRACTS: dict[str, StageContract] = {
         upstream_stages=["s4g_mode220_geometry_filter", "s4h_mode221_geometry_filter"],
         check_run_valid=True,
     ),
+    "s4f_area_observation": StageContract(
+        name="s4f_area_observation",
+        required_inputs=[
+            "s4i_common_geometry_intersection/outputs/common_intersection.json",
+            "run_provenance.json",
+        ],
+        external_inputs=[
+            "atlas",
+            "gwtc_quality_catalog",
+        ],
+        produced_outputs=[
+            "outputs/area_obs.json",
+        ],
+        upstream_stages=["s4i_common_geometry_intersection"],
+        check_run_valid=True,
+    ),
     "s4j_hawking_area_filter": StageContract(
         name="s4j_hawking_area_filter",
         required_inputs=[
@@ -489,7 +505,7 @@ CONTRACTS: dict[str, StageContract] = {
         produced_outputs=[
             "outputs/hawking_area_filter.json",
         ],
-        upstream_stages=["s4i_common_geometry_intersection"],
+        upstream_stages=["s4i_common_geometry_intersection", "s4f_area_observation"],
         check_run_valid=True,
     ),
     "s4k_event_support_region": StageContract(

@@ -556,13 +556,26 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                         ),
                         encoding="utf-8",
                     )
+                if label == "s4f_area_observation":
+                    (stage_dir / "area_obs.json").write_text(
+                        json.dumps(
+                            {
+                                "area_data": {"geo_A": {"area_final": 2.0, "area_initial": 1.0}},
+                                "observation_status": "AREA_DATA_AVAILABLE",
+                                "policy": "mass_only_lower_bound_v1",
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
                 if label == "s4j_hawking_area_filter":
                     (stage_dir / "hawking_area_filter.json").write_text(
                         json.dumps(
                             {
                                 "golden_geometry_ids": ["geo_A"],
                                 "n_golden": 1,
-                                "area_data": {},
+                                "area_data": {"geo_A": {"area_final": 2.0, "area_initial": 1.0}},
+                                "area_obs_present": True,
+                                "area_constraint_applied": True,
                                 "verdict": "PASS",
                             }
                         ),
@@ -649,7 +662,7 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
             expected_prefix = [
                 "s0_oracle_mvp", "s1_fetch_strain", "s2_ringdown_window", "s3_ringdown_estimates",
                 "s3b_multimode_estimates", "s4g_mode220_geometry_filter", "s4h_mode221_geometry_filter",
-                "s4i_common_geometry_intersection", "s4j_hawking_area_filter",
+                "s4i_common_geometry_intersection", "s4f_area_observation", "s4j_hawking_area_filter",
                 "s4_geometry_filter", "s4c_kerr_consistency", "s4d_kerr_from_multimode",
                 "s4k_event_support_region", "s7_beyond_kerr_deviation_score",
                 "s8_family_router", "s4e_kerr_ratio_filter", "s8a_family_gr_kerr",
@@ -730,6 +743,17 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                         ),
                         encoding="utf-8",
                     )
+                if label == "s4f_area_observation":
+                    (stage_dir / "area_obs.json").write_text(
+                        json.dumps(
+                            {
+                                "area_data": {},
+                                "observation_status": "MISSING_SOURCE_MASSES",
+                                "policy": "mass_only_lower_bound_v1",
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
                 if label == "s4j_hawking_area_filter":
                     (stage_dir / "hawking_area_filter.json").write_text(
                         json.dumps(
@@ -737,6 +761,8 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                                 "golden_geometry_ids": ["geo_A", "geo_B"],
                                 "n_golden": 2,
                                 "area_data": {},
+                                "area_obs_present": True,
+                                "area_constraint_applied": False,
                                 "verdict": "PASS",
                             }
                         ),
@@ -912,13 +938,26 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                         ),
                         encoding="utf-8",
                     )
+                if label == "s4f_area_observation":
+                    (stage_dir / "area_obs.json").write_text(
+                        json.dumps(
+                            {
+                                "area_data": {"geo_A": {"area_final": 2.0, "area_initial": 1.0}},
+                                "observation_status": "AREA_DATA_AVAILABLE",
+                                "policy": "mass_only_lower_bound_v1",
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
                 if label == "s4j_hawking_area_filter":
                     (stage_dir / "hawking_area_filter.json").write_text(
                         json.dumps(
                             {
                                 "golden_geometry_ids": ["geo_A"],
                                 "n_golden": 1,
-                                "area_data": {},
+                                "area_data": {"geo_A": {"area_final": 2.0, "area_initial": 1.0}},
+                                "area_obs_present": True,
+                                "area_constraint_applied": True,
                                 "verdict": "PASS",
                             }
                         ),
