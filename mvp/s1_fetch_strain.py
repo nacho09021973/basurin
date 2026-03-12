@@ -15,6 +15,7 @@ import argparse
 import glob
 import hashlib
 import json
+import math
 import os
 import signal
 import shutil
@@ -38,6 +39,8 @@ from basurin_io import resolve_out_root, write_json_atomic, sha256_file, utc_now
 
 STAGE = "s1_fetch_strain"
 DEFAULT_T0_REFERENCE_CATALOG = Path(__file__).resolve().parents[1] / "gwtc_events_t0.json"
+DEFAULT_MAX_NONFINITE_FRACTION = 1e-5
+DEFAULT_MIN_ALLOWED_NONFINITE_COUNT = 8
 
 
 def _run_valid_verdict_path(run_id: str) -> Path:
@@ -405,6 +408,80 @@ def _load_local_hdf5(path: Path) -> tuple[np.ndarray, float, float | None, str]:
     return values, float(1.0 / float(xspacing)), gps_start, "h5py"
 
 
+def _max_nonfinite_fraction() -> float:
+    raw = os.environ.get("BASURIN_MAX_NONFINITE_FRACTION", "").strip()
+    if not raw:
+        return DEFAULT_MAX_NONFINITE_FRACTION
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid BASURIN_MAX_NONFINITE_FRACTION={raw!r}; expected float in [0,1)"
+        ) from exc
+    if not (0.0 <= value < 1.0):
+        raise ValueError(
+            f"Invalid BASURIN_MAX_NONFINITE_FRACTION={raw!r}; expected float in [0,1)"
+        )
+    return value
+
+
+def _sanitize_strain_array(
+    strain: np.ndarray,
+    *,
+    detector: str,
+    max_nonfinite_fraction: float,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    if strain.ndim != 1 or strain.size == 0:
+        raise ValueError(f"{detector} strain must be a non-empty 1-D array")
+
+    nonfinite_mask = ~np.isfinite(strain)
+    nonfinite_count = int(np.count_nonzero(nonfinite_mask))
+    total = int(strain.size)
+    allowed_count = max(
+        DEFAULT_MIN_ALLOWED_NONFINITE_COUNT,
+        int(math.ceil(total * max_nonfinite_fraction)),
+    )
+    details: dict[str, Any] = {
+        "applied": False,
+        "method": None,
+        "nonfinite_count_raw": nonfinite_count,
+        "nonfinite_fraction_raw": float(nonfinite_count / total),
+        "max_nonfinite_fraction": float(max_nonfinite_fraction),
+        "allowed_nonfinite_count": int(allowed_count),
+    }
+    if nonfinite_count == 0:
+        return strain, details
+    if nonfinite_count >= total:
+        raise ValueError(
+            f"{detector} strain is entirely non-finite: nonfinite_count={nonfinite_count}, n={total}"
+        )
+    if nonfinite_count > allowed_count:
+        raise ValueError(
+            f"{detector} strain has too many non-finite samples: "
+            f"nonfinite_count={nonfinite_count}, allowed_nonfinite_count={allowed_count}, "
+            f"fraction={nonfinite_count / total:.3e}, max_nonfinite_fraction={max_nonfinite_fraction:.3e}"
+        )
+
+    sanitized = np.asarray(strain, dtype=np.float64).copy()
+    indices = np.arange(total, dtype=np.float64)
+    finite_mask = ~nonfinite_mask
+    sanitized[nonfinite_mask] = np.interp(
+        indices[nonfinite_mask],
+        indices[finite_mask],
+        sanitized[finite_mask],
+    )
+    if not np.isfinite(sanitized).all():
+        raise ValueError(f"{detector} strain sanitization failed to remove all non-finite samples")
+
+    details.update(
+        {
+            "applied": True,
+            "method": "linear_interp_nonfinite",
+        }
+    )
+    return sanitized, details
+
+
 def _try_reuse(
     ctx,
     event_id: str,
@@ -478,8 +555,15 @@ def _try_reuse(
         if det not in npz.files:
             print(f"[s1_fetch_strain] reuse: detector {det} missing in strain.npz, will fetch", flush=True)
             return False
+        arr = np.asarray(npz[det], dtype=np.float64)
+        if not np.isfinite(arr).all():
+            print(
+                f"[s1_fetch_strain] reuse: detector {det} contains NaN/Inf in cached strain.npz, will fetch",
+                flush=True,
+            )
+            return False
         if det in sha_recorded:
-            actual_sha = _sha256_array(npz[det])
+            actual_sha = _sha256_array(arr)
             if actual_sha != sha_recorded[det]:
                 print(f"[s1_fetch_strain] reuse: SHA256 mismatch for {det}, will fetch", flush=True)
                 return False
@@ -726,6 +810,8 @@ def main() -> int:
         library_version = "unknown"
 
         local_inputs_rel: dict[str, str] = {}
+        sanitization_by_det: dict[str, dict[str, Any]] = {}
+        max_nonfinite_fraction = _max_nonfinite_fraction()
 
         for i, det in enumerate(detectors, 1):
             print(
@@ -761,6 +847,19 @@ def main() -> int:
                     args.duration_s,
                     timeout_s=args.fetch_timeout_s,
                 )
+            strain, sanitization = _sanitize_strain_array(
+                np.asarray(strain, dtype=np.float64),
+                detector=det,
+                max_nonfinite_fraction=max_nonfinite_fraction,
+            )
+            sanitization_by_det[det] = sanitization
+            if sanitization["applied"]:
+                print(
+                    f"[s1_fetch_strain] Sanitized {det}: "
+                    f"nonfinite_count={sanitization['nonfinite_count_raw']} "
+                    f"method={sanitization['method']}",
+                    flush=True,
+                )
             strains[det] = strain
             sha_by_det[det] = _sha256_array(strain)
             if sample_rate_hz is None:
@@ -790,6 +889,7 @@ def main() -> int:
             "gps_start": gps_start, "duration_s": args.duration_s,
             "sample_rate_hz": sample_rate_hz, "library_version": library_version,
             "sha256_per_detector": sha_by_det, "timestamp": utc_now_iso(),
+            "strain_sanitization": sanitization_by_det,
         }
         if local_mode:
             provenance["local_inputs"] = {
@@ -810,8 +910,15 @@ def main() -> int:
                 },
             )
 
-        finalize(ctx, artifacts={"strain_npz": npz_path, "provenance": prov_path},
-                 results={"detectors": detectors, "sample_rate_hz": sample_rate_hz})
+        finalize(
+            ctx,
+            artifacts={"strain_npz": npz_path, "provenance": prov_path},
+            results={
+                "detectors": detectors,
+                "sample_rate_hz": sample_rate_hz,
+                "strain_sanitization": sanitization_by_det,
+            },
+        )
         _write_run_valid_verdict(args.run, "PASS", "s1_fetch_strain completed successfully")
         return 0
 
