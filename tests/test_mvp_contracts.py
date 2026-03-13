@@ -54,6 +54,7 @@ class TestContractRegistry:
                        "experiment/phase1_geometry_h5", "experiment/phase2_sector_map",
                        "experiment/phase2a_atlas_family_map", "experiment/phase2b_family_sector_hypothesis",
                        "experiment/phase2c_support_ontology_basis",
+                       "experiment/phase3_weight_policy_basis",
                        "psd_extract",
                        "experiment_ex8_area_consistency",
                        "s4g_mode220_geometry_filter", "s4h_mode221_geometry_filter",
