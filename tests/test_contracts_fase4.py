@@ -152,7 +152,7 @@ class TestAntiRegression:
 class TestContractCount:
     def test_total_contracts_is_10(self):
         """Registry includes oracle precheck, pipeline stages, and phase 1/2/2c/3 experiments."""
-        assert len(CONTRACTS) == 45
+        assert len(CONTRACTS) == 46
 
 
 # ── Test 4: DAG integrity with new stages ────────────────────────────────

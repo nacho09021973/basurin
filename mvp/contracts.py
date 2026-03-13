@@ -721,6 +721,26 @@ CONTRACTS: dict[str, StageContract] = {
         upstream_stages=["experiment/phase3_weight_policy_basis"],
         check_run_valid=True,
     ),
+    "experiment/phase4b_renyi_policy_comparison": StageContract(
+        name="experiment/phase4b_renyi_policy_comparison",
+        required_inputs=[
+            "experiment/phase4_renyi_diversity_baseline/outputs/renyi_diversity_uniform_support_v1.json",
+            "experiment/phase4_renyi_diversity_baseline/outputs/renyi_diversity_event_frequency_support_v1.json",
+            "experiment/phase4_renyi_diversity_baseline/outputs/renyi_diversity_event_support_delta_lnL_softmax_mean_v1.json",
+            "experiment/phase3_weight_policy_basis/outputs/weight_policy_uniform_support_v1.json",
+            "experiment/phase3_weight_policy_basis/outputs/weight_policy_event_frequency_support_v1.json",
+            "experiment/phase3_weight_policy_basis/outputs/weight_policy_event_support_delta_lnL_softmax_mean_v1.json",
+        ],
+        produced_outputs=[
+            "outputs/renyi_policy_comparison_v1.json",
+            "outputs/topk_mass_by_policy_v1.json",
+            "outputs/family_mass_by_policy_v1.json",
+            "outputs/theory_mass_by_policy_v1.json",
+            "outputs/top_geometry_ranking_by_policy_v1.json",
+        ],
+        upstream_stages=["experiment/phase4_renyi_diversity_baseline", "experiment/phase3_weight_policy_basis"],
+        check_run_valid=True,
+    ),
 }
 
 
