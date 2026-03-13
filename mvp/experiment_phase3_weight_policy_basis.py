@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize the canonical uniform weight policy over the supported basis."""
+"""Materialize explicit weight policies over the supported basis."""
 from __future__ import annotations
 
 import argparse
@@ -20,20 +20,32 @@ from mvp.contracts import abort, check_inputs, finalize, init_stage, log_stage_p
 
 STAGE = "experiment/phase3_weight_policy_basis"
 SCHEMA_VERSION = "weight_policy_basis_v1"
-SUPPORTED_POLICY_NAME = "uniform_support_v1"
-POLICY_ROLE = "baseline_canonical"
-NORMALIZATION_METHOD = "divide_by_sum_raw_over_all_rows"
 WEIGHT_STATUS = "WEIGHTED"
-CRITERION = "uniform_over_support_basis"
-CRITERION_VERSION = "v1"
 DEFAULT_INPUT_NAME = "support_ontology_basis_v1.json"
 DEFAULT_OUTPUT_NAME = "weight_policy_basis_v1.json"
+SUPPORTED_POLICIES = {
+    "uniform_support_v1": {
+        "policy_role": "baseline_canonical",
+        "normalization_method": "divide_by_sum_raw_over_all_rows",
+        "source_policy_inputs": [],
+        "criterion": "uniform_over_support_basis",
+        "criterion_version": "v1",
+    },
+    "event_frequency_support_v1": {
+        "policy_role": "comparison_factual",
+        "normalization_method": "divide_by_sum_support_count_events_over_all_rows",
+        "source_policy_inputs": ["support_count_events_from_phase2c"],
+        "criterion": "support_count_events_over_support_basis",
+        "criterion_version": "v1",
+    },
+}
+DEFAULT_POLICY_NAME = "uniform_support_v1"
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    ap = argparse.ArgumentParser(description="Materialize the canonical uniform weight policy basis")
+    ap = argparse.ArgumentParser(description="Materialize explicit weight policies over the supported basis")
     ap.add_argument("--run-id", required=True, help="Aggregate run id containing phase2c support basis")
-    ap.add_argument("--policy-name", default=SUPPORTED_POLICY_NAME)
+    ap.add_argument("--policy-name", default=DEFAULT_POLICY_NAME)
     ap.add_argument("--input-name", default=DEFAULT_INPUT_NAME)
     ap.add_argument("--output-name", default=DEFAULT_OUTPUT_NAME)
     return ap.parse_args(argv)
@@ -60,6 +72,14 @@ def _require_number(row: dict[str, Any], field_name: str, *, row_index: int, ctx
         value = float(row.get(field_name))
     except Exception:
         abort(ctx, f"phase2c support basis row[{row_index}] missing numeric {field_name}")
+        raise AssertionError("unreachable")
+    return value
+
+
+def _require_positive_int(row: dict[str, Any], field_name: str, *, row_index: int, ctx: Any) -> int:
+    value = int(_require_number(row, field_name, row_index=row_index, ctx=ctx))
+    if value <= 0:
+        abort(ctx, f"phase2c support basis row[{row_index}] has non-positive {field_name}={value}")
         raise AssertionError("unreachable")
     return value
 
@@ -96,6 +116,11 @@ def _load_phase2c_basis(path: Path, ctx: Any) -> dict[str, Any]:
     }
 
 
+def _unsupported_policy_message(policy_name: str) -> str:
+    supported = ", ".join(repr(name) for name in sorted(SUPPORTED_POLICIES))
+    return f"Unsupported policy_name={policy_name!r}; supported values are [{supported}]"
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     ctx = init_stage(
@@ -108,11 +133,8 @@ def main(argv: list[str] | None = None) -> int:
         },
     )
 
-    if args.policy_name != SUPPORTED_POLICY_NAME:
-        abort(
-            ctx,
-            f"Unsupported policy_name={args.policy_name!r}; only {SUPPORTED_POLICY_NAME!r} is implemented in this v1",
-        )
+    if args.policy_name not in SUPPORTED_POLICIES:
+        abort(ctx, _unsupported_policy_message(args.policy_name))
 
     source_basis_rel = Path("experiment") / "phase2c_support_ontology_basis" / "outputs" / args.input_name
     source_basis_path = ctx.run_dir / source_basis_rel
@@ -121,49 +143,87 @@ def main(argv: list[str] | None = None) -> int:
     phase2c = _load_phase2c_basis(source_basis_path, ctx)
     basis_rows = phase2c["rows"]
     n_rows = len(basis_rows)
-    weight_normalized = 1.0 / float(n_rows)
+    policy_spec = SUPPORTED_POLICIES[args.policy_name]
 
-    rows: list[dict[str, Any]] = []
+    copied_rows: list[dict[str, Any]] = []
+    support_count_sum = 0
     for idx, basis_row in enumerate(basis_rows):
         if not isinstance(basis_row, dict):
             abort(ctx, f"phase2c support basis row[{idx}] is not an object")
             raise AssertionError("unreachable")
+        support_count_events = _require_positive_int(basis_row, "n_events_supported", row_index=idx, ctx=ctx)
+        support_fraction_events = _require_number(basis_row, "support_fraction_events", row_index=idx, ctx=ctx)
+        copied_rows.append(
+            {
+                "raw_geometry_id": _require_text(basis_row, "raw_geometry_id", row_index=idx, ctx=ctx),
+                "normalized_geometry_id": _require_text(basis_row, "normalized_geometry_id", row_index=idx, ctx=ctx),
+                "atlas_family": _require_text(basis_row, "atlas_family", row_index=idx, ctx=ctx),
+                "atlas_theory": _require_text(basis_row, "atlas_theory", row_index=idx, ctx=ctx),
+                "support_count_events": support_count_events,
+                "support_fraction_events": support_fraction_events,
+            }
+        )
+        support_count_sum += support_count_events
 
-        row = {
-            "raw_geometry_id": _require_text(basis_row, "raw_geometry_id", row_index=idx, ctx=ctx),
-            "normalized_geometry_id": _require_text(basis_row, "normalized_geometry_id", row_index=idx, ctx=ctx),
-            "atlas_family": _require_text(basis_row, "atlas_family", row_index=idx, ctx=ctx),
-            "atlas_theory": _require_text(basis_row, "atlas_theory", row_index=idx, ctx=ctx),
-            "policy_name": SUPPORTED_POLICY_NAME,
-            "weight_raw": 1.0,
-            "weight_normalized": weight_normalized,
-            "weight_status": WEIGHT_STATUS,
-            "support_count_events": int(_require_number(basis_row, "n_events_supported", row_index=idx, ctx=ctx)),
-            "support_fraction_events": _require_number(basis_row, "support_fraction_events", row_index=idx, ctx=ctx),
-            "source_artifacts": [str(source_basis_rel)],
-            "criterion": CRITERION,
-            "criterion_version": CRITERION_VERSION,
-            "evidence": {
+    if args.policy_name == "uniform_support_v1":
+        weight_sum_raw = float(n_rows)
+    else:
+        weight_sum_raw = float(support_count_sum)
+        if weight_sum_raw <= 0.0:
+            abort(ctx, "event_frequency_support_v1 requires positive total support_count_events over the basis")
+
+    rows: list[dict[str, Any]] = []
+    for copied_row in copied_rows:
+        if args.policy_name == "uniform_support_v1":
+            weight_raw = 1.0
+            weight_normalized = 1.0 / float(n_rows)
+            evidence = {
                 "basis_name": phase2c["basis_name"],
                 "uniform_weight_raw": 1.0,
                 "uniform_weight_normalized": weight_normalized,
-            },
+            }
+        else:
+            weight_raw = float(copied_row["support_count_events"])
+            weight_normalized = weight_raw / weight_sum_raw
+            evidence = {
+                "basis_name": phase2c["basis_name"],
+                "support_count_events": copied_row["support_count_events"],
+                "support_count_sum_over_basis": support_count_sum,
+                "event_frequency_weight_raw": weight_raw,
+                "event_frequency_weight_normalized": weight_normalized,
+            }
+
+        row = {
+            "raw_geometry_id": copied_row["raw_geometry_id"],
+            "normalized_geometry_id": copied_row["normalized_geometry_id"],
+            "atlas_family": copied_row["atlas_family"],
+            "atlas_theory": copied_row["atlas_theory"],
+            "policy_name": args.policy_name,
+            "weight_raw": weight_raw,
+            "weight_normalized": weight_normalized,
+            "weight_status": WEIGHT_STATUS,
+            "support_count_events": copied_row["support_count_events"],
+            "support_fraction_events": copied_row["support_fraction_events"],
+            "source_artifacts": [str(source_basis_rel)],
+            "criterion": policy_spec["criterion"],
+            "criterion_version": policy_spec["criterion_version"],
+            "evidence": evidence,
         }
         rows.append(row)
 
     output_payload = {
         "schema_version": SCHEMA_VERSION,
         "basis_name": phase2c["basis_name"],
-        "policy_name": SUPPORTED_POLICY_NAME,
-        "policy_role": POLICY_ROLE,
+        "policy_name": args.policy_name,
+        "policy_role": policy_spec["policy_role"],
         "coverage_fraction": 1.0,
         "n_rows": n_rows,
         "n_weighted": n_rows,
         "n_unweighted": 0,
-        "weight_sum_raw": float(n_rows),
+        "weight_sum_raw": weight_sum_raw,
         "weight_sum_normalized": 1.0,
-        "normalization_method": NORMALIZATION_METHOD,
-        "source_policy_inputs": [],
+        "normalization_method": policy_spec["normalization_method"],
+        "source_policy_inputs": policy_spec["source_policy_inputs"],
         "rows": rows,
     }
 
@@ -182,16 +242,16 @@ def main(argv: list[str] | None = None) -> int:
         extra_summary={
             "schema_version": SCHEMA_VERSION,
             "basis_name": phase2c["basis_name"],
-            "policy_name": SUPPORTED_POLICY_NAME,
-            "policy_role": POLICY_ROLE,
+            "policy_name": args.policy_name,
+            "policy_role": policy_spec["policy_role"],
             "coverage_fraction": 1.0,
             "n_rows": n_rows,
             "n_weighted": n_rows,
             "n_unweighted": 0,
-            "weight_sum_raw": float(n_rows),
+            "weight_sum_raw": weight_sum_raw,
             "weight_sum_normalized": 1.0,
-            "normalization_method": NORMALIZATION_METHOD,
-            "source_policy_inputs": [],
+            "normalization_method": policy_spec["normalization_method"],
+            "source_policy_inputs": policy_spec["source_policy_inputs"],
         },
     )
     log_stage_paths(ctx)

@@ -11,9 +11,12 @@ from mvp.contracts import CONTRACTS
 
 SCRIPT = Path("mvp/experiment_phase3_weight_policy_basis.py")
 SCHEMA_VERSION = "weight_policy_basis_v1"
-POLICY_NAME = "uniform_support_v1"
-POLICY_ROLE = "baseline_canonical"
-NORMALIZATION_METHOD = "divide_by_sum_raw_over_all_rows"
+UNIFORM_POLICY_NAME = "uniform_support_v1"
+UNIFORM_POLICY_ROLE = "baseline_canonical"
+UNIFORM_NORMALIZATION_METHOD = "divide_by_sum_raw_over_all_rows"
+EVENT_FREQUENCY_POLICY_NAME = "event_frequency_support_v1"
+EVENT_FREQUENCY_POLICY_ROLE = "comparison_factual"
+EVENT_FREQUENCY_NORMALIZATION_METHOD = "divide_by_sum_support_count_events_over_all_rows"
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -67,7 +70,17 @@ def _make_phase2c_payload() -> dict:
     }
 
 
-def _run_script(repo_root: Path, run_id: str, runs_root: Path, *, policy_name: str = POLICY_NAME) -> subprocess.CompletedProcess[str]:
+def _support_count_sum(payload: dict) -> int:
+    return sum(int(row["n_events_supported"]) for row in payload["rows"])
+
+
+def _run_script(
+    repo_root: Path,
+    run_id: str,
+    runs_root: Path,
+    *,
+    policy_name: str = UNIFORM_POLICY_NAME,
+) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["BASURIN_RUNS_ROOT"] = str(runs_root)
     return subprocess.run(
@@ -80,15 +93,16 @@ def _run_script(repo_root: Path, run_id: str, runs_root: Path, *, policy_name: s
     )
 
 
-def _prepare_run(tmp_path: Path, *, run_id: str) -> tuple[Path, Path]:
+def _prepare_run(tmp_path: Path, *, run_id: str) -> tuple[Path, Path, dict]:
     repo_root = Path(__file__).resolve().parents[1]
     runs_root = tmp_path / "isolated_runs"
     _write_json(runs_root / run_id / "RUN_VALID" / "verdict.json", {"verdict": "PASS"})
+    payload = _make_phase2c_payload()
     _write_json(
         runs_root / run_id / "experiment" / "phase2c_support_ontology_basis" / "outputs" / "support_ontology_basis_v1.json",
-        _make_phase2c_payload(),
+        payload,
     )
-    return repo_root, runs_root
+    return repo_root, runs_root, payload
 
 
 def _normalized_stage_summary(payload: dict, *, input_sha256: str, output_sha256: str) -> dict:
@@ -143,7 +157,7 @@ def test_contract_registered() -> None:
 
 def test_happy_path_uniform_support_matches_normalized_snapshot(tmp_path: Path) -> None:
     run_id = "phase3_weight_policy_basis_ok"
-    repo_root, runs_root = _prepare_run(tmp_path, run_id=run_id)
+    repo_root, runs_root, phase2c_payload = _prepare_run(tmp_path, run_id=run_id)
 
     result = _run_script(repo_root, run_id, runs_root)
     assert result.returncode == 0, result.stderr + result.stdout
@@ -164,31 +178,31 @@ def test_happy_path_uniform_support_matches_normalized_snapshot(tmp_path: Path) 
     rows = output_payload["rows"]
     assert output_payload["schema_version"] == SCHEMA_VERSION
     assert output_payload["basis_name"] == "final_support_region_union_v1"
-    assert output_payload["policy_name"] == POLICY_NAME
-    assert output_payload["policy_role"] == POLICY_ROLE
+    assert output_payload["policy_name"] == UNIFORM_POLICY_NAME
+    assert output_payload["policy_role"] == UNIFORM_POLICY_ROLE
     assert output_payload["coverage_fraction"] == 1.0
     assert output_payload["n_rows"] == 106
     assert output_payload["n_weighted"] == 106
     assert output_payload["n_unweighted"] == 0
     assert output_payload["weight_sum_raw"] == 106.0
     assert output_payload["weight_sum_normalized"] == 1.0
-    assert output_payload["normalization_method"] == NORMALIZATION_METHOD
+    assert output_payload["normalization_method"] == UNIFORM_NORMALIZATION_METHOD
     assert output_payload["source_policy_inputs"] == []
     assert len(rows) == 106
-    assert all(row["policy_name"] == POLICY_NAME for row in rows)
+    assert all(row["policy_name"] == UNIFORM_POLICY_NAME for row in rows)
     assert all(row["weight_raw"] == 1.0 for row in rows)
     assert all(row["weight_normalized"] == 1.0 / 106.0 for row in rows)
     assert all(row["weight_status"] == "WEIGHTED" for row in rows)
     assert all(row["criterion"] == "uniform_over_support_basis" for row in rows)
     assert all(row["criterion_version"] == "v1" for row in rows)
     assert all(row["source_artifacts"] == ["experiment/phase2c_support_ontology_basis/outputs/support_ontology_basis_v1.json"] for row in rows)
-    assert rows[0]["raw_geometry_id"] == "EdGB_geo_000"
-    assert rows[38]["atlas_family"] == "edgb"
-    assert rows[39]["atlas_family"] == "kerr_newman"
-    assert rows[-1]["atlas_family"] == "dcs"
-    assert rows[0]["support_count_events"] == 1
-    assert rows[1]["support_count_events"] == 2
-    assert rows[0]["support_fraction_events"] == 1.0 / 47.0
+    assert rows[0]["raw_geometry_id"] == phase2c_payload["rows"][0]["raw_geometry_id"]
+    assert rows[38]["atlas_family"] == phase2c_payload["rows"][38]["atlas_family"]
+    assert rows[39]["atlas_family"] == phase2c_payload["rows"][39]["atlas_family"]
+    assert rows[-1]["atlas_family"] == phase2c_payload["rows"][-1]["atlas_family"]
+    assert rows[0]["support_count_events"] == phase2c_payload["rows"][0]["n_events_supported"]
+    assert rows[1]["support_count_events"] == phase2c_payload["rows"][1]["n_events_supported"]
+    assert rows[0]["support_fraction_events"] == phase2c_payload["rows"][0]["support_fraction_events"]
 
     summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
     input_sha256 = sha256_file(
@@ -208,7 +222,7 @@ def test_happy_path_uniform_support_matches_normalized_snapshot(tmp_path: Path) 
         "n_rows": 106,
         "n_unweighted": 0,
         "n_weighted": 106,
-        "normalization_method": NORMALIZATION_METHOD,
+        "normalization_method": UNIFORM_NORMALIZATION_METHOD,
         "outputs": [
             {
                 "path": "experiment/phase3_weight_policy_basis/outputs/weight_policy_basis_v1.json",
@@ -218,10 +232,10 @@ def test_happy_path_uniform_support_matches_normalized_snapshot(tmp_path: Path) 
         "parameters": {
             "input_name": "support_ontology_basis_v1.json",
             "output_name": "weight_policy_basis_v1.json",
-            "policy_name": POLICY_NAME,
+            "policy_name": UNIFORM_POLICY_NAME,
         },
-        "policy_name": POLICY_NAME,
-        "policy_role": POLICY_ROLE,
+        "policy_name": UNIFORM_POLICY_NAME,
+        "policy_role": UNIFORM_POLICY_ROLE,
         "results": {
             "coverage_fraction": 1.0,
             "n_rows": 106,
@@ -245,17 +259,121 @@ def test_happy_path_uniform_support_matches_normalized_snapshot(tmp_path: Path) 
     ) == expected_summary
 
 
-def test_rejects_non_uniform_policy_name(tmp_path: Path) -> None:
-    run_id = "phase3_weight_policy_basis_bad_policy"
-    repo_root, runs_root = _prepare_run(tmp_path, run_id=run_id)
+def test_happy_path_event_frequency_matches_normalized_snapshot(tmp_path: Path) -> None:
+    run_id = "phase3_weight_policy_basis_event_frequency"
+    repo_root, runs_root, phase2c_payload = _prepare_run(tmp_path, run_id=run_id)
+    support_count_sum = _support_count_sum(phase2c_payload)
 
-    result = _run_script(repo_root, run_id, runs_root, policy_name="event_frequency_support_v1")
+    result = _run_script(repo_root, run_id, runs_root, policy_name=EVENT_FREQUENCY_POLICY_NAME)
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    stage_dir = runs_root / run_id / "experiment" / "phase3_weight_policy_basis"
+    output_path = stage_dir / "outputs" / "weight_policy_basis_v1.json"
+    summary_path = stage_dir / "stage_summary.json"
+
+    output_payload = json.loads(output_path.read_text(encoding="utf-8"))
+    rows = output_payload["rows"]
+    assert output_payload["schema_version"] == SCHEMA_VERSION
+    assert output_payload["basis_name"] == "final_support_region_union_v1"
+    assert output_payload["policy_name"] == EVENT_FREQUENCY_POLICY_NAME
+    assert output_payload["policy_role"] == EVENT_FREQUENCY_POLICY_ROLE
+    assert output_payload["coverage_fraction"] == 1.0
+    assert output_payload["n_rows"] == 106
+    assert output_payload["n_weighted"] == 106
+    assert output_payload["n_unweighted"] == 0
+    assert output_payload["weight_sum_raw"] == float(support_count_sum)
+    assert output_payload["weight_sum_normalized"] == 1.0
+    assert output_payload["normalization_method"] == EVENT_FREQUENCY_NORMALIZATION_METHOD
+    assert output_payload["source_policy_inputs"] == ["support_count_events_from_phase2c"]
+    assert len(rows) == 106
+    assert all(row["policy_name"] == EVENT_FREQUENCY_POLICY_NAME for row in rows)
+    assert all(row["weight_status"] == "WEIGHTED" for row in rows)
+    assert all(row["criterion"] == "support_count_events_over_support_basis" for row in rows)
+    assert all(row["criterion_version"] == "v1" for row in rows)
+    assert all(row["source_artifacts"] == ["experiment/phase2c_support_ontology_basis/outputs/support_ontology_basis_v1.json"] for row in rows)
+    assert [row["weight_raw"] for row in rows[:5]] == [
+        float(phase2c_payload["rows"][idx]["n_events_supported"]) for idx in range(5)
+    ]
+    assert [row["support_count_events"] for row in rows[:5]] == [
+        int(phase2c_payload["rows"][idx]["n_events_supported"]) for idx in range(5)
+    ]
+    assert rows[0]["support_fraction_events"] == phase2c_payload["rows"][0]["support_fraction_events"]
+    assert rows[0]["weight_normalized"] == rows[0]["support_count_events"] / float(support_count_sum)
+    assert rows[1]["weight_normalized"] == rows[1]["support_count_events"] / float(support_count_sum)
+    assert rows[0]["evidence"] == {
+        "basis_name": "final_support_region_union_v1",
+        "support_count_events": rows[0]["support_count_events"],
+        "support_count_sum_over_basis": support_count_sum,
+        "event_frequency_weight_raw": float(rows[0]["support_count_events"]),
+        "event_frequency_weight_normalized": rows[0]["weight_normalized"],
+    }
+
+    summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    input_sha256 = sha256_file(
+        runs_root / run_id / "experiment" / "phase2c_support_ontology_basis" / "outputs" / "support_ontology_basis_v1.json"
+    )
+    expected_summary = {
+        "basis_name": "final_support_region_union_v1",
+        "coverage_fraction": 1.0,
+        "created": "<TIMESTAMP>",
+        "inputs": [
+            {
+                "label": "support_ontology_basis_v1",
+                "path": "experiment/phase2c_support_ontology_basis/outputs/support_ontology_basis_v1.json",
+                "sha256": input_sha256,
+            }
+        ],
+        "n_rows": 106,
+        "n_unweighted": 0,
+        "n_weighted": 106,
+        "normalization_method": EVENT_FREQUENCY_NORMALIZATION_METHOD,
+        "outputs": [
+            {
+                "path": "experiment/phase3_weight_policy_basis/outputs/weight_policy_basis_v1.json",
+                "sha256": sha256_file(output_path),
+            }
+        ],
+        "parameters": {
+            "input_name": "support_ontology_basis_v1.json",
+            "output_name": "weight_policy_basis_v1.json",
+            "policy_name": EVENT_FREQUENCY_POLICY_NAME,
+        },
+        "policy_name": EVENT_FREQUENCY_POLICY_NAME,
+        "policy_role": EVENT_FREQUENCY_POLICY_ROLE,
+        "results": {
+            "coverage_fraction": 1.0,
+            "n_rows": 106,
+            "n_unweighted": 0,
+            "n_weighted": 106,
+        },
+        "run": run_id,
+        "runs_root": "<RUNS_ROOT>",
+        "schema_version": SCHEMA_VERSION,
+        "source_policy_inputs": ["support_count_events_from_phase2c"],
+        "stage": "experiment/phase3_weight_policy_basis",
+        "verdict": "PASS",
+        "version": "v1",
+        "weight_sum_normalized": 1.0,
+        "weight_sum_raw": float(support_count_sum),
+    }
+    assert _normalized_stage_summary(
+        summary_payload,
+        input_sha256=input_sha256,
+        output_sha256=sha256_file(output_path),
+    ) == expected_summary
+
+
+def test_rejects_unsupported_policy_name(tmp_path: Path) -> None:
+    run_id = "phase3_weight_policy_basis_bad_policy"
+    repo_root, runs_root, _phase2c_payload = _prepare_run(tmp_path, run_id=run_id)
+
+    result = _run_script(repo_root, run_id, runs_root, policy_name="bad_policy_v1")
     assert result.returncode == 2
-    assert "Unsupported policy_name='event_frequency_support_v1'; only 'uniform_support_v1' is implemented in this v1" in (
+    assert "Unsupported policy_name='bad_policy_v1'; supported values are ['event_frequency_support_v1', 'uniform_support_v1']" in (
         result.stderr + result.stdout
     )
 
     stage_dir = runs_root / run_id / "experiment" / "phase3_weight_policy_basis"
     summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
     assert summary["verdict"] == "FAIL"
-    assert "Unsupported policy_name='event_frequency_support_v1'" in summary["error"]
+    assert "Unsupported policy_name='bad_policy_v1'" in summary["error"]
