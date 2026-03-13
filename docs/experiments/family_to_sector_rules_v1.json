@@ -1,0 +1,57 @@
+{
+  "schema_version": "family_to_sector_rules_v1",
+  "rules": [
+    {
+      "confidence_class": "LOW",
+      "criterion": "unsupported_family_to_sector_derivation_v1",
+      "criterion_version": "v1",
+      "match": {
+        "atlas_family": "kerr",
+        "atlas_theory": "GR_Kerr"
+      },
+      "notes": "Atlas family/theory is explicit, but this repo does not yet contain an auditable derivation from kerr/GR_Kerr to an intrinsic geometric sector. Keep UNKNOWN and block downstream sector observables.",
+      "proposed_sector": "UNKNOWN",
+      "rule_id": "ftsr_v1_kerr_unknown",
+      "rule_source": "docs/experiments/family_to_sector_rules_v1.json#ftsr_v1_kerr_unknown"
+    },
+    {
+      "confidence_class": "LOW",
+      "criterion": "unsupported_family_to_sector_derivation_v1",
+      "criterion_version": "v1",
+      "match": {
+        "atlas_family": "edgb",
+        "atlas_theory": "EdGB"
+      },
+      "notes": "Atlas family/theory is explicit, but this repo does not yet contain an auditable derivation from edgb/EdGB to an intrinsic geometric sector. Keep UNKNOWN and block downstream sector observables.",
+      "proposed_sector": "UNKNOWN",
+      "rule_id": "ftsr_v1_edgb_unknown",
+      "rule_source": "docs/experiments/family_to_sector_rules_v1.json#ftsr_v1_edgb_unknown"
+    },
+    {
+      "confidence_class": "LOW",
+      "criterion": "unsupported_family_to_sector_derivation_v1",
+      "criterion_version": "v1",
+      "match": {
+        "atlas_family": "kerr_newman",
+        "atlas_theory": "Kerr-Newman"
+      },
+      "notes": "Atlas family/theory is explicit, but this repo does not yet contain an auditable derivation from kerr_newman/Kerr-Newman to an intrinsic geometric sector. Keep UNKNOWN and block downstream sector observables.",
+      "proposed_sector": "UNKNOWN",
+      "rule_id": "ftsr_v1_kerr_newman_unknown",
+      "rule_source": "docs/experiments/family_to_sector_rules_v1.json#ftsr_v1_kerr_newman_unknown"
+    },
+    {
+      "confidence_class": "LOW",
+      "criterion": "unsupported_family_to_sector_derivation_v1",
+      "criterion_version": "v1",
+      "match": {
+        "atlas_family": "dcs",
+        "atlas_theory": "dCS"
+      },
+      "notes": "Atlas family/theory is explicit, but this repo does not yet contain an auditable derivation from dcs/dCS to an intrinsic geometric sector. Keep UNKNOWN and block downstream sector observables.",
+      "proposed_sector": "UNKNOWN",
+      "rule_id": "ftsr_v1_dcs_unknown",
+      "rule_source": "docs/experiments/family_to_sector_rules_v1.json#ftsr_v1_dcs_unknown"
+    }
+  ]
+}
