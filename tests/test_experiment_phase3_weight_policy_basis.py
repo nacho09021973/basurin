@@ -80,11 +80,15 @@ def _run_script(
     runs_root: Path,
     *,
     policy_name: str = UNIFORM_POLICY_NAME,
+    output_name: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["BASURIN_RUNS_ROOT"] = str(runs_root)
+    cmd = [sys.executable, str(repo_root / SCRIPT), "--run-id", run_id, "--policy-name", policy_name]
+    if output_name is not None:
+        cmd.extend(["--output-name", output_name])
     return subprocess.run(
-        [sys.executable, str(repo_root / SCRIPT), "--run-id", run_id, "--policy-name", policy_name],
+        cmd,
         cwd=repo_root,
         env=env,
         text=True,
@@ -105,7 +109,13 @@ def _prepare_run(tmp_path: Path, *, run_id: str) -> tuple[Path, Path, dict]:
     return repo_root, runs_root, payload
 
 
-def _normalized_stage_summary(payload: dict, *, input_sha256: str, output_sha256: str) -> dict:
+def _normalized_stage_summary(
+    payload: dict,
+    *,
+    input_sha256: str,
+    output_sha256: str,
+    output_rel_path: str,
+) -> dict:
     normalized = dict(payload)
     normalized["created"] = "<TIMESTAMP>"
     normalized["runs_root"] = "<RUNS_ROOT>"
@@ -126,10 +136,12 @@ def _normalized_stage_summary(payload: dict, *, input_sha256: str, output_sha256
         "normalization_method": normalized["normalization_method"],
         "outputs": [
             {
-                "path": "experiment/phase3_weight_policy_basis/outputs/weight_policy_basis_v1.json",
+                "path": output_rel_path,
                 "sha256": output_sha256,
             }
         ],
+        "output_name": normalized["output_name"],
+        "output_path": normalized["output_path"],
         "parameters": normalized["parameters"],
         "policy_name": normalized["policy_name"],
         "policy_role": normalized["policy_role"],
@@ -229,6 +241,8 @@ def test_happy_path_uniform_support_matches_normalized_snapshot(tmp_path: Path) 
                 "sha256": sha256_file(output_path),
             }
         ],
+        "output_name": "weight_policy_basis_v1.json",
+        "output_path": "experiment/phase3_weight_policy_basis/outputs/weight_policy_basis_v1.json",
         "parameters": {
             "input_name": "support_ontology_basis_v1.json",
             "output_name": "weight_policy_basis_v1.json",
@@ -256,6 +270,7 @@ def test_happy_path_uniform_support_matches_normalized_snapshot(tmp_path: Path) 
         summary_payload,
         input_sha256=input_sha256,
         output_sha256=sha256_file(output_path),
+        output_rel_path="experiment/phase3_weight_policy_basis/outputs/weight_policy_basis_v1.json",
     ) == expected_summary
 
 
@@ -333,6 +348,8 @@ def test_happy_path_event_frequency_matches_normalized_snapshot(tmp_path: Path) 
                 "sha256": sha256_file(output_path),
             }
         ],
+        "output_name": "weight_policy_basis_v1.json",
+        "output_path": "experiment/phase3_weight_policy_basis/outputs/weight_policy_basis_v1.json",
         "parameters": {
             "input_name": "support_ontology_basis_v1.json",
             "output_name": "weight_policy_basis_v1.json",
@@ -360,6 +377,7 @@ def test_happy_path_event_frequency_matches_normalized_snapshot(tmp_path: Path) 
         summary_payload,
         input_sha256=input_sha256,
         output_sha256=sha256_file(output_path),
+        output_rel_path="experiment/phase3_weight_policy_basis/outputs/weight_policy_basis_v1.json",
     ) == expected_summary
 
 
@@ -377,3 +395,50 @@ def test_rejects_unsupported_policy_name(tmp_path: Path) -> None:
     summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
     assert summary["verdict"] == "FAIL"
     assert "Unsupported policy_name='bad_policy_v1'" in summary["error"]
+
+
+def test_distinct_output_names_preserve_multiple_artifacts_without_collision(tmp_path: Path) -> None:
+    run_id = "phase3_weight_policy_basis_distinct_outputs"
+    repo_root, runs_root, _phase2c_payload = _prepare_run(tmp_path, run_id=run_id)
+    uniform_output_name = "weight_policy_uniform_support_v1.json"
+    event_frequency_output_name = "weight_policy_event_frequency_support_v1.json"
+
+    uniform_result = _run_script(
+        repo_root,
+        run_id,
+        runs_root,
+        policy_name=UNIFORM_POLICY_NAME,
+        output_name=uniform_output_name,
+    )
+    assert uniform_result.returncode == 0, uniform_result.stderr + uniform_result.stdout
+
+    event_frequency_result = _run_script(
+        repo_root,
+        run_id,
+        runs_root,
+        policy_name=EVENT_FREQUENCY_POLICY_NAME,
+        output_name=event_frequency_output_name,
+    )
+    assert event_frequency_result.returncode == 0, event_frequency_result.stderr + event_frequency_result.stdout
+
+    stage_dir = runs_root / run_id / "experiment" / "phase3_weight_policy_basis"
+    uniform_output_path = stage_dir / "outputs" / uniform_output_name
+    event_frequency_output_path = stage_dir / "outputs" / event_frequency_output_name
+    summary_path = stage_dir / "stage_summary.json"
+
+    assert uniform_output_path.exists()
+    assert event_frequency_output_path.exists()
+    assert uniform_output_path != event_frequency_output_path
+    assert sha256_file(uniform_output_path) != sha256_file(event_frequency_output_path)
+
+    uniform_payload = json.loads(uniform_output_path.read_text(encoding="utf-8"))
+    event_frequency_payload = json.loads(event_frequency_output_path.read_text(encoding="utf-8"))
+    assert uniform_payload["policy_name"] == UNIFORM_POLICY_NAME
+    assert event_frequency_payload["policy_name"] == EVENT_FREQUENCY_POLICY_NAME
+
+    summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary_payload["policy_name"] == EVENT_FREQUENCY_POLICY_NAME
+    assert summary_payload["output_name"] == event_frequency_output_name
+    assert summary_payload["output_path"] == (
+        "experiment/phase3_weight_policy_basis/outputs/weight_policy_event_frequency_support_v1.json"
+    )

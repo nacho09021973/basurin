@@ -121,6 +121,10 @@ def _unsupported_policy_message(policy_name: str) -> str:
     return f"Unsupported policy_name={policy_name!r}; supported values are [{supported}]"
 
 
+def _output_path_rel(output_name: str) -> Path:
+    return Path(STAGE) / "outputs" / output_name
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     ctx = init_stage(
@@ -227,6 +231,7 @@ def main(argv: list[str] | None = None) -> int:
         "rows": rows,
     }
 
+    output_rel = _output_path_rel(args.output_name)
     output_path = ctx.outputs_dir / args.output_name
     write_json_atomic(output_path, output_payload)
 
@@ -252,6 +257,8 @@ def main(argv: list[str] | None = None) -> int:
             "weight_sum_normalized": 1.0,
             "normalization_method": policy_spec["normalization_method"],
             "source_policy_inputs": policy_spec["source_policy_inputs"],
+            "output_name": args.output_name,
+            "output_path": str(output_rel),
         },
     )
     log_stage_paths(ctx)
