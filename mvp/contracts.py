@@ -686,6 +686,18 @@ CONTRACTS: dict[str, StageContract] = {
         upstream_stages=["experiment/phase1_geometry_h5", "experiment/phase2a_atlas_family_map"],
         check_run_valid=True,
     ),
+    "experiment/phase2c_support_ontology_basis": StageContract(
+        name="experiment/phase2c_support_ontology_basis",
+        required_inputs=[
+            "experiment/phase1_geometry_h5/outputs/phase1_geometry_cohort.h5",
+            "experiment/phase2a_atlas_family_map/outputs/family_map_v1.json",
+        ],
+        produced_outputs=[
+            "outputs/support_ontology_basis_v1.json",
+        ],
+        upstream_stages=["experiment/phase1_geometry_h5", "experiment/phase2a_atlas_family_map"],
+        check_run_valid=True,
+    ),
 }
 
 
