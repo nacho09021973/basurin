@@ -709,6 +709,18 @@ CONTRACTS: dict[str, StageContract] = {
         upstream_stages=["experiment/phase2c_support_ontology_basis"],
         check_run_valid=True,
     ),
+    "experiment/phase4_renyi_diversity_baseline": StageContract(
+        name="experiment/phase4_renyi_diversity_baseline",
+        required_inputs=[],
+        dynamic_inputs=[
+            "experiment/phase3_weight_policy_basis/outputs/{weight_policy_file}",
+        ],
+        produced_outputs=[
+            "outputs/renyi_diversity_baseline_v1.json",
+        ],
+        upstream_stages=["experiment/phase3_weight_policy_basis"],
+        check_run_valid=True,
+    ),
 }
 
 

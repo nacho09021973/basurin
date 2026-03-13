@@ -1,7 +1,7 @@
 """Regression tests for mvp/contracts.py — the centralized contract module.
 
 Tests:
-    1. CONTRACTS registry completeness: all 5 stages registered, no unknown stages.
+    1. CONTRACTS registry completeness: all registered stages, no unknown stages.
     2. init_stage rejects unknown stage names and invalid run_ids.
     3. check_inputs aborts on missing files, records SHA256 on present files.
     4. finalize produces manifest.json + stage_summary.json with correct structure.
@@ -55,6 +55,7 @@ class TestContractRegistry:
                        "experiment/phase2a_atlas_family_map", "experiment/phase2b_family_sector_hypothesis",
                        "experiment/phase2c_support_ontology_basis",
                        "experiment/phase3_weight_policy_basis",
+                       "experiment/phase4_renyi_diversity_baseline",
                        "psd_extract",
                        "experiment_ex8_area_consistency",
                        "s4g_mode220_geometry_filter", "s4h_mode221_geometry_filter",
