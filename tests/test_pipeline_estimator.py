@@ -8,6 +8,7 @@ Tests:
 """
 from __future__ import annotations
 
+import csv
 import json
 import math
 import sys
@@ -71,6 +72,60 @@ class TestGWTCEvents:
         assert len(events) >= 10
         assert "GW150914" in events
 
+    def test_csv_backed_o3_event_exposes_mass_and_snr(self):
+        from mvp.gwtc_events import get_event
+        ev = get_event("GW190706_222641")
+        assert ev is not None
+        assert ev["m_final_msun"] == pytest.approx(107.3)
+        assert ev["snr_network"] == pytest.approx(13.4)
+        assert "chi_final" in ev
+
+    def test_csv_backed_o3_event_exposes_source_masses(self):
+        from mvp.gwtc_events import get_event
+        ev = get_event("GW190706_222641")
+        assert ev is not None
+        assert ev["m1_source"] == pytest.approx(74.0)
+        assert ev["m2_source"] == pytest.approx(39.4)
+
+    def test_preflight_skips_partial_catalog_entry_without_chi_final(self, tmp_path, monkeypatch):
+        from mvp import pipeline
+        monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path / "runs"))
+        monkeypatch.setattr("mvp.gwtc_events.get_event", lambda _event_id: {
+            "m_final_msun": 107.3,
+            "snr_network": 13.4,
+            "chi_final": None,
+        })
+        result = pipeline._run_preflight_viability(
+            tmp_path / "runs",
+            "partial_catalog_run",
+            "GW190706_222641",
+            0.003,
+            0.06,
+            {"stages": []},
+        )
+        assert result is None
+        assert not (tmp_path / "runs" / "partial_catalog_run" / "preflight_viability").exists()
+
+    def test_problematic_rows_are_excluded_from_canonical_bbh_filter(self):
+        excluded = {"GW190706_222641", "GW190513_205428"}
+        with (REPO_ROOT / "gwtc_quality_events.csv").open(newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+
+        by_event = {row["event"]: row for row in rows}
+        for event_id in excluded:
+            row = by_event[event_id]
+            assert row["is_problematic"] == "True"
+            assert "no effective area observation" in row["quality_note"]
+
+        bbh_events = {
+            row["event"]
+            for row in rows
+            if str(row.get("is_problematic", "")).strip().lower() != "true"
+            and row.get("m2_source")
+            and float(row["m2_source"]) >= 3.0
+        }
+        assert excluded.isdisjoint(bbh_events)
+
 
 class TestS4EstimatesPath:
     """Test that s4_geometry_filter accepts --estimates-path override."""
@@ -97,13 +152,13 @@ class TestPipelineEstimatorArg:
         assert "estimator" in sig.parameters, \
             "run_single_event should have an 'estimator' parameter"
 
-    def test_default_estimator_is_spectral(self):
+    def test_default_estimator_is_dual(self):
         import inspect
         from mvp.pipeline import run_single_event
         sig = inspect.signature(run_single_event)
         default = sig.parameters["estimator"].default
-        assert default == "spectral", (
-            f"Expected default estimator 'spectral', got '{default}'"
+        assert default == "dual", (
+            f"Expected default estimator 'dual', got '{default}'"
         )
 
     def test_pipeline_has_batch_mode(self):

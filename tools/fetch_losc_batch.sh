@@ -245,6 +245,12 @@ write_sha256sums_if_any() {
   )
 }
 
+detector_hdf5_present() {
+  local event_dir="$1"
+  local det="$2"
+  find "$event_dir" -maxdepth 1 -type f \( -iname "*.hdf5" -o -iname "*.h5" \) | grep -qi "${det}"
+}
+
 while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   line="${raw_line%%#*}"
   line="${line#"${line%%[![:space:]]*}"}"
@@ -263,6 +269,11 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   echo "[fetch_losc_batch] ${event_id}: shortName=${short_name}"
 
   for det in "${DETECTORS[@]}"; do
+    if detector_hdf5_present "$event_dir" "$det"; then
+      echo "[fetch_losc_batch] ${event_id} ${det}: SKIP detector already present"
+      continue
+    fi
+
     url="https://gwosc.org/api/v2/event-versions/${short_name}/strain-files?detector=${det}"
     if ! body="$(fetch_json_with_retries "$url" 3)"; then
       echo "[fetch_losc_batch] WARN ${event_id} ${det}: strain-files devolvió NOT_JSON tras reintentos" >&2

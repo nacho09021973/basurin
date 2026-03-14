@@ -41,6 +41,7 @@ def test_losc_precheck_pass(tmp_path: Path) -> None:
     assert "h5_count=2" in out
     assert "match_count_H1=1" in out
     assert "match_count_L1=1" in out
+    assert "match_count_V1=0" in out
 
 
 def test_losc_precheck_fail_includes_actionable_diagnostics(tmp_path: Path) -> None:
@@ -57,7 +58,23 @@ def test_losc_precheck_fail_includes_actionable_diagnostics(tmp_path: Path) -> N
     assert "h5_count=1" in out
     assert "match_count_H1=0" in out
     assert "match_count_L1=0" in out
+    assert "match_count_V1=0" in out
     assert "rama B" in out
+
+
+def test_losc_precheck_passes_with_l1_v1_when_h1_is_missing(tmp_path: Path) -> None:
+    event_dir = tmp_path / "losc" / "GW200112_155838"
+    event_dir.mkdir(parents=True)
+    (event_dir / "L-L1_GWOSC.hdf5").write_bytes(b"l1")
+    (event_dir / "V-V1_GWOSC.h5").write_bytes(b"v1")
+
+    proc = _run(["--event-id", "GW200112_155838", "--losc-root", str(tmp_path / "losc")])
+    out = proc.stdout + proc.stderr
+
+    assert proc.returncode == 0, out
+    assert "match_count_H1=0" in out
+    assert "match_count_L1=1" in out
+    assert "match_count_V1=1" in out
 
 
 def test_losc_precheck_subprocess_is_read_only_and_cwd_independent(tmp_path: Path) -> None:
@@ -76,4 +93,3 @@ def test_losc_precheck_subprocess_is_read_only_and_cwd_independent(tmp_path: Pat
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert before == after
-

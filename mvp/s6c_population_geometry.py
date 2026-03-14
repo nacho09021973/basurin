@@ -72,6 +72,9 @@ def main() -> int:
         events = aggregate.get("events", [])
         if not isinstance(events, list):
             abort(ctx, "aggregate.json invalid: events must be a list")
+        multimode_conditioned = aggregate.get("multimode_conditioned_population")
+        if not isinstance(multimode_conditioned, dict):
+            multimode_conditioned = {}
 
         violations = 0
         reasons = Counter()
@@ -116,6 +119,7 @@ def main() -> int:
             "run_id": args.run,
             "n_events_total": len(events),
             "n_scalar_included": len(scalar_vals),
+            "multimode_conditioned_population": multimode_conditioned,
             "summary": {
                 **stats,
                 **_percentiles(scalar_vals),
@@ -126,6 +130,7 @@ def main() -> int:
             "run_id": args.run,
             "n_events_total": len(events),
             "n_inconclusive": n_inconclusive,
+            "multimode_conditioned_population": multimode_conditioned,
             "reasons_frequency": dict(sorted(reasons.items())),
             "hard_rule_violations": violations,
         }
@@ -145,6 +150,8 @@ def main() -> int:
                 "n_events_total": len(events),
                 "n_scalar_included": len(scalar_vals),
                 "n_inconclusive": n_inconclusive,
+                "multimode_conditioned_status": multimode_conditioned.get("status"),
+                "multimode_conditioned_reason": multimode_conditioned.get("reason"),
             },
         )
         print(f"OUT_ROOT={ctx.out_root}")

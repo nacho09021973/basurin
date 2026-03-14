@@ -113,6 +113,23 @@ def _collect_s4c_metrics(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _collect_s4k_metrics(payload: dict[str, Any]) -> dict[str, Any]:
+    downstream = payload.get("downstream_status") if isinstance(payload.get("downstream_status"), dict) else {}
+    multimode = payload.get("multimode_viability") if isinstance(payload.get("multimode_viability"), dict) else {}
+    final_ids = payload.get("final_geometry_ids") if isinstance(payload.get("final_geometry_ids"), list) else []
+    return {
+        "analysis_path": payload.get("analysis_path"),
+        "support_region_status": payload.get("support_region_status"),
+        "domain_status": payload.get("domain_status"),
+        "n_final_geometries": len(final_ids),
+        "downstream_status": {
+            "class": downstream.get("class"),
+            "reasons": list(downstream.get("reasons", [])) if isinstance(downstream.get("reasons"), list) else [],
+        },
+        "multimode_viability_class": multimode.get("class"),
+    }
+
+
 def _find_geometry_h5(subrun_dir: Path, *payloads: dict[str, Any]) -> Path | None:
     candidates: list[Path] = []
 
@@ -184,6 +201,7 @@ def main() -> int:
     window_meta_path = subrun_dir / "s2_ringdown_window" / "outputs" / "window_meta.json"
     s3b_path = subrun_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
     s4c_path = subrun_dir / "s4c_kerr_consistency" / "outputs" / "kerr_consistency.json"
+    s4k_path = subrun_dir / "s4k_event_support_region" / "outputs" / "event_support_region.json"
 
     required = {
         "window_meta": window_meta_path,
@@ -197,6 +215,7 @@ def main() -> int:
     window_meta = _read_json(window_meta_path)
     s3b = _read_json(s3b_path)
     s4c = _read_json(s4c_path)
+    s4k = _read_json(s4k_path) if s4k_path.exists() else None
 
     inputs = []
     for label, path in required.items():
@@ -217,6 +236,14 @@ def main() -> int:
                 "sha256": sha256_file(geometry_path),
             }
         )
+    if s4k_path.exists():
+        inputs.append(
+            {
+                "label": "event_support_region",
+                "path": str(s4k_path.relative_to(out_root / args.run_id)),
+                "sha256": sha256_file(s4k_path),
+            }
+        )
 
     row = {
         "schema_version": "s5_event_row_v1",
@@ -227,6 +254,7 @@ def main() -> int:
         "event_window": window_meta,
         "s3b": _collect_s3b_metrics(s3b),
         "s4c": _collect_s4c_metrics(s4c),
+        "s4k": _collect_s4k_metrics(s4k) if isinstance(s4k, dict) else None,
         "geometry": geometry if geometry is not None else {"value": None, "reason": geometry_reason},
         "artifacts": {
             "window_meta": {"path": str(window_meta_path.relative_to(out_root / args.run_id)), "sha256": sha256_file(window_meta_path)},
@@ -238,6 +266,11 @@ def main() -> int:
         row["artifacts"]["geometry_hdf5"] = {
             "path": str(geometry_path.relative_to(out_root / args.run_id)) if geometry_path.is_relative_to(out_root / args.run_id) else str(geometry_path),
             "sha256": sha256_file(geometry_path),
+        }
+    if s4k_path.exists():
+        row["artifacts"]["event_support_region"] = {
+            "path": str(s4k_path.relative_to(out_root / args.run_id)),
+            "sha256": sha256_file(s4k_path),
         }
 
     row_path = outputs_dir / "event_row.json"
@@ -262,6 +295,13 @@ def main() -> int:
         "results": {
             "subrun_id": subrun_id,
             "geometry_present": geometry is not None,
+            "s4k_present": s4k is not None,
+            "s4k_downstream_status_class": (
+                row["s4k"]["downstream_status"]["class"]
+                if isinstance(row.get("s4k"), dict)
+                and isinstance(row["s4k"].get("downstream_status"), dict)
+                else None
+            ),
         },
     }
 

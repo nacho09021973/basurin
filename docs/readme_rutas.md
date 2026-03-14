@@ -19,6 +19,8 @@ Objetivo: que una IA (o humano) no pierda 5–6 horas diarias por confundir `RUN
   - `runs/<RUN_ID>/s3b_multimode_estimates/outputs/`
 - **Filtro geométrico (s4):**
   - `runs/<RUN_ID>/s4_geometry_filter/outputs/`
+- **Artefacto consolidado por evento (rama golden geometry explícita):**
+  - `runs/<RUN_ID>/s4k_event_support_region/outputs/event_support_region.json`
 - **Curvatura/diagnóstico (s6/s6b):**
   - `runs/<RUN_ID>/s6*/outputs/curvature*.json`
   - `runs/<RUN_ID>/s6*/outputs/metric_diagnostics*.json`
@@ -27,6 +29,10 @@ Objetivo: que una IA (o humano) no pierda 5–6 horas diarias por confundir `RUN
   - `runs/<run_id>/external_inputs/...`
   - `runs/<run_id>/<stage>/outputs/`
   - `runs/<run_id>/experiment/<name>/`
+- **MALDA sobre un run gobernado:**
+  - `runs/<RUN_ID>/experiment/malda_feature_table/outputs/event_features.csv`
+  - `runs/<RUN_ID>/experiment/malda_discovery/outputs/discovery_summary.json`
+  - `runs/<RUN_ID>/experiment/malda_formula_validation/outputs/formula_validation.json`
 - **Ejemplo NetCDF contra release externo:**
   - `runs/ext_220_210_20260227T090000Z/external_inputs/siegel_220_210/Users/RichardFineMan/Downloads/data_release/220_210/<file>.nc`
 
@@ -101,6 +107,14 @@ Ruta canónica (input externo *read-only*):
 
 `data/losc/<EVENT_ID>/`
 
+Ruta real desde la raíz del repo:
+
+`./data/losc/<EVENT_ID>/`
+
+En este checkout actual:
+
+`/home/ignac/work/basurin/data/losc/<EVENT_ID>/`
+
 Precheck canónico:
 
 ```bash
@@ -133,6 +147,8 @@ Procedimiento completo de bootstrap/descarga/poblado: ver `README.md` en la secc
 
 **Nota de gobernanza**: `data/losc/...` es input externo. El árbol auditable del run empieza en `runs/<RUN_ID>/...`.
 
+**Nota MALDA**: `malda/10_build_event_feature_table.py` lee del catálogo local del repo, no de `data/losc/...`, pero sigue colgándose de un `run_id` BASURIN para escribir sus outputs bajo `runs/<RUN_ID>/experiment/...`.
+
 
 ## 0) Regla de oro (léela primero)
 
@@ -150,6 +166,147 @@ Si eso no coincide con el árbol real donde está `RUN_VALID/verdict.json`, el s
 - `runs/<run_id>/external_inputs/...`: anclaje determinista de releases externos (por ejemplo, `siegel_220_210.tar.gz`) con hash verificable para trazabilidad.
 - `runs/<run_id>/<stage>/outputs/`: artefactos producidos por stages. Deben convivir con `manifest.json` y `stage_summary.json`, incluyendo hashes SHA256.
 - `runs/<run_id>/experiment/<name>/`: espacio para experimentos; no debe mutar artefactos canónicos de stages ya emitidos.
+
+### MALDA: rutas exactas y orden estricto
+
+Flujo soportado hoy:
+
+1. `malda/10_build_event_feature_table.py`
+2. `malda/11_kan_pysr_discovery.py`
+3. `malda/12_validate_formula_candidates.py`
+
+Contrato:
+
+- `step 10` escribe en `runs/<RUN_ID>/experiment/malda_feature_table/`.
+- `step 11` escribe en `runs/<RUN_ID>/experiment/malda_discovery/`.
+- `step 12` escribe en `runs/<RUN_ID>/experiment/malda_formula_validation/`.
+- `step 12` exige que exista `runs/<RUN_ID>/RUN_VALID/verdict.json` con `PASS`.
+- Si quieres gobernanza estricta, no uses un `RUN_ID` "huérfano" creado solo para MALDA; reutiliza un run canónico ya válido o crea primero ese run con el pipeline principal.
+
+Rutas de trabajo:
+
+- `runs/<RUN_ID>/experiment/malda_feature_table/outputs/event_features.csv`
+- `runs/<RUN_ID>/experiment/malda_discovery/outputs/discovery_summary.json`
+- `runs/<RUN_ID>/experiment/malda_formula_validation/outputs/formula_validation.json`
+
+Ejemplo estricto:
+
+```bash
+export BASURIN_RUNS_ROOT=/home/ignac/work/basurin/runs
+
+python malda/10_build_event_feature_table.py \
+  --run-id synth_family_router_smoke \
+  --bbh-only
+
+python malda/11_kan_pysr_discovery.py \
+  --run-id synth_family_router_smoke \
+  --feature-policy claim_grade_symmetric \
+  --targets E_rad_frac,af,F_220_dimless,f_ratio_221_220 \
+  --heartbeat-seconds 10 \
+  --bbh-only
+
+python malda/12_validate_formula_candidates.py \
+  --run-id synth_family_router_smoke \
+  --targets E_rad_frac,af,F_220_dimless,f_ratio_221_220 \
+  --bootstrap-samples 200
+```
+
+Anti-pérdida-de-tiempo:
+
+- `data/losc/...` no crea `RUN_VALID`.
+- `event_features.csv` no sustituye `RUN_VALID`.
+- Si `runs/<RUN_ID>/RUN_VALID/verdict.json` no existe, `step 12` debe fallar.
+
+### Golden geometry explícita: artefacto canónico por evento
+
+`python -m mvp.pipeline multimode` ya materializa por defecto los inputs observacionales de `s4g/s4h`, ejecuta `s4g -> s4h -> s4i -> s4f -> s4j -> s4k` y degrada a `MODE220_NO_AREA_CONSTRAINT` cuando `221` no es usable o `s4f_area_observation` no produce un `area_obs.json` efectivo. Si `s4j` sí recibe una restriccion de area efectiva desde `s4f`, el path queda como `MODE220_PLUS_HAWKING`.
+
+Si ejecutas la rama explícita `s4g -> s4h -> s4i -> s4j`, el artefacto downstream recomendado ya no es mirar cuatro JSON por separado, sino:
+
+- `runs/<RUN_ID>/s4k_event_support_region/outputs/event_support_region.json`
+
+Ese artefacto consolida:
+
+- región compatible `220`
+- región compatible `221`
+- intersección común
+- filtro de Hawking
+- `multimode_viability` desde `s3b`
+- `domain_status` desde `s4d` cuando exista
+- `downstream_status` como semántica conservadora para consumo downstream
+
+Regla práctica:
+
+- `s4k_event_support_region` no re-ejecuta física; solo consolida artefactos ya emitidos.
+- Si falta cualquiera de `s4g`, `s4h`, `s4i` o `s4j`, el stage debe fallar por contrato.
+- `downstream_status.class` resume la legibilidad downstream del artefacto: `MULTIMODE_USABLE`, `GEOMETRY_PRESENT_BUT_NONINFORMATIVE`, `OUT_OF_DOMAIN` o `NO_SUPPORT_REGION`.
+- `s5_aggregate` consume este artefacto cuando existe y, si hay suficientes eventos `MULTIMODE_USABLE`, usa `s4k_event_support_region` como base preferente para `multimode_conditioned_population`.
+
+### Experimento de barrido de bandas multimodo
+
+Ruta canónica del experimento:
+
+```text
+runs/<RUN_ID>/experiment/band_sweep_multimode/
+```
+
+Artefactos principales:
+
+- `runs/<RUN_ID>/experiment/band_sweep_multimode/outputs/band_sweep_results.json`
+- `runs/<RUN_ID>/experiment/band_sweep_multimode/outputs/band_sweep_summary.csv`
+- `runs/<RUN_ID>/experiment/band_sweep_multimode/outputs/recommendation.json`
+
+Subruns aislados por banda:
+
+```text
+runs/<RUN_ID>/experiment/band_sweep_multimode/runsroot/<SUBRUN_ID>/
+```
+
+Cada `<SUBRUN_ID>` es un run completo de `python -m mvp.pipeline multimode` con un par `band_low/band_high` distinto. El objetivo no es mutar stages canónicos aguas arriba, sino producir un diagnóstico operativo sobre si la banda actual deja `220` edge-locked, si `s4g` acepta alguna geometría y si aparece una región final no vacía.
+
+### Experimento de barrido de `dt_start_s`
+
+Ruta canónica del experimento:
+
+```text
+runs/<RUN_ID>/experiment/dt_start_sweep_multimode/
+```
+
+Artefactos principales:
+
+- `runs/<RUN_ID>/experiment/dt_start_sweep_multimode/outputs/dt_start_sweep_results.json`
+- `runs/<RUN_ID>/experiment/dt_start_sweep_multimode/outputs/dt_start_sweep_summary.csv`
+- `runs/<RUN_ID>/experiment/dt_start_sweep_multimode/outputs/recommendation.json`
+
+Subruns aislados por `dt_start_s`:
+
+```text
+runs/<RUN_ID>/experiment/dt_start_sweep_multimode/runsroot/<SUBRUN_ID>/
+```
+
+Cada `<SUBRUN_ID>` es un run completo de `python -m mvp.pipeline multimode` sobre una banda fija y un `dt_start_s` distinto. El objetivo es separar si el colapso del `220` viene del borde de banda o del arranque temporal del recorte.
+
+### Experimento de barrido de `window_duration_s`
+
+Ruta canónica del experimento:
+
+```text
+runs/<RUN_ID>/experiment/window_duration_sweep_multimode/
+```
+
+Artefactos principales:
+
+- `runs/<RUN_ID>/experiment/window_duration_sweep_multimode/outputs/window_duration_sweep_results.json`
+- `runs/<RUN_ID>/experiment/window_duration_sweep_multimode/outputs/window_duration_sweep_summary.csv`
+- `runs/<RUN_ID>/experiment/window_duration_sweep_multimode/outputs/recommendation.json`
+
+Subruns aislados por `window_duration_s`:
+
+```text
+runs/<RUN_ID>/experiment/window_duration_sweep_multimode/runsroot/<SUBRUN_ID>/
+```
+
+Cada `<SUBRUN_ID>` es un run completo de `python -m mvp.pipeline multimode` sobre banda fija, `dt_start_s` fijo y una duración de ventana distinta. El objetivo es ver si el colapso del `220` viene de una ventana demasiado corta/larga o del estimador mismo.
 
 ### Rutas de auditoría LOSC/t0 y batch offline
 
@@ -440,4 +597,3 @@ runs/<RUN_ID>/experiment/t0_sweep_full_seed<seed>/outputs/t0_sweep_full_results.
 ```
 
 Si falta ese directorio/JSON, el oráculo imprime la ruta esperada exacta y el comando para regenerar el sweep (`phase=run`)
-

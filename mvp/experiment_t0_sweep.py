@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
-"""DEV/INTEGRATION deterministic t0-sweep over existing s2 outputs.
+"""Compatibility wrapper for t0 sweep.
 
-This script is intentionally lightweight and does not implement the
-contract-first/inventory/finalize flow nor subrun isolation required for
-official reproducible sweeps. For scalable/governed execution use
+Legacy entrypoint kept for CLI stability. Canonical implementation is
 ``mvp/experiment_t0_sweep_full.py``.
 """
 from __future__ import annotations
 
+import warnings
+warnings.warn(
+    "experiment_t0_sweep.py is DEPRECATED (2026-03-09). "
+    "Use experiment_t0_sweep_full.py instead.",
+    DeprecationWarning, stacklevel=2,
+)
+
 import argparse
 import json
 import math
+import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
-
-import numpy as np
 
 _here = Path(__file__).resolve()
 for _cand in (_here.parents[0], _here.parents[1]):
@@ -33,22 +38,23 @@ from basurin_io import (
     write_manifest,
     write_stage_summary,
 )
+from mvp.preflight_viability import restrict_grid_with_preflight
 from mvp.s3_ringdown_estimates import estimate_ringdown_observables
 from mvp.s3b_multimode_estimates import (
     _estimate_220,
     _estimate_221_from_signal,
     evaluate_mode,
 )
-from mvp.preflight_viability import restrict_grid_with_preflight
 
 EXPERIMENT_STAGE = "experiment/t0_sweep"
 RESULTS_NAME = "t0_sweep_results.json"
 DEV_TOOL_BANNER = (
-    "DEV/INTEGRATION TOOL: no contract-first, no inventory/finalize, "
-    "no subrun isolation\n"
-    "Para resultados reproducibles y escalables usa: "
+    "DEPRECATED WRAPPER: mvp/experiment_t0_sweep.py delega a "
     "mvp/experiment_t0_sweep_full.py"
 )
+LEGACY_S2_ONLY_FALLBACK = "legacy_s2_only"
+FULL_DELEGATION_PATH = "delegated_full"
+MISSING_BASE_S1_REASON = "missing base s1 strain NPZ"
 
 
 def _parse_grid(args: argparse.Namespace) -> list[int]:
@@ -69,10 +75,6 @@ def _parse_grid(args: argparse.Namespace) -> list[int]:
     if stop < start:
         raise ValueError("--t0-stop-ms must be >= --t0-start-ms")
     return list(range(start, stop + 1, step))
-
-
-def _restrict_grid_with_preflight(run_dir: Path, grid: list[int]) -> tuple[list[int], dict[str, Any] | None]:
-    return restrict_grid_with_preflight(run_dir, grid)
 
 
 def _pick_detector(outputs_dir: Path, detector: str) -> tuple[str, Path]:
@@ -97,7 +99,9 @@ def _pick_detector(outputs_dir: Path, detector: str) -> tuple[str, Path]:
     return det, available[det]
 
 
-def _load_npz(npz_path: Path, window_meta: dict[str, Any]) -> tuple[np.ndarray, float]:
+def _load_npz(npz_path: Path, window_meta: dict[str, Any]) -> tuple[Any, float]:
+    import numpy as np
+
     data = np.load(npz_path)
     if "strain" not in data:
         raise RuntimeError(f"corrupt s2 NPZ: missing strain in {npz_path}")
@@ -119,7 +123,7 @@ def _load_npz(npz_path: Path, window_meta: dict[str, Any]) -> tuple[np.ndarray, 
     return strain, fs
 
 
-def _run_single_point(signal: np.ndarray, fs: float) -> tuple[dict[str, Any], list[str], str]:
+def _run_single_point(signal: Any, fs: float) -> tuple[dict[str, Any], list[str], str]:
     try:
         est = estimate_ringdown_observables(signal, fs)
     except Exception as exc:
@@ -144,7 +148,7 @@ def _run_single_point(signal: np.ndarray, fs: float) -> tuple[dict[str, Any], li
     }, [], ""
 
 
-def _run_multimode_point(signal: np.ndarray, fs: float, n_bootstrap: int, seed: int) -> tuple[dict[str, Any], list[str], str]:
+def _run_multimode_point(signal: Any, fs: float, n_bootstrap: int, seed: int) -> tuple[dict[str, Any], list[str], str]:
     mode_220, flags_220, ok_220 = evaluate_mode(
         signal,
         fs,
@@ -172,10 +176,15 @@ def _run_multimode_point(signal: np.ndarray, fs: float, n_bootstrap: int, seed: 
     return payload, sorted(set(flags_220 + flags_221)), ""
 
 
-def run_t0_sweep(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any], Path]:
-    out_root = resolve_out_root("runs")
-    validate_run_id(args.run_id, out_root)
-    require_run_valid(out_root, args.run_id)
+def _can_use_legacy_s2_only_fallback(out_root: Path, run_id: str, stderr_or_stdout: str) -> bool:
+    if MISSING_BASE_S1_REASON not in stderr_or_stdout:
+        return False
+    s2_manifest = out_root / run_id / "s2_ringdown_window" / "manifest.json"
+    return s2_manifest.exists()
+
+
+def _run_legacy_s2_only_t0_sweep(args: argparse.Namespace, out_root: Path) -> tuple[dict[str, Any], dict[str, Any], Path]:
+    import numpy as np
 
     run_dir = out_root / args.run_id
     s2_dir = run_dir / "s2_ringdown_window"
@@ -192,7 +201,7 @@ def run_t0_sweep(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
 
     strain, fs = _load_npz(npz_path, window_meta)
     grid = _parse_grid(args)
-    grid, grid_restriction = _restrict_grid_with_preflight(run_dir, grid)
+    grid, grid_restriction = restrict_grid_with_preflight(run_dir, grid)
 
     stage_dir, outputs_dir = ensure_stage_dirs(args.run_id, EXPERIMENT_STAGE, base_dir=out_root)
     points: list[dict[str, Any]] = []
@@ -336,6 +345,9 @@ def run_t0_sweep(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
             "n_insufficient": int(n_insufficient),
             "n_failed": int(n_failed),
             "experiment_verdict": verdict_note,
+            "execution_path": LEGACY_S2_ONLY_FALLBACK,
+            "fallback_reason": MISSING_BASE_S1_REASON,
+            "results_sha256": sha256_file(out_path),
         },
         "checks": {
             "run_valid": "PASS",
@@ -343,19 +355,143 @@ def run_t0_sweep(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, An
             "s2_npz_present": True,
         },
     }
-    write_stage_summary(stage_dir, stage_summary)
-    write_manifest(stage_dir, {"t0_sweep_results": out_path})
+    stage_summary_path = write_stage_summary(stage_dir, stage_summary)
+    manifest_path = write_manifest(stage_dir, {"t0_sweep_results": out_path, "stage_summary": stage_summary_path})
+
+    print(f"OUT_ROOT={out_root}")
+    print(f"STAGE_DIR={stage_dir}")
+    print(f"OUTPUTS_DIR={outputs_dir}")
+    print(f"STAGE_SUMMARY={stage_summary_path}")
+    print(f"MANIFEST={manifest_path}")
 
     return results, stage_summary, out_path
+
+
+def _build_full_cmd(args: argparse.Namespace) -> list[str]:
+    cmd = [
+        sys.executable,
+        "-m",
+        "mvp.experiment_t0_sweep_full",
+        "--run-id",
+        args.run_id,
+        "--phase",
+        "run",
+        "--seed",
+        str(int(args.seed)),
+        "--detector",
+        args.detector,
+        "--n-bootstrap",
+        str(int(args.n_bootstrap)),
+        "--stage-timeout-s",
+        "300",
+    ]
+    if args.t0_grid_ms:
+        cmd += ["--t0-grid-ms", args.t0_grid_ms]
+    else:
+        if args.t0_start_ms is not None:
+            cmd += ["--t0-start-ms", str(int(args.t0_start_ms))]
+        if args.t0_stop_ms is not None:
+            cmd += ["--t0-stop-ms", str(int(args.t0_stop_ms))]
+        if args.t0_step_ms is not None:
+            cmd += ["--t0-step-ms", str(int(args.t0_step_ms))]
+    if args.atlas_path:
+        cmd += ["--atlas-path", args.atlas_path]
+    return cmd
+
+
+def _build_legacy_payload(full_payload: dict[str, Any], run_id: str) -> dict[str, Any]:
+    summary = full_payload.get("summary", {}) if isinstance(full_payload.get("summary"), dict) else {}
+    points = full_payload.get("points", []) if isinstance(full_payload.get("points"), list) else []
+    n_ok = int(summary.get("n_ok", 0))
+    n_ins = int(summary.get("n_insufficient", 0))
+    n_failed = int(summary.get("n_failed", 0))
+    verdict_note = "EXECUTED" if (n_ok + n_ins + n_failed) > 0 else "SKIPPED_UNSUPPORTED"
+    return {
+        "schema_version": "experiment_t0_sweep_v1",
+        "run_id": run_id,
+        "source": full_payload.get("source", {}),
+        "grid": full_payload.get("grid", {}),
+        "mode": "single",
+        "summary": {
+            "n_points": int(summary.get("n_points", len(points))),
+            "n_ok": n_ok,
+            "n_insufficient": n_ins,
+            "n_failed": n_failed,
+            "best_point": summary.get("best_point", {}),
+            "verdict": verdict_note,
+        },
+        "points": points,
+    }
+
+
+def run_t0_sweep(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any], Path]:
+    out_root = resolve_out_root("runs")
+    validate_run_id(args.run_id, out_root)
+    require_run_valid(out_root, args.run_id)
+
+    cmd = _build_full_cmd(args)
+    cp = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    if cp.returncode != 0:
+        msg = (cp.stderr or cp.stdout).strip()
+        if _can_use_legacy_s2_only_fallback(out_root, args.run_id, msg):
+            return _run_legacy_s2_only_t0_sweep(args, out_root)
+        raise RuntimeError(f"t0_sweep_full failed exit={cp.returncode}: {msg}")
+
+    full_results = (
+        out_root
+        / args.run_id
+        / "experiment"
+        / f"t0_sweep_full_seed{int(args.seed)}"
+        / "outputs"
+        / "t0_sweep_full_results.json"
+    )
+    if not full_results.exists():
+        raise FileNotFoundError(
+            "Input faltante para wrapper deprecado. "
+            f"Ruta esperada exacta: {full_results}. "
+            f"Comando para regenerar upstream: {' '.join(cmd)}."
+        )
+
+    full_payload = json.loads(full_results.read_text(encoding="utf-8"))
+    legacy_payload = _build_legacy_payload(full_payload, args.run_id)
+
+    stage_dir, outputs_dir = ensure_stage_dirs(args.run_id, EXPERIMENT_STAGE, base_dir=out_root)
+    out_path = outputs_dir / RESULTS_NAME
+    write_json_atomic(out_path, legacy_payload)
+
+    stage_summary = {
+        "stage": EXPERIMENT_STAGE,
+        "run_id": args.run_id,
+        "verdict": "PASS",
+        "created": utc_now_iso(),
+        "results": {
+            "n_points": legacy_payload["summary"]["n_points"],
+            "n_ok": legacy_payload["summary"]["n_ok"],
+            "n_insufficient": legacy_payload["summary"]["n_insufficient"],
+            "n_failed": legacy_payload["summary"]["n_failed"],
+            "experiment_verdict": legacy_payload["summary"]["verdict"],
+            "execution_path": FULL_DELEGATION_PATH,
+            "delegated_to": "mvp.experiment_t0_sweep_full",
+            "results_sha256": sha256_file(out_path),
+        },
+    }
+    stage_summary_path = write_stage_summary(stage_dir, stage_summary)
+    manifest_path = write_manifest(stage_dir, {"t0_sweep_results": out_path, "stage_summary": stage_summary_path})
+
+    print(f"OUT_ROOT={out_root}")
+    print(f"STAGE_DIR={stage_dir}")
+    print(f"OUTPUTS_DIR={outputs_dir}")
+    print(f"STAGE_SUMMARY={stage_summary_path}")
+    print(f"MANIFEST={manifest_path}")
+
+    return legacy_payload, stage_summary, out_path
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=(
-            "Experiment (DEV/INTEGRATION): deterministic t0 sweep over existing s2 outputs. "
-            "No contract-first, no inventory/finalize, no subrun isolation. "
-            "Para resultados reproducibles y escalables usa: "
-            "mvp/experiment_t0_sweep_full.py"
+            "Experiment (deprecated wrapper): deterministic t0 sweep over existing s2 outputs. "
+            "Delegates to mvp/experiment_t0_sweep_full.py"
         )
     )
     ap.add_argument("--run-id", "--run", dest="run_id", required=True)
@@ -368,8 +504,11 @@ def main() -> int:
     ap.add_argument("--mode", choices=["single", "multimode"], default="single")
     ap.add_argument("--detector", choices=["H1", "L1", "auto"], default="auto")
     ap.add_argument("--atlas-path", default=None)
-    ap.add_argument("--quiet", action="store_true", help="Suppress DEV/INTEGRATION banner")
+    ap.add_argument("--quiet", action="store_true", help="Suppress deprecation banner")
     args = ap.parse_args()
+
+    if args.mode != "single":
+        print("[experiment_t0_sweep] WARNING: wrapper supports only single-mode output; forcing canonical run phase", file=sys.stderr)
 
     try:
         if not args.quiet:

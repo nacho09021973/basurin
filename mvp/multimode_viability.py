@@ -74,6 +74,11 @@ def classify_multimode_viability(
         )
         return _viability_result("SINGLEMODE_ONLY", reasons, metrics, t)
 
+    mode_221_ok = inputs.get("mode_221_ok")
+    if isinstance(mode_221_ok, bool) and mode_221_ok is False:
+        reasons.append("mode_221_ok=false: overtone posterior not usable for multimode inference")
+        return _viability_result("SINGLEMODE_ONLY", reasons, metrics, t)
+
     severe: list[str] = []
 
     sf = _finite_or_none(inputs.get("spin_at_floor_frac_221"))
@@ -86,7 +91,14 @@ def classify_multimode_viability(
 
     dbic = _finite_or_none(inputs.get("delta_bic"))
     metrics["delta_bic"] = dbic
-    if dbic is not None and dbic < t["DELTA_BIC_SUPPORTIVE"]:
+    two_mode_preferred = inputs.get("two_mode_preferred")
+    if dbic is None:
+        reasons.append("delta_bic missing or non-finite: two-mode preference not established")
+        return _viability_result("SINGLEMODE_ONLY", reasons, metrics, t)
+    if isinstance(two_mode_preferred, bool) and two_mode_preferred is False:
+        reasons.append("two_mode_preferred=false: data do not prefer the two-mode model")
+        return _viability_result("SINGLEMODE_ONLY", reasons, metrics, t)
+    if two_mode_preferred is not True and dbic < t["DELTA_BIC_SUPPORTIVE"]:
         severe.append("DELTA_BIC_UNSUPPORTIVE")
         reasons.append(
             f"delta_bic={dbic:.2f} < {t['DELTA_BIC_SUPPORTIVE']}: "

@@ -15,6 +15,7 @@ import argparse
 import glob
 import hashlib
 import json
+import math
 import os
 import signal
 import shutil
@@ -37,6 +38,9 @@ from mvp.contracts import init_stage, finalize, abort, check_inputs
 from basurin_io import resolve_out_root, write_json_atomic, sha256_file, utc_now_iso
 
 STAGE = "s1_fetch_strain"
+DEFAULT_T0_REFERENCE_CATALOG = Path(__file__).resolve().parents[1] / "gwtc_events_t0.json"
+DEFAULT_MAX_NONFINITE_FRACTION = 1e-5
+DEFAULT_MIN_ALLOWED_NONFINITE_COUNT = 8
 
 
 def _run_valid_verdict_path(run_id: str) -> Path:
@@ -130,15 +134,25 @@ def _generate_synthetic_strain(
 
 
 def _fetch_gps_center(event_id: str) -> float:
-    local = Path("docs/ringdown/event_metadata") / f"{event_id}_metadata.json"
-    if local.exists():
-        print(f"[s1_fetch_strain] GPS lookup: reading local metadata {local}", flush=True)
-        with open(local, "r", encoding="utf-8") as f:
-            meta = json.load(f)
-        for key in ("t_coalescence_gps", "gps", "GPS", "gpstime"):
-            if key in meta:
-                print(f"[s1_fetch_strain] GPS resolved from local file: {meta[key]}", flush=True)
-                return float(meta[key])
+    lookup_keys = [event_id]
+    if "_" in event_id:
+        lookup_keys.append(event_id.split("_", 1)[0])
+    if DEFAULT_T0_REFERENCE_CATALOG.exists():
+        print(
+            f"[s1_fetch_strain] GPS lookup: reading canonical catalog {DEFAULT_T0_REFERENCE_CATALOG}",
+            flush=True,
+        )
+        with open(DEFAULT_T0_REFERENCE_CATALOG, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+        if isinstance(catalog, dict):
+            for lookup_key in lookup_keys:
+                entry = catalog.get(lookup_key)
+                if not isinstance(entry, dict):
+                    continue
+                for key in ("GPS", "gps", "t0_gps", "event_time_gps", "gpstime", "gps_time"):
+                    if key in entry:
+                        print(f"[s1_fetch_strain] GPS resolved from canonical catalog: {entry[key]}", flush=True)
+                        return float(entry[key])
     print(f"[s1_fetch_strain] GPS lookup: querying GWOSC API for {event_id} ...", flush=True)
     try:
         import requests
@@ -171,7 +185,7 @@ def _fetch_gps_center(event_id: str) -> float:
         print(f"[s1_fetch_strain] GWOSC API error: {exc}", flush=True)
     raise RuntimeError(
         f"Cannot resolve GPS center for {event_id}. "
-        f"Add metadata to docs/ringdown/event_metadata/{event_id}_metadata.json"
+        f"Add the event to {DEFAULT_T0_REFERENCE_CATALOG}"
     )
 
 
@@ -191,8 +205,8 @@ def _resolve_local_hdf5_mappings(items: list[str], event_id: str | None) -> dict
         path_expr = path_raw.strip()
         if not sep:
             raise ValueError(f"Invalid --local-hdf5 entry '{item}'. Expected DET=PATH")
-        if det not in {"H1", "L1"}:
-            raise ValueError(f"Invalid detector in --local-hdf5: {det}. Allowed: H1,L1")
+        if det not in {"H1", "L1", "V1"}:
+            raise ValueError(f"Invalid detector in --local-hdf5: {det}. Allowed: H1,L1,V1")
         if det in local_by_det:
             raise ValueError(f"Duplicate --local-hdf5 detector: {det}")
         local_by_det[det] = _resolve_hdf5_candidate(path_expr, det, event_id=event_id)
@@ -217,6 +231,7 @@ def match_hdf5_files(event_dir: Path) -> dict[str, list[Path]]:
         "all": all_files,
         "H1": [p for p in all_files if "H1" in p.name.upper()],
         "L1": [p for p in all_files if "L1" in p.name.upper()],
+        "V1": [p for p in all_files if "V1" in p.name.upper()],
     }
 
 
@@ -249,6 +264,7 @@ def _resolve_event_hdf5_or_die(*, hdf5_root: Path, event_id: str, detectors: lis
         f"h5_count={len(matches.get('all', []))}",
         f"match_count_H1={len(matches.get('H1', []))}",
         f"match_count_L1={len(matches.get('L1', []))}",
+        f"match_count_V1={len(matches.get('V1', []))}",
         "Patrones buscados por detector:",
     ]
     for det in detectors:
@@ -260,7 +276,7 @@ def _resolve_event_hdf5_or_die(*, hdf5_root: Path, event_id: str, detectors: lis
         [
             "Guía de resolución:",
             "  A) mount/symlink roto: data/losc no apunta al cache real.",
-            "  B) naming: hay .h5/.hdf5 pero no casan H1/L1; crear symlinks H1.h5 y L1.h5.",
+            "  B) naming: hay .h5/.hdf5 pero no casan detectores; crear symlinks coherentes por detector (H1/L1/V1).",
             f"Precheck: python tools/losc_precheck.py --event-id {event_id} --losc-root {hdf5_root.resolve()}",
             f"Comprobación sugerida: find {event_dir} \\( -iname '*.hdf5' -o -iname '*.h5' \\) -type f",
             "Ejemplo explícito (--local-hdf5):",
@@ -392,6 +408,133 @@ def _load_local_hdf5(path: Path) -> tuple[np.ndarray, float, float | None, str]:
     return values, float(1.0 / float(xspacing)), gps_start, "h5py"
 
 
+def _crop_local_strain_to_requested_window(
+    strain: np.ndarray,
+    *,
+    detector: str,
+    sample_rate_hz: float,
+    gps_start_local: float | None,
+    gps_start_target: float | None,
+    duration_s: float,
+) -> tuple[np.ndarray, float | None, dict[str, Any]]:
+    details: dict[str, Any] = {
+        "applied": False,
+        "source_n_samples": int(strain.size),
+        "output_n_samples": int(strain.size),
+        "source_gps_start": None if gps_start_local is None else float(gps_start_local),
+        "output_gps_start": None if gps_start_local is None else float(gps_start_local),
+        "duration_s": float(duration_s),
+        "reason": None,
+    }
+    if strain.ndim != 1 or strain.size == 0:
+        raise ValueError(f"{detector} local strain must be a non-empty 1-D array")
+    if gps_start_local is None:
+        details["reason"] = "missing_local_gps_start"
+        return strain, gps_start_local, details
+    if gps_start_target is None:
+        details["reason"] = "missing_target_gps_start"
+        return strain, gps_start_local, details
+    if duration_s <= 0.0:
+        raise ValueError(f"{detector} duration_s must be > 0")
+    if sample_rate_hz <= 0.0:
+        raise ValueError(f"{detector} sample_rate_hz must be > 0")
+
+    n_out = int(round(duration_s * sample_rate_hz))
+    if n_out <= 0:
+        raise ValueError(f"{detector} requested window has zero samples")
+
+    i_start = int(round((gps_start_target - gps_start_local) * sample_rate_hz))
+    i_end = i_start + n_out
+    if i_start < 0 or i_end > int(strain.size):
+        details["reason"] = "requested_window_out_of_bounds"
+        return strain, gps_start_local, details
+
+    cropped = np.asarray(strain[i_start:i_end], dtype=np.float64).copy()
+    details.update(
+        {
+            "applied": True,
+            "output_n_samples": int(cropped.size),
+            "output_gps_start": float(gps_start_target),
+            "reason": "cropped_to_requested_window",
+        }
+    )
+    return cropped, float(gps_start_target), details
+
+
+def _max_nonfinite_fraction() -> float:
+    raw = os.environ.get("BASURIN_MAX_NONFINITE_FRACTION", "").strip()
+    if not raw:
+        return DEFAULT_MAX_NONFINITE_FRACTION
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid BASURIN_MAX_NONFINITE_FRACTION={raw!r}; expected float in [0,1)"
+        ) from exc
+    if not (0.0 <= value < 1.0):
+        raise ValueError(
+            f"Invalid BASURIN_MAX_NONFINITE_FRACTION={raw!r}; expected float in [0,1)"
+        )
+    return value
+
+
+def _sanitize_strain_array(
+    strain: np.ndarray,
+    *,
+    detector: str,
+    max_nonfinite_fraction: float,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    if strain.ndim != 1 or strain.size == 0:
+        raise ValueError(f"{detector} strain must be a non-empty 1-D array")
+
+    nonfinite_mask = ~np.isfinite(strain)
+    nonfinite_count = int(np.count_nonzero(nonfinite_mask))
+    total = int(strain.size)
+    allowed_count = max(
+        DEFAULT_MIN_ALLOWED_NONFINITE_COUNT,
+        int(math.ceil(total * max_nonfinite_fraction)),
+    )
+    details: dict[str, Any] = {
+        "applied": False,
+        "method": None,
+        "nonfinite_count_raw": nonfinite_count,
+        "nonfinite_fraction_raw": float(nonfinite_count / total),
+        "max_nonfinite_fraction": float(max_nonfinite_fraction),
+        "allowed_nonfinite_count": int(allowed_count),
+    }
+    if nonfinite_count == 0:
+        return strain, details
+    if nonfinite_count >= total:
+        raise ValueError(
+            f"{detector} strain is entirely non-finite: nonfinite_count={nonfinite_count}, n={total}"
+        )
+    if nonfinite_count > allowed_count:
+        raise ValueError(
+            f"{detector} strain has too many non-finite samples: "
+            f"nonfinite_count={nonfinite_count}, allowed_nonfinite_count={allowed_count}, "
+            f"fraction={nonfinite_count / total:.3e}, max_nonfinite_fraction={max_nonfinite_fraction:.3e}"
+        )
+
+    sanitized = np.asarray(strain, dtype=np.float64).copy()
+    indices = np.arange(total, dtype=np.float64)
+    finite_mask = ~nonfinite_mask
+    sanitized[nonfinite_mask] = np.interp(
+        indices[nonfinite_mask],
+        indices[finite_mask],
+        sanitized[finite_mask],
+    )
+    if not np.isfinite(sanitized).all():
+        raise ValueError(f"{detector} strain sanitization failed to remove all non-finite samples")
+
+    details.update(
+        {
+            "applied": True,
+            "method": "linear_interp_nonfinite",
+        }
+    )
+    return sanitized, details
+
+
 def _try_reuse(
     ctx,
     event_id: str,
@@ -465,8 +608,15 @@ def _try_reuse(
         if det not in npz.files:
             print(f"[s1_fetch_strain] reuse: detector {det} missing in strain.npz, will fetch", flush=True)
             return False
+        arr = np.asarray(npz[det], dtype=np.float64)
+        if not np.isfinite(arr).all():
+            print(
+                f"[s1_fetch_strain] reuse: detector {det} contains NaN/Inf in cached strain.npz, will fetch",
+                flush=True,
+            )
+            return False
         if det in sha_recorded:
-            actual_sha = _sha256_array(npz[det])
+            actual_sha = _sha256_array(arr)
             if actual_sha != sha_recorded[det]:
                 print(f"[s1_fetch_strain] reuse: SHA256 mismatch for {det}, will fetch", flush=True)
                 return False
@@ -587,7 +737,8 @@ def main() -> int:
         metavar="DET=PATH",
         help=(
             "Use local/offline HDF5 per detector (repeatable, DET=PATH). "
-            "If omitted, auto-resolves from <hdf5-root>/<EVENT_ID>/ using *H1*.hdf5|*.h5 and *L1*.hdf5|*.h5."
+            "If omitted, auto-resolves from <hdf5-root>/<EVENT_ID>/ using the best available detector pair "
+            "among H1/L1/V1."
         ),
     )
     ap.add_argument(
@@ -692,8 +843,7 @@ def main() -> int:
 
     try:
         if local_mode:
-            gps_center = None
-            gps_start = None
+            gps_center = _fetch_gps_center(args.event_id)
         elif args.synthetic:
             gps_center = 1126259462.4204
         else:
@@ -705,6 +855,8 @@ def main() -> int:
             gps_center = _fetch_gps_center(args.event_id)
         if gps_center is not None:
             gps_start = gps_center - args.duration_s / 2.0
+        else:
+            gps_start = None
 
         strains: dict[str, np.ndarray] = {}
         sha_by_det: dict[str, str] = {}
@@ -712,6 +864,9 @@ def main() -> int:
         library_version = "unknown"
 
         local_inputs_rel: dict[str, str] = {}
+        sanitization_by_det: dict[str, dict[str, Any]] = {}
+        window_crop_by_det: dict[str, dict[str, Any]] = {}
+        max_nonfinite_fraction = _max_nonfinite_fraction()
 
         for i, det in enumerate(detectors, 1):
             print(
@@ -732,9 +887,22 @@ def main() -> int:
                 shutil.copy2(src, dst)
                 local_inputs_rel[det] = str(dst.relative_to(ctx.stage_dir))
                 strain, sr, gps_start_local, library_version = _load_local_hdf5(dst)
-                if gps_start is None and gps_start_local is not None:
-                    gps_start = gps_start_local
-                    gps_center = gps_start + args.duration_s / 2.0
+                strain, gps_start_cropped, crop_details = _crop_local_strain_to_requested_window(
+                    np.asarray(strain, dtype=np.float64),
+                    detector=det,
+                    sample_rate_hz=sr,
+                    gps_start_local=gps_start_local,
+                    gps_start_target=gps_start,
+                    duration_s=args.duration_s,
+                )
+                window_crop_by_det[det] = crop_details
+                if gps_start is None:
+                    if gps_start_cropped is not None:
+                        gps_start = gps_start_cropped
+                        gps_center = gps_start + args.duration_s / 2.0
+                    elif gps_start_local is not None:
+                        gps_start = gps_start_local
+                        gps_center = gps_start + args.duration_s / 2.0
                 print(f"[s1_fetch_strain] Local HDF5 OK: {det}, n={strain.size}, fs={sr}", flush=True)
             else:
                 if args.offline:
@@ -746,6 +914,19 @@ def main() -> int:
                     gps_start,
                     args.duration_s,
                     timeout_s=args.fetch_timeout_s,
+                )
+            strain, sanitization = _sanitize_strain_array(
+                np.asarray(strain, dtype=np.float64),
+                detector=det,
+                max_nonfinite_fraction=max_nonfinite_fraction,
+            )
+            sanitization_by_det[det] = sanitization
+            if sanitization["applied"]:
+                print(
+                    f"[s1_fetch_strain] Sanitized {det}: "
+                    f"nonfinite_count={sanitization['nonfinite_count_raw']} "
+                    f"method={sanitization['method']}",
+                    flush=True,
                 )
             strains[det] = strain
             sha_by_det[det] = _sha256_array(strain)
@@ -776,6 +957,7 @@ def main() -> int:
             "gps_start": gps_start, "duration_s": args.duration_s,
             "sample_rate_hz": sample_rate_hz, "library_version": library_version,
             "sha256_per_detector": sha_by_det, "timestamp": utc_now_iso(),
+            "strain_sanitization": sanitization_by_det,
         }
         if local_mode:
             provenance["local_inputs"] = {
@@ -784,6 +966,7 @@ def main() -> int:
             provenance["local_input_sha256"] = {
                 det: sha256_file(ctx.stage_dir / provenance["local_inputs"][det]) for det in provenance["local_inputs"]
             }
+            provenance["local_window_crop"] = window_crop_by_det
         prov_path = ctx.outputs_dir / "provenance.json"
         write_json_atomic(prov_path, provenance)
 
@@ -796,8 +979,16 @@ def main() -> int:
                 },
             )
 
-        finalize(ctx, artifacts={"strain_npz": npz_path, "provenance": prov_path},
-                 results={"detectors": detectors, "sample_rate_hz": sample_rate_hz})
+        finalize(
+            ctx,
+            artifacts={"strain_npz": npz_path, "provenance": prov_path},
+            results={
+                "detectors": detectors,
+                "sample_rate_hz": sample_rate_hz,
+                "strain_sanitization": sanitization_by_det,
+                "local_window_crop": window_crop_by_det if local_mode else {},
+            },
+        )
         _write_run_valid_verdict(args.run, "PASS", "s1_fetch_strain completed successfully")
         return 0
 

@@ -58,6 +58,19 @@ ALT_MASSES = [30, 62, 100]
 ALT_SPINS = [0.0, 0.3, 0.5, 0.67, 0.8, 0.95]
 
 
+def _format_mass_token(mass: float) -> str:
+    """Preserve non-integer mass resolution in geometry IDs.
+
+    Historical atlas IDs use integer masses such as ``M62``. Keep those stable,
+    but avoid collapsing fine low-mass grids (for example 2.4..3.2 Msun) into
+    only ``M2`` and ``M3``.
+    """
+    rounded = round(mass)
+    if math.isclose(mass, rounded, rel_tol=0.0, abs_tol=1e-9):
+        return str(int(rounded))
+    return f"{mass:.4f}".rstrip("0").rstrip(".")
+
+
 def generate_kerr_grid(
     masses: list[float],
     n_spins: int,
@@ -72,7 +85,7 @@ def generate_kerr_grid(
         for M in masses:
             for chi in spins:
                 qnm_result = kerr_qnm(M, chi, mode)
-                gid = f"Kerr_M{M:.0f}_a{chi:.4f}_l{l}m{m}n{n}"
+                gid = f"Kerr_M{_format_mass_token(M)}_a{chi:.4f}_l{l}m{m}n{n}"
                 entry = make_atlas_entry(
                     geometry_id=gid,
                     theory="GR_Kerr",
@@ -106,7 +119,7 @@ def generate_alternative_entries(
             for zeta in EDGB_ZETAS:
                 df, dt = deviation_edgb(chi, zeta)
                 shifted = apply_deviation(base, df, dt)
-                gid = f"EdGB_M{M:.0f}_a{chi:.2f}_z{zeta:.1f}"
+                gid = f"EdGB_M{_format_mass_token(M)}_a{chi:.2f}_z{zeta:.1f}"
                 entry = make_atlas_entry(
                     geometry_id=gid,
                     theory="EdGB",
@@ -129,7 +142,7 @@ def generate_alternative_entries(
                 for zeta in DCS_ZETAS:
                     df, dt = deviation_dcs(chi, zeta)
                     shifted = apply_deviation(base, df, dt)
-                    gid = f"dCS_M{M:.0f}_a{chi:.2f}_z{zeta:.1f}"
+                    gid = f"dCS_M{_format_mass_token(M)}_a{chi:.2f}_z{zeta:.1f}"
                     entry = make_atlas_entry(
                         geometry_id=gid,
                         theory="dCS",
@@ -151,7 +164,7 @@ def generate_alternative_entries(
             for q in KN_CHARGES:
                 df, dt = deviation_kerr_newman(chi, q)
                 shifted = apply_deviation(base, df, dt)
-                gid = f"KN_M{M:.0f}_a{chi:.2f}_q{q:.1f}"
+                gid = f"KN_M{_format_mass_token(M)}_a{chi:.2f}_q{q:.1f}"
                 entry = make_atlas_entry(
                     geometry_id=gid,
                     theory="Kerr-Newman",

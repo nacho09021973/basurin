@@ -2,6 +2,7 @@ from mvp.s5_aggregate import (
     _detect_compatible_set_schema,
     _event_id_from_source_run,
     _extract_compatible_geometry_ids,
+    _safe_event_id,
 )
 
 
@@ -118,3 +119,9 @@ def test_event_id_parser_from_source_run_handles_embedded_underscore() -> None:
     assert _event_id_from_source_run("mvp_GW190521_030229_20260201_120001") == "GW190521_030229"
     assert _event_id_from_source_run("mvp_GW200311_115853_20260201_120001") == "GW200311_115853"
     assert _event_id_from_source_run("invalid_run") is None
+
+
+def test_safe_event_id_prefers_payload_over_noncanonical_run_suffix() -> None:
+    run_id = "mvp_GW200129_065458_area_strict_20260312T132701Z"
+    assert _safe_event_id(run_id, "GW200129_065458") == "GW200129_065458"
+    assert _safe_event_id(run_id, None) == "GW200129_065458_area"

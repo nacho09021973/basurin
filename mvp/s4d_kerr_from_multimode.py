@@ -8,6 +8,7 @@ Canonical stage (Phase B):
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
 import os
@@ -20,6 +21,18 @@ from typing import Any
 from mvp.contracts import StageContext, abort, check_inputs, finalize, init_stage, log_stage_paths
 
 STAGE = "s4d_kerr_from_multimode"
+SKIPPED_MULTIMODE_GATE = "SKIPPED_MULTIMODE_GATE"
+SKIPPED_OUT_OF_DOMAIN = "SKIPPED_OUT_OF_DOMAIN"
+DOMAIN_OUT_OF_DOMAIN = "OUT_OF_DOMAIN"
+BNS_FAMILY = "BNS_REMNANT"
+LOW_MASS_FAMILY = "LOW_MASS_BH_POSTMERGER"
+MULTIMODE_UNAVAILABLE_221 = "MULTIMODE_UNAVAILABLE_221"
+SINGLE_MODE_CONSTRAINED_PROGRAM = "SINGLE_MODE_CONSTRAINED_PROGRAM"
+FALLBACK_PATH_220_ATLAS = "220_ATLAS"
+FALLBACK_PATH_220_HAWKING = "220_HAWKING"
+EMPTY_COMPATIBLE_SET = "EMPTY_COMPATIBLE_SET"
+LOW_MASS_DEFAULT_MASS_RANGE = (2.3, 3.2)
+LOW_MASS_DEFAULT_CHI_RANGE = (0.55, 0.98)
 M_MIN = 5.0
 M_MAX = 500.0
 A_MIN = 0.0
@@ -34,6 +47,10 @@ SPIN_PHYSICAL_FLOOR_WARNING_MSG = "Spin posterior saturated at A_MIN=0 (physical
 MULTIMODE_OK = "MULTIMODE_OK"
 SINGLEMODE_ONLY = "SINGLEMODE_ONLY"
 RINGDOWN_NONINFORMATIVE = "RINGDOWN_NONINFORMATIVE"
+CATALOG_CANDIDATE_PATHS = (
+    Path(__file__).resolve().parents[1] / "gwtc_quality_events.csv",
+    Path(__file__).resolve().parents[1] / "data" / "losc" / "gwtc_all_events.csv",
+)
 
 
 def _base_params() -> dict[str, Any]:
@@ -102,6 +119,293 @@ def _to_float(value: Any) -> float | None:
     if not math.isfinite(out):
         return None
     return out
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Expected JSON object in {path}, got {type(payload).__name__}")
+    return payload
+
+
+def _compatible_geometry_count(payload: dict[str, Any]) -> int:
+    n_compatible = payload.get("n_compatible")
+    if isinstance(n_compatible, int):
+        return max(0, int(n_compatible))
+    compatible = payload.get("compatible_geometries")
+    if isinstance(compatible, list):
+        return len(compatible)
+    return 0
+
+
+def _lookup_catalog_row(event_id: str) -> dict[str, str] | None:
+    for path in CATALOG_CANDIDATE_PATHS:
+        if not path.exists():
+            continue
+        with path.open("r", encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh)
+            for row in reader:
+                if str(row.get("event", "")).strip() == event_id:
+                    return row
+    return None
+
+
+def _classify_source_kind_from_masses(m1_source: Any, m2_source: Any) -> str | None:
+    m1 = _to_float(m1_source)
+    m2 = _to_float(m2_source)
+    if m1 is None or m2 is None or m1 <= 0.0 or m2 <= 0.0:
+        return None
+    if m1 < 3.0 and m2 < 3.0:
+        return "BNS"
+    if (m1 < 3.0 <= m2) or (m2 < 3.0 <= m1):
+        return "NSBH"
+    return "BBH"
+
+
+def _load_event_catalog_metadata(event_id: str | None) -> dict[str, Any]:
+    if event_id is None:
+        return {}
+    row = _lookup_catalog_row(event_id)
+    if row is None:
+        return {}
+    source_kind = _classify_source_kind_from_masses(
+        row.get("m1_source") or row.get("mass_1_source"),
+        row.get("m2_source") or row.get("mass_2_source"),
+    )
+    metadata: dict[str, Any] = {
+        "event_id": event_id,
+        "catalog": row.get("catalog"),
+        "classification_source": "catalog_mass_threshold" if source_kind is not None else "unknown",
+    }
+    if source_kind is not None:
+        metadata["source_class"] = source_kind
+    return metadata
+
+
+def _resolve_fallback_path(run_dir: Path) -> str:
+    hawking_path = run_dir / "s4j_hawking_area_filter" / "outputs" / "hawking_area_filter.json"
+    if hawking_path.exists():
+        return FALLBACK_PATH_220_HAWKING
+    return FALLBACK_PATH_220_ATLAS
+
+
+def _is_mode221_unavailable(
+    viability_class: str,
+    viability_reasons: list[str],
+    multimode: dict[str, Any],
+) -> bool:
+    if viability_class == SINGLEMODE_ONLY:
+        return True
+    reason_blob = " ".join(str(reason).lower() for reason in viability_reasons)
+    if "221" in reason_blob or "overtone" in reason_blob:
+        return True
+    results = multimode.get("results")
+    if isinstance(results, dict):
+        verdict = results.get("verdict")
+        if isinstance(verdict, str) and verdict.upper() in {"INSUFFICIENT_DATA", SINGLEMODE_ONLY}:
+            return True
+    return False
+
+
+def _build_multimode_fallback(
+    *,
+    run_dir: Path,
+    viability_class: str,
+    viability_reasons: list[str],
+    multimode: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not _is_mode221_unavailable(viability_class, viability_reasons, multimode):
+        return None
+    fallback_reason = (
+        str(viability_reasons[0])
+        if viability_reasons
+        else "mode 221 is not usable for canonical multimode inference"
+    )
+    return {
+        "classification": MULTIMODE_UNAVAILABLE_221,
+        "fallback_path": _resolve_fallback_path(run_dir),
+        "program_classification": SINGLE_MODE_CONSTRAINED_PROGRAM,
+        "reason": fallback_reason,
+    }
+
+
+def _coerce_range(raw: Any) -> tuple[float, float] | None:
+    if not isinstance(raw, list) or len(raw) != 2:
+        return None
+    low = _to_float(raw[0])
+    high = _to_float(raw[1])
+    if low is None or high is None or high < low:
+        return None
+    return (float(low), float(high))
+
+
+def _normalize_family_list(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        family = str(item).strip().upper()
+        if family and family not in out:
+            out.append(family)
+    return out
+
+
+def _source_kind_from_metadata(metadata: dict[str, Any]) -> str | None:
+    for key in ("source_class", "event_class", "event_type", "source_type"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            token = value.strip().lower().replace("-", "_").replace(" ", "_")
+            if token in {"bns", "binary_neutron_star", "nsns"}:
+                return "BNS"
+            return token.upper()
+    return None
+
+
+def _extract_event_id(run_provenance: dict[str, Any]) -> str | None:
+    invocation = run_provenance.get("invocation")
+    if not isinstance(invocation, dict):
+        return None
+    event_id = invocation.get("event_id")
+    if not isinstance(event_id, str) or not event_id.strip():
+        return None
+    return event_id.strip()
+
+
+def _extract_analysis_band_hz(
+    *,
+    multimode: dict[str, Any],
+    run_provenance: dict[str, Any],
+) -> tuple[float, float] | None:
+    invocation = run_provenance.get("invocation")
+    if isinstance(invocation, dict):
+        key_params = invocation.get("key_params")
+        if isinstance(key_params, dict):
+            low = _to_float(key_params.get("band_low"))
+            high = _to_float(key_params.get("band_high"))
+            if low is not None and high is not None and high > low:
+                return (float(low), float(high))
+
+    source = multimode.get("source")
+    if isinstance(source, dict):
+        window = source.get("window")
+        if isinstance(window, dict):
+            band = _coerce_range(window.get("band_hz"))
+            if band is not None:
+                return band
+        band = _coerce_range(source.get("band_hz"))
+        if band is not None:
+            return band
+
+    return None
+
+
+def _resolve_low_mass_prior(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    family_priors = metadata.get("family_priors")
+    preferred = set(_normalize_family_list(metadata.get("preferred_families")))
+    source_kind = _source_kind_from_metadata(metadata)
+    low_mass_prior = family_priors.get(LOW_MASS_FAMILY) if isinstance(family_priors, dict) else None
+
+    if isinstance(low_mass_prior, dict):
+        mass_range = _coerce_range(low_mass_prior.get("mass_msun_range")) or LOW_MASS_DEFAULT_MASS_RANGE
+        chi_range = _coerce_range(low_mass_prior.get("chi_range")) or LOW_MASS_DEFAULT_CHI_RANGE
+        return {
+            "mass_msun_range": [float(mass_range[0]), float(mass_range[1])],
+            "chi_range": [float(chi_range[0]), float(chi_range[1])],
+            "source": "event_metadata",
+        }
+
+    if source_kind == "BNS" or BNS_FAMILY in preferred or LOW_MASS_FAMILY in preferred:
+        return {
+            "mass_msun_range": [float(LOW_MASS_DEFAULT_MASS_RANGE[0]), float(LOW_MASS_DEFAULT_MASS_RANGE[1])],
+            "chi_range": [float(LOW_MASS_DEFAULT_CHI_RANGE[0]), float(LOW_MASS_DEFAULT_CHI_RANGE[1])],
+            "source": "default_low_mass_domain",
+        }
+
+    return None
+
+
+def _linspace(lo: float, hi: float, n: int) -> list[float]:
+    if n <= 1 or math.isclose(lo, hi):
+        return [float(lo)]
+    step = (hi - lo) / float(n - 1)
+    return [float(lo + step * i) for i in range(n)]
+
+
+def _low_mass_kerr_frequency_envelope(prior: dict[str, Any]) -> dict[str, Any] | None:
+    mass_range = _coerce_range(prior.get("mass_msun_range"))
+    chi_range = _coerce_range(prior.get("chi_range"))
+    if mass_range is None or chi_range is None:
+        return None
+
+    from mvp.kerr_qnm_fits import kerr_qnm
+
+    freqs: list[float] = []
+    for mass_msun in _linspace(float(mass_range[0]), float(mass_range[1]), 9):
+        for chi in _linspace(float(chi_range[0]), float(chi_range[1]), 9):
+            for mode in ((2, 2, 0), (2, 2, 1)):
+                qnm = kerr_qnm(mass_msun, chi, mode)
+                freq = _to_float(qnm.f_hz)
+                if freq is not None and freq > 0.0:
+                    freqs.append(float(freq))
+
+    if not freqs:
+        return None
+
+    return {
+        "f_low_hz": float(min(freqs)),
+        "f_high_hz": float(max(freqs)),
+        "mass_msun_range": [float(mass_range[0]), float(mass_range[1])],
+        "chi_range": [float(chi_range[0]), float(chi_range[1])],
+        "source": str(prior.get("source") or "unknown"),
+    }
+
+
+def _evaluate_domain_guard(
+    *,
+    multimode: dict[str, Any],
+    run_provenance: dict[str, Any],
+    event_metadata: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not isinstance(event_metadata, dict) or not event_metadata:
+        return None
+
+    prior = _resolve_low_mass_prior(event_metadata)
+    if prior is None:
+        return None
+
+    analysis_band = _extract_analysis_band_hz(multimode=multimode, run_provenance=run_provenance)
+    if analysis_band is None:
+        return None
+
+    envelope = _low_mass_kerr_frequency_envelope(prior)
+    if envelope is None:
+        return None
+
+    overlap_low = max(float(analysis_band[0]), float(envelope["f_low_hz"]))
+    overlap_high = min(float(analysis_band[1]), float(envelope["f_high_hz"]))
+    overlap_hz = max(0.0, overlap_high - overlap_low)
+    if overlap_hz > 0.0:
+        return None
+
+    event_id = _extract_event_id(run_provenance) or event_metadata.get("event_id")
+    preferred = _normalize_family_list(event_metadata.get("preferred_families"))
+    reason = (
+        "analysis band has no physically useful overlap with the low-mass Kerr modal envelope "
+        f"for this event domain: band_hz=[{analysis_band[0]:.3f}, {analysis_band[1]:.3f}], "
+        f"kerr_envelope_hz=[{float(envelope['f_low_hz']):.3f}, {float(envelope['f_high_hz']):.3f}]"
+    )
+    return {
+        "domain_status": DOMAIN_OUT_OF_DOMAIN,
+        "reason": reason,
+        "event_id": event_id,
+        "source_class": event_metadata.get("source_class"),
+        "preferred_families": preferred,
+        "analysis_band_hz": [float(analysis_band[0]), float(analysis_band[1])],
+        "kerr_envelope_hz": [float(envelope["f_low_hz"]), float(envelope["f_high_hz"])],
+        "prior_source": envelope["source"],
+        "mass_msun_range": envelope["mass_msun_range"],
+        "chi_range": envelope["chi_range"],
+    }
 
 
 def _extract_quantile_block(mode_obj: dict[str, Any]) -> dict[str, dict[str, float]] | None:
@@ -556,6 +860,181 @@ def _extract_kerr_with_covariance(multimode: dict[str, Any]) -> dict[str, Any]:
         },
     }
 
+
+def _write_out_of_domain_skip(
+    *,
+    ctx: StageContext,
+    viability: dict[str, Any],
+    domain_guard: dict[str, Any],
+    input_by_label: dict[str, dict[str, str]],
+) -> dict[str, Path]:
+    skip_payload = {
+        "schema_name": "kerr_from_multimode",
+        "schema_version": "mvp_kerr_from_multimode_v1",
+        "json_strict": True,
+        "created_utc": _utc_now_z(),
+        "run_id": ctx.run_id,
+        "stage": STAGE,
+        "status": SKIPPED_OUT_OF_DOMAIN,
+        "domain_status": DOMAIN_OUT_OF_DOMAIN,
+        "reason": domain_guard["reason"],
+        "source": {
+            "compatible_set": {
+                "relpath": "s4_geometry_filter/outputs/compatible_set.json",
+                "sha256": input_by_label["compatible_set"]["sha256"],
+            },
+            "multimode_estimates": {
+                "relpath": "s3b_multimode_estimates/outputs/multimode_estimates.json",
+                "sha256": input_by_label["multimode_estimates"]["sha256"],
+            },
+        },
+        "multimode_viability": viability,
+        "domain_guard": domain_guard,
+    }
+    diagnostics_payload = {
+        "schema_name": "kerr_from_multimode_diagnostics",
+        "schema_version": "mvp_kerr_from_multimode_diagnostics_v1",
+        "json_strict": True,
+        "created_utc": _utc_now_z(),
+        "run_id": ctx.run_id,
+        "stage": STAGE,
+        "diagnostics": {
+            "multimode_evaluated": False,
+            "skips": [DOMAIN_OUT_OF_DOMAIN],
+            "multimode_viability": viability,
+            "compatible_set_status": "NONEMPTY",
+            "domain_guard": domain_guard,
+        },
+    }
+    extraction_payload = {
+        "schema_name": "kerr_extraction",
+        "schema_version": "mvp_kerr_extraction_v1",
+        "json_strict": True,
+        "created_utc": _utc_now_z(),
+        "run_id": ctx.run_id,
+        "stage": STAGE,
+        "verdict": SKIPPED_OUT_OF_DOMAIN,
+        "domain_status": DOMAIN_OUT_OF_DOMAIN,
+        "reason": domain_guard["reason"],
+        "M_final_Msun": None,
+        "chi_final": None,
+        "sigma_M": None,
+        "sigma_chi": None,
+        "cov_M_chi": None,
+        "delta_f221_Hz": None,
+        "delta_tau221_ms": None,
+        "consistency_score": None,
+    }
+
+    kerr_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode.json", skip_payload)
+    diag_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode_diagnostics.json", diagnostics_payload)
+    extraction_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_extraction.json", extraction_payload)
+    log_stage_paths(ctx)
+    return {
+        "kerr_from_multimode": kerr_path,
+        "kerr_from_multimode_diagnostics": diag_path,
+        "kerr_extraction": extraction_path,
+    }
+
+
+def _write_multimode_gate_skip(
+    *,
+    ctx: StageContext,
+    viability: dict[str, Any],
+    reason: str,
+    skip_code: str,
+    input_by_label: dict[str, dict[str, str]],
+    compatible_set_status: str,
+    n_compatible: int,
+    multimode_fallback: dict[str, Any] | None = None,
+) -> dict[str, Path]:
+    skip_payload: dict[str, Any] = {
+        "schema_name": "kerr_from_multimode",
+        "schema_version": "mvp_kerr_from_multimode_v1",
+        "json_strict": True,
+        "created_utc": _utc_now_z(),
+        "run_id": ctx.run_id,
+        "stage": STAGE,
+        "status": SKIPPED_MULTIMODE_GATE,
+        "reason": reason,
+        "skip_reason_code": skip_code,
+        "compatible_set_status": compatible_set_status,
+        "n_compatible": int(n_compatible),
+        "source": {
+            "compatible_set": {
+                "relpath": "s4_geometry_filter/outputs/compatible_set.json",
+                "sha256": input_by_label["compatible_set"]["sha256"],
+            },
+            "multimode_estimates": {
+                "relpath": "s3b_multimode_estimates/outputs/multimode_estimates.json",
+                "sha256": input_by_label["multimode_estimates"]["sha256"],
+            },
+        },
+        "multimode_viability": viability,
+    }
+    if "model_comparison" in input_by_label:
+        skip_payload["source"]["model_comparison"] = {
+            "relpath": "s3b_multimode_estimates/outputs/model_comparison.json",
+            "sha256": input_by_label["model_comparison"]["sha256"],
+        }
+    if multimode_fallback is not None:
+        skip_payload["multimode_fallback"] = multimode_fallback
+
+    diag_payload: dict[str, Any] = {
+        "schema_name": "kerr_from_multimode_diagnostics",
+        "schema_version": "mvp_kerr_from_multimode_diagnostics_v1",
+        "json_strict": True,
+        "created_utc": _utc_now_z(),
+        "run_id": ctx.run_id,
+        "stage": STAGE,
+        "diagnostics": {
+            "multimode_evaluated": False,
+            "skips": [skip_code],
+            "reason": reason,
+            "compatible_set_status": compatible_set_status,
+            "n_compatible": int(n_compatible),
+            "multimode_viability": viability,
+        },
+    }
+    if multimode_fallback is not None:
+        diag_payload["diagnostics"]["multimode_fallback"] = multimode_fallback
+
+    extraction_payload: dict[str, Any] = {
+        "schema_name": "kerr_extraction",
+        "schema_version": "mvp_kerr_extraction_v1",
+        "json_strict": True,
+        "created_utc": _utc_now_z(),
+        "run_id": ctx.run_id,
+        "stage": STAGE,
+        "verdict": SKIPPED_MULTIMODE_GATE,
+        "reason": reason,
+        "skip_reason_code": skip_code,
+        "compatible_set_status": compatible_set_status,
+        "n_compatible": int(n_compatible),
+        "multimode_viability": viability,
+        "M_final_Msun": None,
+        "chi_final": None,
+        "sigma_M": None,
+        "sigma_chi": None,
+        "cov_M_chi": None,
+        "delta_f221_Hz": None,
+        "delta_tau221_ms": None,
+        "consistency_score": None,
+    }
+    if multimode_fallback is not None:
+        extraction_payload["multimode_fallback"] = multimode_fallback
+
+    kerr_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode.json", skip_payload)
+    diag_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode_diagnostics.json", diag_payload)
+    extraction_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_extraction.json", extraction_payload)
+    log_stage_paths(ctx)
+
+    return {
+        "kerr_from_multimode": kerr_path,
+        "kerr_from_multimode_diagnostics": diag_path,
+        "kerr_extraction": extraction_path,
+    }
+
 def _execute(ctx: StageContext) -> dict[str, Path]:
     if not isinstance(ctx.params, dict) or not ctx.params:
         ctx.params = _base_params()
@@ -563,16 +1042,37 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
     multimode_path = ctx.run_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
     model_comparison_path = ctx.run_dir / "s3b_multimode_estimates" / "outputs" / "model_comparison.json"
     s3b_summary_path = ctx.run_dir / "s3b_multimode_estimates" / "stage_summary.json"
+    compatible_set_path = ctx.run_dir / "s4_geometry_filter" / "outputs" / "compatible_set.json"
+    run_provenance_path = ctx.run_dir / "run_provenance.json"
+
+    run_provenance: dict[str, Any] = {}
+    if run_provenance_path.exists():
+        try:
+            run_provenance = _load_json_object(run_provenance_path)
+        except Exception:
+            run_provenance = {}
+
+    event_id = _extract_event_id(run_provenance)
 
     inputs = check_inputs(
         ctx,
-        paths={"multimode_estimates": multimode_path, "s3b_stage_summary": s3b_summary_path},
-        optional={"model_comparison": model_comparison_path},
+        paths={
+            "multimode_estimates": multimode_path,
+            "s3b_stage_summary": s3b_summary_path,
+            "compatible_set": compatible_set_path,
+        },
+        optional={
+            "model_comparison": model_comparison_path,
+            "run_provenance": run_provenance_path,
+        },
     )
     input_by_label = {row.get("label", ""): row for row in inputs}
 
     multimode = json.loads(multimode_path.read_text(encoding="utf-8"))
     s3b_summary = json.loads(s3b_summary_path.read_text(encoding="utf-8"))
+    compatible_set = json.loads(compatible_set_path.read_text(encoding="utf-8"))
+    n_compatible = _compatible_geometry_count(compatible_set)
+    ctx.params["compatible_set_n_compatible"] = n_compatible
     viability = s3b_summary.get("multimode_viability")
     if not isinstance(viability, dict) or viability.get("class") not in {
         MULTIMODE_OK,
@@ -583,78 +1083,105 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
 
     viability_class = str(viability.get("class"))
     viability_reasons = viability.get("reasons") if isinstance(viability.get("reasons"), list) else []
+    multimode_fallback = _build_multimode_fallback(
+        run_dir=ctx.run_dir,
+        viability_class=viability_class,
+        viability_reasons=[str(reason) for reason in viability_reasons],
+        multimode=multimode,
+    )
     if viability_class != MULTIMODE_OK:
-        skip_payload = {
-            "schema_name": "kerr_from_multimode",
-            "schema_version": "mvp_kerr_from_multimode_v1",
-            "json_strict": True,
-            "created_utc": _utc_now_z(),
-            "run_id": ctx.run_id,
-            "stage": STAGE,
-            "status": "SKIPPED_MULTIMODE_GATE",
-            "multimode_viability": viability,
-        }
-        diag_payload = {
-            "schema_name": "kerr_from_multimode_diagnostics",
-            "schema_version": "mvp_kerr_from_multimode_diagnostics_v1",
-            "json_strict": True,
-            "created_utc": _utc_now_z(),
-            "run_id": ctx.run_id,
-            "stage": STAGE,
-            "diagnostics": {
-                "multimode_evaluated": False,
-                "skips": ["MULTIMODE_DUE_TO_GATE"],
-                "multimode_viability": viability,
-            },
-        }
-        kerr_extract = {
-            "schema_name": "kerr_extraction",
-            "schema_version": "mvp_kerr_extraction_v1",
-            "verdict": viability_class,
-            "M_final_Msun": None,
-            "chi_final": None,
-            "sigma_M": None,
-            "sigma_chi": None,
-            "cov_M_chi": None,
-            "delta_f221_Hz": None,
-            "delta_tau221_ms": None,
-            "consistency_score": None,
-        }
-        kerr_extract_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_extraction.json", kerr_extract)
-        kerr_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode.json", skip_payload)
-        diag_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_from_multimode_diagnostics.json", diag_payload)
-        extraction_skip_payload = {
-            "schema_name": "kerr_extraction",
-            "schema_version": "mvp_kerr_extraction_v1",
-            "json_strict": True,
-            "created_utc": _utc_now_z(),
-            "run_id": ctx.run_id,
-            "stage": STAGE,
-            "verdict": "SKIPPED_MULTIMODE_GATE",
-            "multimode_viability": viability,
-            "M_final_Msun": None,
-            "chi_final": None,
-            "sigma_M": None,
-            "sigma_chi": None,
-            "cov_M_chi": None,
-            "delta_f221_Hz": None,
-            "delta_tau221_ms": None,
-            "consistency_score": None,
-        }
-        extraction_path = _write_json_strict_atomic(ctx.outputs_dir / "kerr_extraction.json", extraction_skip_payload)
+        fallback_reason = (
+            str(multimode_fallback["reason"])
+            if multimode_fallback is not None
+            else (
+                str(viability_reasons[0])
+                if viability_reasons
+                else f"s3b multimode gate blocked the Kerr inversion with class={viability_class}"
+            )
+        )
+        reason = (
+            f"s3b_multimode_estimates blocked multimode Kerr inference: {fallback_reason}"
+        )
         ctx.params.update(
             {
                 "multimode_viability_class": viability_class,
                 "multimode_viability_reasons": viability_reasons,
                 "multimode_evaluated": False,
-                "skips": ["MULTIMODE_DUE_TO_GATE"],
+                "skips": [multimode_fallback["classification"] if multimode_fallback is not None else "MULTIMODE_DUE_TO_GATE"],
+                "program_classification": (
+                    multimode_fallback["program_classification"]
+                    if multimode_fallback is not None else None
+                ),
+                "fallback_classification": (
+                    multimode_fallback["classification"]
+                    if multimode_fallback is not None else None
+                ),
+                "fallback_path": (
+                    multimode_fallback["fallback_path"]
+                    if multimode_fallback is not None else None
+                ),
             }
         )
-        return {
-            "kerr_from_multimode": kerr_path,
-            "kerr_from_multimode_diagnostics": diag_path,
-            "kerr_extraction": kerr_extract_path,
-        }
+        return _write_multimode_gate_skip(
+            ctx=ctx,
+            viability=viability,
+            reason=reason,
+            skip_code=(
+                multimode_fallback["classification"]
+                if multimode_fallback is not None else "MULTIMODE_DUE_TO_GATE"
+            ),
+            input_by_label=input_by_label,
+            compatible_set_status="NONEMPTY" if n_compatible > 0 else "EMPTY",
+            n_compatible=n_compatible,
+            multimode_fallback=multimode_fallback,
+        )
+
+    if n_compatible <= 0:
+        reason = (
+            "s4_geometry_filter produced an empty compatible_set; multimode Kerr inference "
+            "is not allowed without surviving 220 atlas support"
+        )
+        ctx.params.update(
+            {
+                "multimode_viability_class": viability_class,
+                "multimode_viability_reasons": viability_reasons,
+                "multimode_evaluated": False,
+                "skips": [EMPTY_COMPATIBLE_SET],
+            }
+        )
+        return _write_multimode_gate_skip(
+            ctx=ctx,
+            viability=viability,
+            reason=reason,
+            skip_code=EMPTY_COMPATIBLE_SET,
+            input_by_label=input_by_label,
+            compatible_set_status="EMPTY",
+            n_compatible=n_compatible,
+        )
+
+    event_metadata = _load_event_catalog_metadata(event_id)
+
+    domain_guard = _evaluate_domain_guard(
+        multimode=multimode,
+        run_provenance=run_provenance,
+        event_metadata=event_metadata,
+    )
+    if isinstance(domain_guard, dict) and domain_guard.get("domain_status") == DOMAIN_OUT_OF_DOMAIN:
+        ctx.params.update(
+            {
+                "multimode_viability_class": viability_class,
+                "multimode_viability_reasons": viability_reasons,
+                "multimode_evaluated": False,
+                "skips": [DOMAIN_OUT_OF_DOMAIN],
+                "domain_guard": domain_guard,
+            }
+        )
+        return _write_out_of_domain_skip(
+            ctx=ctx,
+            viability=viability,
+            domain_guard=domain_guard,
+            input_by_label=input_by_label,
+        )
 
     model_comparison = (
         json.loads(model_comparison_path.read_text(encoding="utf-8"))
@@ -836,6 +1363,10 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
         "run_id": ctx.run_id,
         "stage": STAGE,
         "source": {
+            "compatible_set": {
+                "relpath": "s4_geometry_filter/outputs/compatible_set.json",
+                "sha256": input_by_label["compatible_set"]["sha256"],
+            },
             "multimode_estimates": {
                 "relpath": "s3b_multimode_estimates/outputs/multimode_estimates.json",
                 "sha256": input_by_label["multimode_estimates"]["sha256"],
@@ -920,6 +1451,8 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
                 "n_samples": n_samples,
                 "n_accepted": len(m_joint_samples),
                 "n_rejected": rejected,
+                "compatible_set_status": "NONEMPTY",
+                "n_compatible": int(n_compatible),
                 "edge_hits": {
                     "M_min": count_m_min,
                     "M_max": count_m_max,
@@ -1015,7 +1548,6 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
     return {
         "kerr_from_multimode": kerr_path,
         "kerr_from_multimode_diagnostics": diag_path,
-        "kerr_extraction": extraction_path,
         "kerr_extraction": kerr_extraction_path,
     }
 
@@ -1049,7 +1581,40 @@ def main() -> int:
     if not artifacts:
         return _abort_with_reason(ctx, f"{STAGE} failed: NO_OUTPUTS")
 
-    finalize(ctx, artifacts=artifacts)
+    summary_results: dict[str, Any] | None = None
+    try:
+        kerr_payload = _load_json_object(artifacts["kerr_from_multimode"])
+    except Exception:
+        kerr_payload = {}
+    if isinstance(kerr_payload, dict):
+        summary_results = {
+            key: kerr_payload.get(key)
+            for key in (
+                "status",
+                "domain_status",
+                "reason",
+                "skip_reason_code",
+                "compatible_set_status",
+                "n_compatible",
+            )
+            if kerr_payload.get(key) is not None
+        } or None
+        fallback = kerr_payload.get("multimode_fallback")
+        if isinstance(fallback, dict):
+            if summary_results is None:
+                summary_results = {}
+            key_map = {
+                "classification": "fallback_classification",
+                "fallback_path": "fallback_path",
+                "program_classification": "program_classification",
+                "reason": "fallback_reason",
+            }
+            for key, out_key in key_map.items():
+                value = fallback.get(key)
+                if value is not None:
+                    summary_results[out_key] = value
+
+    finalize(ctx, artifacts=artifacts, results=summary_results)
     return 0
 
 

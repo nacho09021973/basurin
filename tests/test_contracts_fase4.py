@@ -151,8 +151,8 @@ class TestAntiRegression:
 
 class TestContractCount:
     def test_total_contracts_is_10(self):
-        """Registry includes oracle precheck + FASE 4/5 + s4 spectral variant + experiments."""
-        assert len(CONTRACTS) == 26
+        """Registry includes oracle precheck, pipeline stages, and phase 1/2/2c/3 experiments."""
+        assert len(CONTRACTS) == 46
 
 
 # ── Test 4: DAG integrity with new stages ────────────────────────────────
@@ -161,7 +161,17 @@ class TestContractCount:
 class TestDAGIntegrity:
     def test_new_upstream_references_valid(self):
         """All upstream_stages referenced by new contracts exist in CONTRACTS."""
-        for name in ("s3b_multimode_estimates", "s4c_kerr_consistency", "s4d_kerr_from_multimode", "s7_beyond_kerr_deviation_score"):
+        for name in (
+            "s3b_multimode_estimates",
+            "s4c_kerr_consistency",
+            "s4d_kerr_from_multimode",
+            "s4e_kerr_ratio_filter",
+            "s7_beyond_kerr_deviation_score",
+            "s8_family_router",
+            "s8a_family_gr_kerr",
+            "s8b_family_bns",
+            "s8c_family_low_mass_bh_postmerger",
+        ):
             c = CONTRACTS[name]
             for upstream in c.upstream_stages:
                 assert upstream in CONTRACTS, (
@@ -192,3 +202,9 @@ class TestDAGIntegrity:
 
     def test_s3b_depends_on_s3_output(self):
         assert "s3_ringdown_estimates" in CONTRACTS["s3b_multimode_estimates"].upstream_stages
+
+    def test_s4d_requires_monomode_compatible_set(self):
+        assert "s4_geometry_filter/outputs/compatible_set.json" in CONTRACTS["s4d_kerr_from_multimode"].required_inputs
+
+    def test_router_requires_s4d_output(self):
+        assert "s4d_kerr_from_multimode/outputs/kerr_from_multimode.json" in CONTRACTS["s8_family_router"].required_inputs

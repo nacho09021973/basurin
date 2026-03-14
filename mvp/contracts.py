@@ -161,6 +161,8 @@ CONTRACTS: dict[str, StageContract] = {
             "{source_run}/s3b_multimode_estimates/stage_summary.json",  # preferred
             "{source_run}/s3_ringdown_estimates/stage_summary.json",  # fallback when s3b is absent
             "{source_run}/s6_information_geometry/outputs/curvature.json",
+            "{source_run}/s4i_common_geometry_intersection/outputs/common_intersection.json",
+            "{source_run}/s4j_hawking_area_filter/outputs/hawking_area_filter.json",
         ],
         produced_outputs=[
             "outputs/aggregate.json",
@@ -317,13 +319,28 @@ CONTRACTS: dict[str, StageContract] = {
         required_inputs=[
             "s3b_multimode_estimates/outputs/multimode_estimates.json",
             "s3b_multimode_estimates/stage_summary.json",
+            "s4_geometry_filter/outputs/compatible_set.json",
+        ],
+        external_inputs=[
+            "event_metadata",
         ],
         produced_outputs=[
             "outputs/kerr_from_multimode.json",
             "outputs/kerr_from_multimode_diagnostics.json",
             "outputs/kerr_extraction.json",
         ],
-        upstream_stages=["s3b_multimode_estimates"],
+        upstream_stages=["s3b_multimode_estimates", "s4_geometry_filter"],
+    ),
+    "s4e_kerr_ratio_filter": StageContract(
+        name="s4e_kerr_ratio_filter",
+        required_inputs=[
+            "s3b_multimode_estimates/outputs/multimode_estimates.json",
+            "s4_geometry_filter/outputs/compatible_set.json",
+        ],
+        produced_outputs=[
+            "outputs/ratio_filter_result.json",
+        ],
+        upstream_stages=["s3b_multimode_estimates", "s4_geometry_filter"],
     ),
     "s7_beyond_kerr_deviation_score": StageContract(
         name="s7_beyond_kerr_deviation_score",
@@ -335,6 +352,81 @@ CONTRACTS: dict[str, StageContract] = {
             "outputs/beyond_kerr_score.json",
         ],
         upstream_stages=["s4d_kerr_from_multimode", "s3b_multimode_estimates"],
+    ),
+    "s8_family_router": StageContract(
+        name="s8_family_router",
+        required_inputs=[
+            "run_provenance.json",
+            "s3b_multimode_estimates/stage_summary.json",
+            "s4d_kerr_from_multimode/outputs/kerr_from_multimode.json",
+        ],
+        external_inputs=[
+            "event_metadata",
+        ],
+        produced_outputs=[
+            "outputs/family_router.json",
+        ],
+        upstream_stages=["s3b_multimode_estimates", "s4d_kerr_from_multimode", "s7_beyond_kerr_deviation_score"],
+    ),
+    "s8a_family_gr_kerr": StageContract(
+        name="s8a_family_gr_kerr",
+        required_inputs=[
+            "s8_family_router/outputs/family_router.json",
+            "s4e_kerr_ratio_filter/outputs/ratio_filter_result.json",
+            "s4c_kerr_consistency/outputs/kerr_consistency.json",
+            "s4d_kerr_from_multimode/outputs/kerr_extraction.json",
+            "s7_beyond_kerr_deviation_score/outputs/beyond_kerr_score.json",
+        ],
+        produced_outputs=[
+            "outputs/gr_kerr_family.json",
+        ],
+        upstream_stages=[
+            "s8_family_router",
+            "s4e_kerr_ratio_filter",
+            "s4c_kerr_consistency",
+            "s4d_kerr_from_multimode",
+            "s7_beyond_kerr_deviation_score",
+        ],
+    ),
+    "s8b_family_bns": StageContract(
+        name="s8b_family_bns",
+        required_inputs=[
+            "s8_family_router/outputs/family_router.json",
+            "run_provenance.json",
+            "s3b_multimode_estimates/stage_summary.json",
+            "s3b_multimode_estimates/outputs/multimode_estimates.json",
+        ],
+        external_inputs=[
+            "event_metadata",
+        ],
+        produced_outputs=[
+            "outputs/bns_family.json",
+        ],
+        upstream_stages=["s8_family_router", "s3b_multimode_estimates"],
+    ),
+    "s8c_family_low_mass_bh_postmerger": StageContract(
+        name="s8c_family_low_mass_bh_postmerger",
+        required_inputs=[
+            "s8_family_router/outputs/family_router.json",
+            "run_provenance.json",
+            "s3b_multimode_estimates/stage_summary.json",
+            "s4e_kerr_ratio_filter/outputs/ratio_filter_result.json",
+            "s4d_kerr_from_multimode/outputs/kerr_extraction.json",
+            "s7_beyond_kerr_deviation_score/outputs/beyond_kerr_score.json",
+        ],
+        external_inputs=[
+            "event_metadata",
+        ],
+        produced_outputs=[
+            "outputs/low_mass_bh_family.json",
+        ],
+        upstream_stages=[
+            "s8_family_router",
+            "s3b_multimode_estimates",
+            "s4e_kerr_ratio_filter",
+            "s4d_kerr_from_multimode",
+            "s7_beyond_kerr_deviation_score",
+        ],
     ),
     "s3_spectral_estimates": StageContract(
         name="s3_spectral_estimates",
@@ -348,6 +440,94 @@ CONTRACTS: dict[str, StageContract] = {
             "outputs/spectral_estimates.json",
         ],
         upstream_stages=["s2_ringdown_window"],
+    ),
+    "s4g_mode220_geometry_filter": StageContract(
+        name="s4g_mode220_geometry_filter",
+        required_inputs=[
+            "s4g_mode220_geometry_filter/inputs/mode220_obs.json",
+        ],
+        external_inputs=[
+            "atlas",
+        ],
+        produced_outputs=[
+            "outputs/geometries_220.json",
+        ],
+        upstream_stages=[],
+        check_run_valid=True,
+    ),
+    "s4h_mode221_geometry_filter": StageContract(
+        name="s4h_mode221_geometry_filter",
+        required_inputs=[
+            # mode221_obs is optional; when absent the stage emits SKIPPED output.
+        ],
+        external_inputs=[
+            "atlas",
+        ],
+        produced_outputs=[
+            "outputs/mode221_filter.json",
+        ],
+        upstream_stages=[],
+        check_run_valid=True,
+    ),
+    "s4i_common_geometry_intersection": StageContract(
+        name="s4i_common_geometry_intersection",
+        required_inputs=[
+            "s4g_mode220_geometry_filter/outputs/mode220_filter.json",
+        ],
+        produced_outputs=[
+            "outputs/common_intersection.json",
+        ],
+        upstream_stages=["s4g_mode220_geometry_filter", "s4h_mode221_geometry_filter"],
+        check_run_valid=True,
+    ),
+    "s4f_area_observation": StageContract(
+        name="s4f_area_observation",
+        required_inputs=[
+            "s4i_common_geometry_intersection/outputs/common_intersection.json",
+            "run_provenance.json",
+        ],
+        external_inputs=[
+            "atlas",
+            "gwtc_quality_catalog",
+        ],
+        produced_outputs=[
+            "outputs/area_obs.json",
+        ],
+        upstream_stages=["s4i_common_geometry_intersection"],
+        check_run_valid=True,
+    ),
+    "s4j_hawking_area_filter": StageContract(
+        name="s4j_hawking_area_filter",
+        required_inputs=[
+            "s4i_common_geometry_intersection/outputs/common_intersection.json",
+            # area_obs input is optional; when absent no area constraint is applied.
+        ],
+        produced_outputs=[
+            "outputs/hawking_area_filter.json",
+        ],
+        upstream_stages=["s4i_common_geometry_intersection", "s4f_area_observation"],
+        check_run_valid=True,
+    ),
+    "s4k_event_support_region": StageContract(
+        name="s4k_event_support_region",
+        required_inputs=[
+            "s3b_multimode_estimates/stage_summary.json",
+            "s4g_mode220_geometry_filter/outputs/mode220_filter.json",
+            "s4h_mode221_geometry_filter/outputs/mode221_filter.json",
+            "s4i_common_geometry_intersection/outputs/common_intersection.json",
+            "s4j_hawking_area_filter/outputs/hawking_area_filter.json",
+        ],
+        produced_outputs=[
+            "outputs/event_support_region.json",
+        ],
+        upstream_stages=[
+            "s3b_multimode_estimates",
+            "s4g_mode220_geometry_filter",
+            "s4h_mode221_geometry_filter",
+            "s4i_common_geometry_intersection",
+            "s4j_hawking_area_filter",
+        ],
+        check_run_valid=True,
     ),
     "experiment_geometry_evidence_vs_gr": StageContract(
         name="experiment_geometry_evidence_vs_gr",
@@ -426,6 +606,139 @@ CONTRACTS: dict[str, StageContract] = {
             "outputs/delta_sweep.tsv",
         ],
         upstream_stages=["s3_ringdown_estimates"],
+        check_run_valid=True,
+    ),
+    "experiment/feature_foundry": StageContract(
+        name="experiment/feature_foundry",
+        required_inputs=[],
+        dynamic_inputs=[
+            "{source_run}/RUN_VALID/verdict.json",
+            "{source_run}/s1_fetch_strain/stage_summary.json",
+            "{source_run}/s3b_multimode_estimates/stage_summary.json",
+            "{source_run}/s4_geometry_filter/outputs/compatible_set.json",
+            "{source_run}/s8_family_router/outputs/family_router.json",
+        ],
+        external_inputs=[
+            "atlas",
+            "catalog",
+        ],
+        produced_outputs=[
+            "outputs/event_summary.csv",
+            "outputs/candidate_rows.csv",
+            "outputs/common_candidate_status.csv",
+            "outputs/posthoc_checks.json",
+        ],
+        upstream_stages=[],
+        check_run_valid=False,
+    ),
+    "experiment/phase1_geometry_h5": StageContract(
+        name="experiment/phase1_geometry_h5",
+        required_inputs=[
+            "s5_aggregate/outputs/aggregate.json",
+        ],
+        external_inputs=[
+            "atlas",
+        ],
+        produced_outputs=[
+            "outputs/phase1_geometry_cohort.h5",
+            "outputs/phase1_geometry_summary.json",
+        ],
+        upstream_stages=["s5_aggregate"],
+        check_run_valid=True,
+    ),
+    "experiment/phase2_sector_map": StageContract(
+        name="experiment/phase2_sector_map",
+        required_inputs=[
+            "experiment/phase1_geometry_h5/outputs/phase1_geometry_cohort.h5",
+        ],
+        produced_outputs=[
+            "outputs/sector_map_v1.json",
+        ],
+        upstream_stages=["experiment/phase1_geometry_h5"],
+        check_run_valid=True,
+    ),
+    "experiment/phase2a_atlas_family_map": StageContract(
+        name="experiment/phase2a_atlas_family_map",
+        required_inputs=[
+            "experiment/phase1_geometry_h5/outputs/phase1_geometry_cohort.h5",
+        ],
+        external_inputs=[
+            "atlas",
+        ],
+        produced_outputs=[
+            "outputs/family_map_v1.json",
+        ],
+        upstream_stages=["experiment/phase1_geometry_h5"],
+        check_run_valid=True,
+    ),
+    "experiment/phase2b_family_sector_hypothesis": StageContract(
+        name="experiment/phase2b_family_sector_hypothesis",
+        required_inputs=[
+            "experiment/phase1_geometry_h5/outputs/phase1_geometry_cohort.h5",
+            "experiment/phase2a_atlas_family_map/outputs/family_map_v1.json",
+        ],
+        external_inputs=[
+            "rules",
+        ],
+        produced_outputs=[
+            "outputs/family_sector_hypothesis_v1.json",
+        ],
+        upstream_stages=["experiment/phase1_geometry_h5", "experiment/phase2a_atlas_family_map"],
+        check_run_valid=True,
+    ),
+    "experiment/phase2c_support_ontology_basis": StageContract(
+        name="experiment/phase2c_support_ontology_basis",
+        required_inputs=[
+            "experiment/phase1_geometry_h5/outputs/phase1_geometry_cohort.h5",
+            "experiment/phase2a_atlas_family_map/outputs/family_map_v1.json",
+        ],
+        produced_outputs=[
+            "outputs/support_ontology_basis_v1.json",
+        ],
+        upstream_stages=["experiment/phase1_geometry_h5", "experiment/phase2a_atlas_family_map"],
+        check_run_valid=True,
+    ),
+    "experiment/phase3_weight_policy_basis": StageContract(
+        name="experiment/phase3_weight_policy_basis",
+        required_inputs=[
+            "experiment/phase2c_support_ontology_basis/outputs/support_ontology_basis_v1.json",
+        ],
+        produced_outputs=[
+            "outputs/weight_policy_basis_v1.json",
+        ],
+        upstream_stages=["experiment/phase2c_support_ontology_basis"],
+        check_run_valid=True,
+    ),
+    "experiment/phase4_renyi_diversity_baseline": StageContract(
+        name="experiment/phase4_renyi_diversity_baseline",
+        required_inputs=[],
+        dynamic_inputs=[
+            "experiment/phase3_weight_policy_basis/outputs/{weight_policy_file}",
+        ],
+        produced_outputs=[
+            "outputs/renyi_diversity_baseline_v1.json",
+        ],
+        upstream_stages=["experiment/phase3_weight_policy_basis"],
+        check_run_valid=True,
+    ),
+    "experiment/phase4b_renyi_policy_comparison": StageContract(
+        name="experiment/phase4b_renyi_policy_comparison",
+        required_inputs=[
+            "experiment/phase4_renyi_diversity_baseline/outputs/renyi_diversity_uniform_support_v1.json",
+            "experiment/phase4_renyi_diversity_baseline/outputs/renyi_diversity_event_frequency_support_v1.json",
+            "experiment/phase4_renyi_diversity_baseline/outputs/renyi_diversity_event_support_delta_lnL_softmax_mean_v1.json",
+            "experiment/phase3_weight_policy_basis/outputs/weight_policy_uniform_support_v1.json",
+            "experiment/phase3_weight_policy_basis/outputs/weight_policy_event_frequency_support_v1.json",
+            "experiment/phase3_weight_policy_basis/outputs/weight_policy_event_support_delta_lnL_softmax_mean_v1.json",
+        ],
+        produced_outputs=[
+            "outputs/renyi_policy_comparison_v1.json",
+            "outputs/topk_mass_by_policy_v1.json",
+            "outputs/family_mass_by_policy_v1.json",
+            "outputs/theory_mass_by_policy_v1.json",
+            "outputs/top_geometry_ranking_by_policy_v1.json",
+        ],
+        upstream_stages=["experiment/phase4_renyi_diversity_baseline", "experiment/phase3_weight_policy_basis"],
         check_run_valid=True,
     ),
 }

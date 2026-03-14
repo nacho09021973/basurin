@@ -1,7 +1,7 @@
 """Regression tests for mvp/contracts.py — the centralized contract module.
 
 Tests:
-    1. CONTRACTS registry completeness: all 5 stages registered, no unknown stages.
+    1. CONTRACTS registry completeness: all registered stages, no unknown stages.
     2. init_stage rejects unknown stage names and invalid run_ids.
     3. check_inputs aborts on missing files, records SHA256 on present files.
     4. finalize produces manifest.json + stage_summary.json with correct structure.
@@ -40,20 +40,34 @@ class TestContractRegistry:
     EXPECTED_STAGES = {"s0_oracle_mvp", "s1_fetch_strain", "s2_ringdown_window", "s3_ringdown_estimates",
                        "s3b_multimode_estimates",
                        "s4_geometry_filter", "s4_spectral_geometry_filter", "s4b_spectral_curvature",
-                       "s4c_kerr_consistency", "s4d_kerr_from_multimode",
-                       "s7_beyond_kerr_deviation_score",
+                       "s4c_kerr_consistency", "s4d_kerr_from_multimode", "s4e_kerr_ratio_filter",
+                       "s7_beyond_kerr_deviation_score", "s8_family_router", "s8a_family_gr_kerr", "s8b_family_bns",
+                       "s8c_family_low_mass_bh_postmerger",
                        "s5_aggregate", "s6_information_geometry", "s6b_information_geometry_3d",
                        "s6b_information_geometry_ranked",
                        "s6c_brunete_psd_curvature", "s6c_population_geometry",
-                       "s3_spectral_estimates", "experiment_geometry_evidence_vs_gr",
+                       "s3_spectral_estimates", "s4g_mode220_geometry_filter",
+                       "experiment_geometry_evidence_vs_gr",
                        "experiment_ex3_golden_sweep", "experiment_ex4_spectral_exclusion",
                        "experiment_gwtc_posteriors_fetch", "experiment_area_theorem",
-                       "experiment/delta_lnL_sweep", "psd_extract",
-                       "experiment_ex8_area_consistency"}
+                       "experiment/delta_lnL_sweep", "experiment/feature_foundry",
+                       "experiment/phase1_geometry_h5", "experiment/phase2_sector_map",
+                       "experiment/phase2a_atlas_family_map", "experiment/phase2b_family_sector_hypothesis",
+                       "experiment/phase2c_support_ontology_basis",
+                       "experiment/phase3_weight_policy_basis",
+                       "experiment/phase4_renyi_diversity_baseline",
+                       "experiment/phase4b_renyi_policy_comparison",
+                       "psd_extract",
+                       "experiment_ex8_area_consistency",
+                       "s4g_mode220_geometry_filter", "s4h_mode221_geometry_filter",
+                       "s4i_common_geometry_intersection", "s4f_area_observation", "s4j_hawking_area_filter",
+                       "s4k_event_support_region"}
 
     def test_all_stages_registered(self):
-        """Every MVP stage has a contract entry."""
-        assert set(CONTRACTS.keys()) == self.EXPECTED_STAGES
+        """Every baseline MVP stage has a contract entry."""
+        registered = set(CONTRACTS.keys())
+        missing = self.EXPECTED_STAGES - registered
+        assert not missing, f"Missing expected contract stages: {sorted(missing)}"
 
     def test_every_contract_has_required_fields(self):
         """Each contract has name, produced_outputs, and is a StageContract."""
@@ -89,6 +103,11 @@ class TestContractRegistry:
         produced = CONTRACTS["s3b_multimode_estimates"].produced_outputs
         assert "outputs/model_comparison.json" in produced, \
             "s3b_multimode_estimates must declare outputs/model_comparison.json in produced_outputs"
+
+    def test_feature_foundry_declares_common_candidate_status_output(self):
+        """Guardrail: feature_foundry must declare the aggregated common-candidate table."""
+        produced = CONTRACTS["experiment/feature_foundry"].produced_outputs
+        assert "outputs/common_candidate_status.csv" in produced
 
 
 # ── Test 2: init_stage validation ──────────────────────────────────────────

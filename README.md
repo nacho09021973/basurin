@@ -1,961 +1,541 @@
 # BASURIN
 
-Framework MVP para análisis de *ringdown* (ondas gravitacionales) con ejecución por etapas, contratos de artefactos y trazabilidad de resultados en disco.
+BASURIN es un pipeline contract-first para el analisis reproducible de ringdown en ondas gravitacionales. Su objetivo cientifico no es limitarse a una estimacion puntual Kerr del remanente, sino reconstruir, por evento y luego a nivel poblacional, regiones de geometria compatibles con los datos, preservando trazabilidad, gating semantico y auditoria de artefactos.
 
-> Este README está optimizado para que tanto personas como asistentes de IA puedan entender el proyecto rápidamente y operar sin romper las reglas de IO/auditoría.
+El repositorio prioriza:
 
-## TL;DR para una IA (quickstart operativo)
+- reproducibilidad de IO y artefactos;
+- interpretacion conservadora de resultados multimodo;
+- separacion estricta entre pipeline canonico y experimentos;
+- semantica auditable sobre "hay informacion", "el dominio aplica" y "se puede interpretar".
 
-1. **Lee primero este archivo completo** para entender objetivos, etapas y convenciones.
-2. **Consulta el mapa de rutas**: [`docs/readme_rutas.md`](docs/readme_rutas.md) (crítico para `RUNS_ROOT`, subruns y experimentos anidados).
-3. Ejecuta con `python mvp/pipeline.py ...` y asume semántica *fail-fast* (si una etapa falla, el pipeline aborta).
-4. No escribas fuera de `runs/<run_id>/...` (o del `BASURIN_RUNS_ROOT` efectivo).
-5. HDF5 externos (GWOSC/LOSC) viven en `data/losc/<EVENT_ID>/` como input read-only; el run auditable guarda copia inmutable + hashes en `s1_fetch_strain/inputs` y `provenance.json`.
-6. Antes de proponer cambios, revisa tests en `tests/` y contratos en `mvp/contracts.py`.
+## Lectura rapida operativa
 
----
+- Toda salida canonica debe vivir bajo `runs/<run_id>/...` o bajo el `BASURIN_RUNS_ROOT` efectivo.
+- Un run solo existe para downstream si `runs/<run_id>/RUN_VALID/verdict.json` existe y su `verdict` es `PASS`.
+- Cada stage/experimento canonico debe producir `manifest.json`, `stage_summary.json` y `outputs/*`, con hashes SHA256 auditables.
+- La resolucion de la raiz de salida debe hacerse con `basurin_io.resolve_out_root("runs")`.
+- El documento de rutas operativo sigue siendo [`docs/readme_rutas.md`](docs/readme_rutas.md).
 
-## ¿Qué es BASURIN?
+## Leyenda de estado
 
-BASURIN implementa un pipeline reproducible para análisis de ringdown con estas propiedades:
+- **Implementado**: existe entrypoint/contrato/artefacto en el repositorio actual.
+- **Validado por tests**: existe semantica fijada por tests unitarios o de integracion/regresion.
+- **Planificado**: objetivo cientifico o artefacto aun no cerrado como superficie canonica definitiva.
 
-- **Ejecución por etapas** (`s1`, `s2`, `s3`, `s4`, ...).
-- **Artefactos explícitos por stage** (`manifest.json`, `stage_summary.json`, `outputs/...`).
-- **Gobernanza por run** con `RUN_VALID/verdict.json`.
-- **Modo evento único y multi-evento** desde un orquestador central.
+## 1. Vision general del proyecto
 
-## Posicionamiento científico (2026): dónde sí competir y dónde no
+### 1.1 Que es BASURIN
 
-BASURIN **no reemplaza** pipelines bayesianos oficiales (p. ej. pyRing/FIREFLY/ringdown)
-para inferencia final de parámetros físicos. El posicionamiento recomendado es:
+BASURIN es un framework MVP para analisis de ringdown con:
 
-- **Screening auditable y trazable**: filtrar rápidamente geometrías/atlas compatibles
-  por evento y en agregado poblacional.
-- **Priorización computacional**: identificar hipótesis supervivientes para luego enviar
-  solo esos casos a inferencia bayesiana completa (MCMC / nested sampling).
-- **Intersección multi-evento orientada a teoría**: responder cuántas geometrías
-  (Kerr y beyond-Kerr) son simultáneamente compatibles con todo un conjunto de eventos.
+- ejecucion por etapas;
+- contratos de artefactos por stage;
+- hashes SHA256 y trazabilidad en disco;
+- gobernanza por run mediante `RUN_VALID`;
+- modos de ejecucion `single`, `multimode`, `multi` y `batch`.
 
-Fortaleza diferencial de BASURIN:
+### 1.2 Que problema cientifico aborda
 
-- Contratos de artefactos por stage + hashes SHA256 + `RUN_VALID` + fail-fast, con
-  evidencia reproducible y auditable de punta a punta.
-- Diagnósticos de geometría de información (Fisher/Mahalanobis/curvatura) como capa
-  de comparación y ranking informacional entre hipótesis.
+El problema cientifico central es inferir, a partir de observables de ringdown, que geometrias del atlas teorico permanecen compatibles con un evento y como esa informacion debe agregarse sin sobreinterpretar ni el multimodo ni la consistencia con Kerr/GR cuando los datos no lo sostienen.
 
-En papers/reportes, explicitar este alcance evita sobre-claims: BASURIN aporta una
-**etapa de cribado robusta**, no un sustituto de la inferencia bayesiana de colaboración.
+### 1.3 Por que el objetivo final es geometrico y no solo Kerr puntual
 
-## Dónde están los datos y cómo encontrarlos (anti-pérdida de tiempo)
+En BASURIN, una estimacion puntual Kerr puede ser util como diagnostico condicionado, pero no debe confundirse con la salida cientifica final. El objetivo mas fuerte del proyecto es:
 
-Regla base: un run solo “existe” para downstream si existe:
+- localizar regiones compatibles del atlas para un evento;
+- distinguir cuando el modo 221 aporta informacion util y cuando no;
+- conservar flags de calidad, viabilidad y dominio;
+- evitar que la ausencia de informatividad multimodo se convierta en una narrativa espuria de soporte a Kerr o a GR.
 
-`runs/<RUN_ID>/RUN_VALID/verdict.json`
+En ese sentido, BASURIN es mas cercano a un sistema de cribado geometrico auditable que a un sustituto de una inferencia bayesiana completa de colaboracion.
 
-Copy/paste rápido:
+Por tanto, BASURIN no debe documentarse ni interpretarse como reemplazo de pipelines bayesianos oficiales de inferencia final, sino como una capa reproducible de cribado geometrico, gating y priorizacion de hipotesis.
 
-```bash
-# (i) leer verdict de un run
-RUN_ID="mvp_GW150914_..."
-cat "runs/$RUN_ID/RUN_VALID/verdict.json"
+## 2. Objetivo cientifico
 
-# (ii) listar runs PASS (comando real verificado)
-grep -R --line-number '"verdict"\s*:\s*"PASS"' runs/*/RUN_VALID/verdict.json \
-  | sed -E 's@runs/([^/]+)/.*@\1@' | sort -u
+### 2.1 Inferencia por evento
 
-# (iii) localizar H5 usados por s1 + trazabilidad
-ls -l "runs/$RUN_ID/s1_fetch_strain/inputs/H1.h5" \
-      "runs/$RUN_ID/s1_fetch_strain/inputs/L1.h5"
-cat "runs/$RUN_ID/s1_fetch_strain/outputs/provenance.json"
+El objetivo cientifico por evento es el siguiente:
 
-# (iv) localizar estimates clave de s3
-ls -l "runs/$RUN_ID/s3_ringdown_estimates/outputs/estimates.json"
-```
+1. Inferir la region compatible para el modo 220.
+2. Inferir la region compatible para el modo 221 cuando la extraccion del overtone sea usable.
+3. Construir la interseccion multimodo entre 220 y 221 cuando el gate de viabilidad multimodo lo permita.
+4. Filtrar esa interseccion con restricciones geometrico-fisicas adicionales, incluyendo el criterio/area de Hawking y el atlas geometrico canonico.
+5. Devolver como salida cientifica un conjunto o region de geometrias remanentes compatibles, no una unica solucion puntual.
 
-Nota Bash importante:
+Principio conservador:
 
-- ✅ Correcto: `RUN_ID="..."`
-- ❌ Incorrecto: `.RUN_ID="..."` (eso produce `command not found`).
+- si el multimodo no es viable, el pipeline debe degradar a inferencia monomodo;
+- si el caso esta fuera de dominio, debe declararlo como tal;
+- no debe fabricarse un remanente Kerr ni aparentar una confirmacion fuerte de GR cuando la cadena de gates no la autoriza.
 
-## Arquitectura de alto nivel
+#### 2.1.1 Estado actual de implementacion
 
-- Orquestador principal: `mvp/pipeline.py`.
-- Etapas del MVP (núcleo):
-  - `mvp/s1_fetch_strain.py`
-  - `mvp/s2_ringdown_window.py`
-  - `mvp/s3_ringdown_estimates.py`
-  - `mvp/s4_geometry_filter.py`
-- Etapas/experimentos avanzados: `s3b`, `s4b`, `s4c`, `s5`, `s6`, `experiment_*`.
+La implementacion actual contiene dos rutas complementarias:
 
-## Ejecución básica
+- **Ruta canonica actual de soporte geometrico monomodo**: `s4_geometry_filter` consume `s3_ringdown_estimates` y produce `compatible_set.json` y `ranked_all_full.json`.
+- **Ruta explicita de region geometrica por modos**: `s4g_mode220_geometry_filter`, `s4h_mode221_geometry_filter`, `s4i_common_geometry_intersection`, `s4f_area_observation` y `s4j_hawking_area_filter` modelan explicitamente 220, 221, la interseccion comun, la observacion de area y el filtrado por area. Si falta `s4f_area_observation/outputs/area_obs.json` o llega vacio, `s4j` se comporta como pass-through y `s4k` lo marca como `*_NO_AREA_CONSTRAINT`.
 
-## Quickstart: Online vs Offline-first
+La segunda ruta ya esta implementada y registrada en contratos, pero no constituye aun el artefacto canonico unificado por evento consumido por todo el pipeline multimodo. Ese cierre pertenece todavia al roadmap cientifico.
 
-### Path A — Online (resolución en tiempo real)
+### 2.2 Inferencia poblacional
+
+El objetivo poblacional posterior es estudiar geometrias usando muchos eventos validos, no acumular "best fits" puntuales.
+
+En terminos conceptuales, una inferencia poblacional correcta debe:
+
+- consumir por evento regiones de soporte geometrico, no solo puntos;
+- preservar flags de calidad, viabilidad y dominio de cada evento;
+- excluir de evidencia geometrica positiva a casos `SINGLEMODE_ONLY`, `RINGDOWN_NONINFORMATIVE` u `OUT_OF_DOMAIN`;
+- estudiar que familias geometricas sobreviven de manera recurrente;
+- estudiar que regiones del atlas concentran soporte;
+- estudiar que zonas quedan progresivamente excluidas a medida que crece la muestra.
+
+#### 2.2.1 Estado actual de implementacion
+
+Hoy existen piezas parciales de agregacion:
+
+- `s5_aggregate` agrega `compatible_set` y metadatos de viabilidad entre runs;
+- `s6c_population_geometry` produce un resumen poblacional descriptivo a partir de `aggregate.json`;
+- `experiment_population_kerr.py` es un experimento no canonico sobre scores `s7`.
+
+Lo que aun no existe como superficie cerrada y canonica es un stage poblacional que consuma exclusivamente un artefacto por evento que represente formalmente la region geometrica compatible completa.
+
+## 3. Principios de gobernanza y reproducibilidad
+
+### 3.1 IO determinista y raiz de salida
+
+Reglas duras:
+
+- La IO canonica solo puede escribirse bajo `runs/<run_id>/...`.
+- Si `BASURIN_RUNS_ROOT` esta definido, esa es la raiz efectiva.
+- La resolucion debe hacerse con `basurin_io.resolve_out_root("runs")`.
+- Esta prohibido hardcodear rutas absolutas del tipo `/home/...`.
+
+Rutas canonicas:
+
+- stage canonico: `<RUNS_ROOT>/<run_id>/<stage>/...`
+- experimento canonico: `<RUNS_ROOT>/<run_id>/experiment/<name>/...`
+
+### 3.2 Gating por RUN_VALID y abort semantics
+
+`RUN_VALID` es la unica puerta canonica hacia downstream.
+
+- Si `RUN_VALID != PASS`, no debe correr ningun stage downstream.
+- Si falla un contrato o un stage retorna error, el run no existe a efectos downstream.
+- La semantica es fail-fast: el pipeline aborta y no debe inventar continuaciones parciales.
+
+### 3.3 Contrato de artefactos
+
+Cada stage/experimento canonico debe producir bajo su directorio:
+
+- `manifest.json`
+- `stage_summary.json`
+- `outputs/*`
+
+Y debe reflejar hashes SHA256 de los outputs en manifest/summary cuando aplica. Si un dataset intermedio no esta canonizado por contrato/manifest/summary, no forma parte de la superficie canonica del pipeline.
+
+### 3.4 Trazabilidad y logging obligatorio
+
+Todo entrypoint que escriba outputs debe emitir al final, como minimo:
+
+- `OUT_ROOT=...`
+- `STAGE_DIR=...`
+- `OUTPUTS_DIR=...`
+- `STAGE_SUMMARY=...`
+- `MANIFEST=...`
+
+La implementacion canonica usa `contracts.log_stage_paths(ctx)` para ello.
+
+### 3.5 Datos externos y politica offline-first
+
+- `data/losc/<EVENT_ID>/` es input externo read-only.
+- Desde la raiz del repo, la ubicacion operativa es `./data/losc/<EVENT_ID>/`.
+- En este checkout concreto, eso resuelve bajo `/home/ignac/work/basurin/data/losc/<EVENT_ID>/`.
+- `s1_fetch_strain` copia los HDF5 efectivamente usados a `runs/<run_id>/s1_fetch_strain/inputs/{H1,L1}.h5`.
+- La trazabilidad de esos inputs queda en `runs/<run_id>/s1_fetch_strain/outputs/provenance.json`.
+- Cuando un input externo se ancla dentro del run, debe quedar bajo `external_inputs/` o equivalente y hasheado.
+
+Regla practica:
+
+- `data/losc/...` no pertenece al arbol auditable del run.
+- `data/losc/...` no sustituye `RUN_VALID`.
+- Los experimentos MALDA y los stages canonicos solo pueden escribir bajo `runs/<run_id>/...`.
+
+### 3.6 Canonico vs experimento
+
+- Lo canonico vive en `mvp/` y `mvp/contracts.py`.
+- Los experimentos viven bajo `runs/<run_id>/experiment/<name>/...`.
+- Un experimento no debe mutar artefactos canonicos ya emitidos.
+- La exploracion sin contrato cientifico suficientemente cerrado debe quedarse en `experiment/`.
+
+### 3.7 Excepcion documentada
+
+`mvp/extract_psd.py` (`psd_extract`) es un helper de preparacion, no un stage canonico del pipeline principal.
+
+- `s6c_brunete_psd_curvature` soporta fallback runtime de PSD via `external_inputs/psd_model.json` cuando no existe `psd/measured_psd.json`.
+- Por contrato, `psd/measured_psd.json` no debe modelarse como dependencia rigida cuando ese fallback esta habilitado.
+
+### 3.8 Disciplina oracle-first
+
+El repositorio mantiene una disciplina "oracle-first": la superficie canonica debe poder relacionarse con un baseline externo reproducible o con un criterio explicito de PASS/FAIL. La exploracion sin oracle o sin criterio de aceptacion debe permanecer fuera del pipeline canonico o declararse expresamente como experimento.
+
+## 4. Arquitectura del pipeline
+
+### 4.1 Stages principales existentes
+
+| Stage | Rol conceptual | Gates semanticos o notas de interpretacion |
+| --- | --- | --- |
+| `s1_fetch_strain` | Obtiene strain real o sintetico y fija la trazabilidad de adquisicion. | Es el primer stage despues de crear `RUN_VALID`. Copia inputs efectivos y emite `provenance.json`. |
+| `s2_ringdown_window` | Resuelve `t0` y recorta la ventana de ringdown. | Puede operar en modo offline/online; su error invalida el run downstream. |
+| `s3_ringdown_estimates` | Estima observables de ringdown del modo dominante (`f`, `tau`, `Q`) y sus incertidumbres. | Alimenta el soporte geometrico monomodo actual. |
+| `s3b_multimode_estimates` | Extrae resumen multimodo `220+221`, compara modelos 1-modo/2-modos y escribe `multimode_viability`, `systematics_gate` y `science_evidence`. | Distingue `MULTIMODE_OK`, `SINGLEMODE_ONLY` y `RINGDOWN_NONINFORMATIVE`; la evidencia formal puede quedar `NOT_EVALUATED`. |
+| `s4_geometry_filter` | Filtra el atlas a partir de `s3` y produce `compatible_set.json` y ranking completo. | Es la pieza canonica actual de soporte geometrico monomodo. No equivale por si sola a una reconstruccion multimodo completa. |
+| `s4d_kerr_from_multimode` | Realiza una inversion Kerr condicionada a partir de `220+221`. | Si `multimode_viability != MULTIMODE_OK`, emite `SKIPPED_MULTIMODE_GATE`; si el evento cae fuera de dominio, emite `SKIPPED_OUT_OF_DOMAIN`. No reemplaza `s4_geometry_filter`. |
+| `s5_aggregate` | Agrega soporte geometrico entre runs y conserva metadatos de viabilidad multimodo. | Debe consumir runs validos; contabiliza clases de viabilidad y usa fallbacks explicitamente anotados. Si existe `s4k_event_support_region`, prefiere `downstream_status=MULTIMODE_USABLE` como base explícita del agregado multimodo condicionado. |
+| `s7_beyond_kerr_deviation_score` | Evalua el residual del modo 221 respecto de la prediccion Kerr inducida por `s4d`. | Es un score condicional, no una confirmacion independiente de GR; usa `independence_class = NON_INDEPENDENT`. |
+| `s8a_family_gr_kerr` | Evalua la familia `GR_KERR_BH` combinando router, ratio filter, soporte geometrico y score `s7`. | No permite reclamar soporte GR Kerr solo con `s7`; requiere soporte monomodo/geometrico explicito y puede degradar a `INCONCLUSIVE`. |
+| `s8b_family_bns` | Evalua la familia `BNS_REMNANT` con un atlas fenomenologico de post-merger. | No es un solver EOS. Puede terminar en `SUPPORTED`, `DISFAVORED` o `INCONCLUSIVE`; fuera de dominio propaga `OUT_OF_DOMAIN`. |
+| `s8c_family_low_mass_bh_postmerger` | Evalua una rama Kerr restringida para remanentes BH de baja masa. | Requiere inversion Kerr valida y consistencia con el prior restringido; fuera de dominio queda `INCONCLUSIVE`. |
+
+### 4.2 Stages geometricos explicitos por modo
+
+Estos stages ya existen y representan mas directamente el flujo cientifico "region 220 -> region 221 -> interseccion -> Hawking":
+
+| Stage | Rol conceptual | Estado en la orquestacion actual |
+| --- | --- | --- |
+| `s4g_mode220_geometry_filter` | Filtra el atlas con el observable del modo 220. | Implementado y contractual; no forma parte del `pipeline multimode` por defecto. |
+| `s4h_mode221_geometry_filter` | Filtra el atlas con el observable del modo 221; si falta input de 221, emite `SKIPPED_221_UNAVAILABLE`. | Implementado y contractual. |
+| `s4i_common_geometry_intersection` | Calcula la interseccion de geometrias comunes entre 220 y 221. | Implementado y contractual. |
+| `s4f_area_observation` | Construye la observacion canonica de area por evento a partir de la interseccion comun, el atlas y el catalogo local. | Implementado y contractual; escribe `outputs/area_obs.json` para consumo downstream. |
+| `s4j_hawking_area_filter` | Aplica el filtro de area/Hawking sobre la interseccion comun cuando existe `s4f_area_observation/outputs/area_obs.json`; si falta o llega vacio, actua como pass-through y lo declara explicitamente. | Implementado y contractual. |
+| `s4k_event_support_region` | Consolida `220`, `221`, interseccion, Hawking, `multimode_viability` y `domain_status` en un unico artefacto por evento. | Implementado y contractual; añade `downstream_status` conservador (`MULTIMODE_USABLE`, `GEOMETRY_PRESENT_BUT_NONINFORMATIVE`, `OUT_OF_DOMAIN`, `NO_SUPPORT_REGION`) para consumo downstream. |
+
+### 4.3 Gates auxiliares que protegen la interpretacion
+
+Ademas de los stages listados arriba, la interpretacion multimodo actual depende de tres piezas auxiliares:
+
+- `s4c_kerr_consistency`: resume consistencia Kerr y se salta con `SKIPPED_MULTIMODE_GATE` cuando `s3b` no autoriza multimodo.
+- `s4e_kerr_ratio_filter`: comprueba la consistencia del cociente `221/220` respecto de la banda Kerr de referencia.
+- `s8_family_router`: decide que familias fisicas deben evaluarse; puede enrutar varias familias en orden de prioridad, sin forzar una sola interpretacion cuando el metadata es debil.
+
+### 4.4 Otros stages existentes
+
+El repositorio contiene ademas capas de geometria de la informacion y curvatura (`s6*`) y varios experimentos. Son utiles como diagnostico o exploracion, pero no sustituyen el flujo cientifico principal descrito arriba.
+
+## 5. Semantica conservadora y no sobreinterpretacion
+
+Las siguientes reglas deben leerse como parte del contrato cientifico del proyecto:
+
+- `SINGLEMODE_ONLY` significa que el evento puede seguir siendo tratado como monomodo, pero no autoriza inferencia multimodo fuerte.
+- `RINGDOWN_NONINFORMATIVE` significa que incluso el soporte del modo dominante es insuficiente para sostener inferencias downstream fuertes.
+- `SKIPPED_MULTIMODE_GATE` en `s4d` o `s4c` impide fabricar un remanente Kerr a partir de `220+221`.
+- `s7_beyond_kerr_deviation_score` es un chequeo condicional y no independiente. Incluso cuando devuelve `GR_CONSISTENT`, la salida sigue etiquetada como `NON_INDEPENDENT`.
+- `SKIPPED_S4D_GATE` en `s7` impide aparentar evidencia independiente a favor de GR cuando `s4d` no produjo una inversion interpretable.
+- `OUT_OF_DOMAIN` o `SKIPPED_OUT_OF_DOMAIN` significa que la banda de analisis no tiene solapamiento fisicamente util con la envolvente relevante del modelo/familia. No debe traducirse en `DISFAVORED` fuerte fuera de dominio.
+- `INCONCLUSIVE` es un resultado cientificamente valido cuando los datos, el dominio o la cadena de gates no permiten ir mas lejos.
+- En `s3b`, `science_evidence` solo puede quedar `EVALUATED` si `multimode_viability == MULTIMODE_OK` y el gate de sistematicas no bloquea la interpretacion. La ausencia de evaluacion es una salida explicita, no un fallo silencioso.
+
+## 6. Estado actual y validacion
+
+Esta seccion describe semantica de software validada por tests y regresiones. No debe leerse como validacion fisica completa del programa cientifico.
+
+### 6.1 Semantica validada por tests
+
+Se ha verificado por tests que:
+
+- una cadena cross-stage tipo `GW170817` puede quedar en `SINGLEMODE_ONLY` en `s3b_multimode_estimates` cuando el modo 221 no es utilizable;
+- esa condicion se propaga a `SKIPPED_MULTIMODE_GATE` en `s4d_kerr_from_multimode` y `s4c_kerr_consistency`, evitando fabricar una inversion Kerr multimodo;
+- `s7_beyond_kerr_deviation_score` convierte esa situacion en `SKIPPED_S4D_GATE` y mantiene `independence_class = NON_INDEPENDENT`, sin producir chi-cuadrados o epsilons espurios;
+- la narrativa Kerr/GR no se propaga downstream como si fuera evidencia fuerte cuando faltan gates o soporte geometrico adicional;
+- para contextos fuera de dominio, `s4d` puede emitir `SKIPPED_OUT_OF_DOMAIN`, `s7` propaga `SKIPPED_OUT_OF_DOMAIN`, y las familias `BNS_REMNANT` y `LOW_MASS_BH_POSTMERGER` permanecen `INCONCLUSIVE` en lugar de convertirse artificialmente en evidencia positiva o negativa fuerte;
+- `s8a_family_gr_kerr` no acepta un `GR_CONSISTENT` de `s7` como soporte suficiente por si solo: exige soporte monomodo/geometrico explicito y puede degradar a `INCONCLUSIVE`;
+- `s5_aggregate` conserva cuentas y razones de `multimode_viability` por evento y no trata la ausencia de `s3b` como evidencia multimodo positiva.
+
+Tests representativos de esta semantica:
+
+- `tests/test_multimode_wiring_unittest.py`
+- `tests/test_s7_beyond_kerr_deviation_score.py`
+- `tests/test_s8_family_router.py`
+- `tests/test_s5_aggregate_ranked_integration.py`
+
+En el estado local inspeccionado para esta reescritura, ese subconjunto pasa (`52 passed`).
+
+### 6.2 Que esta implementado pero no debe sobreafirmarse
+
+Implementado hoy no significa que ya exista una superficie cientifica definitivamente cerrada. En particular:
+
+- la ruta explicita `220 -> 221 -> interseccion -> Hawking` existe en stages separados, pero el artefacto canonico unico por evento todavia no esta fijado como salida unificada del pipeline multimodo completo;
+- la ruta explicita `220 -> 221 -> interseccion -> Hawking` ya puede consolidarse en `s4k_event_support_region` y ahora se orquesta por defecto dentro de `python -m mvp.pipeline multimode`, degradando conservadoramente a `MODE220_NO_AREA_CONSTRAINT` cuando `221` no es usable y `s4f_area_observation` no produce una observacion de area efectiva;
+- existen handlers de familia y agregacion poblacional, pero la inferencia poblacional final basada en regiones canonicas por evento sigue siendo objetivo de diseno, no conclusion cerrada;
+- `experiment_population_kerr.py` existe, pero es un experimento no canonico y no debe confundirse con el stage poblacional definitivo que consumira artefactos geometricos por evento.
+
+## 6.3 Estado operativo a 12 de marzo de 2026
+
+A fecha de 12 de marzo de 2026, la superficie operativa relevante del pipeline ha quedado asi:
+
+- la ruta explicita `220 -> s4j` ya funciona de forma estable en cohorte real BBH y produce `s4k_event_support_region` no vacio en la mayoria de eventos, pero hoy la cohorte canónica cae en `MODE220_NO_AREA_CONSTRAINT` cuando `s4f_area_observation` no produce `area_obs.json` efectivo;
+- el vaciado artificial observado inicialmente en `s4g` se debia a una degeneracion del ajuste Lorentziano en `s3_ringdown_estimates`;
+- `mvp/gwtc_events.py` ya se resuelve desde `gwtc_quality_events.csv` para exponer `m_final_msun` y `snr_network` en toda la cohorte disponible;
+- `s3_ringdown_estimates` ya expande la banda de entrada antes del bandpass cuando existe hint Kerr y la banda fija original cortaria la frecuencia esperada del modo 220;
+- el estimador `dual` ha dejado de tratarse como fallback exotico y pasa a ser la politica normal del proyecto para runs reales y poblacionales.
+
+Decision operativa vigente:
+
+- `python -m mvp.pipeline single|multi|multimode|batch` usa ahora `--estimator dual` por defecto;
+- `spectral` queda como baseline historico/comparativo;
+- `hilbert` queda como ruta legacy;
+- la interpretacion poblacional actual debe hacerse sobre `golden_geometry_support_region`, no sobre interseccion multimodo estricta.
+
+Resultado poblacional de referencia previo al cambio de default:
+
+- cohorte BBH agregada: `49` eventos;
+- `42/49` con `GEOMETRY_PRESENT_BUT_NONINFORMATIVE`;
+- `7/49` con `NO_SUPPORT_REGION`;
+- `0/49` con `MULTIMODE_USABLE`.
+
+Resultado de rescate con `dual` sobre los `7` fallidos:
+
+- `7/7` pasan a `SUPPORT_REGION_AVAILABLE`;
+- todos quedan como `GEOMETRY_PRESENT_BUT_NONINFORMATIVE`;
+- por tanto, `dual` no es un ajuste cosmetico sino una mejora operativa real del baseline.
+
+## 7. Uso y ejemplos
+
+Los ejemplos siguientes usan CLIs verificadas en el repositorio actual. Ajuste atlas, catalogos y datasets externos de acuerdo con [`docs/readme_rutas.md`](docs/readme_rutas.md).
+
+### 7.1 Quickstart minimo
+
+Smoke test sintetico de un evento:
 
 ```bash
 python -m mvp.pipeline single \
   --event-id GW150914 \
-  --atlas-default
-```
-
-### Path B — Offline-first (recomendado para batch)
-
-1) Genera auditoría LOSC/t0 y catálogo de eventos listos:
-
-```bash
-AUDIT_RUN="audit_gwosc_t0_$(date -u +%Y%m%dT%H%M%SZ)"
-
-python -m mvp.experiment_losc_quality \
-  --run "$AUDIT_RUN" \
-  --gwosc-api-version v2 \
-  --batch-gwosc \
-  --write-t0-catalog
-```
-
-2) Ejecuta pipeline consumiendo catálogo t0 cuando exista:
-
-```bash
-python -m mvp.pipeline single \
-  --event-id GW150914 \
-  --run-id <RUN_ID> \
   --atlas-default \
-  --offline-s2 \
-  --window-catalog "runs/${AUDIT_RUN}/experiment/losc_quality/t0_catalog_gwosc_v2.json"
+  --synthetic
 ```
 
-> Alias soportado: `--t0-catalog`.
-
-### Batch offline-first (recomendado)
+Pipeline multimodo sintetico (usa `dual` por defecto):
 
 ```bash
-python -m mvp.experiment_offline_batch --batch-run-id <BATCH_RUN_ID> --window-catalog "runs/${AUDIT_RUN}/experiment/losc_quality/t0_catalog_gwosc_v2.json" --events-file "runs/${AUDIT_RUN}/experiment/losc_quality/approved_events.txt"
-```
-
-### Catálogo t0 de GWOSC v2 (input externo auditable)
-
-- **Qué es**: `t0_catalog_gwosc_v2.json` es un catálogo determinista `event_id -> t0_gps` (segundos GPS) para eventos GWOSC v2.
-- **Dónde vive**: `runs/<audit_run_id>/experiment/losc_quality/t0_catalog_gwosc_v2.json`.
-- **Cómo se usa**: pásalo a `experiment_offline_batch` con `--t0-catalog` (alias de `--window-catalog`) para ejecutar en modo offline-first sin resolver t0 online en runtime.
-- **Práctica recomendada**: construir `events_with_t0.txt` como intersección entre eventos disponibles en `data/losc/*` y `keys(t0_catalog_gwosc_v2.json)`, y guardarlo en `runs/<prep_run_id>/external_inputs/events_with_t0.txt`.
-- **Por qué**: mejora reproducibilidad y auditoría, reduce dependencia de consultas online y evita fallos por eventos sin t0.
-
-Ejemplo explícito:
-
-```bash
-T0_CATALOG="runs/<audit_run_id>/experiment/losc_quality/t0_catalog_gwosc_v2.json"
-EVENTS_FILE="runs/<prep_run_id>/external_inputs/events_with_t0.txt"
-
-python -m mvp.experiment_offline_batch \
-  --batch-run-id <batch_run_id> \
-  --events-file "$EVENTS_FILE" \
-  --t0-catalog "$T0_CATALOG" \
-  --mode-filter "(2,2,0)"
-```
-
-## Quality gates (auditoría de eventos)
-
-En auditorías LOSC/t0, usa siempre estas listas como puertas de calidad antes de correr batch pesado:
-
-- `runs/<audit>/experiment/losc_quality/approved_events.txt`
-- `runs/<audit>/experiment/losc_quality/gwosc_ready_events.txt`
-
-Recomendación práctica: prioriza la intersección `approved_events ∩ gwosc_ready_events` para minimizar fallos por metadatos incompletos en ejecución online.
-
-### Prerrequisitos mínimos del entorno Python
-
-Antes de ejecutar `pipeline.py` o cualquier stage del MVP, valida que estén disponibles
-las dependencias base del flujo real (`numpy`) y del fetch de strain (`requests`, `gwpy`):
-
-```bash
-python - << 'PY'
-mods = ["numpy", "requests", "gwpy"]
-missing = []
-for m in mods:
-    try:
-        __import__(m)
-    except Exception:
-        missing.append(m)
-if missing:
-    raise SystemExit(f"Faltan dependencias: {', '.join(missing)}")
-print("OK: entorno listo para s1/s2/s3")
-PY
-```
-
-Para modo local con `--local-hdf5`, añade además `h5py` a la verificación.
-
-## Descarga automatizada de eventos GW (`download_gw_events.py`)
-
-Script independiente que consulta los catálogos GWTC en GWOSC, filtra eventos por calidad (SNR, p_astro, FAR) y opcionalmente descarga el strain data de cada evento filtrado.
-
-### Uso básico
-
-```bash
-# Solo metadatos: genera CSV + JSON con los eventos que pasan los filtros
-python download_gw_events.py
-
-# Metadatos + descarga de strain (flag --download obligatorio para descargar)
-python download_gw_events.py --download
-```
-
-**Importante:** sin `--download`, el script solo selecciona eventos y guarda metadatos (CSV/JSON). La descarga de archivos HDF5 de strain requiere el flag `--download` explícitamente.
-
-### Opciones de descarga
-
-```bash
-# Archivos de 32s (más ligeros, suficiente para ringdown)
-python download_gw_events.py --download --duration 32
-
-# Strain a 16 kHz (máxima resolución temporal)
-python download_gw_events.py --download --sr 16384
-
-# Solo eventos con SNR alto (para empezar rápido)
-python download_gw_events.py --download --snr-min 15 --duration 32
-
-# Todos los eventos del catálogo (p_astro > 0.5, sin filtros extra)
-python download_gw_events.py --download --all-events
-```
-
-### Opciones de filtrado
-
-| Flag | Default | Descripción |
-|------|---------|-------------|
-| `--snr-min` | 8.0 | SNR de red mínimo |
-| `--pastro-min` | 0.9 | p_astro mínimo |
-| `--far-max` | 1.0 | FAR máximo (yr⁻¹) |
-| `--no-exclude-problematic` | off | Incluir eventos con posteriors poco fiables |
-| `--all-events` | off | Incluir todo con p_astro > 0.5, sin filtros extra |
-| `--catalogs` | GWTC-1/2.1/3-confident | Catálogos a consultar |
-
-### Opciones de strain
-
-| Flag | Default | Opciones | Descripción |
-|------|---------|----------|-------------|
-| `--sr` | 4096 | 4096, 16384 | Sample rate (Hz) |
-| `--duration` | 4096 | 32, 4096 | Duración del archivo (s) |
-| `--format` | hdf5 | hdf5, gwf | Formato de strain |
-| `--output-dir` | `gw_events/` | — | Directorio de salida |
-
-### Outputs
-
-Sin `--download`:
-- `gw_events/gwtc_all_events.csv` — todos los eventos del catálogo (sin filtrar)
-- `gw_events/gwtc_quality_events.csv` — eventos que pasan los filtros de calidad
-- `gw_events/gwtc_events_t0.json` — GPS times + parámetros clave (listo para BASURIN)
-
-Con `--download`:
-- Todo lo anterior + `gw_events/strain/<EVENT_ID>/` con los HDF5 de H1, L1, V1
-
-### Requisitos
-
-```bash
-pip install gwosc requests pandas
-```
-
-### Integración con BASURIN
-
-Los HDF5 descargados pueden copiarse a `data/losc/<EVENT_ID>/` para uso offline con el pipeline:
-
-```bash
-# Copiar strain descargado al directorio esperado por s1_fetch_strain
-cp gw_events/strain/GW150914/*.hdf5 data/losc/GW150914/
-```
-
----
-
-## Descarga manual rápida de strain (GWOSC) para modo offline
-
-Usa esta ruta solo cuando `data/losc/<EVENT_ID>/` no existe o está vacía, o cuando quieras precargar caché para batch offline. El objetivo no es "consumir una API concreta", sino dejar HDF5 válidos de H1/L1 en `data/losc/<EVENT_ID>/` y validar con precheck.
-
-**Requisitos de shell**: `curl`, `sha256sum` (opcional: `aria2c` para descarga paralela).
-
-```bash
-EVENT_ID="GW190521_030229"
-OUT_DIR="data/losc/$EVENT_ID"
-mkdir -p "$OUT_DIR"
-
-# 1) Copia desde GWOSC/LOSC las URLs directas de los 2 ficheros HDF5 (H1 y L1)
-H1_URL="<URL_DIRECTA_H1.hdf5>"
-L1_URL="<URL_DIRECTA_L1.hdf5>"
-test -n "$H1_URL" && test -n "$L1_URL"
-
-# 2) Descarga conservadora (sin depender de estructura JSON de la API)
-curl -fL "$H1_URL" -o "$OUT_DIR/$(basename "$H1_URL")"
-curl -fL "$L1_URL" -o "$OUT_DIR/$(basename "$L1_URL")"
-
-# 3) Verificación mínima contract-first
-ls -lh "$OUT_DIR"/*.{h5,hdf5} 2>/dev/null
-sha256sum "$OUT_DIR"/*.{h5,hdf5} 2>/dev/null
-
-# 4) Validación canónica antes de s1
-python tools/losc_precheck.py --event-id "$EVENT_ID" --losc-root data/losc
-```
-
-Si tu entorno permite `aria2c`, puedes reemplazar los dos `curl` por:
-
-```bash
-aria2c -x 8 -s 8 -d "$OUT_DIR" "$H1_URL" "$L1_URL"
-```
-
-### Ejecutar `s1_fetch_strain` offline con HDF5 ya presentes en `data/losc`
-
-Si no activas virtualenv con `source .venv/bin/activate`, usa siempre `.venv/bin/python` para evitar confusión con Python del sistema (PEP 668).
-
-```bash
-.venv/bin/python -m mvp.s1_fetch_strain \
-  --run <RUN_ID> \
-  --event-id <EVENT_ID> \
-  --offline \
-  --hdf5-root data/losc \
-  --reuse-if-present
-```
-
-Verificación rápida (artefactos tratables/auditables):
-
-```bash
-ls -l "runs/<RUN_ID>/s1_fetch_strain/manifest.json" \
-      "runs/<RUN_ID>/s1_fetch_strain/stage_summary.json" \
-      "runs/<RUN_ID>/s1_fetch_strain/outputs/provenance.json"
-sha256sum "data/losc/<EVENT_ID>"/*.hdf5
-```
-
-### 1) Single-event
-
-```bash
-python mvp/pipeline.py single \
-  --event-id GW150914 \
-  --atlas-path atlas.json
-```
-
-### 2) Multi-event
-
-```bash
-python mvp/pipeline.py multi \
-  --events GW150914,GW151226 \
-  --atlas-path atlas.json
-```
-
-## Cómo reproducir (multimode + s3b model_comparison)
-
-Esta guía está pensada para ejecución **auditables/copy-paste** dentro del repo, sin rutas ad hoc y con artefactos en `runs/<run_id>/...`.
-
-### Cómo correr multimode (real) y producir `model_comparison`
-
-Antes de correr, inspecciona los flags disponibles en la versión actual:
-
-```bash
-python -m mvp.pipeline multimode -h
-```
-
-### 2) Ejecutar run real (GW150914) con atlas por defecto y s3b `spectral_two_pass`
-
-```bash
-RUN_ID="mvp_GW150914_$(date -u +%Y%m%dT%H%M%SZ)"
-
 python -m mvp.pipeline multimode \
   --event-id GW150914 \
   --atlas-default \
-  --run-id "$RUN_ID" \
-  --s3b-method spectral_two_pass
+  --synthetic
 ```
 
-### 3) Comprobar outputs
+Agregacion multi-evento sintetica:
 
 ```bash
-ls -lah "runs/$RUN_ID/s3b_multimode_estimates/outputs/"
+python -m mvp.pipeline multi \
+  --events GW150914,GW151226 \
+  --atlas-default \
+  --synthetic \
+  --min-coverage 1.0
 ```
 
-Debes ver `model_comparison.json` en `runs/${RUN_ID}/s3b_multimode_estimates/outputs/`.
+### 7.2 Ejecucion offline-first recomendada
 
-### Troubleshooting rápido
-
-- Si aparece `--atlas-path is required ...`: usa `--atlas-default` o `--atlas-path`.
-- No existe `--stop-after` ni `--method` en esta CLI; el flag correcto es `--s3b-method`.
-
-### Autodetect + validate (sin copiar `run_id`)
-
-```bash
-P="$(ls -1t runs/*/s3b_multimode_estimates/outputs/model_comparison.json 2>/dev/null | head -n 1)"
-test -n "$P" || { echo "ERROR: no model_comparison.json found under runs/*/s3b_multimode_estimates/outputs/"; exit 2; }
-
-RUN_ID="$(echo "$P" | awk -F/ '{print $2}')"; echo "RUN_ID=$RUN_ID"
-ls -lah "$P"
-
-python - << PY
-import json, math
-p = r"""$P"""
-d = json.load(open(p))
-def walk(x):
-    if isinstance(x, float):
-        assert math.isfinite(x), f"non-finite float: {x}"
-    elif isinstance(x, dict):
-        for v in x.values(): walk(v)
-    elif isinstance(x, list):
-        for v in x: walk(v)
-walk(d)
-conv = d.get("conventions") or {}
-tr = d.get("trace") or {}
-print("OK: JSON strict (finite floats)")
-print("schema_version:", d.get("schema_version"))
-assert isinstance(conv, dict) and conv, "missing conventions"
-assert "delta_bic_definition" in conv, "missing conventions.delta_bic_definition"
-assert "rss_floored_1mode" in tr and "rss_floored_2mode" in tr, "missing trace rss_floored booleans"
-db = d.get("delta_bic")
-tmp = d.get("two_mode_preferred")
-# Semantics: if delta_bic is float => two_mode_preferred must be bool (not None)
-if isinstance(db, (int, float)):
-    assert isinstance(tmp, bool), "two_mode_preferred must be bool when delta_bic is finite"
-else:
-    # allow None only when delta_bic is None
-    assert db is None, "delta_bic must be None if not numeric"
-print("delta_bic:", db)
-print("two_mode_preferred:", tmp)
-PY
-```
-
-Evidence mínima esperada:
-
-- `RUN_ID=...`
-- `OK: JSON strict (finite floats)`
-- `schema_version: model_comparison_v1`
-
-## Mantenimiento de ramas (dejar solo `main`)
-
-Si quieres limpiar el repositorio y mantener únicamente la rama `main`, verifica primero
-que `main` esté actualizada y luego elimina ramas locales y remotas distintas de `main`.
-
-```bash
-# 1) Trae refs remotas y cámbiate a main
-git fetch --all --prune
-git checkout main
-git pull origin main
-
-# 2) Borra ramas locales excepto main
-git branch | grep -v "main" | xargs -r git branch -D
-
-# 3) Borra ramas remotas excepto main (en origin)
-git branch -r \
-  | sed 's#origin/##' \
-  | grep -v '^main$' \
-  | grep -v '^HEAD$' \
-  | xargs -r -I{} git push origin --delete {}
-```
-
-Verificación final:
-
-```bash
-git branch
-git branch -r
-```
-
-## Experimentos (`t0_sweep_full`) e inventario por fases
-
-Guías de experimentos documentadas:
-
-- `docs/manual_experimento_1.md`
-- `docs/readme_experiment_2.md`
-- `docs/readme_experiment_4.md` (batch offline-first con `t0`, `mode_filter` y calibración de `epsilon` en `s4_geometry_filter` con `metric=mahalanobis_log`)
-
-### Semántica mínima de `s4_geometry_filter` (evitar sobre-interpretación)
-
-- En `metric=mahalanobis_log`, `d²` debe leerse como **score operativo** (mínimo sobre atlas discreto + \(\Sigma\) estimada en runtime), **no** como un \(\chi^2\) calibrado para significancia estadística.
-- Interpretación de estados por evento en batch:
-  - `EMPTY`: no hubo candidatos evaluables para decidir compatibilidad.
-  - `SATURATED`: el score queda en régimen no informativo/saturado para decidir exclusión/compatibilidad fina.
-    **No** significa “compatibilidad alta”.
-  - `OK`: hubo evaluación informativa y la decisión de compatibilidad se interpreta con el umbral operativo.
-- Umbral recomendado cuando se usa comparación relativa por modo: `threshold_mode=delta_lnL`.
-  Flags explícitas disponibles en CLI de `s4`:
-  - `--delta-lnL-220`
-  - `--delta-lnL-221`
-
-- `mvp/experiment_t0_sweep_full.py`: **recomendado para escala/producción**, contract-first con fases `run`/`inventory`/`finalize`.
-- `mvp/experiment_t0_sweep.py`: herramienta **DEV/INTEGRATION** para sanity-check rápido; no contract-first, no inventory/finalize, no aislamiento por subrun. **No usar para conteos oficiales**.
-
-Cuándo usar cada uno:
-- Usa `t0_sweep_full` cuando necesites reproducibilidad auditada, gobernanza por fases y barridos escalables.
-- Usa `t0_sweep` simple solo para validar wiring/integración local rápida sobre un run ya preparado.
-
-`experiment_t0_sweep_full.py` soporta fases explícitas con contrato estable:
-
-- `--phase run`: ejecuta subruns del barrido y mantiene semántica fail-fast.
-- `--phase inventory`: escaneo barato/determinista de completitud (sin atlas).
-- `--phase finalize`: aplica gating final por faltantes (sin atlas).
-
-### a) Sweep completo (`phase=run`, aquí sí va `--atlas-path`)
-
-```bash
-RUN_ID="mvp_GW150914_20260219T120000Z"
-ATLAS_PATH="/ruta/al/atlas"
-
-python mvp/experiment_t0_sweep_full.py \
-  --run-id "$RUN_ID" \
-  --phase run \
-  --atlas-path "$ATLAS_PATH" \
-  --t0-grid-ms 0,2,4,6,8 \
-  --seed 101
-```
-
-### b) Inventario barato (`phase=inventory`, sin atlas)
-
-```bash
-RUN_ID="mvp_GW150914_20260219T120000Z"
-
-python mvp/experiment_t0_sweep_full.py \
-  --run-id "$RUN_ID" \
-  --phase inventory \
-  --inventory-seeds 101,202 \
-  --t0-grid-ms 0,2,4,6,8
-```
-
-### c) Finalize estricto/tolerante (`phase=finalize`, sin atlas)
-
-```bash
-RUN_ID="mvp_GW150914_20260219T120000Z"
-
-python mvp/experiment_t0_sweep_full.py \
-  --run-id "$RUN_ID" \
-  --phase finalize \
-  --inventory-seeds 101,202 \
-  --t0-grid-ms 0,2,4,6,8 \
-  --max-missing-abs 0 \
-  --max-missing-frac 0.0
-```
-
-Artefactos agregados a vigilar:
-
-- `runs/<RUN_ID>/experiment/derived/geometry_table.tsv` (agregado de `s6_geometry_table.py`).
-- `runs/<RUN_ID>/experiment/derived/sweep_inventory.json` (inventario/decisión de sweep).
-
-## Oráculo t0 v1.2 (selección canónica de ventana)
-
-El oráculo t0 v1.2 está implementado en `mvp/experiment_oracle_t0_ringdown.py` y consume el
-resultado previo de `t0_sweep_full` para emitir un veredicto reproducible PASS/FAIL.
-
-Qué hace:
-
-- Toma el JSON del sweep por seed: `.../experiment/t0_sweep_full_seed<seed>/outputs/t0_sweep_full_results.json`.
-- Mapea cada punto `t0_ms` a una ventana `WindowSummaryV1` validada.
-- Calcula métricas del oráculo (`oracle_v1_plateau`) y escribe un reporte auditable.
-
-Cómo se ejecuta:
-
-```bash
-RUN_ID="mvp_GW150914_20260219T120000Z"
-
-python mvp/experiment_oracle_t0_ringdown.py \
-  --run-id "$RUN_ID"
-```
-
-Si tienes más de un seed y quieres fijar uno explícitamente:
-
-```bash
-python mvp/experiment_oracle_t0_ringdown.py \
-  --run-id "$RUN_ID" \
-  --seed-dir "runs/$RUN_ID/experiment/t0_sweep_full_seed101"
-```
-
-Qué requiere (precondición obligatoria):
-
-- Haber ejecutado antes `t0_sweep_full` en `--phase run` para ese `RUN_ID`.
-- Que exista el directorio seed y el JSON del sweep en la ruta exacta esperada.
-
-Si falta el seed dir o falta el JSON del sweep, el comando falla con mensaje explícito que incluye:
-
-- ruta esperada exacta, y
-- comando exacto para regenerar el sweep (`python mvp/experiment_t0_sweep_full.py --phase run ...`).
-
-Salidas del oráculo:
-
-- `runs/<RUN_ID>/experiment/oracle_t0_ringdown/outputs/oracle_report.json`
-- `runs/<RUN_ID>/experiment/oracle_t0_ringdown/stage_summary.json`
-- `runs/<RUN_ID>/experiment/oracle_t0_ringdown/manifest.json`
-
-Nota sobre subruns por seed: el experimento crea árboles por semilla para aislar trazabilidad y reintentos. Por eso, los agregados deben escanearse desde `scan_root` (global o por seed) y no por prefijos de nombre; además, se excluyen ancestros symlink para evitar duplicados/alias.
-
-## Convención canónica de HDF5 externos (LOSC/GWOSC)
-
-**Single source de ubicación:** BASURIN espera datasets externos en:
-
-- `data/losc/<EVENT_ID>/`
-- Convención de nombres (plana, sin subdirectorios por detector): los archivos deben incluir `H1` o `L1` en el nombre.
-
-### Precheck LOSC (canónico, 10 segundos)
-
-> **STOP**: no continúes con `s1` (ni con ningún stage downstream) si este precheck falla.
-
-Decisión rápida (A/B/C) antes de continuar:
-
-1. **Caché presente y válida**: `data/losc/<EVENT_ID>/` existe y el precheck encuentra H1+L1.  
-   Acción: continuar con `s1_fetch_strain` en offline/reuse.
-2. **Caché presente pero naming no casable**: hay `.h5/.hdf5`, pero no matchean `H1/L1`.  
-   Acción: crear symlinks `H1.h5` y `L1.h5`, repetir precheck.
-3. **Caché ausente o vacía**: falta `data/losc/<EVENT_ID>/` o no contiene HDF5 válidos.  
-   Acción: poblar `data/losc/<EVENT_ID>/` (ver sección "Descarga manual rápida de strain"), luego repetir precheck.
-
-Precheck read-only recomendado (script canónico):
+Antes de ejecutar datos reales, verifique la visibilidad de HDF5 locales:
 
 ```bash
 python tools/losc_precheck.py --event-id GW150914 --losc-root data/losc
 ```
 
-Precheck manual equivalente (bash):
+Pipeline single consumiendo catalogo de `t0` ya auditado (usa `dual` por defecto):
 
 ```bash
-EVENT_ID=GW150914
-echo "data/losc -> $(readlink -f data/losc 2>/dev/null || echo '(no symlink)')"
-test -d "data/losc/$EVENT_ID" || { echo "ERROR: falta data/losc/$EVENT_ID (cache no montada/visible)"; exit 2; }
-H1_MATCHES="$(find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*H1*.h5' -o -iname '*H1*.hdf5' \) | wc -l)"
-L1_MATCHES="$(find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*L1*.h5' -o -iname '*L1*.hdf5' \) | wc -l)"
-echo "H1 matches: ${H1_MATCHES}"
-echo "L1 matches: ${L1_MATCHES}"
-test "$H1_MATCHES" -ge 1 || { echo "ERROR: falta al menos 1 archivo H1 (.h5/.hdf5) en data/losc/$EVENT_ID"; exit 2; }
-test "$L1_MATCHES" -ge 1 || { echo "ERROR: falta al menos 1 archivo L1 (.h5/.hdf5) en data/losc/$EVENT_ID"; exit 2; }
-echo "total h5/hdf5:"; find "data/losc/$EVENT_ID" -maxdepth 1 -type f \( -iname '*.h5' -o -iname '*.hdf5' \) | wc -l
+python -m mvp.pipeline single \
+  --event-id GW150914 \
+  --atlas-default \
+  --offline-s2 \
+  --window-catalog "runs/<AUDIT_RUN>/experiment/losc_quality/t0_catalog_gwosc_v2.json"
 ```
 
-Resolución rápida en 3 ramas:
-
-- **Caso A (mount/symlink)**: `data/losc` no apunta a la caché real.
-  - Reapunta con **una sola** estrategia recomendada por el equipo (symlink o bind mount) para que `data/losc/<EVENT_ID>/...` exista y sea visible.
-- **Caso B (nombres)**: hay `.h5/.hdf5`, pero el patrón no casa con `H1/L1`.
-  - Sin renombrar originales, crea symlinks casables dentro de `data/losc/<EVENT_ID>/`:
+Batch offline-first (usa `dual` por defecto):
 
 ```bash
-ln -sf "<archivo_real_H1>.h5" "data/losc/$EVENT_ID/H1.h5"
-ln -sf "<archivo_real_L1>.h5" "data/losc/$EVENT_ID/L1.h5"
+python -m mvp.experiment_offline_batch \
+  --batch-run-id <BATCH_RUN_ID> \
+  --events-file "runs/<PREP_RUN>/external_inputs/events_with_t0.txt" \
+  --t0-catalog "runs/<AUDIT_RUN>/experiment/losc_quality/t0_catalog_gwosc_v2.json"
 ```
 
-- **Caso C (carpeta ausente o vacía)**: no existe `data/losc/<EVENT_ID>/` o no hay HDF5 utilizables.
-  - Pobla primero `data/losc/<EVENT_ID>/` con H1/L1 (procedimiento canónico en "Descarga manual rápida de strain"), luego ejecuta de nuevo:
+### 7.3 Sobre los stages geometricos explicitos
+
+`s4g/s4h/s4i/s4f/s4j` tienen CLI propia y forman la rama mas directamente alineada con el objetivo "region compatible por modo + interseccion + Hawking". `python -m mvp.pipeline multimode` ahora materializa por defecto los inputs observacionales de `s4g/s4h`, ejecuta esa rama explícita y consolida `s4k_event_support_region`; si `221` no es usable y `s4f_area_observation` no produce una restricción de área efectiva, la ruta degrada de forma conservadora a `MODE220_NO_AREA_CONSTRAINT` en lugar de abortar la región geométrica por evento. Solo cuando `s4j` recibe una observación de área efectiva desde `s4f` el path queda como `MODE220_PLUS_HAWKING`. Desde el 12 de marzo de 2026, el estimador por defecto para esta ruta es `dual`.
+
+### 7.3b Experimento de barrido de bandas multimodo
+
+Cuando `s3_ringdown_estimates` parece clavarse en el borde de banda o en el floor de `tau`, no hace falta probar manualmente una banda cada vez. `experiment_band_sweep_multimode.py` lanza subruns aislados de `python -m mvp.pipeline multimode` para un mismo evento y resume por banda:
+
+- `f_hz`, `tau_s` y `Q` estimados por `s3`
+- `n_geometries_accepted` en `s4g_mode220_geometry_filter`
+- `support_region_status` y `support_region_n_final` del top-level
+- diagnóstico automático (`LIKELY_EDGE_LOCKED_220`, `FOUND_NONEMPTY_SUPPORT_REGION`, etc.)
+- una recomendación final en `recommendation.json`
+
+Ejemplo:
 
 ```bash
-python tools/losc_precheck.py --event-id "$EVENT_ID" --losc-root data/losc
+python -m mvp.experiment_band_sweep_multimode \
+  --run-id band_sweep_GW190521 \
+  --event-id GW190521_074359 \
+  --bands 150-400,400-800,800-1200,1200-1600 \
+  --atlas-default \
+  --offline
 ```
 
-Ejemplo recomendado:
+Artefactos emitidos:
 
-```text
-data/losc/GW150914/
-  H-H1_GWOSC_4KHZ_R1-1126257415-4096.hdf5
-  L-L1_GWOSC_4KHZ_R1-1126257415-4096.hdf5
-```
+- `runs/<run_id>/experiment/band_sweep_multimode/outputs/band_sweep_results.json`
+- `runs/<run_id>/experiment/band_sweep_multimode/outputs/band_sweep_summary.csv`
+- `runs/<run_id>/experiment/band_sweep_multimode/outputs/recommendation.json`
+- subruns completos bajo `runs/<run_id>/experiment/band_sweep_multimode/runsroot/<subrun_id>/...`
 
-Quickstart local (sin descarga):
+### 7.3c Experimento de barrido de `dt_start_s`
+
+Cuando una banda fija sigue dando `220` edge-locked o `tau` pegado al floor, el siguiente knob útil es `dt_start_s`. `experiment_dt_start_sweep_multimode.py` lanza subruns de `python -m mvp.pipeline multimode` sobre una banda fija y resume el diagnóstico por valor de arranque temporal.
+
+Ejemplo:
 
 ```bash
-python mvp/s1_fetch_strain.py   --run <run_id>   --event-id GW150914   --detectors H1,L1   --hdf5-root data/losc   --reuse-if-present
+python -m mvp.experiment_dt_start_sweep_multimode \
+  --run-id dt_sweep_GW190521 \
+  --event-id GW190521_074359 \
+  --band-low 1200 \
+  --band-high 1600 \
+  --dt-start-grid-s 0,0.001,0.003,0.005,0.008 \
+  --atlas-default \
+  --offline
 ```
 
-- Si no pasas `--local-hdf5`, `s1_fetch_strain` intenta auto-resolver en `data/losc/<EVENT_ID>/` con patrones `*H1*.hdf5|*.h5` y `*L1*.hdf5|*.h5`.
-- Si falta algún archivo, falla rápido con la ruta exacta esperada + comando `find` + ejemplo de invocación con `--local-hdf5`.
-- `data/losc/...` es **input externo read-only**; el run auditable guarda copia inmutable de los HDF5 efectivamente usados en `runs/<run_id>/s1_fetch_strain/inputs/{H1,L1}.h5` y hashes/trazabilidad en `runs/<run_id>/s1_fetch_strain/outputs/provenance.json`.
-- Para auditoría, s1 copia los HDF5 usados a `runs/<run_id>/s1_fetch_strain/inputs/*.h5` y guarda hashes en `provenance.json`.
+Artefactos emitidos:
 
-## Semántica operacional importante
+- `runs/<run_id>/experiment/dt_start_sweep_multimode/outputs/dt_start_sweep_results.json`
+- `runs/<run_id>/experiment/dt_start_sweep_multimode/outputs/dt_start_sweep_summary.csv`
+- `runs/<run_id>/experiment/dt_start_sweep_multimode/outputs/recommendation.json`
 
-- El pipeline crea `RUN_VALID` al inicializar el run.
-- Cada stage escribe su propio bloque de artefactos bajo el run activo.
-- Si un stage retorna código distinto de cero, el pipeline **aborta inmediatamente**.
-- Se mantiene trazabilidad temporal en `pipeline_timeline.json`.
+### 7.3d Experimento de barrido de `window_duration_s`
 
-## Layout esperado de artefactos
+Si una banda y un `dt_start_s` fijos siguen dejando `220` edge-locked, el siguiente knob útil es `window_duration_s`. `experiment_window_duration_sweep_multimode.py` lanza subruns sobre una banda fija y un `dt_start_s` fijo, y resume si el problema mejora o empeora al acortar/alargar la ventana de ringdown.
 
-Ejemplo resumido:
-
-```text
-runs/<RUN_ID>/
-  RUN_VALID/verdict.json
-  s1_fetch_strain/{manifest.json,stage_summary.json,outputs/...}
-  s2_ringdown_window/{manifest.json,stage_summary.json,outputs/...}
-  s3_ringdown_estimates/{manifest.json,stage_summary.json,outputs/...}
-  ...
-```
-
-## Documento clave de rutas (lectura obligatoria)
-
-Cuando trabajes con subruns (por ejemplo en `experiment/t0_sweep_full`), es fácil romper la ejecución si no se entiende dónde vive realmente cada `run_id`.
-
-➡️ **Lee este documento antes de depurar o ejecutar stages manuales:**
-
-- [`docs/readme_rutas.md`](docs/readme_rutas.md)
-- [`docs/request_flow.md`](docs/request_flow.md) (resumen del flujo de ejecución y validaciones por módulo).
-
-Ese documento detalla:
-
-- cómo se resuelve `BASURIN_RUNS_ROOT`,
-- por qué ocurre el error típico de `RUN_VALID verdict not found`,
-- y cómo ejecutar stages contra subruns de forma correcta.
-
-## Convenciones para contribuir (humanos e IA)
-
-- Mantener compatibilidad con contratos/artefactos existentes.
-- Evitar cambios que relajen validaciones de `RUN_VALID` sin discusión explícita.
-- Priorizar cambios pequeños y verificables.
-- Incluir pruebas o validaciones mínimas al modificar lógica de pipeline/stages.
-- Documentar decisiones de rutas/IO cuando afecten reproducibilidad.
-
-## Reglas generales de BASURIN (para no volver a iterar a ciegas)
-
-### 0) Principio soberano
-
-**El pipeline existe para producir física reproducible, no para “tener pipeline”.**
-Todo cambio debe cerrar un ciclo completo: **Inputs deterministas → Estimación → Oracle externo → Veredicto PASS/FAIL → Auditoría**.
-
----
-
-## 1) “Oracle-first”: sin oracle externo no hay progreso
-
-**Definición:** un *oracle* es un baseline independiente (paper/catálogo/tabla publicada) con valores y/o intervalos reproducibles y una regla cuantitativa de PASS/FAIL.
-
-**Regla:**
-
-* Cualquier nuevo análisis canónico debe declarar un oracle externo antes de añadir complejidad.
-* Si no existe oracle, el trabajo debe ir a `experiment/` y **no** al pipeline canónico.
-
-**Artefactos mínimos del oracle (versionados):**
-
-* `docs/baselines/<oracle_id>.json` con:
-
-  * referencia (paper/doi/arxiv),
-  * parámetros objetivo (p.ej. f, tau, …),
-  * intervalos o incertidumbres,
-  * tolerancias (relativas/absolutas),
-  * versión/fecha.
-
-**Criterio de aceptación:**
-
-* Existe un `physics_gate.json` (o equivalente) que da `PASS/FAIL` contra el oracle.
-* En `FAIL`, el run se invalida (ver regla 3).
-
----
-
-## 2) MVP científico mínimo (antes de fase 2)
-
-**Regla:**
-
-* El MVP científico de cualquier nuevo “tema” es: **1 caso + 1 observable + 1 oracle + PASS/FAIL**.
-* Multi-evento, multimode, consistencia Kerr, geometría, agregación, sweeps masivos… son **fase 2** y quedan bloqueados hasta que el MVP pase.
-
-**Anti-pattern prohibido:**
-
-* “Añadir un stage nuevo” sin un test que demuestre que mejora o mantiene el oracle PASS.
-
----
-
-## 3) RUN_VALID y abort semantics (gobernanza dura)
-
-**Regla soberana:**
-
-* `RUN_VALID` es la **única puerta** hacia downstream.
-* Si `runs/<run_id>/RUN_VALID/verdict.json` no existe o su `verdict != PASS`, ningún stage downstream puede correr.
-* Si un stage falla, el run **no existe** a efectos downstream (fail-fast).
-
-**Criterio de aceptación:**
-
-* Cada stage ejecuta `require_run_valid` (salvo excepciones explícitas).
-* El pipeline corta en rc != 0 sin intentar “continuar”.
-
----
-
-## 4) IO determinista: prohibido escribir fuera de `runs/<run_id>/`
-
-**Regla:**
-
-* Toda salida y todo artefacto intermedio debe vivir bajo `runs/<run_id>/...` (o `BASURIN_RUNS_ROOT`).
-* **Prohibido** escribir en `docs/`, `./`, `/tmp`, home, etc., salvo:
-
-  * documentación versionada (README/docs),
-  * baselines versionados en `docs/baselines/`,
-  * tests.
-
-**Criterio de aceptación:**
-
-* Cada stage produce:
-
-  * `manifest.json` (SHA256 de inputs/outputs),
-  * `stage_summary.json` (parámetros, veredictos, métricas),
-  * `outputs/` (artefactos).
-
----
-
-## 5) Datos externos: “offline-first” y inputs formalizados
-
-**Regla:**
-
-* Ningún stage puede depender de red “por defecto”.
-* Los inputs externos deben formalizarse como:
-
-  * `--local-*` / `--atlas-path` / `--external-inputs` (rutas explícitas),
-  * o como `runs/<run_id>/external_inputs/...` con hashes.
-
-**Política recomendada:**
-
-* **Red sólo con opt-in** (`--allow-network`) y siempre cacheando con hash.
-* Si `OFFLINE=1` y falta input local ⇒ FAIL temprano con mensaje claro.
-
-**Criterio de aceptación:**
-
-* Se puede ejecutar el pipeline completo en un entorno sin red si los inputs existen localmente.
-
----
-
-## 6) Superficie canónica mínima: separación estricta canónico vs experimento
-
-**Reglas:**
-
-* Canónico:
-
-  * vive en `mvp/` + `contracts.py`,
-  * pequeño, estable, orientado a oracle.
-* Experimentos:
-
-  * viven bajo `runs/<run_id>/experiment/<name>/...`,
-  * no mutan artefactos canónicos,
-  * no cambian `RUN_VALID`.
-
-**Anti-pattern prohibido:**
-
-* “s3b/s4b/s4c…” sin deprecación clara y sin test oracle.
-* Scripts sueltos sin contrato ni trazabilidad.
-
----
-
-## 7) Sweeps y “1000 runs”: solo si hay función objetivo y logging auditable
-
-**Regla:**
-
-* Un sweep masivo sólo es aceptable si existe:
-
-  * oracle PASS/FAIL o loss cuantitativa,
-  * logging por subrun con seed/params,
-  * resumen agregado (p.ej. `summary.jsonl` o `summary.csv`),
-  * selección reproducible del “best”.
-
-**Criterio de aceptación:**
-
-* Dado el mismo seed y mismos inputs hash, el sweep produce el mismo “best” y el mismo veredicto.
-
----
-
-## 8) Preflight de entorno (Stage 0) obligatorio
-
-**Regla:**
-
-* Antes de crear un run se valida:
-
-  * Python version,
-  * dependencias críticas importables,
-  * presencia de inputs externos requeridos (si OFFLINE),
-  * espacio en disco mínimo.
-
-**Criterio de aceptación:**
-
-* Si falla preflight, no se crea `runs/<run_id>/` (o se crea y queda `RUN_VALID/verdict.json` con `verdict=FAIL` y razón explícita).
-
----
-
-## 9) Regla práctica de productividad (evitar 14 meses)
-
-**Regla:**
-
-* Cada PR debe mejorar al menos uno de:
-
-  1. probabilidad de oracle PASS,
-  2. determinismo/auditoría,
-  3. reducción de superficie canónica.
-
-Si no cumple, va a `experiment/` o se rechaza.
-
----
-
-### Apéndice: Definition of Done (DoD) para cambios canónicos
-
-Un cambio canónico está “DONE” si:
-
-* `pytest -q` pasa,
-* el oracle PASS/FAIL está implementado (o no se degrada),
-* no se introducen escrituras fuera de `runs/<run_id>/`,
-* todos los artefactos tienen `manifest.json` + `stage_summary.json`,
-* la ejecución offline es posible con inputs locales.
-
----
-
-
-## PRs auditables (claims de contrato)
-
-Cuando una descripción de PR afirme que un output ya está declarado en contrato (por ejemplo `outputs/model_comparison.json`), añade evidencia reproducible para evitar claims débiles.
-
-Plantilla mínima recomendada:
-
-- **Claim:** “El stage X declara el output Y”.
-- **Evidence:** comando exacto (1-liner) + salida esperada + aserción explícita.
-
-Ejemplo (falla fuerte si la clave o el output cambian):
+Ejemplo:
 
 ```bash
-python -c "import mvp.contracts as c; o=c.CONTRACTS['s3b_multimode_estimates'].produced_outputs; assert 'outputs/model_comparison.json' in o; print(o)"
+python -m mvp.experiment_window_duration_sweep_multimode \
+  --run-id win_sweep_GW190521 \
+  --event-id GW190521_074359 \
+  --band-low 1200 \
+  --band-high 1600 \
+  --dt-start-s 0.003 \
+  --window-duration-grid-s 0.02,0.04,0.06,0.08,0.12,0.16 \
+  --atlas-default \
+  --offline
 ```
 
-Nota de mantenimiento (punto único): si en el futuro cambia el registro (`CONTRACTS` → `STAGE_CONTRACTS`), reemplaza el acceso en el snippet y actualiza `tests/test_mvp_contracts.py` en el mismo PR.
+Artefactos emitidos:
 
-## Diagnóstico de crecimiento en tests (actualización de gobernanza)
+- `runs/<run_id>/experiment/window_duration_sweep_multimode/outputs/window_duration_sweep_results.json`
+- `runs/<run_id>/experiment/window_duration_sweep_multimode/outputs/window_duration_sweep_summary.csv`
+- `runs/<run_id>/experiment/window_duration_sweep_multimode/outputs/recommendation.json`
 
-Correcto: con el criterio “desde hoy 12:00” y contando **altas** de `*.py`, son **3 scripts nuevos** y el conteo está bien hecho.
+### 7.4 Flujo MALDA estricto sobre runs gobernados
 
-### Diagnóstico
+Los entrypoints MALDA actuales relevantes para discovery simbolico son:
 
-Estamos pagando “deuda de gobernanza” (CLI + contratos) a base de **añadir tests unitarios**. Eso es saludable, pero el riesgo real es el señalado: **crecimiento de superficie** (más ficheros, más mantenimiento, más tiempo de CI) sin una estrategia de consolidación.
+- `malda/10_build_event_feature_table.py`
+- `malda/11_kan_pysr_discovery.py`
+- `malda/12_validate_formula_candidates.py`
 
-Los tres añadidos son de **tres áreas distintas** (experimento, pipeline/CLI, contrato s2). Eso suele ocurrir cuando no existe aún una convención fuerte de “dónde vive cada test” y “cuándo se amplía uno existente vs crear fichero nuevo”.
+Contrato operativo:
 
-### Acción mínima (para no “engordar al monstruo”)
+- `10_build_event_feature_table.py` lee del catalogo local del repo (`gwtc_quality_events.csv`, `gwtc_events_t0.json`) y no necesita outputs canonicos upstream.
+- Aun asi, si vas a colgar MALDA de BASURIN con gobernanza estricta, debes ejecutarlo sobre un `run_id` que ya tenga `runs/<run_id>/RUN_VALID/verdict.json` con `PASS`.
+- `11_kan_pysr_discovery.py` consume el `event_features.csv` emitido por `step 10`.
+- `12_validate_formula_candidates.py` consume `event_features.csv` + `discovery_summary.json` y exige `RUN_VALID == PASS`.
+- La secuencia valida es siempre `10 -> 11 -> 12` dentro del mismo `run_id`.
 
-1. **Regla operativa**: por defecto, **no se crea fichero nuevo** si:
-   - el test es del mismo stage/feature, o
-   - es el mismo tipo (CLI help, contract, smoke determinista).
-   En ese caso se **agrega al fichero existente**.
-2. **Consolidación inmediata** (sin reescribir medio repo):
-   - `tests/test_pipeline_cli_local_hdf5.py`: convertirlo en el hogar de *todo* lo relacionado con CLI de `mvp/pipeline.py` (help flags, atlas-default fail, passthrough, etc.).
-   - `tests/test_s2_ringdown_window_contract_unittest.py`: mantenerlo como “contract tests” de s2, pero evitar duplicar utilidades; extraer helpers a `tests/_util_contract.py` si ya hay repetición (un único helper compartido vale más que tres copias).
-   - `tests/test_experiment_t0_sweep_full_diagnose_unittest.py`: si esto es “experiment”, idealmente debería vivir bajo un patrón estable (p.ej. `tests/experiments/test_t0_sweep_full_*.py`) o convertirse en un **smoke test** más pequeño. Los experiments tienden a crecer sin control.
-3. **Presupuesto de tests por cambio** (pragmático):
-   - Cambios de parser/CLI: 1 fichero.
-   - Cambios de contrato por stage: 1 fichero por stage.
-   - Experimentos: 1 fichero por experimento (y preferir asserts de “manifiesto/gating”, no loops gigantes).
+Rutas emitidas por MALDA bajo un run gobernado:
 
-### Comandos útiles (para vigilar crecimiento)
+- `runs/<run_id>/experiment/malda_feature_table/outputs/event_features.csv`
+- `runs/<run_id>/experiment/malda_discovery/outputs/discovery_summary.json`
+- `runs/<run_id>/experiment/malda_formula_validation/outputs/formula_validation.json`
 
-Archivos añadidos hoy:
+Ejemplo estricto reutilizando un run ya gobernado:
 
 ```bash
-git log --since='today 12:00' --name-status --pretty=format: \
-| awk '$1=="A" && $2 ~ /\.py$/ {print $2}' | sort -u
+export BASURIN_RUNS_ROOT=/home/ignac/work/basurin/runs
+
+python malda/10_build_event_feature_table.py \
+  --run-id synth_family_router_smoke \
+  --bbh-only
+
+python malda/11_kan_pysr_discovery.py \
+  --run-id synth_family_router_smoke \
+  --feature-policy claim_grade_symmetric \
+  --targets E_rad_frac,af,F_220_dimless,f_ratio_221_220 \
+  --heartbeat-seconds 10 \
+  --bbh-only
+
+python malda/12_validate_formula_candidates.py \
+  --run-id synth_family_router_smoke \
+  --targets E_rad_frac,af,F_220_dimless,f_ratio_221_220 \
+  --bootstrap-samples 200
 ```
 
-“Hotspots” (muchos ficheros tocados por commit):
+Regla de interpretacion:
 
-```bash
-git show --stat b08a7b7
-```
+- Si un `run_id` no tiene `RUN_VALID/verdict.json`, MALDA discovery puede haberse ejecutado como experimento local, pero `step 12` debe abortar por contrato.
+- Si quieres gobernanza estricta, no "repares" un run a mano creando `RUN_VALID`; cuelga MALDA de un run canonico ya valido o crea primero ese run con el pipeline canónico.
 
-### Riesgos / supuestos
+## 8. Rutas y artefactos clave
 
-- Si esos tests nuevos están evitando regresiones reales (lo parecen), no es “basura”: es **control de daños**.
-- El peligro no es crear 3 ficheros una vez; es no poner una regla y acabar con 80 ficheros micro-especializados.
+### 8.1 Donde mirar primero al auditar o depurar
 
-Si hace falta, se puede convertir esta guía en una convención concreta de estructura `tests/` (nombres + carpetas + helpers) con criterio de “cuándo crear fichero nuevo”.
+1. `runs/<run_id>/RUN_VALID/verdict.json`
+2. `runs/<run_id>/pipeline_timeline.json`
+3. `runs/<run_id>/<stage>/stage_summary.json`
+4. `runs/<run_id>/<stage>/manifest.json`
+5. `runs/<run_id>/s1_fetch_strain/outputs/provenance.json`
+6. `runs/<run_id>/s4k_event_support_region/outputs/event_support_region.json` cuando exista la rama golden geometry explicita
 
-## Dónde mirar primero al depurar
+### 8.2 Rutas practicas
 
-1. `runs/<run_id>/pipeline_timeline.json`
-2. `runs/<run_id>/<stage>/stage_summary.json`
-3. `runs/<run_id>/<stage>/manifest.json`
-4. `docs/readme_rutas.md` para validar root efectivo y subruns.
+- mapa operativo de rutas: [`docs/readme_rutas.md`](docs/readme_rutas.md)
+- flujo de ejecucion y validaciones: [`docs/request_flow.md`](docs/request_flow.md)
+- semantica multimodo y canal de evidencia: [`docs/multimode_viability_and_evidence.md`](docs/multimode_viability_and_evidence.md)
+- artefacto consolidado por evento de la rama golden geometry: `runs/<run_id>/s4k_event_support_region/outputs/event_support_region.json` con `downstream_status.class` para gating conservador downstream
 
-Nota breve de shell: el comando `.` es `source` de bash; si aparece `-bash: .: filename argument required`, es un error de shell, no de BASURIN.
+### 8.3 Atlas y metadatos
 
-## Estado del proyecto
+- Los atlas versionados viven bajo `docs/ringdown/atlas/`.
+- La clasificacion usada por `malda/10_build_event_feature_table.py` sale del catalogo (`m1_source`, `m2_source`), sin un arbol de metadatos versionados bajo `docs/ringdown/`.
+- Cuando se pase un atlas explicito por CLI, debe ser un fichero versionado y trazable del repositorio o una ruta externa igualmente auditable.
 
-Este repositorio prioriza reproducibilidad y trazabilidad del MVP sobre ergonomía de packaging.
-Si vas a automatizar tareas con IA, usa este README + `docs/readme_rutas.md` como contexto base mínimo.
+Nota prudente:
+
+- la direccion de gobernanza sigue siendo mover todo consumo efectivo de inputs externos hacia artefactos explicitamente anclados y hasheados dentro del run.
+
+## 9. Hoja de ruta cientifica
+
+Los siguientes puntos son planificacion explicita, no capacidades cerradas hoy:
+
+1. Formalizar el artefacto canonico por evento que represente la region geometrica compatible completa, incluyendo 220, 221 cuando aplique, interseccion multimodo, filtros de area y metadata de dominio/viabilidad.
+2. Construir un stage poblacional canonico que consuma solo runs validos y artefactos canonicos por evento.
+3. Estudiar ocupacion del atlas, recurrencia de familias geometricas y exclusiones poblacionales sobre regiones de soporte, no sobre best fits puntuales.
+4. Mantener separacion estricta entre logica por evento y agregacion poblacional para impedir que un evento no informativo contamine una conclusion poblacional como si fuera evidencia geometrica positiva.
+5. Integrar de manera mas cerrada la rama explicita `s4g/s4h/s4i/s4j` con la superficie canonica del pipeline cuando el artefacto por evento quede fijado.
+
+## 10. Contribucion y disciplina de cambios
+
+Quien modifique BASURIN debe preservar estas reglas:
+
+- no relajar `RUN_VALID` ni el gating downstream sin una justificacion explicita;
+- no escribir fuera de `runs/<run_id>/...`;
+- no introducir artefactos intermedios no canonizados como si fueran parte del pipeline;
+- acompanar cambios en stages o contratos con tests y/o regresiones proporcionales;
+- documentar cualquier cambio de rutas, contratos o semantica de veredictos.
+
+En resumen: BASURIN debe fallar de forma explicita, degradar de forma conservadora y dejar evidencia reproducible de lo que hizo y de lo que deliberadamente no interpreto.

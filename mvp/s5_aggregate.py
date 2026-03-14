@@ -41,8 +41,20 @@ ALLOWED_MULTIMODE_VIABILITY_CLASSES = {
     "SINGLEMODE_ONLY",
     "RINGDOWN_NONINFORMATIVE",
 }
+ALLOWED_S4K_DOWNSTREAM_STATUS_CLASSES = {
+    "MULTIMODE_USABLE",
+    "GEOMETRY_PRESENT_BUT_NONINFORMATIVE",
+    "OUT_OF_DOMAIN",
+    "NO_SUPPORT_REGION",
+}
 SINGLEMODE_FALLBACK_CLASS = "SINGLEMODE_ONLY"
 SINGLEMODE_FALLBACK_REASON = "MISSING_S3B_UPSTREAM"
+MULTIMODE_CONDITIONED_SUPPORTED = "SUPPORTED"
+MULTIMODE_CONDITIONED_NOT_SUPPORTED = "NOT_SUPPORTED"
+MULTIMODE_CONDITIONED_INSUFFICIENT = "INSUFFICIENT_POPULATION"
+MIN_MULTIMODE_POPULATION_EVENTS = 2
+
+
 def _relpath_under(root: Path, p: Path) -> str:
     """Return POSIX path relative to root when possible, else absolute POSIX path."""
     try:
@@ -122,12 +134,12 @@ def _event_id_from_source_run(run_id: str) -> str | None:
 
 
 def _safe_event_id(run_id: str, payload_event_id: Any) -> str:
-    """Resolve event_id using source_run naming first, payload as fallback."""
+    """Resolve event_id contract-first, using run_id parsing only as a fallback."""
+    if isinstance(payload_event_id, str) and payload_event_id.strip():
+        return payload_event_id.strip()
     from_run = _event_id_from_source_run(run_id)
     if from_run:
         return from_run
-    if isinstance(payload_event_id, str) and payload_event_id.strip():
-        return payload_event_id.strip()
     return "unknown"
 
 
@@ -214,6 +226,188 @@ def _extract_vector4(s4c_payload: dict[str, Any]) -> dict[str, Any]:
         "delta_tau_221": _first_number(deltas, ["delta_tau_221"]),
         "cov4": s4c_payload.get("cov4") if isinstance(s4c_payload.get("cov4"), list) else None,
     }
+
+
+def _extract_common_intersection_ids(payload: dict[str, Any]) -> list[str]:
+    ids = payload.get("common_geometry_ids")
+    if not isinstance(ids, list):
+        return []
+    return [str(geometry_id) for geometry_id in ids]
+
+
+def _extract_s4k_downstream_status(payload: dict[str, Any], source_path: Path) -> tuple[str | None, list[str]]:
+    downstream = payload.get("downstream_status")
+    if not isinstance(downstream, dict):
+        return None, []
+    status_class = downstream.get("class")
+    if status_class is None:
+        return None, []
+    if status_class not in ALLOWED_S4K_DOWNSTREAM_STATUS_CLASSES:
+        raise RuntimeError(
+            f"Invalid s4k downstream_status.class={status_class!r} in {source_path}; "
+            "regenerate upstream with python -m mvp.s4k_event_support_region --run-id <RUN_ID>"
+        )
+    reasons = downstream.get("reasons")
+    if not isinstance(reasons, list):
+        reasons = []
+    return str(status_class), [str(reason) for reason in reasons]
+
+
+def _summarize_s4k_support_region(source_data: list[dict[str, Any]]) -> dict[str, Any]:
+    counts = {key: 0 for key in sorted(ALLOWED_S4K_DOWNSTREAM_STATUS_CLASSES)}
+    event_run_ids = {key: [] for key in sorted(ALLOWED_S4K_DOWNSTREAM_STATUS_CLASSES)}
+    per_event: dict[str, dict[str, Any]] = {}
+    present = 0
+
+    for src in source_data:
+        run_id = str(src.get("run_id"))
+        if not src.get("s4k_present"):
+            continue
+        present += 1
+        status_class = src.get("s4k_downstream_status_class")
+        if status_class in counts:
+            counts[str(status_class)] += 1
+            event_run_ids[str(status_class)].append(run_id)
+        per_event[run_id] = {
+            "event_id": str(src.get("event_id")),
+            "downstream_status_class": status_class,
+            "downstream_status_reasons": list(src.get("s4k_downstream_status_reasons", [])),
+            "support_region_status": src.get("s4k_support_region_status"),
+            "analysis_path": src.get("s4k_analysis_path"),
+            "n_final_geometries": len(src.get("s4k_final_geometry_ids", [])),
+        }
+
+    return {
+        "n_present": present,
+        "n_missing": len(source_data) - present,
+        "counts": counts,
+        "event_run_ids": event_run_ids,
+        "per_event": per_event,
+    }
+
+
+def compute_multimode_conditioned_population(
+    source_data: list[dict[str, Any]],
+    *,
+    min_events_required: int = MIN_MULTIMODE_POPULATION_EVENTS,
+) -> dict[str, Any]:
+    explicit_present = [src for src in source_data if src.get("s4k_present")]
+    if explicit_present:
+        eligible_explicit = [
+            src for src in explicit_present
+            if src.get("s4k_downstream_status_class") == "MULTIMODE_USABLE"
+            and bool(src.get("s4k_final_geometry_ids"))
+        ]
+        payload: dict[str, Any] = {
+            "status": None,
+            "reason": None,
+            "min_events_required": int(min_events_required),
+            "n_events_eligible": len(eligible_explicit),
+            "eligible_run_ids": [str(src.get("run_id")) for src in eligible_explicit],
+            "eligible_event_ids": [str(src.get("event_id")) for src in eligible_explicit],
+            "artifact_basis": "s4k_event_support_region",
+            "common_geometry_ids": [],
+            "n_common": 0,
+        }
+        if not eligible_explicit:
+            payload["status"] = MULTIMODE_CONDITIONED_NOT_SUPPORTED
+            payload["reason"] = (
+                "explicit event support regions are present, but no event is tagged "
+                "MULTIMODE_USABLE in s4k_event_support_region"
+            )
+            return payload
+        if len(eligible_explicit) < min_events_required:
+            payload["status"] = MULTIMODE_CONDITIONED_INSUFFICIENT
+            payload["reason"] = (
+                f"need at least {min_events_required} eligible events with "
+                "s4k_event_support_region downstream_status=MULTIMODE_USABLE; "
+                f"got {len(eligible_explicit)}"
+            )
+            return payload
+
+        common_sets = [
+            set(map(str, src.get("s4k_final_geometry_ids", [])))
+            for src in eligible_explicit
+        ]
+        common_geometry_ids = sorted(set.intersection(*common_sets)) if common_sets else []
+        payload.update(
+            {
+                "status": MULTIMODE_CONDITIONED_SUPPORTED,
+                "reason": (
+                    "sufficient eligible events with canonical explicit support-region artifacts"
+                ),
+                "common_geometry_ids": common_geometry_ids,
+                "n_common": len(common_geometry_ids),
+            }
+        )
+        return payload
+
+    eligible = [
+        src for src in source_data
+        if src.get("multimode_viability_class") == "MULTIMODE_OK"
+        and bool(src.get("compatible_ids"))
+    ]
+    payload: dict[str, Any] = {
+        "status": None,
+        "reason": None,
+        "min_events_required": int(min_events_required),
+        "n_events_eligible": len(eligible),
+        "eligible_run_ids": [str(src.get("run_id")) for src in eligible],
+        "eligible_event_ids": [str(src.get("event_id")) for src in eligible],
+        "artifact_basis": None,
+        "common_geometry_ids": [],
+        "n_common": 0,
+    }
+
+    if not eligible:
+        payload["status"] = MULTIMODE_CONDITIONED_NOT_SUPPORTED
+        payload["reason"] = (
+            "no events satisfy MULTIMODE_OK with non-empty s4 compatible_set; "
+            "220∩221 population aggregation is not supported"
+        )
+        return payload
+
+    if len(eligible) < min_events_required:
+        payload["status"] = MULTIMODE_CONDITIONED_INSUFFICIENT
+        payload["reason"] = (
+            f"need at least {min_events_required} eligible events with MULTIMODE_OK "
+            f"and non-empty compatible_set; got {len(eligible)}"
+        )
+        return payload
+
+    missing_s4i = [
+        str(src.get("run_id"))
+        for src in eligible
+        if not src.get("s4i_present")
+    ]
+    if missing_s4i:
+        payload["status"] = MULTIMODE_CONDITIONED_NOT_SUPPORTED
+        payload["reason"] = (
+            "canonical per-event 220∩221 artifact missing: "
+            "s4i_common_geometry_intersection/outputs/common_intersection.json"
+        )
+        payload["missing_common_intersection_run_ids"] = missing_s4i
+        return payload
+
+    common_sets = [
+        set(map(str, src.get("common_intersection_ids", [])))
+        for src in eligible
+    ]
+    common_geometry_ids = sorted(set.intersection(*common_sets)) if common_sets else []
+    payload.update(
+        {
+            "status": MULTIMODE_CONDITIONED_SUPPORTED,
+            "reason": (
+                "sufficient eligible events with canonical 220∩221 common-intersection artifacts"
+            ),
+            "artifact_basis": "s4i_common_geometry_intersection",
+            "common_geometry_ids": common_geometry_ids,
+            "n_common": len(common_geometry_ids),
+        }
+    )
+    return payload
+
+
 def aggregate_compatible_sets(
     source_data: list[dict[str, Any]], min_coverage: float = 1.0, top_k: int = 50,
 ) -> dict[str, Any]:
@@ -712,16 +906,29 @@ def main() -> int:
     ranked_paths: dict[str, Path] = {}
     s3b_summary_paths: dict[str, Path] = {}
     s3_summary_paths: dict[str, Path] = {}
+    common_intersection_paths: dict[str, Path] = {}
+    hawking_paths: dict[str, Path] = {}
+    event_support_region_paths: dict[str, Path] = {}
     for src in source_runs:
         p = out_root / src / "s4_geometry_filter" / "outputs" / "compatible_set.json"
         source_paths[src] = p
         ranked_paths[src] = out_root / src / "s6b_information_geometry_ranked" / "outputs" / "ranked_geometries.json"
         s3b_summary_paths[src] = out_root / src / "s3b_multimode_estimates" / "stage_summary.json"
         s3_summary_paths[src] = out_root / src / "s3_ringdown_estimates" / "stage_summary.json"
+        common_intersection_paths[src] = out_root / src / "s4i_common_geometry_intersection" / "outputs" / "common_intersection.json"
+        hawking_paths[src] = out_root / src / "s4j_hawking_area_filter" / "outputs" / "hawking_area_filter.json"
+        event_support_region_paths[src] = out_root / src / "s4k_event_support_region" / "outputs" / "event_support_region.json"
     check_inputs(
         ctx,
         source_paths,
-        optional={**ranked_paths, **s3b_summary_paths, **s3_summary_paths},
+        optional={
+            **ranked_paths,
+            **s3b_summary_paths,
+            **s3_summary_paths,
+            **common_intersection_paths,
+            **hawking_paths,
+            **event_support_region_paths,
+        },
     )
     # Keep metadata portable/auditable: prefer paths relative to runs_root for upstream inputs.
     for rec in ctx.inputs_record:
@@ -815,6 +1022,16 @@ def main() -> int:
                 "compatible_indices": [],
                 "multimode_viability_class": None,
                 "compatible_set_schema": {},
+                "s4i_present": False,
+                "common_intersection_ids": [],
+                "s4j_present": False,
+                "hawking_geometry_ids": [],
+                "s4k_present": False,
+                "s4k_analysis_path": None,
+                "s4k_support_region_status": None,
+                "s4k_final_geometry_ids": [],
+                "s4k_downstream_status_class": None,
+                "s4k_downstream_status_reasons": [],
             })
             if "schema_version" in cs:
                 detected_schema, normalized_schema = _detect_compatible_set_schema(cs, p)
@@ -872,8 +1089,52 @@ def main() -> int:
                     source_data[-1]["compatible_indices"] = _parse_s6b_indices(ranked_payload.get("compatible"))
                 except Exception:
                     pass
+            common_intersection_path = common_intersection_paths[src]
+            if common_intersection_path.exists():
+                try:
+                    common_payload = json.loads(common_intersection_path.read_text(encoding="utf-8"))
+                    source_data[-1]["s4i_present"] = True
+                    source_data[-1]["common_intersection_ids"] = _extract_common_intersection_ids(common_payload)
+                except Exception:
+                    pass
+            hawking_path = hawking_paths[src]
+            if hawking_path.exists():
+                try:
+                    hawking_payload = json.loads(hawking_path.read_text(encoding="utf-8"))
+                    golden_ids = hawking_payload.get("golden_geometry_ids")
+                    if isinstance(golden_ids, list):
+                        source_data[-1]["s4j_present"] = True
+                        source_data[-1]["hawking_geometry_ids"] = [str(geometry_id) for geometry_id in golden_ids]
+                except Exception:
+                    pass
+            event_support_region_path = event_support_region_paths[src]
+            if event_support_region_path.exists():
+                try:
+                    support_payload = json.loads(event_support_region_path.read_text(encoding="utf-8"))
+                    downstream_status_class, downstream_status_reasons = _extract_s4k_downstream_status(
+                        support_payload, event_support_region_path
+                    )
+                    final_ids = support_payload.get("final_geometry_ids")
+                    source_data[-1]["s4k_present"] = True
+                    source_data[-1]["s4k_analysis_path"] = support_payload.get("analysis_path")
+                    source_data[-1]["s4k_support_region_status"] = support_payload.get("support_region_status")
+                    source_data[-1]["s4k_final_geometry_ids"] = (
+                        [str(geometry_id) for geometry_id in final_ids] if isinstance(final_ids, list) else []
+                    )
+                    source_data[-1]["s4k_downstream_status_class"] = downstream_status_class
+                    source_data[-1]["s4k_downstream_status_reasons"] = downstream_status_reasons
+                except Exception:
+                    raise
 
         result = aggregate_compatible_sets(source_data, args.min_coverage, top_k=args.top_k)
+        multimode_conditioned_population = compute_multimode_conditioned_population(source_data)
+        result["multimode_conditioned_population"] = multimode_conditioned_population
+        result["golden_geometry_support_region"] = _summarize_s4k_support_region(source_data)
+        conditioned_status = multimode_conditioned_population.get("status")
+        if conditioned_status == MULTIMODE_CONDITIONED_NOT_SUPPORTED:
+            result.setdefault("warnings", []).append("MULTIMODE_CONDITIONED_NOT_SUPPORTED")
+        elif conditioned_status == MULTIMODE_CONDITIONED_INSUFFICIENT:
+            result.setdefault("warnings", []).append("MULTIMODE_CONDITIONED_INSUFFICIENT_POPULATION")
         schema_rows = [
             {
                 "run_id": str(src.get("run_id")),
@@ -935,6 +1196,10 @@ def main() -> int:
             "n_events": result["n_events"],
             "n_common": result["n_common_geometries"],
             "n_unique": result["n_total_unique_geometries"],
+            "multimode_conditioned_status": multimode_conditioned_population.get("status"),
+            "multimode_conditioned_reason": multimode_conditioned_population.get("reason"),
+            "multimode_conditioned_artifact_basis": multimode_conditioned_population.get("artifact_basis"),
+            "s4k_present_events": result["golden_geometry_support_region"].get("n_present"),
             "diagnostics": {
                 "missing_scalar_kerr_tension": scalar_missing,
             },

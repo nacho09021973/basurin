@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
-"""Canonical stage s7: beyond-Kerr deviation score from s4d + s3b."""
+"""Canonical stage s7: beyond-Kerr deviation score from s4d + s3b.
+
+Contract note: ``verdict`` is a conditional summary state for this stage, not an
+independent GR confirmation label. The currently supported vocabulary is fixed to
+the tuple declared in ``VERDICT_TAXONOMY`` below.
+"""
 from __future__ import annotations
 
 import argparse
+import csv
 import json
+import logging
 import math
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +29,26 @@ from mvp.contracts import StageContext, abort, check_inputs, finalize, init_stag
 STAGE = "s7_beyond_kerr_deviation_score"
 GR_THRESHOLD_90 = 4.605
 GR_THRESHOLD_99 = 9.210
+BNS_MAX_REMNANT_MASS_MSUN = 10.0
+BNS_MAX_REMNANT_MASS_MSUN_MIN = 5.0
+BNS_MAX_REMNANT_MASS_MSUN_MAX = 15.0
+
+logger = logging.getLogger(__name__)
+NON_INDEPENDENT = "NON_INDEPENDENT"
+DOMAIN_OUT_OF_DOMAIN = "OUT_OF_DOMAIN"
+CATALOG_CANDIDATE_PATHS = (
+    _here.parents[1] / "gwtc_quality_events.csv",
+    _here.parents[1] / "data" / "losc" / "gwtc_all_events.csv",
+)
+VERDICT_TAXONOMY = (
+    "GR_CONSISTENT",
+    "GR_TENSION",
+    "GR_INCONSISTENT",
+    "SKIPPED_S4D_GATE",
+    "SKIPPED_OUT_OF_DOMAIN",
+    "ASTRO_INCONSISTENT",
+    "INCONCLUSIVE",
+)
 
 
 def _utc_now_z() -> str:
@@ -74,7 +102,26 @@ def _compute_score(
     }
 
 
-def _empty_score_payload(verdict: str) -> dict[str, Any]:
+def _semantic_fields(
+    *,
+    reason: str,
+    domain_status: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "independence_class": NON_INDEPENDENT,
+        "reason": reason,
+    }
+    if domain_status is not None:
+        payload["domain_status"] = domain_status
+    return payload
+
+
+def _empty_score_payload(
+    verdict: str,
+    *,
+    reason: str,
+    domain_status: str | None = None,
+) -> dict[str, Any]:
     return {
         "chi2_kerr_2dof": None,
         "chi2_cdf_proxy": None,
@@ -87,6 +134,10 @@ def _empty_score_payload(verdict: str) -> dict[str, Any]:
         "predicted_tau221_s": None,
         "gr_threshold_90pct": GR_THRESHOLD_90,
         "gr_threshold_99pct": GR_THRESHOLD_99,
+        **_semantic_fields(
+            reason=reason,
+            domain_status=domain_status,
+        ),
     }
 
 
@@ -95,6 +146,218 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"Expected JSON object in {path}, got {type(payload).__name__}")
     return payload
+
+
+def _extract_source_class(metadata: dict[str, Any]) -> str | None:
+    for key in ("source_class", "event_class", "event_type", "source_type"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    classification = metadata.get("classification")
+    if isinstance(classification, dict):
+        for key in ("source_class", "event_class", "event_type"):
+            value = classification.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _classify_source_kind(source_class: str | None) -> str | None:
+    if source_class is None:
+        return None
+    token = source_class.strip().lower().replace("-", "_").replace(" ", "_")
+    if token in {"bns", "binary_neutron_star", "nsns"}:
+        return "BNS"
+    if token in {"bbh", "binary_black_hole"}:
+        return "BBH"
+    if token in {"nsbh", "neutron_star_black_hole"}:
+        return "NSBH"
+    return token.upper()
+
+
+def _resolve_bns_mass_upper_bound_msun() -> float:
+    """Resolve BNS remnant-mass upper bound from env with conservative default.
+
+    BASURIN_BNS_MAX_REMNANT_MASS_MSUN can tune this threshold without changing code.
+    Recommended range: [5, 15] Msun. Values outside this range are clamped.
+    """
+    raw = os.environ.get("BASURIN_BNS_MAX_REMNANT_MASS_MSUN")
+    if raw is None:
+        return BNS_MAX_REMNANT_MASS_MSUN
+    try:
+        bound = float(raw)
+    except ValueError:
+        logger.warning(
+            "Ignoring invalid BASURIN_BNS_MAX_REMNANT_MASS_MSUN=%r; using default %.1f",
+            raw,
+            BNS_MAX_REMNANT_MASS_MSUN,
+        )
+        return BNS_MAX_REMNANT_MASS_MSUN
+    if not math.isfinite(bound) or bound <= 0.0:
+        logger.warning(
+            "Ignoring non-finite/out-of-domain BASURIN_BNS_MAX_REMNANT_MASS_MSUN=%r; using default %.1f",
+            raw,
+            BNS_MAX_REMNANT_MASS_MSUN,
+        )
+        return BNS_MAX_REMNANT_MASS_MSUN
+    clamped = min(BNS_MAX_REMNANT_MASS_MSUN_MAX, max(BNS_MAX_REMNANT_MASS_MSUN_MIN, bound))
+    if clamped != bound:
+        logger.warning(
+            "Clamping BASURIN_BNS_MAX_REMNANT_MASS_MSUN from %.3f to %.3f (allowed range %.1f-%.1f)",
+            bound,
+            clamped,
+            BNS_MAX_REMNANT_MASS_MSUN_MIN,
+            BNS_MAX_REMNANT_MASS_MSUN_MAX,
+        )
+    return clamped
+
+
+def _classify_source_kind_from_masses(m1_source: Any, m2_source: Any) -> str | None:
+    m1 = _to_float(m1_source)
+    m2 = _to_float(m2_source)
+    if m1 is None or m2 is None or m1 <= 0.0 or m2 <= 0.0:
+        return None
+    if m1 < 3.0 and m2 < 3.0:
+        return "BNS"
+    if (m1 < 3.0 <= m2) or (m2 < 3.0 <= m1):
+        return "NSBH"
+    return "BBH"
+
+
+def _to_float(value: Any) -> float | None:
+    try:
+        out = float(value)
+    except Exception:
+        return None
+    if not math.isfinite(out):
+        return None
+    return out
+
+
+def _lookup_catalog_row(event_id: str) -> dict[str, str] | None:
+    for path in CATALOG_CANDIDATE_PATHS:
+        if not path.exists():
+            continue
+        with path.open("r", encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh)
+            for row in reader:
+                if str(row.get("event", "")).strip() == event_id:
+                    return row
+    return None
+
+
+def _validate_metadata_for_source_inference(metadata: dict[str, Any]) -> str | None:
+    preferred_families = metadata.get("preferred_families")
+    if preferred_families is not None and not isinstance(preferred_families, list):
+        return "preferred_families must be a list when present"
+    family_priors = metadata.get("family_priors")
+    if family_priors is not None and not isinstance(family_priors, dict):
+        return "family_priors must be an object when present"
+    return None
+
+
+def _infer_source_kind_from_metadata(metadata: dict[str, Any]) -> str | None:
+    preferred_families = metadata.get("preferred_families")
+    if isinstance(preferred_families, list) and any(str(f) == "BNS_REMNANT" for f in preferred_families):
+        return "BNS"
+    family_priors = metadata.get("family_priors")
+    if isinstance(family_priors, dict) and "BNS_REMNANT" in family_priors:
+        return "BNS"
+    return None
+
+
+def _load_event_metadata_for_run(run_dir: Path) -> dict[str, Any]:
+    run_provenance_path = run_dir / "run_provenance.json"
+    if not run_provenance_path.exists():
+        return {"_metadata_lookup": "not_requested"}
+    provenance = _load_json_object(run_provenance_path)
+    invocation = provenance.get("invocation")
+    if not isinstance(invocation, dict):
+        return {"_metadata_lookup": "not_requested"}
+    event_id = invocation.get("event_id")
+    if not isinstance(event_id, str) or not event_id.strip():
+        return {"_metadata_lookup": "not_requested"}
+    catalog_row = _lookup_catalog_row(event_id.strip())
+    if catalog_row is None:
+        return {"_metadata_lookup": "missing", "event_id": event_id}
+    source_kind = _classify_source_kind_from_masses(
+        catalog_row.get("m1_source") or catalog_row.get("mass_1_source"),
+        catalog_row.get("m2_source") or catalog_row.get("mass_2_source"),
+    )
+    metadata: dict[str, Any] = {
+        "_metadata_lookup": "found",
+        "event_id": event_id,
+        "catalog": catalog_row.get("catalog"),
+        "classification_source": "catalog_mass_threshold" if source_kind is not None else "unknown",
+    }
+    if source_kind is not None:
+        metadata["source_class"] = source_kind
+    return metadata
+
+
+def _astrophysical_consistency(*, M_final: float, metadata: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate lightweight astrophysical priors.
+
+    Output schema example:
+    {
+      "source_kind": "BNS",
+      "status": "INCONSISTENT",
+      "reason": "BNS prior violated: inferred Kerr remnant mass ...",
+      "mass_upper_bound_msun": 10.0
+    }
+
+    TODO: migrate to probabilistic consistency with upstream uncertainties
+    (e.g. if s4d provides mu/sigma, evaluate P[M_final > bound] via Normal CDF
+    and compare against a confidence threshold) instead of a hard cut.
+    """
+    metadata_validation_error = _validate_metadata_for_source_inference(metadata)
+    if metadata_validation_error is not None:
+        return {
+            "source_kind": None,
+            "status": "METADATA_INSUFFICIENT",
+            "reason": f"event metadata malformed for source inference: {metadata_validation_error}",
+            "mass_upper_bound_msun": None,
+        }
+    source_kind = _classify_source_kind(_extract_source_class(metadata)) or _infer_source_kind_from_metadata(metadata)
+    mass_upper_bound_msun = _resolve_bns_mass_upper_bound_msun()
+    lookup_state = str(metadata.get("_metadata_lookup", "missing"))
+    result = {
+        "source_kind": source_kind,
+        "status": "NOT_APPLICABLE" if lookup_state == "not_requested" else "METADATA_INSUFFICIENT",
+        "reason": (
+            "event catalog lookup was not requested for this run"
+            if lookup_state == "not_requested"
+            else "event catalog data are insufficient to classify source kind for astrophysical checks"
+        ),
+        "mass_upper_bound_msun": None,
+    }
+    if source_kind != "BNS":
+        if source_kind is None:
+            return result
+        return {
+            "source_kind": source_kind,
+            "status": "NOT_APPLICABLE",
+            "reason": "astrophysical remnant-mass sanity prior currently applied only to BNS events",
+            "mass_upper_bound_msun": None,
+        }
+
+    if M_final > mass_upper_bound_msun:
+        return {
+            "source_kind": source_kind,
+            "status": "INCONSISTENT",
+            "reason": (
+                f"BNS prior violated: inferred Kerr remnant mass {M_final:.3f} Msun exceeds "
+                f"BNS_MAX_REMNANT_MASS_MSUN={mass_upper_bound_msun:.1f}"
+            ),
+            "mass_upper_bound_msun": mass_upper_bound_msun,
+        }
+
+    return {
+        "source_kind": source_kind,
+        "status": "CONSISTENT",
+        "reason": "BNS prior satisfied by Kerr remnant mass",
+        "mass_upper_bound_msun": mass_upper_bound_msun,
+    }
 
 
 def _as_finite_float(value: Any, json_path: str) -> float:
@@ -198,13 +461,37 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
     _validate_upstream_governance(ctx)
 
     kerr = _load_json_object(kerr_path)
+    kerr_verdict = str(kerr.get("verdict"))
+    kerr_reason = str(kerr.get("reason")) if kerr.get("reason") is not None else None
+    domain_status = str(kerr.get("domain_status")) if kerr.get("domain_status") is not None else None
 
-    if (
-        kerr.get("verdict") == "SKIPPED_MULTIMODE_GATE"
+    if domain_status == DOMAIN_OUT_OF_DOMAIN or kerr_verdict == "SKIPPED_OUT_OF_DOMAIN":
+        score = _empty_score_payload(
+            "SKIPPED_OUT_OF_DOMAIN",
+            domain_status=DOMAIN_OUT_OF_DOMAIN,
+            reason=(
+                kerr_reason
+                or "s4d marked the Kerr inversion out of domain; the conditional 221 residual check is not physically applicable"
+            ),
+        )
+    elif (
+        kerr_verdict == "SKIPPED_MULTIMODE_GATE"
         or kerr.get("M_final_Msun") is None
         or kerr.get("chi_final") is None
     ):
-        score = _empty_score_payload("SKIPPED_S4D_GATE")
+        score = _empty_score_payload(
+            "SKIPPED_S4D_GATE",
+            reason=(
+                kerr_reason
+                or "s4d did not provide a usable Kerr remnant; this conditional 221 residual check was not evaluated"
+            ),
+        )
+        score["astrophysical_consistency"] = {
+            "source_kind": None,
+            "status": "NOT_APPLICABLE",
+            "reason": "Kerr extraction unavailable; astrophysical consistency was not evaluated",
+            "mass_upper_bound_msun": None,
+        }
     else:
         multimode = _load_json_object(multimode_path)
         try:
@@ -239,6 +526,21 @@ def _execute(ctx: StageContext) -> dict[str, Path]:
             sigma_f221=observed["sigma_f221"],
             sigma_tau221=observed["sigma_tau221"],
         )
+        score.update(
+            _semantic_fields(
+                reason=(
+                    "221 residual evaluated conditional on the s4d Kerr remnant; "
+                    "this is not an independent GR support test"
+                ),
+            )
+        )
+        event_metadata = _load_event_metadata_for_run(ctx.run_dir)
+        astro_consistency = _astrophysical_consistency(M_final=M_final, metadata=event_metadata)
+        score["astrophysical_consistency"] = astro_consistency
+        if astro_consistency.get("status") == "INCONSISTENT":
+            score["verdict"] = "ASTRO_INCONSISTENT"
+        elif astro_consistency.get("status") == "METADATA_INSUFFICIENT":
+            score["verdict"] = "INCONCLUSIVE"
 
     payload = {
         "schema_name": "beyond_kerr_score",
@@ -271,6 +573,9 @@ def main() -> int:
             verdict="PASS",
             results={
                 "verdict": output_payload.get("verdict"),
+                "independence_class": output_payload.get("independence_class"),
+                "domain_status": output_payload.get("domain_status"),
+                "reason": output_payload.get("reason"),
                 "chi2_kerr_2dof": output_payload.get("chi2_kerr_2dof"),
             },
         )

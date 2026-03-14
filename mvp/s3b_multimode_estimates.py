@@ -20,6 +20,7 @@ for _cand in (_here.parents[0], _here.parents[1]):
 from basurin_io import write_json_atomic
 from mvp.contracts import abort, check_inputs, finalize, init_stage
 from mvp.multimode_viability import (
+    DEFAULT_THRESHOLDS,
     classify_multimode_viability as classify_multimode_viability_v3,
     evaluate_science_evidence,
     evaluate_systematics_gate,
@@ -341,17 +342,27 @@ def _estimate_220_spectral(signal: np.ndarray, fs: float, *, band_low: float, ba
     return _estimate_spectral(signal, fs, band_low=band_220[0], band_high=band_220[1])
 
 
+def _coerce_positive_finite_estimate(est: dict[str, float], key: str) -> float:
+    value = est.get(key)
+    coerced = float(value)
+    if not math.isfinite(coerced) or coerced <= 0.0:
+        raise ValueError(f"invalid template estimate: {key}={value!r}")
+    return coerced
+
+
 def _template_220(signal: np.ndarray, fs: float, est220: dict[str, float]) -> np.ndarray:
     from numpy.linalg import lstsq
 
     t = np.arange(signal.size, dtype=float) / fs
-    f = float(est220["f_hz"])
-    tau = float(est220["tau_s"])
+    f = _coerce_positive_finite_estimate(est220, "f_hz")
+    tau = _coerce_positive_finite_estimate(est220, "tau_s")
     env = np.exp(-t / tau)
     w = 2.0 * math.pi * f
     b1 = env * np.cos(w * t)
     b2 = env * np.sin(w * t)
     X = np.vstack([b1, b2]).T
+    if not np.all(np.isfinite(X)):
+        raise ValueError("invalid template estimate: non-finite 220 design matrix")
     coeffs, *_ = lstsq(X, signal, rcond=None)
     return (X @ coeffs).astype(float)
 
@@ -951,12 +962,15 @@ def classify_multimode_viability(
         {
             "valid_fraction_220": valid_fraction_220,
             "valid_fraction_221": valid_fraction_221,
+            "mode_221_ok": True,
             "f_220_median": 1.0,
             "f_220_iqr": 0.0,
             "f_221_median": 1.0,
             "f_221_iqr": 0.0,
             "Rf_bootstrap_quantiles": {"q05": 0.9, "q50": 1.0, "q95": 1.1},
             "Rf_kerr_band": [0.8, 1.2],
+            "delta_bic": DEFAULT_THRESHOLDS["DELTA_BIC_SUPPORTIVE"],
+            "two_mode_preferred": True,
         }
     )
 
@@ -964,6 +978,7 @@ def classify_multimode_viability(
 def _compute_multimode_summary_blocks(
     mode_220: dict[str, Any],
     mode_221: dict[str, Any],
+    mode_221_ok: bool,
     model_comparison: dict[str, Any],
     run_dir: Path,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -976,6 +991,7 @@ def _compute_multimode_summary_blocks(
     viability_inputs = {
         "valid_fraction_220": mode_220.get("fit", {}).get("stability", {}).get("valid_fraction"),
         "valid_fraction_221": mode_221.get("fit", {}).get("stability", {}).get("valid_fraction"),
+        "mode_221_ok": bool(mode_221_ok),
         "f_220_median": m220["f_median"],
         "f_220_iqr": m220["f_iqr"],
         "f_221_median": m221["f_median"],
@@ -984,6 +1000,7 @@ def _compute_multimode_summary_blocks(
         "Rf_bootstrap_quantiles": rf_quantiles,
         "Rf_kerr_band": optional_inputs.get("Rf_kerr_band"),
         "delta_bic": model_comparison.get("delta_bic"),
+        "two_mode_preferred": (model_comparison.get("decision") or {}).get("two_mode_preferred"),
     }
     viability = classify_multimode_viability_v3(viability_inputs)
 
@@ -1158,6 +1175,7 @@ def main() -> int:
         viability, systematics_gate, science_evidence, annotations = _compute_multimode_summary_blocks(
             mode_220=mode_220,
             mode_221=mode_221,
+            mode_221_ok=ok_221,
             model_comparison=model_comparison,
             run_dir=ctx.run_dir,
         )

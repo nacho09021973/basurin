@@ -192,6 +192,37 @@ GW170809
         check=False,
     )
     assert second.returncode == 0
-    assert "GW150914 H1: SKIP H-H1_pref.hdf5" in second.stdout
-    assert "GW151226 H1: SKIP H-H1_151226.hdf5" in second.stdout
-    assert "GW170823 H1: SKIP H-H1_170823.hdf5" in second.stdout
+    assert "GW150914 H1: SKIP detector already present" in second.stdout
+    assert "GW151226 H1: SKIP detector already present" in second.stdout
+    assert "GW170823 H1: SKIP detector already present" in second.stdout
+
+
+def test_fetch_losc_batch_skips_detector_when_any_local_file_for_detector_exists(tmp_path: Path) -> None:
+    mock_curl = tmp_path / "mock_curl.sh"
+    _write_mock_curl(mock_curl)
+
+    events_file = tmp_path / "events.txt"
+    events_file.write_text("GW150914\n", encoding="utf-8")
+
+    losc_root = tmp_path / "data" / "losc"
+    event_dir = losc_root / "GW150914"
+    event_dir.mkdir(parents=True)
+    (event_dir / "legacy_H1_copy.hdf5").write_text("existing", encoding="utf-8")
+
+    env = os.environ.copy()
+    env["CURL_BIN"] = str(mock_curl)
+    env["LOSC_ROOT"] = str(losc_root)
+
+    proc = subprocess.run(
+        [str(SCRIPT), str(events_file)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "GW150914 H1: SKIP detector already present" in proc.stdout
+    assert (event_dir / "legacy_H1_copy.hdf5").exists()
+    assert not (event_dir / "H-H1_pref.hdf5").exists()
+    assert (event_dir / "L-L1_ok.hdf5").exists()

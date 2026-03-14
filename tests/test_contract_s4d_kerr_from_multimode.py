@@ -4,12 +4,13 @@ import mvp.contracts as c
 def test_contract_s4d_kerr_from_multimode_minimal():
     sc = c.CONTRACTS["s4d_kerr_from_multimode"]
 
-    assert sc.upstream_stages == ["s3b_multimode_estimates"]
+    assert sc.upstream_stages == ["s3b_multimode_estimates", "s4_geometry_filter"]
 
     # Canonical required input (model_comparison.json intentionally optional)
     assert sc.required_inputs == [
         "s3b_multimode_estimates/outputs/multimode_estimates.json",
         "s3b_multimode_estimates/stage_summary.json",
+        "s4_geometry_filter/outputs/compatible_set.json",
     ]
 
     # Canonical produced outputs under runs/<run_id>/s4d_kerr_from_multimode/outputs/

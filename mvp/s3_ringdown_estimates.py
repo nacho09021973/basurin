@@ -54,6 +54,36 @@ def _compute_kerr_centered_band(
     return f_low, f_high, half_width_hz
 
 
+def _expand_input_band_for_kerr_hint(
+    *,
+    requested_band_low: float,
+    requested_band_high: float,
+    kerr_f220_hz: float,
+    width_factor: float,
+    min_half_width_hz: float,
+    q_ref: float,
+    f_min_floor_hz: float,
+    nyquist_hz: float,
+) -> tuple[float, float, float]:
+    """Expand the *input* bandpass so the Kerr-centered fit band is not clipped away.
+
+    This solves the failure mode where the spectral fitter asks for a Kerr-centered
+    band around ``f220_kerr_hz`` but the initial Butterworth bandpass has already
+    removed that frequency because the requested input band was fixed too narrowly
+    (for example, default ``150–400 Hz`` while ``f220`` is below 150 Hz).
+    """
+    kerr_low, kerr_high, half_width_hz = _compute_kerr_centered_band(
+        f220_kerr_hz=float(kerr_f220_hz),
+        width_factor=width_factor,
+        min_half_width_hz=min_half_width_hz,
+        q_ref=q_ref,
+        f_min_floor_hz=f_min_floor_hz,
+    )
+    input_low = max(float(f_min_floor_hz), min(float(requested_band_low), float(kerr_low)))
+    input_high = min(float(nyquist_hz) * 0.95, max(float(requested_band_high), float(kerr_high)))
+    return input_low, input_high, half_width_hz
+
+
 def _resolve_f220_kerr_hz(event_id: str) -> float | None:
     """Resolve Kerr f220 from catalog remnant mass/spin when available."""
     evt = get_event(event_id)
@@ -305,9 +335,13 @@ def estimate_ringdown_spectral(
         "rmse": float("nan"), "logL": float("nan"), "BIC": float("nan"),
         # Floor traceability (None = not applicable for degenerate/fallback paths)
         "sigma_f_hz_raw": None, "df_floor_hz": None, "sigma_floor_applied": None,
+        # Degenerate-solution flag: True when curve_fit converged but the solution
+        # is physically meaningless (flat Lorentzian, Q<1, or f0 at band edge).
+        "fit_degenerate": False,
         "fit": {
             "method": "spectral_lorentzian",
             "fit_success": False,
+            "fit_degenerate": False,
             "metrics": {"rmse": float("nan"), "logL": float("nan"), "bic": float("nan")},
             "metrics_debug": {
                 "y_definition": "y_i is one-sided PSD bin value within fit band",
@@ -325,12 +359,25 @@ def estimate_ringdown_spectral(
     if n < 16:
         return dict(_nan_result)
 
-    band_low, band_high = float(band_hz[0]), float(band_hz[1])
+    requested_band_low, requested_band_high = float(band_hz[0]), float(band_hz[1])
+    band_low, band_high = requested_band_low, requested_band_high
     nyquist = sample_rate / 2.0
     if band_high >= nyquist:
         band_high = nyquist * 0.95
     if band_low >= band_high:
         return dict(_nan_result)
+
+    if kerr_centered_band and kerr_f220_hz is not None and math.isfinite(kerr_f220_hz):
+        band_low, band_high, _ = _expand_input_band_for_kerr_hint(
+            requested_band_low=band_low,
+            requested_band_high=band_high,
+            kerr_f220_hz=float(kerr_f220_hz),
+            width_factor=band_width_factor,
+            min_half_width_hz=min_half_width_hz,
+            q_ref=q_ref,
+            f_min_floor_hz=f_min_floor_hz,
+            nyquist_hz=nyquist,
+        )
 
     # Bandpass filter before computing PSD to focus on the ringdown band
     try:
@@ -444,7 +491,10 @@ def estimate_ringdown_spectral(
     sigma_fit = np.maximum(psd_fit, np.max(psd_fit) * 1e-6)
 
     p0 = [A_init, f0_init, tau_init]
-    bounds_low  = [0.0,    effective_band_low,  1e-4]
+    # tau lower bound: 5e-4 s (0.5 ms).  Physical BBH ringdowns have tau > 2 ms;
+    # 1e-4 (the previous floor) allowed a degenerate solution where the Lorentzian
+    # HWHM >> band width, making it indistinguishable from a flat noise spectrum.
+    bounds_low  = [0.0,    effective_band_low,  5e-4]
     bounds_high = [np.inf, effective_band_high, 1.0]
 
     df_floor_hz = sample_rate / n   # Heisenberg floor: 1 / window_duration_s
@@ -462,6 +512,8 @@ def estimate_ringdown_spectral(
 
     n_params = 3
     n_obs = int(f_fit.size)
+    fit_degenerate = False
+    _degenerate_reason: str | None = None
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -477,34 +529,83 @@ def estimate_ringdown_spectral(
         A_fit, f0_fit, tau_fit = popt
 
         if np.all(np.isfinite(pcov)):
-            sigma_f_raw = float(np.sqrt(pcov[1, 1]))
-            sigma_tau   = float(np.sqrt(pcov[2, 2]))
-            sigma_f = max(sigma_f_raw, df_floor_hz)
-            sigma_floor_applied = sigma_f_raw < df_floor_hz
-            fit_success = True
+            # ------------------------------------------------------------------
+            # Degenerate-solution guard
+            # ------------------------------------------------------------------
+            # The primary failure mode is curve_fit driving tau to the lower
+            # bound, producing a Lorentzian whose HWHM (γ) >> band width.
+            # Over the narrow fit band such a Lorentzian is essentially flat and
+            # fits *any* noise spectrum, yielding fit_success=True with garbage
+            # (tau≈1e-4, Q<<1, f0 clamped to band edge).
+            #
+            # We reject three degenerate configurations:
+            #   1. HWHM ≥ half the band width   (Lorentzian ≈ flat constant)
+            #   2. Q < 1.0                       (unphysical for any GR QNM)
+            #   3. f0 within one frequency bin of either band edge  (clamped f0)
+            _gamma_fit     = 1.0 / (2.0 * math.pi * float(tau_fit))
+            _band_width_hz = effective_band_high - effective_band_low
+            _Q_fit_raw     = math.pi * float(f0_fit) * float(tau_fit)
+            _f0_at_low     = (float(f0_fit) - effective_band_low)  < df_floor_hz
+            _f0_at_high    = (effective_band_high - float(f0_fit)) < df_floor_hz
 
-            psd_model = lorentzian(f_fit, *popt)
-            resid = psd_fit - psd_model
-            denom = float(np.mean(psd_fit) ** 2) + 1e-100
-            fit_residual = float(np.mean(resid ** 2) / denom)
-            rmse = float(np.sqrt(np.mean(resid ** 2)))
+            if _gamma_fit >= 0.5 * _band_width_hz:
+                fit_degenerate = True
+                _degenerate_reason = (
+                    f"lorentzian_hwhm_too_wide: gamma={_gamma_fit:.1f} Hz >= "
+                    f"0.5*band_width={0.5 * _band_width_hz:.1f} Hz "
+                    f"(tau={tau_fit:.2e} s, Q={_Q_fit_raw:.3f})"
+                )
+            elif _Q_fit_raw < 1.0:
+                fit_degenerate = True
+                _degenerate_reason = (
+                    f"Q_below_physical_floor: Q={_Q_fit_raw:.4f} < 1.0 "
+                    f"(f0={f0_fit:.1f} Hz, tau={tau_fit:.2e} s)"
+                )
+            elif _f0_at_low or _f0_at_high:
+                fit_degenerate = True
+                _degenerate_reason = (
+                    f"f0_clamped_to_band_edge: f0={f0_fit:.2f} Hz "
+                    f"[band {effective_band_low:.1f}–{effective_band_high:.1f} Hz, "
+                    f"df_floor={df_floor_hz:.3f} Hz]"
+                )
 
-            # Weighted Gaussian log-likelihood with per-bin sigma_i=PSD_i
-            # used in curve_fit weighting.
-            chi2 = float(np.sum((resid / sigma_fit) ** 2))
-            sigma2 = sigma_fit ** 2
-            log_l = float(-0.5 * (
-                chi2 + n_obs * math.log(2.0 * math.pi) + float(np.sum(np.log(sigma2)))
-            ))
-            bic = float(n_params * math.log(max(n_obs, 1)) - 2.0 * log_l)
+            if not fit_degenerate:
+                sigma_f_raw = float(np.sqrt(pcov[1, 1]))
+                sigma_tau   = float(np.sqrt(pcov[2, 2]))
+                sigma_f = max(sigma_f_raw, df_floor_hz)
+                sigma_floor_applied = sigma_f_raw < df_floor_hz
+                fit_success = True
+
+                psd_model = lorentzian(f_fit, *popt)
+                resid = psd_fit - psd_model
+                denom = float(np.mean(psd_fit) ** 2) + 1e-100
+                fit_residual = float(np.mean(resid ** 2) / denom)
+                rmse = float(np.sqrt(np.mean(resid ** 2)))
+
+                # Weighted Gaussian log-likelihood with per-bin sigma_i=PSD_i
+                # used in curve_fit weighting.
+                chi2 = float(np.sum((resid / sigma_fit) ** 2))
+                sigma2 = sigma_fit ** 2
+                log_l = float(-0.5 * (
+                    chi2 + n_obs * math.log(2.0 * math.pi) + float(np.sum(np.log(sigma2)))
+                ))
+                bic = float(n_params * math.log(max(n_obs, 1)) - 2.0 * log_l)
     except RuntimeError:
         pass
 
     if not fit_success:
-        # Fallback: use hilbert_envelope and flag the failure
+        # Fallback: use hilbert_envelope and flag the failure.
+        # Distinguish between curve_fit convergence failure and a converged but
+        # physically degenerate solution (tau→floor, Q<1, f0 clamped to edge).
+        _failure_reason = (
+            f"degenerate_lorentzian: {_degenerate_reason}"
+            if fit_degenerate and _degenerate_reason
+            else ("degenerate_lorentzian" if fit_degenerate else "curve_fit_failed")
+        )
         try:
             result = estimate_ringdown_observables(strain, sample_rate, effective_band_low, effective_band_high)
             result["fit_success"] = False
+            result["fit_degenerate"] = fit_degenerate
             result["fit_residual"] = float("nan")
             result["rmse"] = None
             result["logL"] = None
@@ -512,6 +613,7 @@ def estimate_ringdown_spectral(
             result["fit"] = {
                 "method": "hilbert_envelope_fallback",
                 "fit_success": False,
+                "fit_degenerate": fit_degenerate,
                 "metrics": {"rmse": None, "logL": None, "bic": None},
                 "metrics_debug": {
                     "y_definition": "y_i is one-sided PSD bin value within fit band",
@@ -521,7 +623,7 @@ def estimate_ringdown_spectral(
                     "n_fit_bins": n_obs,
                 },
             }
-            result["fit_failure_reason"] = "curve_fit_failed"
+            result["fit_failure_reason"] = _failure_reason
             result["spectral_band"] = {
                 "method": band_method,
                 "f220_kerr_hz": kerr_f220_hz,
@@ -536,7 +638,8 @@ def estimate_ringdown_spectral(
             return result
         except Exception:
             out = dict(_nan_result)
-            out["fit_failure_reason"] = "curve_fit_failed"
+            out["fit_failure_reason"] = _failure_reason
+            out["fit_degenerate"] = fit_degenerate
             out["spectral_band"] = {
                 "method": band_method,
                 "f220_kerr_hz": kerr_f220_hz,
@@ -567,6 +670,7 @@ def estimate_ringdown_spectral(
         "sigma_Q":      sigma_Q,
         "cov_logf_logQ": 0.0,
         "fit_success":  True,
+        "fit_degenerate": False,
         "fit_residual": fit_residual,
         "rmse": rmse,
         "logL": log_l,
@@ -578,6 +682,7 @@ def estimate_ringdown_spectral(
         "fit": {
             "method": "spectral_lorentzian",
             "fit_success": True,
+            "fit_degenerate": False,
             "metrics": {"rmse": rmse, "logL": log_l, "bic": bic},
             "metrics_debug": {
                 "y_definition": "y_i is one-sided PSD bin value within fit band",

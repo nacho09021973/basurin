@@ -9,6 +9,21 @@ def _sigma_ln_f_ln_q() -> list[list[float]]:
     return [[0.04, 0.01], [0.01, 0.09]]
 
 
+def _write_compatible_set(run_dir: Path, *, n_compatible: int = 1) -> None:
+    payload = {
+        "schema_version": "mvp_compatible_set_v1",
+        "event_id": run_dir.name,
+        "metric": "mahalanobis_log",
+        "n_atlas": 4,
+        "n_compatible": int(max(0, n_compatible)),
+        "ranked_all": [{"geometry_id": f"g{i}", "d2": float(i + 1)} for i in range(4)],
+        "compatible_geometries": [{"geometry_id": f"g{i}"} for i in range(max(0, n_compatible))],
+    }
+    out_dir = run_dir / "s4_geometry_filter" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "compatible_set.json").write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+
 def test_s4d_fails_without_extra_boundary_artifact_on_spin_grid_saturation(tmp_path: Path, monkeypatch) -> None:
     runs_root = tmp_path / "runs"
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
@@ -17,6 +32,7 @@ def test_s4d_fails_without_extra_boundary_artifact_on_spin_grid_saturation(tmp_p
     run_dir = runs_root / run_id
     (run_dir / "RUN_VALID").mkdir(parents=True)
     (run_dir / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}\n', encoding="utf-8")
+    _write_compatible_set(run_dir)
 
     s3b_out = run_dir / "s3b_multimode_estimates" / "outputs"
     s3b_out.mkdir(parents=True)
@@ -164,6 +180,7 @@ def test_s4d_skips_multimode_when_viability_gate_blocks(tmp_path: Path, monkeypa
     run_dir = runs_root / run_id
     (run_dir / "RUN_VALID").mkdir(parents=True)
     (run_dir / "RUN_VALID" / "verdict.json").write_text('{"verdict":"PASS"}\n', encoding="utf-8")
+    _write_compatible_set(run_dir)
     s3b_out = run_dir / "s3b_multimode_estimates" / "outputs"
     s3b_out.mkdir(parents=True)
     (s3b_out / "multimode_estimates.json").write_text(json.dumps({"modes": []}) + "\n", encoding="utf-8")
@@ -184,11 +201,13 @@ def test_s4d_skips_multimode_when_viability_gate_blocks(tmp_path: Path, monkeypa
 
     diag = json.loads((run_dir / "s4d_kerr_from_multimode" / "outputs" / "kerr_from_multimode_diagnostics.json").read_text(encoding="utf-8"))
     assert diag["diagnostics"]["multimode_evaluated"] is False
-    assert "MULTIMODE_DUE_TO_GATE" in diag["diagnostics"]["skips"]
+    assert "MULTIMODE_UNAVAILABLE_221" in diag["diagnostics"]["skips"]
 
     extraction = json.loads((run_dir / "s4d_kerr_from_multimode" / "outputs" / "kerr_extraction.json").read_text(encoding="utf-8"))
     assert extraction["verdict"] == "SKIPPED_MULTIMODE_GATE"
     assert extraction["M_final_Msun"] is None
+    assert extraction["skip_reason_code"] == "MULTIMODE_UNAVAILABLE_221"
+    assert extraction["multimode_fallback"]["program_classification"] == "SINGLE_MODE_CONSTRAINED_PROGRAM"
 
 
 def test_extract_kerr_with_covariance_core_uses_grid_inverter(monkeypatch) -> None:

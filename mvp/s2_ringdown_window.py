@@ -33,6 +33,7 @@ from basurin_io import sha256_file, write_json_atomic
 
 STAGE = "s2_ringdown_window"
 DEFAULT_WINDOW_CATALOG = Path(__file__).resolve().parent / "assets" / "window_catalog_v1.json"
+DEFAULT_T0_REFERENCE_CATALOG = Path(__file__).resolve().parents[1] / "gwtc_events_t0.json"
 OFFLINE_T0_ERROR = "missing_t0_gps_offline: unable to resolve t0_gps from local sources"
 
 
@@ -108,15 +109,34 @@ def _canonical_event_id(event_id: str) -> str:
     return event_id.split("_", 1)[0] if "_" in event_id else event_id
 
 
-def _resolve_t0_gps_from_local_metadata(event_id: str) -> tuple[float, str] | None:
-    meta_path = Path("docs/ringdown/event_metadata") / f"{event_id}_metadata.json"
-    if not meta_path.exists():
+def _extract_t0_from_catalog_entry(entry: Any) -> float | None:
+    if isinstance(entry, dict):
+        for key in ("t0_gps", "GPS", "gps", "event_time_gps", "t_coalescence_gps", "t0_ref_gps", "gpstime", "gps_time"):
+            value = entry.get(key)
+            if isinstance(value, (int, float)):
+                return float(value)
+    elif isinstance(entry, (int, float)):
+        return float(entry)
+    return None
+
+
+def _resolve_t0_gps_from_reference_catalog(
+    event_id: str,
+    reference_catalog_path: Path,
+    lookup_keys: list[str],
+) -> tuple[float, str, str] | None:
+    if not reference_catalog_path.exists():
         return None
-    with open(meta_path, "r", encoding="utf-8") as f:
-        meta = json.load(f)
-    for key in ("gps", "t0_gps", "event_time_gps", "t_coalescence_gps", "t0_ref_gps", "GPS", "gpstime"):
-        if key in meta:
-            return float(meta[key]), str(meta_path)
+    with open(reference_catalog_path, "r", encoding="utf-8") as f:
+        catalog = json.load(f)
+    if not isinstance(catalog, dict):
+        return None
+    for lookup_key in lookup_keys:
+        if lookup_key not in catalog:
+            continue
+        t0_gps = _extract_t0_from_catalog_entry(catalog[lookup_key])
+        if t0_gps is not None:
+            return t0_gps, str(reference_catalog_path), lookup_key
     return None
 
 
@@ -181,13 +201,13 @@ def _resolve_t0_gps(
     if canonical_event_id != event_id:
         lookup_keys.append(canonical_event_id)
 
-    metadata_path = Path("docs/ringdown/event_metadata") / f"{event_id}_metadata.json"
+    reference_catalog_path = DEFAULT_T0_REFERENCE_CATALOG
     run_cache_path: str | None = None
     if run_dir is not None:
         run_cache_path = str(run_dir / "external_inputs" / "gwosc" / "event_time" / f"{event_id}.json")
     sources_attempted: dict[str, Any] = {
         "catalog_path": str(window_catalog_path) if window_catalog_path is not None else None,
-        "metadata_path": str(metadata_path),
+        "reference_catalog_path": str(reference_catalog_path),
         "legacy_windows_path": str(window_catalog_path) if window_catalog_path is not None else None,
         "run_cache_path": run_cache_path,
         "online_fetch_enabled": (not offline),
@@ -248,10 +268,14 @@ def _resolve_t0_gps(
                 if lookup_key in catalog and isinstance(catalog[lookup_key], (int, float)):
                     return float(catalog[lookup_key]), str(window_catalog_path), {"lookup_key": lookup_key}, False
 
-    metadata = _resolve_t0_gps_from_local_metadata(event_id)
-    if metadata is not None:
-        t0_gps, source = metadata
-        return t0_gps, source, {"lookup_key": event_id}, False
+    reference_lookup = _resolve_t0_gps_from_reference_catalog(
+        event_id,
+        reference_catalog_path,
+        lookup_keys,
+    )
+    if reference_lookup is not None:
+        t0_gps, source, lookup_key = reference_lookup
+        return t0_gps, source, {"lookup_key": lookup_key}, False
 
     if offline:
         raise RuntimeError(
