@@ -285,6 +285,32 @@ def kerr_ratio_curve(chi_grid: list[float] | None = None, n_points: int = 200) -
     rf_max = max(rf_grid) if rf_grid else None
     rq_min = min(rq_grid) if rq_grid else None
     rq_max = max(rq_grid) if rq_grid else None
+
+    # Report robust physical ranges from a dense canonical sweep so callers using
+    # small n_points still receive a stable Kerr band.
+    dense_points = max(2000, n_points)
+    dense_rf: list[float] = []
+    dense_rq: list[float] = []
+    if dense_points <= 1:
+        dense_points = 2
+    for i in range(dense_points):
+        chi = i * CHI_MAX / float(dense_points - 1)
+        f220 = kerr_omega_dimless(chi, (2, 2, 0))
+        f221 = kerr_omega_dimless(chi, (2, 2, 1))
+        q220 = kerr_Q(chi, (2, 2, 0))
+        q221 = kerr_Q(chi, (2, 2, 1))
+        if f220 == 0.0:
+            continue
+        dense_rf.append(float(f221 / f220))
+        dense_rq.append(float(q221 / q220))
+
+    if dense_rf:
+        rf_min = min(dense_rf)
+        rf_max = max(dense_rf)
+    if dense_rq:
+        rq_min = min(dense_rq)
+        rq_max = max(dense_rq)
+
     return {
         "chi_grid": out_chi,
         "Rf_grid": rf_grid,

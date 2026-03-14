@@ -778,18 +778,22 @@ def _invert_kerr_from_freqs(f220_hz: float, f221_hz: float) -> tuple[float, floa
         raise ValueError("f220/f221 must be positive")
     ratio_target = f221_hz / f220_hz
 
-    lo = A_MIN
-    hi = A_MAX
-    for _ in range(80):
-        mid = 0.5 * (lo + hi)
-        q220 = kerr_qnm(50.0, mid, (2, 2, 0)).f_hz
-        q221 = kerr_qnm(50.0, mid, (2, 2, 1)).f_hz
-        ratio_mid = q221 / q220
-        if ratio_mid < ratio_target:
-            lo = mid
-        else:
-            hi = mid
-    chi = max(A_MIN, min(A_MAX, 0.5 * (lo + hi)))
+    # NOTE: R_f(chi)=f221/f220 is not globally monotonic in chi.
+    # Use deterministic grid search in chi-space to avoid selecting the wrong root
+    # on the descending branch at high spin.
+    best_chi = A_MIN
+    best_error = float("inf")
+    n_grid = 800
+    for i in range(n_grid + 1):
+        chi = A_MIN + (A_MAX - A_MIN) * (i / float(n_grid))
+        q220 = kerr_qnm(50.0, chi, (2, 2, 0)).f_hz
+        q221 = kerr_qnm(50.0, chi, (2, 2, 1)).f_hz
+        ratio_error = abs((q221 / q220) - ratio_target)
+        if ratio_error < best_error:
+            best_error = ratio_error
+            best_chi = chi
+
+    chi = max(A_MIN, min(A_MAX, best_chi))
     f220_unit = kerr_qnm(1.0, chi, (2, 2, 0)).f_hz
     m_final = f220_unit / f220_hz
     return float(m_final), float(chi)
