@@ -184,6 +184,85 @@ PY
 
 Para modo local con `--local-hdf5`, añade además `h5py` a la verificación.
 
+## Descarga automatizada de eventos GW (`download_gw_events.py`)
+
+Script independiente que consulta los catálogos GWTC en GWOSC, filtra eventos por calidad (SNR, p_astro, FAR) y opcionalmente descarga el strain data de cada evento filtrado.
+
+### Uso básico
+
+```bash
+# Solo metadatos: genera CSV + JSON con los eventos que pasan los filtros
+python download_gw_events.py
+
+# Metadatos + descarga de strain (flag --download obligatorio para descargar)
+python download_gw_events.py --download
+```
+
+**Importante:** sin `--download`, el script solo selecciona eventos y guarda metadatos (CSV/JSON). La descarga de archivos HDF5 de strain requiere el flag `--download` explícitamente.
+
+### Opciones de descarga
+
+```bash
+# Archivos de 32s (más ligeros, suficiente para ringdown)
+python download_gw_events.py --download --duration 32
+
+# Strain a 16 kHz (máxima resolución temporal)
+python download_gw_events.py --download --sr 16384
+
+# Solo eventos con SNR alto (para empezar rápido)
+python download_gw_events.py --download --snr-min 15 --duration 32
+
+# Todos los eventos del catálogo (p_astro > 0.5, sin filtros extra)
+python download_gw_events.py --download --all-events
+```
+
+### Opciones de filtrado
+
+| Flag | Default | Descripción |
+|------|---------|-------------|
+| `--snr-min` | 8.0 | SNR de red mínimo |
+| `--pastro-min` | 0.9 | p_astro mínimo |
+| `--far-max` | 1.0 | FAR máximo (yr⁻¹) |
+| `--no-exclude-problematic` | off | Incluir eventos con posteriors poco fiables |
+| `--all-events` | off | Incluir todo con p_astro > 0.5, sin filtros extra |
+| `--catalogs` | GWTC-1/2.1/3-confident | Catálogos a consultar |
+
+### Opciones de strain
+
+| Flag | Default | Opciones | Descripción |
+|------|---------|----------|-------------|
+| `--sr` | 4096 | 4096, 16384 | Sample rate (Hz) |
+| `--duration` | 4096 | 32, 4096 | Duración del archivo (s) |
+| `--format` | hdf5 | hdf5, gwf | Formato de strain |
+| `--output-dir` | `gw_events/` | — | Directorio de salida |
+
+### Outputs
+
+Sin `--download`:
+- `gw_events/gwtc_all_events.csv` — todos los eventos del catálogo (sin filtrar)
+- `gw_events/gwtc_quality_events.csv` — eventos que pasan los filtros de calidad
+- `gw_events/gwtc_events_t0.json` — GPS times + parámetros clave (listo para BASURIN)
+
+Con `--download`:
+- Todo lo anterior + `gw_events/strain/<EVENT_ID>/` con los HDF5 de H1, L1, V1
+
+### Requisitos
+
+```bash
+pip install gwosc requests pandas
+```
+
+### Integración con BASURIN
+
+Los HDF5 descargados pueden copiarse a `data/losc/<EVENT_ID>/` para uso offline con el pipeline:
+
+```bash
+# Copiar strain descargado al directorio esperado por s1_fetch_strain
+cp gw_events/strain/GW150914/*.hdf5 data/losc/GW150914/
+```
+
+---
+
 ## Descarga manual rápida de strain (GWOSC) para modo offline
 
 Usa esta ruta solo cuando `data/losc/<EVENT_ID>/` no existe o está vacía, o cuando quieras precargar caché para batch offline. El objetivo no es "consumir una API concreta", sino dejar HDF5 válidos de H1/L1 en `data/losc/<EVENT_ID>/` y validar con precheck.
