@@ -34,6 +34,7 @@ from basurin_io import sha256_file, write_json_atomic
 STAGE = "s2_ringdown_window"
 DEFAULT_WINDOW_CATALOG = Path(__file__).resolve().parent / "assets" / "window_catalog_v1.json"
 DEFAULT_T0_REFERENCE_CATALOG = Path(__file__).resolve().parents[1] / "gwtc_events_t0.json"
+DEFAULT_EVENT_METADATA_DIR = Path(__file__).resolve().parents[1] / "docs" / "ringdown" / "event_metadata"
 OFFLINE_T0_ERROR = "missing_t0_gps_offline: unable to resolve t0_gps from local sources"
 
 
@@ -115,8 +116,31 @@ def _extract_t0_from_catalog_entry(entry: Any) -> float | None:
             value = entry.get(key)
             if isinstance(value, (int, float)):
                 return float(value)
+        t0_ref = entry.get("t0_ref")
+        if isinstance(t0_ref, dict):
+            for key in ("value_gps", "t0_gps", "gps"):
+                value = t0_ref.get(key)
+                if isinstance(value, (int, float)):
+                    return float(value)
     elif isinstance(entry, (int, float)):
         return float(entry)
+    return None
+
+
+def _resolve_t0_gps_from_event_metadata(
+    lookup_keys: list[str],
+) -> tuple[float, str, str] | None:
+    if not DEFAULT_EVENT_METADATA_DIR.exists():
+        return None
+    for lookup_key in lookup_keys:
+        metadata_path = DEFAULT_EVENT_METADATA_DIR / f"{lookup_key}_metadata.json"
+        if not metadata_path.exists():
+            continue
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        t0_gps = _extract_t0_from_catalog_entry(payload)
+        if t0_gps is not None:
+            return t0_gps, str(metadata_path), lookup_key
     return None
 
 
@@ -208,12 +232,29 @@ def _resolve_t0_gps(
     sources_attempted: dict[str, Any] = {
         "catalog_path": str(window_catalog_path) if window_catalog_path is not None else None,
         "reference_catalog_path": str(reference_catalog_path),
+        "event_metadata_candidates": [
+            str(DEFAULT_EVENT_METADATA_DIR / f"{lookup_key}_metadata.json")
+            for lookup_key in lookup_keys
+        ],
         "legacy_windows_path": str(window_catalog_path) if window_catalog_path is not None else None,
         "run_cache_path": run_cache_path,
         "online_fetch_enabled": (not offline),
         "offline": bool(offline),
         "keys_checked": list(lookup_keys),
     }
+
+    try:
+        uses_default_window_catalog = window_catalog_path.expanduser().resolve() == DEFAULT_WINDOW_CATALOG.resolve()
+    except OSError:
+        uses_default_window_catalog = window_catalog_path == DEFAULT_WINDOW_CATALOG
+
+    # The default window catalog is a coarse fallback. When event-specific
+    # metadata exists, prefer it to avoid ms-level timing loss for sensitive runs.
+    if uses_default_window_catalog:
+        event_metadata_lookup = _resolve_t0_gps_from_event_metadata(lookup_keys)
+        if event_metadata_lookup is not None:
+            t0_gps, source, lookup_key = event_metadata_lookup
+            return t0_gps, source, {"lookup_key": lookup_key}, False
 
     if window_catalog_path.exists():
         with open(window_catalog_path, "r", encoding="utf-8") as f:
