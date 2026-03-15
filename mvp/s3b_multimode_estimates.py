@@ -367,7 +367,7 @@ def _bootstrap_block_size(n_samples: int) -> int:
 
 def _estimate_220(signal: np.ndarray, fs: float, *, band_low: float, band_high: float) -> dict[str, float]:
     band_220, _ = _split_mode_bands(band_low=band_low, band_high=band_high)
-    return estimate_ringdown_observables(signal, fs, band_220[0], band_220[1])
+    return _estimate_spectral(signal, fs, band_low=band_220[0], band_high=band_220[1])
 
 
 def _estimate_spectral(signal: np.ndarray, fs: float, *, band_low: float, band_high: float) -> dict[str, float]:
@@ -421,7 +421,7 @@ def _estimate_221_from_signal(signal: np.ndarray, fs: float, *, band_low: float,
     est220 = _estimate_220(signal, fs, band_low=band_low, band_high=band_high)
     residual = signal - _template_220(signal, fs, est220)
     _, band_221 = _split_mode_bands(band_low=band_low, band_high=band_high)
-    return estimate_ringdown_observables(residual, fs, band_221[0], band_221[1])
+    return _estimate_spectral(residual, fs, band_low=band_221[0], band_high=band_221[1])
 
 
 def _estimate_221_spectral_two_pass(signal: np.ndarray, fs: float, *, band_low: float, band_high: float) -> dict[str, float]:
