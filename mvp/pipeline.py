@@ -1045,7 +1045,7 @@ def run_single_event(
 
         s3_spectral_args = list(s3_args)
         if psd_path:
-            s3_spectral_args += ["--psd-path", psd_path]
+            s3_spectral_args.extend(["--psd-path", psd_path])
         rc = _run_stage(
             "s3_spectral_estimates.py", s3_spectral_args, "s3_spectral_estimates",
             out_root, run_id, timeline, stage_timeout_s,
@@ -1348,12 +1348,12 @@ def run_multimode_event(
             _write_timeline(out_root, run_id, timeline)
             return rc, run_id
 
-        _s3_spectral_args = list(s3_args)
+        s3_spectral_args = list(s3_args)
         if psd_path:
-            _s3_spectral_args += ["--psd-path", psd_path]
+            s3_spectral_args.extend(["--psd-path", psd_path])
         rc = _run_stage(
             "s3_spectral_estimates.py",
-            _s3_spectral_args,
+            s3_spectral_args,
             "s3_spectral_estimates",
             out_root, run_id, timeline, stage_timeout_s,
         )
@@ -1389,15 +1389,19 @@ def run_multimode_event(
         print(f"[pipeline] ERROR: unknown estimator '{estimator}'", file=sys.stderr)
         return 2, run_id
 
+    s3_estimates_relpath = Path(
+        estimates_path_override or "s3_ringdown_estimates/outputs/estimates.json"
+    )
+    s3_estimates_path = out_root / run_id / s3_estimates_relpath
     s3b_args = [
         "--run-id", run_id,
-        "--s3-estimates", f"{run_id}/{estimates_path_override or 's3_ringdown_estimates/outputs/estimates.json'}",
+        "--s3-estimates", str(s3_estimates_path),
         "--n-bootstrap", str(s3b_n_bootstrap),
         "--seed", str(s3b_seed),
         "--method", s3b_method,
     ]
     if psd_path:
-        s3b_args += ["--psd-path", psd_path]
+        s3b_args.extend(["--psd-path", psd_path])
     rc = _run_stage("s3b_multimode_estimates.py", s3b_args, "s3b_multimode_estimates", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
@@ -1666,6 +1670,7 @@ def main() -> int:
         help="Skip s1 download if outputs already exist and params match",
     )
     sp_single.add_argument("--with-t0-sweep", action="store_true", default=False)
+    sp_single.add_argument("--psd-path", default=None, help="Path to measured_psd.json for spectral whitening")
     sp_single.add_argument(
         "--local-hdf5",
         action="append",
@@ -1740,10 +1745,7 @@ def main() -> int:
         "--catalog-path", default=None,
         help="Optional GWTC catalog JSON for deviation analysis in s5",
     )
-    sp_multi.add_argument(
-        "--psd-path", default=None, metavar="PATH",
-        help="Path to measured_psd.json; enables whitening in s3_spectral_estimates and s3b_multimode_estimates",
-    )
+    sp_multi.add_argument("--psd-path", default=None, help="Path to measured_psd.json for spectral whitening")
 
     # Single event multimode
     sp_multimode = sub.add_parser("multimode", help="Run single-event multimode pipeline")
@@ -1786,10 +1788,7 @@ def main() -> int:
         help="Forward local HDF5 detector mapping(s) to s1_fetch_strain (repeatable)",
     )
     sp_multimode.add_argument("--offline", action="store_true", default=False)
-    sp_multimode.add_argument(
-        "--psd-path", default=None, metavar="PATH",
-        help="Path to measured_psd.json; enables whitening in s3_spectral_estimates and s3b_multimode_estimates",
-    )
+    sp_multimode.add_argument("--psd-path", default=None, help="Path to measured_psd.json for spectral whitening")
 
     # Batch: multi-event GWTC pipeline (continue-on-failure mode)
     sp_batch = sub.add_parser(
@@ -1820,10 +1819,7 @@ def main() -> int:
         help="Optional GWTC catalog JSON for deviation analysis in s5",
     )
     sp_batch.add_argument("--offline", action="store_true", default=False)
-    sp_batch.add_argument(
-        "--psd-path", default=None, metavar="PATH",
-        help="Path to measured_psd.json; enables whitening in s3_spectral_estimates and s3b_multimode_estimates",
-    )
+    sp_batch.add_argument("--psd-path", default=None, help="Path to measured_psd.json for spectral whitening")
 
     args = parser.parse_args()
 

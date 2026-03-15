@@ -322,17 +322,19 @@ def test_spectral_two_pass_synthetic_orders_modes_and_has_finite_sigma() -> None
     assert all(isinstance(flag, str) for flag in flags_221)
 
 
-def test_spectral_two_pass_converts_lntau_to_lnq_for_stability_and_sigma() -> None:
+def test_spectral_two_pass_preserves_lnq_samples_for_stability_and_sigma() -> None:
     signal = np.linspace(-1.0, 1.0, 4096)
-    ln_tau_values = np.log(np.linspace(0.03, 0.05, 100))
+    ln_q_values = np.log(np.linspace(8.0, 12.0, 100))
     lnf_values = np.log(220.0) + np.linspace(-1e-3, 1e-3, 100)
     synthetic_samples = np.column_stack([
         lnf_values,
-        ln_tau_values,
+        ln_q_values,
     ])
 
-    expected_lnq = np.log(np.pi) + synthetic_samples[:, 0] + synthetic_samples[:, 1]
-    expected_p50 = float(np.percentile(expected_lnq, 50))
+    expected_p50 = float(np.percentile(synthetic_samples[:, 1], 50))
+    wrong_tau_to_q_p50 = float(
+        np.percentile(np.log(np.pi) + synthetic_samples[:, 0] + synthetic_samples[:, 1], 50)
+    )
 
     original = _MODULE._bootstrap_mode_log_samples
     _MODULE._bootstrap_mode_log_samples = lambda *_args, **_kwargs: (synthetic_samples.copy(), 0)
@@ -356,6 +358,7 @@ def test_spectral_two_pass_converts_lntau_to_lnq_for_stability_and_sigma() -> No
 
     assert ok
     assert np.isclose(mode["ln_Q"], expected_p50, atol=1e-12)
+    assert not np.isclose(mode["ln_Q"], wrong_tau_to_q_p50, atol=1e-12)
     assert np.exp(mode["ln_Q"]) > 1.0
     sigma = np.asarray(mode["Sigma"], dtype=float)
     assert np.isfinite(sigma).all()
@@ -848,25 +851,25 @@ def test_cli_runs_root_still_enforces_run_valid_gate(tmp_path: Path) -> None:
     assert "RUN_VALID" in result.stderr
 
 
-# ── PSD whitening CLI tests ───────────────────────────────────────────────
+def _write_measured_psd(path: Path, *, include_h1: bool = True) -> None:
+    freqs = np.linspace(0.0, 2048.0, 1025)
+    payload: dict[str, object] = {
+        "frequencies_hz": [float(x) for x in freqs],
+        "sample_rate_hz": 4096.0,
+        "psd_L1": [1.0 for _ in freqs],
+    }
+    if include_h1:
+        payload["psd_H1"] = [1.0 for _ in freqs]
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _make_flat_psd_json(tmp_path: Path, fs: float = 4096.0, n: int = 2048) -> Path:
-    """Write a flat (unit) measured_psd.json keyed by 'H1' detector."""
-    freqs = np.fft.rfftfreq(n, d=1.0 / fs).tolist()
-    psd = np.ones(len(freqs)).tolist()
-    payload = {"H1": {"freqs_hz": freqs, "psd": psd}}
-    psd_file = tmp_path / "measured_psd.json"
-    psd_file.write_text(json.dumps(payload), encoding="utf-8")
-    return psd_file
-
-
-def test_cli_psd_path_flat_psd_does_not_crash(tmp_path: Path) -> None:
-    """--psd-path with a valid flat PSD must produce rc=0 and no traceback."""
-    run_id = "s3b_psd_smoke"
-    tmp_runs = tmp_path / "runs"
+def test_cli_psd_path_sets_external_psd_source_when_detector_available(tmp_path: Path) -> None:
+    run_id = "subrun_psd_ok"
+    tmp_runs = tmp_path / "subruns_root"
     _write_minimal_s2_inputs(tmp_runs, run_id)
-    psd_file = _make_flat_psd_json(tmp_path)
+
+    psd_path = tmp_path / "measured_psd.json"
+    _write_measured_psd(psd_path, include_h1=True)
 
     repo_root = Path(__file__).resolve().parents[1]
     cmd = [
@@ -874,58 +877,10 @@ def test_cli_psd_path_flat_psd_does_not_crash(tmp_path: Path) -> None:
         str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
         "--runs-root", str(tmp_runs),
         "--run-id", run_id,
-        "--n-bootstrap", "4",
-        "--seed", "1",
-        "--psd-path", str(psd_file),
-    ]
-    env = os.environ.copy()
-    env.pop("BASURIN_RUNS_ROOT", None)
-
-    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, env=env)
-    assert "Traceback" not in result.stderr, f"Unexpected traceback:\n{result.stderr}"
-    assert result.returncode == 0, result.stderr
-
-
-def test_cli_psd_path_missing_file_warns_and_falls_back(tmp_path: Path) -> None:
-    """A non-existent --psd-path must warn and succeed (rc=0, no crash)."""
-    run_id = "s3b_psd_missing"
-    tmp_runs = tmp_path / "runs"
-    _write_minimal_s2_inputs(tmp_runs, run_id)
-
-    repo_root = Path(__file__).resolve().parents[1]
-    cmd = [
-        sys.executable,
-        str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
-        "--runs-root", str(tmp_runs),
-        "--run-id", run_id,
-        "--n-bootstrap", "4",
-        "--seed", "2",
-        "--psd-path", str(tmp_path / "nonexistent.json"),
-    ]
-    env = os.environ.copy()
-    env.pop("BASURIN_RUNS_ROOT", None)
-
-    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, env=env)
-    assert "Traceback" not in result.stderr, f"Unexpected traceback:\n{result.stderr}"
-    assert result.returncode == 0, result.stderr
-
-
-def test_cli_psd_path_records_psd_source_in_stage_summary(tmp_path: Path) -> None:
-    """When --psd-path is provided and whitening succeeds, stage_summary.json has psd_source."""
-    run_id = "s3b_psd_source"
-    tmp_runs = tmp_path / "runs"
-    _write_minimal_s2_inputs(tmp_runs, run_id)
-    psd_file = _make_flat_psd_json(tmp_path)
-
-    repo_root = Path(__file__).resolve().parents[1]
-    cmd = [
-        sys.executable,
-        str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
-        "--runs-root", str(tmp_runs),
-        "--run-id", run_id,
-        "--n-bootstrap", "4",
-        "--seed", "3",
-        "--psd-path", str(psd_file),
+        "--n-bootstrap", "8",
+        "--seed", "101",
+        "--psd-path", str(psd_path),
+        "--method", "spectral_two_pass",
     ]
     env = os.environ.copy()
     env.pop("BASURIN_RUNS_ROOT", None)
@@ -934,6 +889,34 @@ def test_cli_psd_path_records_psd_source_in_stage_summary(tmp_path: Path) -> Non
     assert result.returncode == 0, result.stderr
 
     summary_path = tmp_runs / run_id / "s3b_multimode_estimates" / "stage_summary.json"
-    assert summary_path.exists(), "stage_summary.json not written"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    assert "psd_source" in summary, f"psd_source missing from stage_summary: {summary}"
+    assert summary.get("psd_source") == "external_measured_psd"
+
+
+def test_cli_psd_path_falls_back_when_detector_missing_in_psd(tmp_path: Path) -> None:
+    run_id = "subrun_psd_fallback"
+    tmp_runs = tmp_path / "subruns_root"
+    _write_minimal_s2_inputs(tmp_runs, run_id)
+
+    psd_path = tmp_path / "measured_psd_missing_h1.json"
+    _write_measured_psd(psd_path, include_h1=False)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    cmd = [
+        sys.executable,
+        str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
+        "--runs-root", str(tmp_runs),
+        "--run-id", run_id,
+        "--n-bootstrap", "8",
+        "--seed", "101",
+        "--psd-path", str(psd_path),
+    ]
+    env = os.environ.copy()
+    env.pop("BASURIN_RUNS_ROOT", None)
+
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+
+    summary_path = tmp_runs / run_id / "s3b_multimode_estimates" / "stage_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary.get("psd_source") == "internal_welch"

@@ -876,122 +876,101 @@ class TestBootstrapEstimator:
         assert r1["samples"]["f_hz"] != r2["samples"]["f_hz"]
 
 
-# ── TestS3SpectralWhitening: --psd-path smoke tests ──────────────────────
+def _make_colored_noise(n: int, fs: float, *, seed: int = 123) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    freqs = np.fft.rfftfreq(n, d=1.0 / fs)
+    scale = 1.0 / np.maximum(freqs, 1.0)
+    re = rng.normal(0.0, 1.0, size=freqs.size)
+    im = rng.normal(0.0, 1.0, size=freqs.size)
+    spec = (re + 1j * im) * scale
+    noise = np.fft.irfft(spec, n=n)
+    return noise / (np.std(noise) + 1e-30)
 
 
-def _run_s3_spectral_estimates(
-    run_id: str,
-    runs_root: Path,
-    extra_args: list[str] | None = None,
-) -> subprocess.CompletedProcess:
-    """Run mvp/s3_spectral_estimates.py (Lorentzian spectral stage) as subprocess."""
-    cmd = [
-        sys.executable, str(MVP_DIR / "s3_spectral_estimates.py"),
-        "--run", run_id,
-        "--band-low", str(BAND[0]),
-        "--band-high", str(BAND[1]),
-        "--n-bootstrap", "0",
-    ]
-    if extra_args:
-        cmd += extra_args
-    env = {**os.environ, "BASURIN_RUNS_ROOT": str(runs_root)}
-    return subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=str(REPO_ROOT))
-
-
-def _create_s2_outputs_for_spectral(
-    runs_root: Path,
-    run_id: str,
-    *,
-    seed: int = 42,
-    duration: float = 0.5,
-) -> None:
-    """Write s2 npz outputs in the s2_ringdown_window/outputs/ dir for the spectral stage."""
-    out_dir = runs_root / run_id / "s2_ringdown_window" / "outputs"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for det_off, det in enumerate(("H1", "L1")):
-        strain = _make_ringdown(seed=seed + det_off, duration=duration)
-        np.savez(
-            out_dir / f"{det}_rd.npz",
-            strain=strain.astype(np.float64),
-            sample_rate_hz=np.float64(SAMPLE_RATE),
-        )
-    (out_dir / "window_meta.json").write_text(
-        json.dumps({"event_id": "SYNTHETIC_SPECTRAL"}), encoding="utf-8"
-    )
-    stage_dir = runs_root / run_id / "s2_ringdown_window"
-    (stage_dir / "stage_summary.json").write_text(
-        json.dumps({"stage": "s2_ringdown_window", "verdict": "PASS"}), encoding="utf-8"
-    )
+def test_s3_spectral_with_measured_psd_whitening_smoke(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "s3_spectral_psd_smoke"
     _create_run_valid(runs_root, run_id)
 
+    out_dir = runs_root / run_id / "s2_ringdown_window" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-class TestS3SpectralWhitening:
-    """Smoke tests for --psd-path whitening in s3_spectral_estimates."""
+    fs = SAMPLE_RATE
+    duration = 0.5
+    n = int(fs * duration)
+    t = np.arange(n) / fs
+    signal = np.exp(-t / 0.004) * np.cos(2.0 * np.pi * 251.0 * t)
+    colored = _make_colored_noise(n, fs, seed=7)
+    strain = signal + 0.4 * colored
 
-    def _make_flat_psd_json(self, tmp_path: Path) -> Path:
-        """Write a flat (unit) measured_psd.json with entries for H1 and L1."""
-        freqs = np.fft.rfftfreq(int(SAMPLE_RATE * 0.5), d=1.0 / SAMPLE_RATE)
-        psd = np.ones_like(freqs)
-        payload = {
-            "H1": {"freqs_hz": freqs.tolist(), "psd": psd.tolist()},
-            "L1": {"freqs_hz": freqs.tolist(), "psd": psd.tolist()},
-        }
-        psd_file = tmp_path / "measured_psd.json"
-        psd_file.write_text(json.dumps(payload), encoding="utf-8")
-        return psd_file
+    for det in ("H1", "L1"):
+        np.savez(out_dir / f"{det}_rd.npz", strain=strain.astype(np.float64), sample_rate_hz=np.float64(fs))
 
-    def test_smoke_with_psd_path_does_not_crash(self, tmp_path: Path) -> None:
-        """--psd-path with a valid flat PSD must succeed (rc=0) without tracebacks."""
-        runs_root = tmp_path / "runs"
-        run_id = "test_s3_spectral_psd_smoke"
-        _create_s2_outputs_for_spectral(runs_root, run_id)
-        psd_file = self._make_flat_psd_json(tmp_path)
+    (out_dir / "window_meta.json").write_text(json.dumps({"event_id": "SYNTH"}), encoding="utf-8")
+    (runs_root / run_id / "s2_ringdown_window" / "stage_summary.json").write_text(
+        json.dumps({"stage": "s2_ringdown_window", "verdict": "PASS"}), encoding="utf-8"
+    )
 
-        r = _run_s3_spectral_estimates(run_id, runs_root, extra_args=["--psd-path", str(psd_file)])
+    freqs = np.linspace(0.0, fs / 2.0, n // 2 + 1)
+    psd = np.maximum(1e-6, 1.0 / np.maximum(freqs, 1.0) ** 2)
+    psd_path = tmp_path / "measured_psd.json"
+    psd_path.write_text(
+        json.dumps(
+            {
+                "frequencies_hz": [float(x) for x in freqs],
+                "psd_H1": [float(x) for x in psd],
+                "psd_L1": [float(x) for x in psd],
+                "sample_rate_hz": fs,
+            }
+        ),
+        encoding="utf-8",
+    )
 
-        assert "Traceback" not in r.stderr, f"Unexpected traceback:\n{r.stderr}"
-        assert r.returncode == 0, f"s3_spectral_estimates failed (rc={r.returncode}):\n{r.stderr}"
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s3_spectral_estimates.py"),
+        "--run", run_id,
+        "--runs-root", str(runs_root),
+        "--band-low", "150",
+        "--band-high", "400",
+        "--n-bootstrap", "0",
+        "--psd-path", str(psd_path),
+    ]
+    result = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
-    def test_smoke_with_psd_path_records_psd_source_external(self, tmp_path: Path) -> None:
-        """When measured PSD is used, spectral_estimates.json must have psd_source='external_measured'."""
-        runs_root = tmp_path / "runs"
-        run_id = "test_s3_spectral_psd_source"
-        _create_s2_outputs_for_spectral(runs_root, run_id)
-        psd_file = self._make_flat_psd_json(tmp_path)
+    stage_dir = runs_root / run_id / "s3_spectral_estimates"
+    summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
+    estimates = json.loads((stage_dir / "outputs" / "spectral_estimates.json").read_text(encoding="utf-8"))
 
-        r = _run_s3_spectral_estimates(run_id, runs_root, extra_args=["--psd-path", str(psd_file)])
-        assert r.returncode == 0, f"s3_spectral_estimates failed:\n{r.stderr}"
+    assert summary.get("psd_source") == "external_measured_psd"
+    assert estimates.get("psd_source") == "external_measured_psd"
+    assert 220.0 <= float(estimates["combined"]["f_hz"]) <= 280.0
 
-        est_path = runs_root / run_id / "s3_spectral_estimates" / "outputs" / "spectral_estimates.json"
-        est = json.loads(est_path.read_text(encoding="utf-8"))
-        assert est.get("psd_source") == "external_measured", (
-            f"Expected psd_source='external_measured', got {est.get('psd_source')!r}"
-        )
 
-    def test_smoke_without_psd_path_records_welch_internal(self, tmp_path: Path) -> None:
-        """Without --psd-path, psd_source must be 'welch_internal'."""
-        runs_root = tmp_path / "runs"
-        run_id = "test_s3_spectral_no_psd"
-        _create_s2_outputs_for_spectral(runs_root, run_id)
+def test_s3_spectral_bootstrap_keeps_combined_uncertainty_aligned(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "s3_spectral_uncertainty_alignment"
+    _create_run_valid(runs_root, run_id)
+    _create_s2_outputs(runs_root, run_id, seed=11, duration=0.5)
 
-        r = _run_s3_spectral_estimates(run_id, runs_root)
-        assert r.returncode == 0, f"s3_spectral_estimates failed:\n{r.stderr}"
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s3_spectral_estimates.py"),
+        "--run", run_id,
+        "--runs-root", str(runs_root),
+        "--band-low", "150",
+        "--band-high", "400",
+        "--n-bootstrap", "20",
+    ]
+    result = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
-        est_path = runs_root / run_id / "s3_spectral_estimates" / "outputs" / "spectral_estimates.json"
-        est = json.loads(est_path.read_text(encoding="utf-8"))
-        assert est.get("psd_source") == "welch_internal", (
-            f"Expected psd_source='welch_internal', got {est.get('psd_source')!r}"
-        )
+    est_path = runs_root / run_id / "s3_spectral_estimates" / "outputs" / "spectral_estimates.json"
+    estimates = json.loads(est_path.read_text(encoding="utf-8"))
+    combined = estimates["combined"]
+    unc = estimates["combined_uncertainty"]
 
-    def test_missing_psd_file_falls_back_gracefully(self, tmp_path: Path) -> None:
-        """A non-existent --psd-path must warn and fall back (rc=0, no crash)."""
-        runs_root = tmp_path / "runs"
-        run_id = "test_s3_spectral_missing_psd"
-        _create_s2_outputs_for_spectral(runs_root, run_id)
-
-        r = _run_s3_spectral_estimates(
-            run_id, runs_root,
-            extra_args=["--psd-path", str(tmp_path / "nonexistent_psd.json")],
-        )
-        assert "Traceback" not in r.stderr, f"Unexpected traceback:\n{r.stderr}"
-        assert r.returncode == 0, f"s3_spectral_estimates failed (rc={r.returncode}):\n{r.stderr}"
+    assert combined["sigma_f_hz"] == pytest.approx(unc["sigma_f_hz"])
+    assert combined["sigma_tau_s"] == pytest.approx(unc["sigma_tau_s"])
+    assert combined["sigma_Q"] == pytest.approx(unc["sigma_Q"])

@@ -845,12 +845,8 @@ def main() -> int:
         if local_mode:
             try:
                 gps_center = _fetch_gps_center(args.event_id)
-            except Exception as _gps_exc:
-                print(
-                    f"[s1_fetch_strain] WARNING: GPS lookup failed ({_gps_exc}); "
-                    "proceeding without target crop window",
-                    flush=True,
-                )
+            except Exception as exc:
+                print(f"[s1_fetch_strain] WARNING: local HDF5 mode could not resolve GPS center ({exc}); proceeding without target crop", flush=True)
                 gps_center = None
         elif args.synthetic:
             gps_center = 1126259462.4204

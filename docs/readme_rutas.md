@@ -2,6 +2,13 @@
 
 Objetivo: que una IA (o humano) no pierda 5–6 horas diarias por confundir `RUN_ID`, `SUBRUN_ID`, `RUNS_ROOT` y árboles de experimentos.
 
+## Raiz canonica del checkout
+
+- La unica raiz canonica de trabajo es `/home/adnac/basurin/work/basurin`.
+- `/home/adnac/basurin/work` no debe tratarse como repo de desarrollo ni como CWD valido para Git, tests o ejecucion del pipeline.
+- La carpeta contenedora `/home/adnac/basurin/work` debe contener solo `basurin/`.
+- Antes de usar rutas relativas o ejecutar comandos de control, verificar la raiz con `git rev-parse --show-toplevel`.
+
 ## Índice: qué busco → ruta exacta (30 segundos)
 
 - **Gating canónico (run válido para downstream):**

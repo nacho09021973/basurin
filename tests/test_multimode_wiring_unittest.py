@@ -82,6 +82,7 @@ def _write_fake_s3b_outputs(
 class TestMultimodeWiring(unittest.TestCase):
     def test_s3b_declares_s3_estimates_input_in_command(self) -> None:
         calls: list[dict[str, object]] = []
+        runs_root = Path("/tmp") / "basurin_wiring_test"
 
         def fake_run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s=None):
             calls.append({"label": label, "args": list(args), "run_id": run_id})
@@ -118,7 +119,7 @@ class TestMultimodeWiring(unittest.TestCase):
 
         with mock.patch.object(pipeline, "_run_stage", side_effect=fake_run_stage):
             with mock.patch.object(pipeline, "_parse_multimode_results", return_value={}):
-                with mock.patch.dict("os.environ", {"BASURIN_RUNS_ROOT": str(Path("/tmp") / "basurin_wiring_test")}, clear=False):
+                with mock.patch.dict("os.environ", {"BASURIN_RUNS_ROOT": str(runs_root)}, clear=False):
                     rc, _ = pipeline.run_multimode_event(
                         event_id="GW150914",
                         atlas_path="mvp/test_atlas_fixture.json",
@@ -127,6 +128,7 @@ class TestMultimodeWiring(unittest.TestCase):
                         band_low=120.0,
                         band_high=280.0,
                         estimator="spectral",
+                        psd_path="runs/seed/psd/measured_psd.json",
                     )
                     self.assertEqual(rc, 0)
 
@@ -139,6 +141,7 @@ class TestMultimodeWiring(unittest.TestCase):
                         band_high=360.0,
                         s3b_method="spectral_two_pass",
                         estimator="spectral",
+                        psd_path="runs/seed/psd/measured_psd.json",
                     )
                     self.assertEqual(rc, 0)
 
@@ -156,13 +159,20 @@ class TestMultimodeWiring(unittest.TestCase):
             args = call["args"]
             run_id = call["run_id"]
             idx = args.index("--s3-estimates")
-            self.assertEqual(args[idx + 1], f"{run_id}/s3_ringdown_estimates/outputs/estimates.json")
+            self.assertEqual(
+                args[idx + 1],
+                str(runs_root / run_id / "s3_ringdown_estimates" / "outputs" / "estimates.json"),
+            )
             m_idx = args.index("--method")
             expected_method = "spectral_two_pass" if idx_call == 1 else "hilbert_peakband"
             self.assertEqual(args[m_idx + 1], expected_method)
+            self.assertIn("--psd-path", args)
+            p_idx = args.index("--psd-path")
+            self.assertEqual(args[p_idx + 1], "runs/seed/psd/measured_psd.json")
 
     def test_dual_estimator_runs_dual_method_pipeline(self) -> None:
         calls: list[dict[str, object]] = []
+        runs_root = Path("/tmp") / "basurin_wiring_test_dual"
 
         def fake_run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s=None):
             calls.append({"script": script, "label": label, "args": list(args), "run_id": run_id})
@@ -225,13 +235,14 @@ class TestMultimodeWiring(unittest.TestCase):
 
         with mock.patch.object(pipeline, "_run_stage", side_effect=fake_run_stage):
             with mock.patch.object(pipeline, "_parse_multimode_results", return_value={}):
-                with mock.patch.dict("os.environ", {"BASURIN_RUNS_ROOT": str(Path("/tmp") / "basurin_wiring_test_dual")}, clear=False):
+                with mock.patch.dict("os.environ", {"BASURIN_RUNS_ROOT": str(runs_root)}, clear=False):
                     rc, _ = pipeline.run_multimode_event(
                         event_id="GW150914",
                         atlas_path="mvp/test_atlas_fixture.json",
                         run_id="wire_dual",
                         synthetic=True,
                         estimator="dual",
+                        psd_path="runs/base/psd/measured_psd.json",
                     )
                     self.assertEqual(rc, 0)
 
@@ -244,12 +255,18 @@ class TestMultimodeWiring(unittest.TestCase):
         self.assertIn("--method", s3_call["args"])
         self.assertIn("hilbert_envelope", s3_call["args"])
 
+        s3_spectral_call = next(c for c in calls if c["label"] == "s3_spectral_estimates")
+        self.assertIn("--psd-path", s3_spectral_call["args"])
+        psd_idx = s3_spectral_call["args"].index("--psd-path")
+        self.assertEqual(s3_spectral_call["args"][psd_idx + 1], "runs/base/psd/measured_psd.json")
+
         s3b_call = next(c for c in calls if c["label"] == "s3b_multimode_estimates")
         idx = s3b_call["args"].index("--s3-estimates")
         self.assertEqual(
             s3b_call["args"][idx + 1],
-            "wire_dual/s3_spectral_estimates/outputs/spectral_estimates.json",
+            str(runs_root / "wire_dual" / "s3_spectral_estimates" / "outputs" / "spectral_estimates.json"),
         )
+        self.assertIn("--psd-path", s3b_call["args"])
 
 
 class TestMultimodePipelineBehavior(unittest.TestCase):

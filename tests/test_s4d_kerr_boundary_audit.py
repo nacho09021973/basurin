@@ -4,10 +4,8 @@ from pathlib import Path
 from mvp.contracts import init_stage
 import mvp.s4d_kerr_from_multimode as s4d
 
-
 def _sigma_ln_f_ln_q() -> list[list[float]]:
     return [[0.04, 0.01], [0.01, 0.09]]
-
 
 def _write_compatible_set(run_dir: Path, *, n_compatible: int = 1) -> None:
     payload = {
@@ -22,7 +20,6 @@ def _write_compatible_set(run_dir: Path, *, n_compatible: int = 1) -> None:
     out_dir = run_dir / "s4_geometry_filter" / "outputs"
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "compatible_set.json").write_text(json.dumps(payload) + "\n", encoding="utf-8")
-
 
 def test_s4d_fails_without_extra_boundary_artifact_on_spin_grid_saturation(tmp_path: Path, monkeypatch) -> None:
     runs_root = tmp_path / "runs"
@@ -106,7 +103,6 @@ def test_s4d_fails_without_extra_boundary_artifact_on_spin_grid_saturation(tmp_p
     assert "boundary_audit" not in manifest["artifacts"]
     assert "boundary_audit" not in manifest["hashes"]
 
-
 def test_lnq_reconstruction_matches_lnf_lntau_identity() -> None:
     lnf = [2.30, 2.35]
     lntau = [-3.10, -3.00]
@@ -115,7 +111,6 @@ def test_lnq_reconstruction_matches_lnf_lntau_identity() -> None:
 
     for i in range(len(lnf)):
         assert lnq[i] == lnf[i] + lntau[i] + ln_pi
-
 
 def test_best_idx_joint_accepts_sigma_weighting() -> None:
     obs = {"220": {"f_hz": 10.0, "tau_s": 1.0}, "221": {"f_hz": 20.0, "tau_s": 2.0}}
@@ -127,7 +122,6 @@ def test_best_idx_joint_accepts_sigma_weighting() -> None:
     idx = s4d._best_idx_joint(obs, lnf_220, lnq_220, lnf_221, lnq_221, inv_sigma, inv_sigma)
     assert idx in (0, 1)
 
-
 def test_regularize_and_invert_sigma_near_singular_is_finite() -> None:
     sigma_near_singular = ((0.07361859, 0.14723593), (0.14723593, 0.29446937))
     inv_sigma, diag = s4d._regularize_and_invert_2x2_sigma(sigma_near_singular)
@@ -136,7 +130,6 @@ def test_regularize_and_invert_sigma_near_singular_is_finite() -> None:
     assert diag["jitter_used"] > 0.0
     assert diag["det_after"] >= diag["det_before"]
     assert all(value == value for row in inv_sigma for value in row)
-
 
 def test_should_abort_for_boundary_allows_spin_saturation_at_physical_floor() -> None:
     should_abort, reason, warning = s4d._should_abort_for_boundary(
@@ -154,7 +147,6 @@ def test_should_abort_for_boundary_allows_spin_saturation_at_physical_floor() ->
     assert reason is None
     assert warning is True
 
-
 def test_should_abort_for_boundary_fails_when_spin_saturates_at_a_max() -> None:
     should_abort, reason, warning = s4d._should_abort_for_boundary(
         a_p50=s4d.A_MAX,
@@ -170,7 +162,6 @@ def test_should_abort_for_boundary_fails_when_spin_saturates_at_a_max() -> None:
     assert should_abort is True
     assert reason == "median_spin_on_grid_edge"
     assert warning is False
-
 
 def test_s4d_skips_multimode_when_viability_gate_blocks(tmp_path: Path, monkeypatch) -> None:
     runs_root = tmp_path / "runs"
@@ -209,6 +200,16 @@ def test_s4d_skips_multimode_when_viability_gate_blocks(tmp_path: Path, monkeypa
     assert extraction["skip_reason_code"] == "MULTIMODE_UNAVAILABLE_221"
     assert extraction["multimode_fallback"]["program_classification"] == "SINGLE_MODE_CONSTRAINED_PROGRAM"
 
+def test_invert_kerr_from_freqs_recovers_high_spin_branch() -> None:
+    from mvp.kerr_qnm_fits import kerr_qnm
+
+    q220 = kerr_qnm(65.0, 0.99, (2, 2, 0))
+    q221 = kerr_qnm(65.0, 0.99, (2, 2, 1))
+
+    m_final, chi_final = s4d._invert_kerr_from_freqs(q220.f_hz, q221.f_hz)
+
+    assert abs(m_final - 65.0) < 0.5
+    assert chi_final > 0.97
 
 def test_extract_kerr_with_covariance_core_uses_grid_inverter(monkeypatch) -> None:
     calls = {"n": 0}

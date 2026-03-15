@@ -189,6 +189,31 @@ def test_resolve_t0_gps_reference_catalog_event_time_gps_key(
     assert source == str(reference_catalog)
 
 
+def test_resolve_t0_gps_default_window_catalog_prefers_event_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    default_catalog = _write_catalog(tmp_path / "window_catalog_v1.json", {"GW150914": {"t0_gps": 1126259462.4}})
+    event_metadata_dir = tmp_path / "docs" / "ringdown" / "event_metadata"
+    event_metadata_dir.mkdir(parents=True, exist_ok=True)
+    event_metadata_path = event_metadata_dir / "GW150914_metadata.json"
+    event_metadata_path.write_text(
+        json.dumps({"event_id": "GW150914", "t0_gps": 1126259462.4204}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("mvp.s2_ringdown_window.DEFAULT_WINDOW_CATALOG", default_catalog)
+    monkeypatch.setattr("mvp.s2_ringdown_window.DEFAULT_EVENT_METADATA_DIR", event_metadata_dir)
+    monkeypatch.setattr("mvp.s2_ringdown_window.DEFAULT_T0_REFERENCE_CATALOG", tmp_path / "missing_gwtc_events_t0.json")
+
+    resolved = _resolve_t0_gps("GW150914", default_catalog, offline=True, run_dir=tmp_path / "runs" / "rid")
+    assert isinstance(resolved, tuple) and len(resolved) == 4
+    t0_gps, source, details, _gwosc_cache = resolved
+
+    assert t0_gps == pytest.approx(1126259462.4204)
+    assert source == str(event_metadata_path)
+    assert details["lookup_key"] == "GW150914"
+
+
 # ---------------------------------------------------------------------------
 # Path 3 — RuntimeError when neither catalog nor metadata exists
 # ---------------------------------------------------------------------------

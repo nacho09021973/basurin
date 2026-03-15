@@ -279,6 +279,55 @@ def _load_signal_from_npz(path: Path, *, window_meta: dict[str, Any] | None) -> 
     return signal, fs
 
 
+
+
+def _load_measured_psd(psd_path: Path) -> dict[str, Any]:
+    payload = json.loads(psd_path.read_text(encoding="utf-8"))
+    freqs = np.asarray(payload.get("frequencies_hz", []), dtype=np.float64)
+    if freqs.ndim != 1 or freqs.size < 2 or not np.all(np.isfinite(freqs)):
+        raise RuntimeError(f"invalid measured PSD frequencies_hz: {psd_path}")
+    if not np.all(np.diff(freqs) > 0):
+        raise RuntimeError(f"invalid measured PSD frequencies_hz (non-monotonic): {psd_path}")
+    return payload
+
+
+def _detector_from_npz_path(npz_path: Path) -> str | None:
+    stem = npz_path.stem.upper()
+    for det in ("H1", "L1", "V1"):
+        if det in stem:
+            return det
+    return None
+
+
+def _whiten_with_measured_psd(
+    signal: np.ndarray,
+    fs: float,
+    *,
+    detector: str,
+    psd_payload: dict[str, Any],
+) -> np.ndarray:
+    det_key = f"psd_{detector.upper()}"
+    raw = psd_payload.get(det_key)
+    if not isinstance(raw, list):
+        raise KeyError(det_key)
+
+    psd_freqs = np.asarray(psd_payload.get("frequencies_hz", []), dtype=float)
+    psd_vals = np.asarray(raw, dtype=float)
+    if psd_vals.shape != psd_freqs.shape:
+        raise RuntimeError(f"{det_key} length mismatch with frequencies_hz")
+    if np.any(~np.isfinite(psd_vals)):
+        raise RuntimeError(f"{det_key} contains non-finite values")
+    psd_vals = np.maximum(psd_vals, 1e-30)
+
+    freqs = np.fft.rfftfreq(signal.size, d=1.0 / fs)
+    interp = np.interp(freqs, psd_freqs, psd_vals, left=psd_vals[0], right=psd_vals[-1])
+    interp = np.maximum(interp, 1e-30)
+
+    spec = np.fft.rfft(signal)
+    white_spec = spec / np.sqrt(interp)
+    return np.fft.irfft(white_spec, n=signal.size)
+
+
 def _bootstrap_mode_log_samples(
     signal: np.ndarray,
     fs: float,
@@ -465,11 +514,9 @@ def evaluate_mode(
     samples = samples[valid_mask]
     n_failed += dropped_invalid
 
-    if method == "spectral_two_pass" and samples.size > 0:
-        # spectral_two_pass second coordinate is ln(tau_s); convert to ln(Q)
-        # using Q = pi * f * tau_s to keep downstream stability/Sigma semantics.
-        samples = samples.copy()
-        samples[:, 1] = math.log(math.pi) + samples[:, 0] + samples[:, 1]
+    # evaluate_mode operates on bootstrap samples in (ln f, ln Q) coordinates.
+    # spectral_two_pass estimators already report Q, so applying an additional
+    # tau->Q conversion here would inflate Q by a factor of pi*f.
 
     valid_fraction = float(samples.shape[0] / n_bootstrap) if n_bootstrap > 0 else 0.0
     stability["valid_fraction"] = valid_fraction
@@ -1045,6 +1092,7 @@ def main() -> int:
     ap.add_argument("--s3-estimates", default=None, help="Path to s3_ringdown_estimates outputs/estimates.json")
     ap.add_argument("--n-bootstrap", type=int, default=200)
     ap.add_argument("--seed", type=int, default=12345)
+    ap.add_argument("--psd-path", default=None, help="Path to measured_psd.json from extract_psd.py")
     ap.add_argument(
         "--method",
         default="hilbert_peakband",
@@ -1079,6 +1127,7 @@ def main() -> int:
             "n_bootstrap": args.n_bootstrap,
             "seed": args.seed,
             "method": args.method,
+            "psd_path": args.psd_path,
             "max_lnf_span_220": args.max_lnf_span_220,
             "max_lnq_span_220": args.max_lnq_span_220,
             "max_lnf_span_221": args.max_lnf_span_221,
@@ -1109,58 +1158,18 @@ def main() -> int:
             optional={"s2_window_meta": window_meta_path},
         )
         signal, fs = _load_signal_from_npz(npz_path, window_meta=window_meta)
-
-        # Optional PSD-based whitening
-        psd_source = "none"
+        psd_source = "internal_welch"
         if args.psd_path:
-            _psd_file = Path(args.psd_path)
-            if _psd_file.exists():
-                try:
-                    _psd_payload = json.loads(_psd_file.read_text(encoding="utf-8"))
-                    # measured_psd.json may be keyed by detector or be a single entry
-                    _det_psd = None
-                    for _det_key in ("H1", "L1", "V1"):
-                        if _det_key in _psd_payload:
-                            _det_psd = _psd_payload[_det_key]
-                            break
-                    if _det_psd is None and "freqs_hz" in _psd_payload and "psd" in _psd_payload:
-                        _det_psd = _psd_payload
-                    if _det_psd is not None:
-                        from scipy.interpolate import interp1d as _interp1d
-                        _psd_freqs = np.asarray(_det_psd["freqs_hz"], dtype=np.float64)
-                        _psd_vals = np.asarray(_det_psd["psd"], dtype=np.float64)
-                        _rfft_freqs = np.fft.rfftfreq(signal.size, d=1.0 / fs)
-                        _interp = _interp1d(
-                            _psd_freqs, _psd_vals, kind="linear",
-                            bounds_error=False,
-                            fill_value=(_psd_vals[0], _psd_vals[-1]),
-                        )
-                        _psd_interp = _interp(_rfft_freqs)
-                        _pos = _psd_vals[_psd_vals > 0]
-                        if _pos.size > 0:
-                            _psd_interp = np.where(_psd_interp > 0, _psd_interp, _pos.min())
-                        _sfft = np.fft.rfft(signal)
-                        signal = np.fft.irfft(_sfft / np.sqrt(_psd_interp), n=signal.size).astype(np.float64)
-                        psd_source = "external_measured"
-                        print("[s3b_multimode_estimates] signal whitened with measured PSD", flush=True)
-                    else:
-                        print(
-                            "[s3b_multimode_estimates] WARNING: measured PSD has no usable detector entry; "
-                            "proceeding without whitening",
-                            flush=True,
-                        )
-                except Exception as _wh_exc:
-                    print(
-                        f"[s3b_multimode_estimates] WARNING: PSD whitening failed ({_wh_exc}); "
-                        "proceeding without whitening",
-                        flush=True,
-                    )
-            else:
-                print(
-                    f"[s3b_multimode_estimates] WARNING: --psd-path {args.psd_path!r} not found; "
-                    "proceeding without whitening",
-                    flush=True,
-                )
+            try:
+                psd_payload = _load_measured_psd(Path(args.psd_path))
+                detector = _detector_from_npz_path(npz_path)
+                if detector is None:
+                    print(f"[{STAGE}] WARNING: unable to infer detector from {npz_path.name}; falling back to internal Welch", flush=True)
+                else:
+                    signal = _whiten_with_measured_psd(signal, fs, detector=detector, psd_payload=psd_payload)
+                    psd_source = "external_measured_psd"
+            except KeyError as exc:
+                print(f"[{STAGE}] WARNING: measured PSD missing detector for {npz_path.name}: {exc}; falling back to internal Welch", flush=True)
 
         selected_t0_offset_ms = _load_s3_selected_t0_offset_ms(s3_estimates_path)
         applied_t0_offset_ms = 0.0

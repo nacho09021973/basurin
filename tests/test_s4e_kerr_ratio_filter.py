@@ -12,7 +12,6 @@ from mvp.s4e_kerr_ratio_filter import (
     run_ratio_filter,
 )
 
-
 def _mode_payload(label: str, f_hz: float, q_factor: float, frac: float = 0.01) -> dict:
     tau_s = q_factor / (math.pi * f_hz)
     return {
@@ -36,7 +35,6 @@ def _mode_payload(label: str, f_hz: float, q_factor: float, frac: float = 0.01) 
         },
     }
 
-
 def _multimode_payload(f220_hz: float, q220: float, f221_hz: float, q221: float, frac: float = 0.01) -> dict:
     return {
         "modes": [
@@ -45,14 +43,11 @@ def _multimode_payload(f220_hz: float, q220: float, f221_hz: float, q221: float,
         ]
     }
 
-
 def _compatible_payload(rows: list[dict]) -> dict:
     return {"compatible_geometries": rows}
 
-
 def _rf_at_spin(spin: float) -> float:
     return float(kerr_ratio_curve(chi_grid=[spin])["Rf_grid"][0])
-
 
 def test_kerr_ratio_curve_basic() -> None:
     result = kerr_ratio_curve(n_points=10)
@@ -64,25 +59,34 @@ def test_kerr_ratio_curve_basic() -> None:
     assert all(0.5 < value < 1.5 for value in result["Rf_grid"])
     assert all(0.0 < value < 1.0 for value in result["RQ_grid"])
 
-
 def test_kerr_ratio_curve_schwarzschild() -> None:
     result = kerr_ratio_curve(chi_grid=[0.0])
     assert abs(result["Rf_grid"][0] - 0.9267) < 0.01
     assert abs(result["RQ_grid"][0] - 0.3038) < 0.01
 
-
-def test_kerr_ratio_curve_monotonicity() -> None:
-    result = kerr_ratio_curve(n_points=50)
+def test_kerr_ratio_curve_non_monotonic_with_high_spin_turnover() -> None:
+    result = kerr_ratio_curve(n_points=2000)
     rf_grid = result["Rf_grid"]
-    assert all(a <= b for a, b in zip(rf_grid[:-3], rf_grid[1:-2]))
-    assert kerr_ratio_curve(chi_grid=[0.99])["Rf_grid"][0] > 0.95
+    chi_grid = result["chi_grid"]
 
+    peak_idx = max(range(len(rf_grid)), key=lambda i: rf_grid[i])
+    peak_chi = chi_grid[peak_idx]
+
+    assert 0.94 < peak_chi < 0.98
+    assert rf_grid[0] < rf_grid[peak_idx]
+    assert rf_grid[-1] < rf_grid[peak_idx]
+
+def test_kerr_ratio_curve_range_is_stable_with_coarse_grid() -> None:
+    coarse = kerr_ratio_curve(n_points=10)
+    dense = kerr_ratio_curve(n_points=4000)
+
+    assert abs(coarse["Rf_range"]["max"] - dense["Rf_range"]["max"]) < 1e-6
+    assert abs(coarse["Rf_range"]["min"] - dense["Rf_range"]["min"]) < 1e-6
 
 def test_extract_geometry_spin_from_metadata_and_geometry_id() -> None:
     assert extract_geometry_spin({"geometry_id": "Kerr_M90_a0.8631"}) == pytest.approx(0.8631)
     assert extract_geometry_spin({"geometry_id": "x", "metadata": {"chi": 0.67}}) == pytest.approx(0.67)
     assert extract_geometry_spin({"geometry_id": "x"}) is None
-
 
 def test_ratio_filter_keeps_compatible_geometry() -> None:
     spin = 0.67
@@ -108,7 +112,6 @@ def test_ratio_filter_keeps_compatible_geometry() -> None:
     assert rows[0]["status"] == "RATIO_COMPATIBLE"
     assert rows[0]["spin"] == pytest.approx(spin)
 
-
 def test_ratio_filter_excludes_incompatible_geometry() -> None:
     multimode = _multimode_payload(250.0, 4.2, 245.0, 1.45, frac=0.002)
     compatible = _compatible_payload([{"geometry_id": "kerr_a0.01", "metadata": {"spin": 0.01}}])
@@ -131,7 +134,6 @@ def test_ratio_filter_excludes_incompatible_geometry() -> None:
     assert excluded[0]["status"] == "RATIO_EXCLUDED"
     assert excluded[0]["tension_Rf"] is not None
     assert excluded[0]["tension_Rf"] > 0.0
-
 
 def test_ratio_filter_keeps_no_spin_geometry_as_not_applicable() -> None:
     spin = 0.75
@@ -156,12 +158,10 @@ def test_ratio_filter_keeps_no_spin_geometry_as_not_applicable() -> None:
     assert row["status"] == "RATIO_NOT_APPLICABLE"
     assert row["spin"] is None
 
-
 def test_compute_observed_ratios_requires_mode_221() -> None:
     multimode = {"modes": [_mode_payload("220", 250.0, 4.0)]}
     with pytest.raises(ValueError, match=r"\(2,2,1\)"):
         compute_observed_ratios(multimode, sigma_rf=2.0, sigma_rq=2.0)
-
 
 def test_reduction_fraction_and_spin_constraints() -> None:
     spin_target = 0.75
@@ -201,12 +201,10 @@ def test_reduction_fraction_and_spin_constraints() -> None:
     assert result["spin_constraints"]["spin_range_reduction_fraction"] is not None
     assert result["spin_constraints"]["spin_range_reduction_fraction"] > 0.0
 
-
 def test_informativity_classification_thresholds() -> None:
     assert classify_informativity(0.833) == "HIGH"
     assert classify_informativity(0.167) == "LOW"
     assert classify_informativity(0.0) == "UNINFORMATIVE"
-
 
 def test_ratio_filter_result_schema_fields_present() -> None:
     spin = 0.70
