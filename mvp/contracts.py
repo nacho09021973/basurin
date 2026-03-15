@@ -741,6 +741,32 @@ CONTRACTS: dict[str, StageContract] = {
         upstream_stages=["experiment/phase4_renyi_diversity_baseline", "experiment/phase3_weight_policy_basis"],
         check_run_valid=True,
     ),
+    "experiment/phase5_temperature_sweep": StageContract(
+        name="experiment/phase5_temperature_sweep",
+        required_inputs=[
+            "experiment/phase2c_support_ontology_basis/outputs/support_ontology_basis_v1.json",
+            "s5_aggregate/outputs/aggregate.json",
+            "experiment/phase3_weight_policy_basis/outputs/weight_policy_event_support_delta_lnL_softmax_mean_v1.json",
+            "experiment/phase4_renyi_diversity_baseline/outputs/renyi_diversity_event_support_delta_lnL_softmax_mean_v1.json",
+        ],
+        dynamic_inputs=[
+            "{source_run}/s4k_event_support_region/outputs/event_support_region.json",
+            "{source_run}/s4_geometry_filter/outputs/ranked_all_full.json",
+        ],
+        produced_outputs=[
+            "outputs/temperature_sweep_metrics_v1.json",
+            "outputs/temperature_sweep_topk_v1.json",
+            "outputs/temperature_sweep_family_mass_v1.json",
+            "outputs/temperature_sweep_theory_mass_v1.json",
+            "outputs/temperature_sweep_top_geometry_v1.json",
+        ],
+        upstream_stages=[
+            "experiment/phase2c_support_ontology_basis",
+            "experiment/phase3_weight_policy_basis",
+            "experiment/phase4_renyi_diversity_baseline",
+        ],
+        check_run_valid=True,
+    ),
 }
 
 
