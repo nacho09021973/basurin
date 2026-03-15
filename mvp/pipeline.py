@@ -1687,7 +1687,6 @@ def main() -> int:
         help="Skip s1 download if outputs already exist and params match",
     )
     sp_single.add_argument("--with-t0-sweep", action="store_true", default=False)
-    sp_single.add_argument("--psd-path", default=None, help="Path to measured_psd.json for spectral whitening")
     sp_single.add_argument(
         "--local-hdf5",
         action="append",

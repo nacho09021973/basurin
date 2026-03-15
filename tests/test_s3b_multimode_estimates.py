@@ -150,12 +150,16 @@ def test_resolve_mode_bands_prefers_kerr_centered_220_for_known_event() -> None:
         event_id="GW150914",
     )
 
-    assert strategy["method"] == "kerr_centered_220_residual_high"
+    assert strategy["method"] == "kerr_centered_overlap"
     assert np.isclose(strategy["f220_kerr_hz"], 271.45861530076854)
     assert np.isclose(band_220[0], 253.3613742807173)
     assert np.isclose(band_220[1], 289.55585632081977)
-    assert band_221[0] > band_220[1]
-    assert np.isclose(band_221[1], 400.0)
+    assert np.isclose(strategy["mode_221_low_pad_hz"], 1.8097241020051242)
+    assert np.isclose(strategy["mode_221_high_pad_hz"], 3.6194482040102484)
+    assert np.isclose(band_221[0], 251.55165017871218)
+    assert np.isclose(band_221[1], 293.17530452483004)
+    assert band_221[0] < band_220[0]
+    assert band_221[1] > band_220[1]
     assert strategy["mode_220_band_hz"] == [band_220[0], band_220[1]]
     assert strategy["mode_221_band_hz"] == [band_221[0], band_221[1]]
 
