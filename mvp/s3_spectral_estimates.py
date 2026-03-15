@@ -97,151 +97,112 @@ def _lorentzian(nu: np.ndarray, A: float, f0: float, gamma: float, C: float) -> 
     return A / ((nu - f0) ** 2 + (gamma / 2.0) ** 2) + C
 
 
+def _estimate_peak_snr(
+    strain: np.ndarray,
+    fs: float,
+    *,
+    band_low: float,
+    band_high: float,
+) -> float:
+    from scipy.signal import periodogram
+
+    n = strain.size
+    if n < 16:
+        return 0.0
+
+    nyquist = fs / 2.0
+    high = min(float(band_high), nyquist * 0.95)
+    low = float(band_low)
+    if low >= high:
+        return 0.0
+
+    nfft_floor = max(n * 4, int(fs) * 4)
+    nfft = 1 << (nfft_floor - 1).bit_length()
+    freqs, psd = periodogram(
+        strain,
+        fs=fs,
+        window="boxcar",
+        nfft=nfft,
+        scaling="density",
+    )
+    mask = (freqs >= low) & (freqs <= high)
+    if int(np.count_nonzero(mask)) < 5:
+        return 0.0
+
+    psd_band = np.asarray(psd[mask], dtype=np.float64)
+    noise_floor = float(np.median(psd_band)) + 1e-30
+    return float(np.max(psd_band) / noise_floor)
+
+
 def estimate_spectral_observables(
     strain: np.ndarray,
     fs: float,
     band_low: float = 150.0,
     band_high: float = 400.0,
 ) -> dict[str, Any]:
-    """Estimate f, tau, Q via Lorentzian fit to the power spectral density.
+    """Estimate f, tau, Q via the robust shared spectral Lorentzian fitter.
 
-    Returns point estimates and uncertainty fields compatible with s3 schema:
-      f_hz, tau_s, Q, snr_peak       – point estimates
-      sigma_f_hz, sigma_tau_s, sigma_Q – 1-sigma uncertainties from fit
-      cov_logf_logQ                   – covariance in (ln f, ln Q) space
-      fit_converged                   – True if curve_fit succeeded
+    This stage historically carried a simplified fitter that diverged from the
+    canonical implementation in ``s3_ringdown_estimates`` and produced biased
+    outputs on short windows.  Keep the stage-local schema, but delegate the
+    actual fit to the shared implementation so both spectral branches stay
+    numerically aligned.
     """
-    from scipy.signal import welch
-    from scipy.optimize import curve_fit
+    from mvp.s3_ringdown_estimates import estimate_ringdown_spectral
 
-    n = strain.size
-    if n < 32:
-        raise ValueError(f"Strain too short: {n} samples")
+    result = estimate_ringdown_spectral(
+        strain,
+        fs,
+        (band_low, band_high),
+        kerr_centered_band=False,
+    )
 
-    nyquist = fs / 2.0
-    if band_high >= nyquist:
-        band_high = nyquist * 0.95
-    if band_low >= band_high:
-        raise ValueError(f"Invalid band: [{band_low}, {band_high}] Hz")
+    fit_converged = bool(result.get("fit_success", False))
+    f_hz = float(result.get("f_hz", float("nan")))
+    spectral_band = result.get("spectral_band")
+    df_floor_hz = result.get("df_floor_hz")
+    edge_warning = False
+    if (
+        fit_converged
+        and isinstance(spectral_band, dict)
+        and isinstance(df_floor_hz, (int, float))
+        and math.isfinite(float(df_floor_hz))
+        and math.isfinite(f_hz)
+    ):
+        band_low_eff = spectral_band.get("f_low_hz")
+        band_high_eff = spectral_band.get("f_high_hz")
+        if isinstance(band_low_eff, (int, float)) and isinstance(band_high_eff, (int, float)):
+            edge_warning = (
+                (f_hz - float(band_low_eff)) <= float(df_floor_hz)
+                or (float(band_high_eff) - f_hz) <= float(df_floor_hz)
+            )
 
-    # Welch PSD: nperseg ~ 50ms segments
-    nperseg = min(n, int(0.05 * fs))
-    nperseg = max(nperseg, 16)
-
-    freqs, psd = welch(strain, fs=fs, nperseg=nperseg, noverlap=nperseg // 2,
-                       window="hann", scaling="density")
-
-    # Restrict to band
-    mask = (freqs >= band_low) & (freqs <= band_high)
-    if np.sum(mask) < 5:
-        raise ValueError(f"Too few frequency bins in band [{band_low}, {band_high}] Hz")
-
-    freqs_band = freqs[mask]
-    psd_band = psd[mask]
-
-    # Find peak
-    peak_idx = int(np.argmax(psd_band))
-    f_peak = float(freqs_band[peak_idx])
-    psd_peak = float(psd_band[peak_idx])
-    psd_median = float(np.median(psd_band))
-
-    # Check peak not at edge (warn via flag, not abort)
-    edge_warning = (peak_idx < 2) or (peak_idx > len(freqs_band) - 3)
-
-    # Initial parameters for Lorentzian fit
-    # γ_init: rough FWHM estimate from half-max crossing
-    half_max = (psd_peak + psd_median) / 2.0
-    above_half = freqs_band[psd_band > half_max]
-    if len(above_half) >= 2:
-        gamma_init = float(above_half[-1] - above_half[0])
-        gamma_init = max(gamma_init, 1.0)
-    else:
-        gamma_init = 10.0
-
-    A_init = psd_peak * (gamma_init / 2.0) ** 2  # A = PSD_peak * (γ/2)²
-    p0 = [A_init, f_peak, gamma_init, psd_median * 0.1]
-
-    # Bounds: keep f0 in band, γ > 0, A > 0, C >= 0
-    bounds_low = [0.0, band_low, 0.1, 0.0]
-    bounds_high = [np.inf, band_high, (band_high - band_low), np.inf]
-
-    fit_converged = True
-    try:
-        popt, pcov = curve_fit(
-            _lorentzian, freqs_band, psd_band,
-            p0=p0, bounds=(bounds_low, bounds_high),
-            maxfev=10000,
-        )
-        A_fit, f0_fit, gamma_fit, C_fit = popt
-
-        # Check covariance is valid
-        if not np.all(np.isfinite(pcov)):
-            fit_converged = False
-    except (RuntimeError, ValueError):
-        fit_converged = False
-
-    if not fit_converged:
-        # Return NaN estimates with flag
-        return {
-            "f_hz": float("nan"), "tau_s": float("nan"), "Q": float("nan"),
-            "snr_peak": 0.0,
-            "sigma_f_hz": float("nan"), "sigma_tau_s": float("nan"),
-            "sigma_Q": float("nan"),
-            "cov_logf_logQ": 0.0,
-            "fit_converged": False,
-            "edge_warning": edge_warning,
-        }
-
-    # Extract physical observables
-    f_hz = float(f0_fit)
-    gamma = float(gamma_fit)  # FWHM
-    tau_s = 1.0 / (math.pi * gamma)
-    Q = f_hz / gamma  # = π·f·τ
-
-    if Q <= 0 or not math.isfinite(Q):
-        raise ValueError(f"Invalid Q={Q:.4f} from fit")
-
-    # Uncertainties from covariance matrix
-    # popt = [A, f0, gamma, C]  =>  indices: f0=1, gamma=2
-    sigma_f_hz = float(math.sqrt(abs(pcov[1, 1])))
-    sigma_gamma = float(math.sqrt(abs(pcov[2, 2])))
-
-    # Propagation: tau = 1/(π·γ)  =>  sigma_tau = sigma_gamma / (π·γ²)
-    sigma_tau_s = sigma_gamma / (math.pi * gamma ** 2)
-
-    # Q = f/γ  =>  var_Q = Q²·[(σ_f/f)² + (σ_γ/γ)²]
-    sigma_Q = Q * math.sqrt((sigma_f_hz / f_hz) ** 2 + (sigma_gamma / gamma) ** 2)
-
-    # Log-space covariance: sigma_logf, sigma_logQ
-    sigma_logf = sigma_f_hz / f_hz if f_hz > 0 else 0.0
-    sigma_logQ = sigma_Q / Q if Q > 0 else 0.0
-
-    # Covariance in log-space from fit covariance (non-zero correlation)
-    # cov(ln f, ln Q) = cov(ln f, ln f - ln γ)
-    #   = var(ln f) - cov(ln f, ln γ)
-    # In linearized: cov(ln f, ln γ) ≈ cov(f, γ) / (f * γ)
-    cov_f_gamma = float(pcov[1, 2])
-    cov_logf_logQ = (sigma_logf ** 2 - cov_f_gamma / (f_hz * gamma)
-                     if (f_hz > 0 and gamma > 0) else 0.0)
-
-    # SNR estimate: peak height relative to noise floor
-    noise_floor = float(np.median(psd_band)) + 1e-30
-    snr_peak = float(psd_peak / noise_floor)
-
-    return {
-        "f_hz": f_hz, "tau_s": tau_s, "Q": Q,
-        "snr_peak": snr_peak,
-        "sigma_f_hz": sigma_f_hz,
-        "sigma_tau_s": sigma_tau_s,
-        "sigma_Q": sigma_Q,
-        "cov_logf_logQ": cov_logf_logQ,
-        "fit_converged": True,
+    mapped: dict[str, Any] = {
+        "f_hz": f_hz,
+        "tau_s": float(result.get("tau_s", float("nan"))),
+        "Q": float(result.get("Q", float("nan"))),
+        "snr_peak": _estimate_peak_snr(
+            strain,
+            fs,
+            band_low=band_low,
+            band_high=band_high,
+        ) if fit_converged else 0.0,
+        "sigma_f_hz": float(result.get("sigma_f_hz", float("nan"))),
+        "sigma_tau_s": float(result.get("sigma_tau_s", float("nan"))),
+        "sigma_Q": float(result.get("sigma_Q", float("nan"))),
+        "cov_logf_logQ": float(result.get("cov_logf_logQ", 0.0)),
+        "fit_converged": fit_converged,
         "edge_warning": edge_warning,
-        "_fit_params": {
-            "A": float(A_fit), "f0": float(f0_fit),
-            "gamma_fwhm": float(gamma_fit), "C": float(C_fit),
-        },
+        "fit": result.get("fit"),
+        "fit_residual": result.get("fit_residual"),
+        "fit_failure_reason": result.get("fit_failure_reason"),
+        "fit_degenerate": result.get("fit_degenerate"),
+        "spectral_band": spectral_band,
+        "sigma_f_hz_raw": result.get("sigma_f_hz_raw"),
+        "df_floor_hz": result.get("df_floor_hz"),
+        "sigma_floor_applied": result.get("sigma_floor_applied"),
     }
+    return mapped
 
 
 def bootstrap_spectral_observables(
@@ -474,22 +435,13 @@ def main() -> int:
                    + (math.pi * combined_f) ** 2 * var_tau_comb
         sigma_Q_comb = math.sqrt(var_Q_comb)
 
-        # Log-space covariance
-        sigma_logf = sigma_f_comb / combined_f if combined_f > 0 else 0.0
-        sigma_logQ = sigma_Q_comb / combined_Q if combined_Q > 0 else 0.0
-        cov_logf_logQ = 0.0
-
-        sigma_lnf = sigma_logf
-        sigma_lnQ = sigma_logQ
-        if sigma_logf > 0 and sigma_logQ > 0:
-            r = cov_logf_logQ / (sigma_logf * sigma_logQ)
-            r = float(max(min(r, 1.0 - 1e-12), -1.0 + 1e-12))
-        else:
-            r = 0.0
-
         combined_dict: dict[str, Any] = {
             "f_hz": combined_f, "tau_s": combined_tau, "Q": combined_Q,
         }
+
+        sigma_f_out = sigma_f_comb
+        sigma_tau_out = sigma_tau_comb
+        sigma_Q_out = sigma_Q_comb
 
         if args.n_bootstrap > 0:
             boot_var_f = 0.0
@@ -509,21 +461,31 @@ def main() -> int:
                 combined_sigma_f = math.sqrt(boot_var_f)
                 combined_sigma_tau = math.sqrt(boot_var_tau)
                 combined_sigma_Q = math.sqrt(boot_var_Q)
-                combined_dict["sigma_f_hz"] = combined_sigma_f
-                combined_dict["sigma_tau_s"] = combined_sigma_tau
-                combined_dict["sigma_Q"] = combined_sigma_Q
-                combined_dict["sigma_log_f"] = (
-                    combined_sigma_f / combined_f if combined_f > 0 else None
-                )
-                combined_dict["sigma_log_Q"] = (
-                    combined_sigma_Q / combined_Q if combined_Q > 0 else None
-                )
-            else:
-                combined_dict["sigma_f_hz"] = None
-                combined_dict["sigma_tau_s"] = None
-                combined_dict["sigma_Q"] = None
-                combined_dict["sigma_log_f"] = None
-                combined_dict["sigma_log_Q"] = None
+                sigma_f_out = combined_sigma_f
+                sigma_tau_out = combined_sigma_tau
+                sigma_Q_out = combined_sigma_Q
+
+        sigma_logf = sigma_f_out / combined_f if combined_f > 0 else 0.0
+        sigma_logQ = sigma_Q_out / combined_Q if combined_Q > 0 else 0.0
+        cov_logf_logQ = 0.0
+
+        sigma_lnf = sigma_logf
+        sigma_lnQ = sigma_logQ
+        if sigma_logf > 0 and sigma_logQ > 0:
+            r = cov_logf_logQ / (sigma_logf * sigma_logQ)
+            r = float(max(min(r, 1.0 - 1e-12), -1.0 + 1e-12))
+        else:
+            r = 0.0
+
+        combined_dict["sigma_f_hz"] = sigma_f_out if math.isfinite(sigma_f_out) else None
+        combined_dict["sigma_tau_s"] = sigma_tau_out if math.isfinite(sigma_tau_out) else None
+        combined_dict["sigma_Q"] = sigma_Q_out if math.isfinite(sigma_Q_out) else None
+        combined_dict["sigma_log_f"] = (
+            sigma_logf if (combined_f > 0 and math.isfinite(sigma_logf)) else None
+        )
+        combined_dict["sigma_log_Q"] = (
+            sigma_logQ if (combined_Q > 0 and math.isfinite(sigma_logQ)) else None
+        )
 
         # Build output (schema compatible with estimates.json for s4 consumption)
         psd_source = "internal_welch"
@@ -537,9 +499,9 @@ def main() -> int:
             "band_hz": [args.band_low, args.band_high],
             "combined": combined_dict,
             "combined_uncertainty": {
-                "sigma_f_hz": sigma_f_comb,
-                "sigma_tau_s": sigma_tau_comb,
-                "sigma_Q": sigma_Q_comb,
+                "sigma_f_hz": sigma_f_out,
+                "sigma_tau_s": sigma_tau_out,
+                "sigma_Q": sigma_Q_out,
                 "cov_logf_logQ": cov_logf_logQ,
                 "sigma_logf": sigma_logf,
                 "sigma_logQ": sigma_logQ,

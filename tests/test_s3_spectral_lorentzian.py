@@ -946,3 +946,31 @@ def test_s3_spectral_with_measured_psd_whitening_smoke(tmp_path: Path) -> None:
     assert summary.get("psd_source") == "external_measured_psd"
     assert estimates.get("psd_source") == "external_measured_psd"
     assert 220.0 <= float(estimates["combined"]["f_hz"]) <= 280.0
+
+
+def test_s3_spectral_bootstrap_keeps_combined_uncertainty_aligned(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "s3_spectral_uncertainty_alignment"
+    _create_run_valid(runs_root, run_id)
+    _create_s2_outputs(runs_root, run_id, seed=11, duration=0.5)
+
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s3_spectral_estimates.py"),
+        "--run", run_id,
+        "--runs-root", str(runs_root),
+        "--band-low", "150",
+        "--band-high", "400",
+        "--n-bootstrap", "20",
+    ]
+    result = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+    est_path = runs_root / run_id / "s3_spectral_estimates" / "outputs" / "spectral_estimates.json"
+    estimates = json.loads(est_path.read_text(encoding="utf-8"))
+    combined = estimates["combined"]
+    unc = estimates["combined_uncertainty"]
+
+    assert combined["sigma_f_hz"] == pytest.approx(unc["sigma_f_hz"])
+    assert combined["sigma_tau_s"] == pytest.approx(unc["sigma_tau_s"])
+    assert combined["sigma_Q"] == pytest.approx(unc["sigma_Q"])

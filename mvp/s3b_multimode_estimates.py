@@ -514,11 +514,9 @@ def evaluate_mode(
     samples = samples[valid_mask]
     n_failed += dropped_invalid
 
-    if method == "spectral_two_pass" and samples.size > 0:
-        # spectral_two_pass second coordinate is ln(tau_s); convert to ln(Q)
-        # using Q = pi * f * tau_s to keep downstream stability/Sigma semantics.
-        samples = samples.copy()
-        samples[:, 1] = math.log(math.pi) + samples[:, 0] + samples[:, 1]
+    # evaluate_mode operates on bootstrap samples in (ln f, ln Q) coordinates.
+    # spectral_two_pass estimators already report Q, so applying an additional
+    # tau->Q conversion here would inflate Q by a factor of pi*f.
 
     valid_fraction = float(samples.shape[0] / n_bootstrap) if n_bootstrap > 0 else 0.0
     stability["valid_fraction"] = valid_fraction
