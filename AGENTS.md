@@ -1,5 +1,11 @@
 # AGENTS.md — Instrucciones para Codex (BASURIN)
 
+## Raiz canonica del repo
+- La unica raiz canonica de trabajo es `/home/adnac/basurin/work/basurin`.
+- `/home/adnac/basurin/work` no es un repo operable para desarrollo normal: no usarlo para `git`, edicion, tests ni ejecucion del pipeline.
+- La carpeta contenedora `/home/adnac/basurin/work` debe contener solo `basurin/`.
+- Antes de cambiar codigo o ejecutar comandos sensibles, verificar la raiz con `git rev-parse --show-toplevel`.
+
 ## Reglas duras de gobernanza
 - IO determinista: prohibido escribir fuera de `runs/<run_id>/...` (o `BASURIN_RUNS_ROOT` si está definido).
 - Resolución de raíz: usar `basurin_io.resolve_out_root("runs")` (respeta `BASURIN_RUNS_ROOT`).
