@@ -846,3 +846,94 @@ def test_cli_runs_root_still_enforces_run_valid_gate(tmp_path: Path) -> None:
     result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, env=env)
     assert result.returncode != 0
     assert "RUN_VALID" in result.stderr
+
+
+# ── PSD whitening CLI tests ───────────────────────────────────────────────
+
+
+def _make_flat_psd_json(tmp_path: Path, fs: float = 4096.0, n: int = 2048) -> Path:
+    """Write a flat (unit) measured_psd.json keyed by 'H1' detector."""
+    freqs = np.fft.rfftfreq(n, d=1.0 / fs).tolist()
+    psd = np.ones(len(freqs)).tolist()
+    payload = {"H1": {"freqs_hz": freqs, "psd": psd}}
+    psd_file = tmp_path / "measured_psd.json"
+    psd_file.write_text(json.dumps(payload), encoding="utf-8")
+    return psd_file
+
+
+def test_cli_psd_path_flat_psd_does_not_crash(tmp_path: Path) -> None:
+    """--psd-path with a valid flat PSD must produce rc=0 and no traceback."""
+    run_id = "s3b_psd_smoke"
+    tmp_runs = tmp_path / "runs"
+    _write_minimal_s2_inputs(tmp_runs, run_id)
+    psd_file = _make_flat_psd_json(tmp_path)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    cmd = [
+        sys.executable,
+        str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
+        "--runs-root", str(tmp_runs),
+        "--run-id", run_id,
+        "--n-bootstrap", "4",
+        "--seed", "1",
+        "--psd-path", str(psd_file),
+    ]
+    env = os.environ.copy()
+    env.pop("BASURIN_RUNS_ROOT", None)
+
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, env=env)
+    assert "Traceback" not in result.stderr, f"Unexpected traceback:\n{result.stderr}"
+    assert result.returncode == 0, result.stderr
+
+
+def test_cli_psd_path_missing_file_warns_and_falls_back(tmp_path: Path) -> None:
+    """A non-existent --psd-path must warn and succeed (rc=0, no crash)."""
+    run_id = "s3b_psd_missing"
+    tmp_runs = tmp_path / "runs"
+    _write_minimal_s2_inputs(tmp_runs, run_id)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    cmd = [
+        sys.executable,
+        str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
+        "--runs-root", str(tmp_runs),
+        "--run-id", run_id,
+        "--n-bootstrap", "4",
+        "--seed", "2",
+        "--psd-path", str(tmp_path / "nonexistent.json"),
+    ]
+    env = os.environ.copy()
+    env.pop("BASURIN_RUNS_ROOT", None)
+
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, env=env)
+    assert "Traceback" not in result.stderr, f"Unexpected traceback:\n{result.stderr}"
+    assert result.returncode == 0, result.stderr
+
+
+def test_cli_psd_path_records_psd_source_in_stage_summary(tmp_path: Path) -> None:
+    """When --psd-path is provided and whitening succeeds, stage_summary.json has psd_source."""
+    run_id = "s3b_psd_source"
+    tmp_runs = tmp_path / "runs"
+    _write_minimal_s2_inputs(tmp_runs, run_id)
+    psd_file = _make_flat_psd_json(tmp_path)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    cmd = [
+        sys.executable,
+        str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
+        "--runs-root", str(tmp_runs),
+        "--run-id", run_id,
+        "--n-bootstrap", "4",
+        "--seed", "3",
+        "--psd-path", str(psd_file),
+    ]
+    env = os.environ.copy()
+    env.pop("BASURIN_RUNS_ROOT", None)
+
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+
+    summary_path = tmp_runs / run_id / "s3b_multimode_estimates" / "stage_summary.json"
+    assert summary_path.exists(), "stage_summary.json not written"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert "psd_source" in summary, f"psd_source missing from stage_summary: {summary}"

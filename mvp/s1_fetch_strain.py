@@ -220,7 +220,7 @@ def match_hdf5_files(event_dir: Path) -> dict[str, list[Path]]:
     """
     try:
         all_files = [
-            p for p in event_dir.iterdir()
+            p for p in event_dir.rglob("*")
             if p.is_file() and p.suffix.lower() in {".h5", ".hdf5"}
         ]
     except OSError:
@@ -843,7 +843,15 @@ def main() -> int:
 
     try:
         if local_mode:
-            gps_center = _fetch_gps_center(args.event_id)
+            try:
+                gps_center = _fetch_gps_center(args.event_id)
+            except Exception as _gps_exc:
+                print(
+                    f"[s1_fetch_strain] WARNING: GPS lookup failed ({_gps_exc}); "
+                    "proceeding without target crop window",
+                    flush=True,
+                )
+                gps_center = None
         elif args.synthetic:
             gps_center = 1126259462.4204
         else:

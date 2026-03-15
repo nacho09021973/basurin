@@ -1061,6 +1061,12 @@ def main() -> int:
         default=1.0,
         help="Only adds flags; does NOT gate verdict directly",
     )
+    ap.add_argument(
+        "--psd-path", default=None,
+        help="Path to measured_psd.json. When provided, whitens the single-detector "
+             "signal before running spectral_two_pass. Falls back with warning if PSD "
+             "entry is missing.",
+    )
     args = ap.parse_args()
 
     if args.runs_root:
@@ -1079,6 +1085,7 @@ def main() -> int:
             "max_lnq_span_221": args.max_lnq_span_221,
             "min_valid_fraction_221": args.min_valid_fraction_221,
             "cv_threshold_221": args.cv_threshold_221,
+            "psd_path": args.psd_path,
         },
     )
 
@@ -1102,6 +1109,59 @@ def main() -> int:
             optional={"s2_window_meta": window_meta_path},
         )
         signal, fs = _load_signal_from_npz(npz_path, window_meta=window_meta)
+
+        # Optional PSD-based whitening
+        psd_source = "none"
+        if args.psd_path:
+            _psd_file = Path(args.psd_path)
+            if _psd_file.exists():
+                try:
+                    _psd_payload = json.loads(_psd_file.read_text(encoding="utf-8"))
+                    # measured_psd.json may be keyed by detector or be a single entry
+                    _det_psd = None
+                    for _det_key in ("H1", "L1", "V1"):
+                        if _det_key in _psd_payload:
+                            _det_psd = _psd_payload[_det_key]
+                            break
+                    if _det_psd is None and "freqs_hz" in _psd_payload and "psd" in _psd_payload:
+                        _det_psd = _psd_payload
+                    if _det_psd is not None:
+                        from scipy.interpolate import interp1d as _interp1d
+                        _psd_freqs = np.asarray(_det_psd["freqs_hz"], dtype=np.float64)
+                        _psd_vals = np.asarray(_det_psd["psd"], dtype=np.float64)
+                        _rfft_freqs = np.fft.rfftfreq(signal.size, d=1.0 / fs)
+                        _interp = _interp1d(
+                            _psd_freqs, _psd_vals, kind="linear",
+                            bounds_error=False,
+                            fill_value=(_psd_vals[0], _psd_vals[-1]),
+                        )
+                        _psd_interp = _interp(_rfft_freqs)
+                        _pos = _psd_vals[_psd_vals > 0]
+                        if _pos.size > 0:
+                            _psd_interp = np.where(_psd_interp > 0, _psd_interp, _pos.min())
+                        _sfft = np.fft.rfft(signal)
+                        signal = np.fft.irfft(_sfft / np.sqrt(_psd_interp), n=signal.size).astype(np.float64)
+                        psd_source = "external_measured"
+                        print("[s3b_multimode_estimates] signal whitened with measured PSD", flush=True)
+                    else:
+                        print(
+                            "[s3b_multimode_estimates] WARNING: measured PSD has no usable detector entry; "
+                            "proceeding without whitening",
+                            flush=True,
+                        )
+                except Exception as _wh_exc:
+                    print(
+                        f"[s3b_multimode_estimates] WARNING: PSD whitening failed ({_wh_exc}); "
+                        "proceeding without whitening",
+                        flush=True,
+                    )
+            else:
+                print(
+                    f"[s3b_multimode_estimates] WARNING: --psd-path {args.psd_path!r} not found; "
+                    "proceeding without whitening",
+                    flush=True,
+                )
+
         selected_t0_offset_ms = _load_s3_selected_t0_offset_ms(s3_estimates_path)
         applied_t0_offset_ms = 0.0
         if selected_t0_offset_ms > 0.0:
@@ -1190,6 +1250,7 @@ def main() -> int:
                 "systematics_gate": systematics_gate,
                 "science_evidence": science_evidence,
                 "annotations": annotations,
+                "psd_source": psd_source,
             },
         )
         return 0

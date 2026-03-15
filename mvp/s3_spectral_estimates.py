@@ -300,6 +300,47 @@ def bootstrap_spectral_observables(
     }
 
 
+def _whiten_strain(strain: np.ndarray, fs: float, measured_psd: dict[str, Any]) -> np.ndarray:
+    """Whiten strain using a measured PSD via FFT divide-by-sqrt(PSD) IFFT.
+
+    Parameters
+    ----------
+    strain : np.ndarray
+        1-D strain array.
+    fs : float
+        Sample rate in Hz.
+    measured_psd : dict
+        Dict with keys ``freqs_hz`` and ``psd`` (lists or arrays).
+
+    Returns
+    -------
+    np.ndarray
+        Whitened strain (same length as input).
+    """
+    from scipy.interpolate import interp1d
+
+    psd_freqs = np.asarray(measured_psd["freqs_hz"], dtype=np.float64)
+    psd_values = np.asarray(measured_psd["psd"], dtype=np.float64)
+
+    n = strain.size
+    rfft_freqs = np.fft.rfftfreq(n, d=1.0 / fs)
+    strain_fft = np.fft.rfft(strain)
+
+    # Interpolate measured PSD onto rfft frequency grid; clamp edges
+    interp = interp1d(
+        psd_freqs, psd_values,
+        kind="linear", bounds_error=False,
+        fill_value=(psd_values[0], psd_values[-1]),
+    )
+    psd_interp = interp(rfft_freqs)
+    # Protect against zero/negative PSD values
+    psd_interp = np.where(psd_interp > 0, psd_interp, np.min(psd_values[psd_values > 0]))
+
+    whitened_fft = strain_fft / np.sqrt(psd_interp)
+    whitened = np.fft.irfft(whitened_fft, n=n)
+    return whitened.astype(np.float64)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=f"MVP {STAGE}: Lorentzian spectral estimator")
     ap.add_argument("--run", default=None)
@@ -310,6 +351,11 @@ def main() -> int:
     ap.add_argument("--band-high", type=float, default=400.0)
     ap.add_argument("--n-bootstrap", type=int, default=200,
                     help="Number of bootstrap resamples (0=skip)")
+    ap.add_argument(
+        "--psd-path", default=None,
+        help="Path to measured_psd.json (from extract_psd.py). When provided, "
+             "whitens each detector's strain before spectral estimation.",
+    )
     args = ap.parse_args()
 
     run_id = args.run_id or args.run
@@ -321,6 +367,7 @@ def main() -> int:
     ctx = init_stage(run_id, STAGE, params={
         "band_low_hz": args.band_low, "band_high_hz": args.band_high,
         "method": "spectral_lorentzian", "n_bootstrap": args.n_bootstrap,
+        "psd_path": args.psd_path,
     })
 
     # Discover detector files (same pattern as s3)
@@ -335,6 +382,20 @@ def main() -> int:
 
     check_inputs(ctx, det_files)
 
+    # Load optional measured PSD for whitening
+    measured_psd_all: dict[str, Any] | None = None
+    if args.psd_path:
+        psd_file = Path(args.psd_path)
+        if psd_file.exists():
+            with open(psd_file, "r", encoding="utf-8") as _f:
+                measured_psd_all = json.load(_f)
+        else:
+            print(
+                f"[{STAGE}] WARNING: --psd-path {args.psd_path!r} not found; "
+                "falling back to internal Welch PSD",
+                flush=True,
+            )
+
     # Load window metadata
     wm_path = upstream_dir / "window_meta.json"
     window_meta: dict[str, Any] = {}
@@ -345,6 +406,7 @@ def main() -> int:
     try:
         per_detector: dict[str, Any] = {}
         valid: list[dict[str, float]] = []
+        psd_source_by_det: dict[str, str] = {}
 
         for det, path in det_files.items():
             data = np.load(path)
@@ -352,10 +414,35 @@ def main() -> int:
             fs = float(np.asarray(data["sample_rate_hz"]).flat[0])
             if strain.ndim != 1 or not np.all(np.isfinite(strain)):
                 abort(ctx, f"{det}: invalid strain")
+
+            # Whiten if measured PSD is available for this detector
+            det_psd_source = "welch_internal"
+            if measured_psd_all is not None:
+                det_psd = measured_psd_all.get(det)
+                if det_psd is not None and "freqs_hz" in det_psd and "psd" in det_psd:
+                    try:
+                        strain = _whiten_strain(strain, fs, det_psd)
+                        det_psd_source = "external_measured"
+                        print(f"[{STAGE}] {det}: whitened with measured PSD", flush=True)
+                    except Exception as _wh_exc:
+                        print(
+                            f"[{STAGE}] WARNING: {det} whitening failed ({_wh_exc}); "
+                            "falling back to internal Welch",
+                            flush=True,
+                        )
+                else:
+                    print(
+                        f"[{STAGE}] WARNING: measured PSD has no entry for {det}; "
+                        "falling back to internal Welch",
+                        flush=True,
+                    )
+            psd_source_by_det[det] = det_psd_source
+
             try:
                 est = estimate_spectral_observables(
                     strain, fs, args.band_low, args.band_high
                 )
+                est["psd_source"] = det_psd_source
                 per_detector[det] = est
 
                 if not est["fit_converged"]:
@@ -385,7 +472,7 @@ def main() -> int:
 
                 valid.append(per_detector[det])
             except ValueError as exc:
-                per_detector[det] = {"error": str(exc)}
+                per_detector[det] = {"error": str(exc), "psd_source": det_psd_source}
 
         if not valid:
             abort(ctx, "No detector produced a valid spectral estimate")
@@ -464,12 +551,19 @@ def main() -> int:
                 combined_dict["sigma_log_f"] = None
                 combined_dict["sigma_log_Q"] = None
 
+        overall_psd_source = (
+            "external_measured"
+            if any(s == "external_measured" for s in psd_source_by_det.values())
+            else "welch_internal"
+        )
+
         # Build output (schema compatible with estimates.json for s4 consumption)
         estimates: dict[str, Any] = {
             "schema_version": "mvp_spectral_estimates_v1",
             "event_id": window_meta.get("event_id", "unknown"),
             "method": "spectral_lorentzian",
             "band_hz": [args.band_low, args.band_high],
+            "psd_source": overall_psd_source,
             "combined": combined_dict,
             "combined_uncertainty": {
                 "sigma_f_hz": sigma_f_comb,
@@ -494,8 +588,12 @@ def main() -> int:
         est_path = ctx.outputs_dir / "spectral_estimates.json"
         write_json_atomic(est_path, estimates)
 
-        finalize(ctx, artifacts={"spectral_estimates": est_path},
-                 results=estimates["combined"])
+        finalize(
+            ctx,
+            artifacts={"spectral_estimates": est_path},
+            results=estimates["combined"],
+            extra_summary={"psd_source": overall_psd_source},
+        )
         return 0
 
     except SystemExit:
