@@ -12,6 +12,16 @@
 - Gating: nada downstream si `RUN_VALID != PASS` (usar `require_run_valid` cuando aplique).
 - Abort semantics: si un stage falla, el run “no existe” a efectos downstream.
 
+## Cache LOSC canónica
+- Antes de tocar catálogo/descargas de strain, leer `README.md` y `docs/readme_rutas.md` en las secciones de `data/losc`/offline-first.
+- La unica vista canónica que puede consumir el pipeline es `data/losc/<EVENT_ID>/`.
+- Si la caché real vive en `gw_events/strain/<EVENT_ID>/`, exponerla bajo `data/losc/<EVENT_ID>/` con symlink o bind mount; no redirigir el pipeline a `gw_events/strain`.
+- No inventar descargadores ad hoc si ya existe tooling en `tools/`.
+- Para visibilidad/naming usar `tools/losc_precheck.py`.
+- Para un evento puntual usar `tools/fetch_losc_event.py`.
+- Para varios eventos faltantes o rezagados usar `tools/fetch_losc_batch.sh`.
+- `tools/download_gw_events.py` y `tools/fetch_catalog_events.py` se reservan para bootstrap/cohorte amplia, no para reparar huecos puntuales de una caché ya montada.
+
 ## Contrato de artefactos por stage/experimento
 Cada stage/experimento debe producir bajo su directorio:
 - `manifest.json`

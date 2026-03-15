@@ -132,10 +132,17 @@ Decisión rápida A/B/C:
 
 - **Caso A (mount/symlink roto o mal apuntado)**: `data/losc` no apunta a la caché real.
   - Reapunta `data/losc` con la estrategia estándar del equipo (symlink o bind mount).
+- **Caso A2 (caché real en `gw_events/strain`)**: los HDF5 existen, pero la vista canónica sigue vacía.
+  - No cambies el pipeline para leer `gw_events/strain`.
+  - Expón cada evento bajo `data/losc/<EVENT_ID>/` con symlink al directorio plano existente:
+```bash
+ln -sfn ../../gw_events/strain/"$EVENT_ID" "data/losc/$EVENT_ID"
+python tools/losc_precheck.py --event-id "$EVENT_ID" --losc-root data/losc
+```
 - **Caso B (naming)**: hay `.h5/.hdf5`, pero no casan con H1/L1.
   - Crea symlinks casables `H1.h5` y `L1.h5` dentro del evento, sin renombrar originales:
 - **Caso C (carpeta inexistente o vacía)**: `data/losc/<EVENT_ID>/` no existe o no tiene HDF5 válidos.
-  - Pobla primero `data/losc/<EVENT_ID>/` con H1/L1.
+  - Pobla primero `data/losc/<EVENT_ID>/` con los descargadores canónicos del repo.
   - Repite `tools/losc_precheck.py`.
   - Solo después corre `s1_fetch_strain`.
 
@@ -143,6 +150,26 @@ Decisión rápida A/B/C:
 ln -sf "<archivo_real_H1>.h5" "data/losc/$EVENT_ID/H1.h5"
 ln -sf "<archivo_real_L1>.h5" "data/losc/$EVENT_ID/L1.h5"
 ```
+
+Descarga canónica para Caso C:
+
+```bash
+python tools/fetch_losc_event.py --event-id "$EVENT_ID" --out-root data/losc
+python tools/losc_precheck.py --event-id "$EVENT_ID" --losc-root data/losc
+```
+
+Si hay varios eventos incompletos, usa batch en lugar de repetir one-offs:
+
+```bash
+bash tools/fetch_losc_batch.sh /tmp/events_missing.txt
+```
+
+Roles recomendados de los scripts:
+
+- `tools/losc_precheck.py`: verificacion read-only de visibilidad y naming.
+- `tools/fetch_losc_event.py`: bootstrap puntual de un evento.
+- `tools/fetch_losc_batch.sh`: completar/cohesionar una cohorte de eventos faltantes o rezagados.
+- `tools/download_gw_events.py` y `tools/fetch_catalog_events.py`: bootstrap amplio de catálogo/cohorte, no la herramienta por defecto para reparar huecos puntuales en una caché ya existente.
 
 **Solo después del precheck PASS**, continúa offline con `s1` (ejemplo corto):
 
@@ -170,6 +197,7 @@ Si eso no coincide con el árbol real donde está `RUN_VALID/verdict.json`, el s
 ## Rutas canónicas
 
 - `data/losc/<EVENT_ID>/`: caché local *read-only* de HDF5 (external input). No es generado por el pipeline.
+- `gw_events/strain/<EVENT_ID>/`: caché cruda/histórica opcional. Si existe, debe exponerse bajo `data/losc/<EVENT_ID>/` mediante symlink o bind mount antes de ejecutar el pipeline.
 - `runs/<run_id>/external_inputs/...`: anclaje determinista de releases externos (por ejemplo, `siegel_220_210.tar.gz`) con hash verificable para trazabilidad.
 - `runs/<run_id>/<stage>/outputs/`: artefactos producidos por stages. Deben convivir con `manifest.json` y `stage_summary.json`, incluyendo hashes SHA256.
 - `runs/<run_id>/experiment/<name>/`: espacio para experimentos; no debe mutar artefactos canónicos de stages ya emitidos.
