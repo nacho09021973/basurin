@@ -1700,7 +1700,10 @@ def main() -> int:
     sp_single.add_argument(
         "--estimator", choices=["hilbert", "spectral", "dual"], default="dual",
         help="Estimator to use for s3: dual (default), spectral, or hilbert (legacy)",
-
+    )
+    sp_single.add_argument(
+        "--psd-path", default=None, metavar="PATH",
+        help="Path to measured_psd.json; enables whitening in s3_spectral_estimates and s3b_multimode_estimates",
     )
 
     # Multi event

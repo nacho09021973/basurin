@@ -1104,5 +1104,98 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
             self.assertTrue(call["with_t0_sweep"])
 
 
+    def test_psd_path_forwarded_to_s3_spectral_and_s3b(self) -> None:
+        """--psd-path must be forwarded to s3_spectral_estimates and s3b_multimode_estimates."""
+        calls: list[dict[str, object]] = []
+
+        def fake_run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s=None):
+            calls.append({"label": label, "args": list(args)})
+            stage_dir = out_root / run_id / label / "outputs"
+            stage_dir.mkdir(parents=True, exist_ok=True)
+            if label == "s3_ringdown_estimates":
+                _write_fake_s3_estimates(out_root, run_id)
+            if label == "s3b_multimode_estimates":
+                _write_fake_s3b_outputs(out_root, run_id)
+            if label == "s8_family_router":
+                (stage_dir / "family_router.json").write_text(
+                    json.dumps({"primary_family": "GR_KERR_BH", "families_to_run": ["GR_KERR_BH"]}),
+                    encoding="utf-8",
+                )
+            if label == "s4e_kerr_ratio_filter":
+                (stage_dir / "ratio_filter_result.json").write_text(
+                    json.dumps({"kerr_consistency": {"Rf_consistent": True}, "diagnostics": {"informativity_class": "LOW"}, "filtering": {"n_ratio_compatible": 1}}),
+                    encoding="utf-8",
+                )
+            timeline["stages"].append({
+                "stage": label, "script": script, "command": [script] + list(args),
+                "started_utc": "now", "ended_utc": "now",
+                "duration_s": 0.0, "returncode": 0, "timed_out": False,
+            })
+            pipeline._write_timeline(out_root, run_id, timeline)
+            return 0
+
+        with mock.patch.object(pipeline, "_run_stage", side_effect=fake_run_stage):
+            with mock.patch.object(pipeline, "_parse_multimode_results", return_value={}):
+                with mock.patch.dict("os.environ", {"BASURIN_RUNS_ROOT": str(Path("/tmp") / "basurin_psd_wiring")}, clear=False):
+                    rc, _ = pipeline.run_multimode_event(
+                        event_id="GW150914",
+                        atlas_path="mvp/test_atlas_fixture.json",
+                        run_id="wire_psd",
+                        synthetic=True,
+                        estimator="dual",
+                        psd_path="/tmp/fake_psd.json",
+                    )
+                    self.assertEqual(rc, 0)
+
+        # Collect args by label
+        by_label = {c["label"]: c["args"] for c in calls}
+
+        s3_spectral_args = by_label.get("s3_spectral_estimates", [])
+        self.assertIn("--psd-path", s3_spectral_args,
+                      f"--psd-path not found in s3_spectral_estimates args: {s3_spectral_args}")
+        psd_idx = s3_spectral_args.index("--psd-path")
+        self.assertEqual(s3_spectral_args[psd_idx + 1], "/tmp/fake_psd.json")
+
+        s3b_args = by_label.get("s3b_multimode_estimates", [])
+        self.assertIn("--psd-path", s3b_args,
+                      f"--psd-path not found in s3b_multimode_estimates args: {s3b_args}")
+        psd_idx_b = s3b_args.index("--psd-path")
+        self.assertEqual(s3b_args[psd_idx_b + 1], "/tmp/fake_psd.json")
+
+    def test_single_forwards_psd_path_to_s3_spectral(self) -> None:
+        """run_single_event must forward psd_path to s3_spectral_estimates in dual mode."""
+        calls: list[dict[str, object]] = []
+
+        def fake_run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s=None):
+            calls.append({"label": label, "args": list(args)})
+            stage_dir = out_root / run_id / label / "outputs"
+            stage_dir.mkdir(parents=True, exist_ok=True)
+            if label == "s3_ringdown_estimates":
+                _write_fake_s3_estimates(out_root, run_id)
+            timeline["stages"].append({
+                "stage": label, "script": script, "command": [script] + list(args),
+                "started_utc": "now", "ended_utc": "now",
+                "duration_s": 0.0, "returncode": 0, "timed_out": False,
+            })
+            pipeline._write_timeline(out_root, run_id, timeline)
+            return 0
+
+        with mock.patch.object(pipeline, "_run_stage", side_effect=fake_run_stage):
+            with mock.patch.dict("os.environ", {"BASURIN_RUNS_ROOT": str(Path("/tmp") / "basurin_single_psd")}, clear=False):
+                rc, _ = pipeline.run_single_event(
+                    event_id="GW150914",
+                    atlas_path="mvp/test_atlas_fixture.json",
+                    run_id="wire_single_psd",
+                    synthetic=True,
+                    estimator="dual",
+                    psd_path="/tmp/fake_psd.json",
+                )
+                # rc may be non-zero (later stages may not be stubbed), only check s3 wiring
+                by_label = {c["label"]: c["args"] for c in calls}
+                s3_spectral_args = by_label.get("s3_spectral_estimates", [])
+                self.assertIn("--psd-path", s3_spectral_args,
+                              f"--psd-path not in s3_spectral_estimates args: {s3_spectral_args}")
+
+
 if __name__ == "__main__":
     unittest.main()

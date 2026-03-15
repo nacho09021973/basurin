@@ -1109,6 +1109,12 @@ def main() -> int:
         default=1.0,
         help="Only adds flags; does NOT gate verdict directly",
     )
+    ap.add_argument(
+        "--psd-path", default=None,
+        help="Path to measured_psd.json. When provided, whitens the single-detector "
+             "signal before running spectral_two_pass. Falls back with warning if PSD "
+             "entry is missing.",
+    )
     args = ap.parse_args()
 
     if args.runs_root:
@@ -1128,6 +1134,7 @@ def main() -> int:
             "max_lnq_span_221": args.max_lnq_span_221,
             "min_valid_fraction_221": args.min_valid_fraction_221,
             "cv_threshold_221": args.cv_threshold_221,
+            "psd_path": args.psd_path,
         },
     )
 
