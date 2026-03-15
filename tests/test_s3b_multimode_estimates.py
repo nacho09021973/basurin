@@ -143,6 +143,37 @@ def test_discover_s2_window_meta_from_manifest(tmp_path: Path) -> None:
     assert _discover_s2_window_meta(run_dir) == meta_path
 
 
+def test_resolve_mode_bands_prefers_kerr_centered_220_for_known_event() -> None:
+    band_220, band_221, strategy = _MODULE._resolve_mode_bands(
+        band_low=150.0,
+        band_high=400.0,
+        event_id="GW150914",
+    )
+
+    assert strategy["method"] == "kerr_centered_220_residual_high"
+    assert np.isclose(strategy["f220_kerr_hz"], 271.45861530076854)
+    assert np.isclose(band_220[0], 253.3613742807173)
+    assert np.isclose(band_220[1], 289.55585632081977)
+    assert band_221[0] > band_220[1]
+    assert np.isclose(band_221[1], 400.0)
+    assert strategy["mode_220_band_hz"] == [band_220[0], band_220[1]]
+    assert strategy["mode_221_band_hz"] == [band_221[0], band_221[1]]
+
+
+def test_resolve_mode_bands_falls_back_to_midpoint_without_event_id() -> None:
+    band_220, band_221, strategy = _MODULE._resolve_mode_bands(
+        band_low=150.0,
+        band_high=400.0,
+        event_id=None,
+    )
+
+    assert strategy["method"] == "midpoint_split"
+    assert np.isclose(band_220[0], 150.0)
+    assert 274.999 < band_220[1] < 275.0
+    assert 275.0 < band_221[0] < 275.001
+    assert np.isclose(band_221[1], 400.0)
+
+
 def test_main_populates_source_window_and_avoids_missing_flag(tmp_path: Path) -> None:
     run_id = "subrun_003"
     tmp_runs = tmp_path / "subruns_root"
