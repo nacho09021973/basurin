@@ -943,9 +943,41 @@ def test_s3_spectral_with_measured_psd_whitening_smoke(tmp_path: Path) -> None:
     summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
     estimates = json.loads((stage_dir / "outputs" / "spectral_estimates.json").read_text(encoding="utf-8"))
 
+    assert "measured PSD has no entry for H1" not in result.stdout
+    assert "measured PSD has no entry for L1" not in result.stdout
     assert summary.get("psd_source") == "external_measured_psd"
     assert estimates.get("psd_source") == "external_measured_psd"
     assert 220.0 <= float(estimates["combined"]["f_hz"]) <= 280.0
+
+
+def test_s3_spectral_missing_psd_path_falls_back_to_internal_welch(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "s3_spectral_missing_psd_path"
+    _create_run_valid(runs_root, run_id)
+    _create_s2_outputs(runs_root, run_id, seed=9, duration=0.5)
+
+    missing_psd_path = tmp_path / "missing_measured_psd.json"
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s3_spectral_estimates.py"),
+        "--run", run_id,
+        "--runs-root", str(runs_root),
+        "--band-low", "150",
+        "--band-high", "400",
+        "--n-bootstrap", "0",
+        "--psd-path", str(missing_psd_path),
+    ]
+    result = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert "--psd-path" in result.stdout
+    assert "falling back to internal Welch PSD" in result.stdout
+
+    stage_dir = runs_root / run_id / "s3_spectral_estimates"
+    summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
+    estimates = json.loads((stage_dir / "outputs" / "spectral_estimates.json").read_text(encoding="utf-8"))
+
+    assert summary.get("psd_source") == "internal_welch"
+    assert estimates.get("psd_source") == "internal_welch"
 
 
 def test_s3_spectral_bootstrap_keeps_combined_uncertainty_aligned(tmp_path: Path) -> None:
