@@ -119,6 +119,25 @@ def test_match_hdf5_files_no_throw_on_missing_dir(tmp_path: Path) -> None:
     assert matches == {"all": [], "H1": [], "L1": [], "V1": []}
 
 
+def test_match_hdf5_files_finds_files_in_nested_subdirectory(tmp_path: Path) -> None:
+    """match_hdf5_files uses rglob and finds HDF5 in detector sub-directories."""
+    event_dir = tmp_path / "GW170814"
+    h1_dir = event_dir / "H1"
+    l1_dir = event_dir / "L1"
+    h1_dir.mkdir(parents=True)
+    l1_dir.mkdir(parents=True)
+    (h1_dir / "H-H1_GWOSC.hdf5").write_bytes(b"h1")
+    (l1_dir / "L-L1_GWOSC.h5").write_bytes(b"l1")
+
+    matches = s1_fetch_strain.match_hdf5_files(event_dir)
+
+    assert len(matches["all"]) == 2
+    assert len(matches["H1"]) == 1
+    assert len(matches["L1"]) == 1
+    assert matches["H1"][0].name == "H-H1_GWOSC.hdf5"
+    assert matches["L1"][0].name == "L-L1_GWOSC.h5"
+
+
 def test_autoresolve_hdf5_root_accepts_l1_v1_pair(tmp_path: Path) -> None:
     event_dir = tmp_path / "data" / "losc" / "GW200112_155838"
     event_dir.mkdir(parents=True)

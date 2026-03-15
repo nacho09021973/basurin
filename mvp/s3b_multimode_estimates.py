@@ -25,7 +25,12 @@ from mvp.multimode_viability import (
     evaluate_science_evidence,
     evaluate_systematics_gate,
 )
-from mvp.s3_ringdown_estimates import estimate_ringdown_observables, estimate_ringdown_spectral
+from mvp.s3_ringdown_estimates import (
+    _compute_kerr_centered_band,
+    _resolve_f220_kerr_hz,
+    estimate_ringdown_observables,
+    estimate_ringdown_spectral,
+)
 
 STAGE = "s3b_multimode_estimates"
 TARGET_MODES = [
@@ -43,6 +48,11 @@ RINGDOWN_NONINFORMATIVE = "RINGDOWN_NONINFORMATIVE"
 _RSS_FLOOR = 1e-300         # floor applied to rss/n inside log; prevents -inf on perfect fits
 _N_MIN_BIC_MARGIN = 2       # n must exceed k + this margin for BIC to be interpretable
 _DELTA_BIC_TIE_EPS = 1e-10  # |delta_bic| < eps → prefer simpler 1-mode (deterministic tie-break)
+S3B_220_BAND_WIDTH_FACTOR = 0.8
+S3B_220_MIN_HALF_WIDTH_HZ = 15.0
+S3B_220_Q_REF = 12.0
+S3B_FREQ_FLOOR_HZ = 10.0
+S3B_MIN_RESIDUAL_HIGH_BAND_HZ = 15.0
 
 
 def compute_covariance(samples: np.ndarray) -> np.ndarray:
@@ -189,8 +199,14 @@ def _coerce_band(raw: Any) -> tuple[float, float] | None:
     return low, high
 
 
-def _load_s3_band(path: Path, *, window_meta: dict[str, Any] | None) -> tuple[float, float]:
+def _load_json_payload(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"invalid json payload in {path}")
+    return payload
+
+
+def _load_s3_band(payload: dict[str, Any], *, window_meta: dict[str, Any] | None) -> tuple[float, float]:
     for cand in (payload.get("band_hz"), payload.get("results", {}).get("bandpass_hz")):
         band = _coerce_band(cand)
         if band is not None:
@@ -203,6 +219,20 @@ def _load_s3_band(path: Path, *, window_meta: dict[str, Any] | None) -> tuple[fl
     raise RuntimeError(
         "invalid s3 estimates: missing band_hz (and no band_hz in s2 window_meta fallback)"
     )
+
+
+def _resolve_event_id(
+    *,
+    window_meta: dict[str, Any] | None,
+    s3_payload: dict[str, Any] | None,
+) -> str | None:
+    for source in (window_meta, s3_payload):
+        if not isinstance(source, dict):
+            continue
+        raw = source.get("event_id")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return None
 
 
 def _load_s3_selected_t0_offset_ms(path: Path) -> float:
@@ -365,21 +395,12 @@ def _bootstrap_block_size(n_samples: int) -> int:
     return max(64, n_samples // 20)
 
 
-def _estimate_220(signal: np.ndarray, fs: float, *, band_low: float, band_high: float) -> dict[str, float]:
-    band_220, _ = _split_mode_bands(band_low=band_low, band_high=band_high)
-    return _estimate_spectral(signal, fs, band_low=band_220[0], band_high=band_220[1])
+def _estimate_observables_in_band(signal: np.ndarray, fs: float, *, band: tuple[float, float]) -> dict[str, float]:
+    return estimate_ringdown_observables(signal, fs, band[0], band[1])
 
 
-def _estimate_spectral(signal: np.ndarray, fs: float, *, band_low: float, band_high: float) -> dict[str, float]:
-    est = estimate_ringdown_spectral(signal, fs, (band_low, band_high))
-    # Only accept converged Lorentzian fits.  When the spectral fit fails or
-    # is flagged degenerate, estimate_ringdown_spectral silently falls back to
-    # the Hilbert envelope estimator — which produces biased frequencies on
-    # block-bootstrapped signals.  Raising here lets the bootstrap in
-    # _bootstrap_mode_log_samples count the sample as failed instead of
-    # polluting the distribution with a biased fallback estimate.
-    if not est.get("fit_success", False):
-        raise ValueError("spectral Lorentzian fit did not converge")
+def _estimate_spectral_in_band(signal: np.ndarray, fs: float, *, band: tuple[float, float]) -> dict[str, float]:
+    est = estimate_ringdown_spectral(signal, fs, band)
     return {
         "f_hz": float(est["f_hz"]),
         "Q": float(est["Q"]),
@@ -401,9 +422,64 @@ def _split_mode_bands(*, band_low: float, band_high: float) -> tuple[tuple[float
     return band_220, band_221
 
 
+def _resolve_mode_bands(
+    *,
+    band_low: float,
+    band_high: float,
+    event_id: str | None,
+) -> tuple[tuple[float, float], tuple[float, float], dict[str, Any]]:
+    fallback_220, fallback_221 = _split_mode_bands(band_low=band_low, band_high=band_high)
+    strategy: dict[str, Any] = {
+        "method": "midpoint_split",
+        "event_id": event_id,
+        "mode_220_band_hz": [float(fallback_220[0]), float(fallback_220[1])],
+        "mode_221_band_hz": [float(fallback_221[0]), float(fallback_221[1])],
+    }
+    if not event_id:
+        return fallback_220, fallback_221, strategy
+
+    f220_kerr_hz = _resolve_f220_kerr_hz(event_id)
+    if f220_kerr_hz is None or not math.isfinite(float(f220_kerr_hz)):
+        return fallback_220, fallback_221, strategy
+
+    kerr_low, kerr_high, half_width_hz = _compute_kerr_centered_band(
+        f220_kerr_hz=float(f220_kerr_hz),
+        width_factor=S3B_220_BAND_WIDTH_FACTOR,
+        min_half_width_hz=S3B_220_MIN_HALF_WIDTH_HZ,
+        q_ref=S3B_220_Q_REF,
+        f_min_floor_hz=S3B_FREQ_FLOOR_HZ,
+    )
+    eps = 1e-6
+    band_220 = (max(float(band_low), float(kerr_low)), min(float(band_high), float(kerr_high)))
+    if not band_220[1] > band_220[0] + eps:
+        return fallback_220, fallback_221, strategy
+
+    residual_low = min(max(band_220[1] + eps, float(band_low) + eps), float(band_high) - eps)
+    if float(band_high) - residual_low < S3B_MIN_RESIDUAL_HIGH_BAND_HZ:
+        return fallback_220, fallback_221, strategy
+    band_221 = (residual_low, float(band_high))
+
+    strategy = {
+        "method": "kerr_centered_220_residual_high",
+        "event_id": event_id,
+        "f220_kerr_hz": float(f220_kerr_hz),
+        "width_factor": float(S3B_220_BAND_WIDTH_FACTOR),
+        "min_half_width_hz": float(S3B_220_MIN_HALF_WIDTH_HZ),
+        "half_width_hz": float(half_width_hz),
+        "mode_220_band_hz": [float(band_220[0]), float(band_220[1])],
+        "mode_221_band_hz": [float(band_221[0]), float(band_221[1])],
+    }
+    return band_220, band_221, strategy
+
+
+def _estimate_220(signal: np.ndarray, fs: float, *, band_low: float, band_high: float) -> dict[str, float]:
+    band_220, _ = _split_mode_bands(band_low=band_low, band_high=band_high)
+    return _estimate_observables_in_band(signal, fs, band=band_220)
+
+
 def _estimate_220_spectral(signal: np.ndarray, fs: float, *, band_low: float, band_high: float) -> dict[str, float]:
     band_220, _ = _split_mode_bands(band_low=band_low, band_high=band_high)
-    return _estimate_spectral(signal, fs, band_low=band_220[0], band_high=band_220[1])
+    return _estimate_spectral_in_band(signal, fs, band=band_220)
 
 
 def _coerce_positive_finite_estimate(est: dict[str, float], key: str) -> float:
@@ -435,14 +511,38 @@ def _estimate_221_from_signal(signal: np.ndarray, fs: float, *, band_low: float,
     est220 = _estimate_220(signal, fs, band_low=band_low, band_high=band_high)
     residual = signal - _template_220(signal, fs, est220)
     _, band_221 = _split_mode_bands(band_low=band_low, band_high=band_high)
-    return _estimate_spectral(residual, fs, band_low=band_221[0], band_high=band_221[1])
+    return _estimate_observables_in_band(residual, fs, band=band_221)
 
 
 def _estimate_221_spectral_two_pass(signal: np.ndarray, fs: float, *, band_low: float, band_high: float) -> dict[str, float]:
     est220 = _estimate_220_spectral(signal, fs, band_low=band_low, band_high=band_high)
     residual = signal - _template_220(signal, fs, est220)
     _, band_221 = _split_mode_bands(band_low=band_low, band_high=band_high)
-    return _estimate_spectral(residual, fs, band_low=band_221[0], band_high=band_221[1])
+    return _estimate_spectral_in_band(residual, fs, band=band_221)
+
+
+def _estimate_221_from_signal_in_bands(
+    signal: np.ndarray,
+    fs: float,
+    *,
+    band_220: tuple[float, float],
+    band_221: tuple[float, float],
+) -> dict[str, float]:
+    est220 = _estimate_observables_in_band(signal, fs, band=band_220)
+    residual = signal - _template_220(signal, fs, est220)
+    return _estimate_observables_in_band(residual, fs, band=band_221)
+
+
+def _estimate_221_spectral_two_pass_in_bands(
+    signal: np.ndarray,
+    fs: float,
+    *,
+    band_220: tuple[float, float],
+    band_221: tuple[float, float],
+) -> dict[str, float]:
+    est220 = _estimate_spectral_in_band(signal, fs, band=band_220)
+    residual = signal - _template_220(signal, fs, est220)
+    return _estimate_spectral_in_band(residual, fs, band=band_221)
 
 
 def _mode_null(
@@ -898,6 +998,7 @@ def build_results_payload(
     *,
     model_comparison: dict[str, Any] | None = None,
     t0_offset_ms_from_s3: float = 0.0,
+    band_strategy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     verdict = "OK" if mode_220_ok else "INSUFFICIENT_DATA"
     messages: list[str] = []
@@ -920,6 +1021,8 @@ def build_results_payload(
     source: dict[str, Any] = {"stage": "s2_ringdown_window", "window": window_meta}
     if t0_offset_ms_from_s3 > 0.0:
         source["t0_offset_ms_from_s3"] = float(t0_offset_ms_from_s3)
+    if band_strategy is not None:
+        source["band_strategy"] = band_strategy
 
     return {
         "schema_version": "multimode_estimates_v1",
@@ -1144,6 +1247,7 @@ def main() -> int:
             "max_lnq_span_221": args.max_lnq_span_221,
             "min_valid_fraction_221": args.min_valid_fraction_221,
             "cv_threshold_221": args.cv_threshold_221,
+            "psd_path": args.psd_path,
         },
     )
 
@@ -1154,7 +1258,14 @@ def main() -> int:
             window_meta = json.loads(window_meta_path.read_text(encoding="utf-8"))
 
         s3_estimates_path = _resolve_s3_estimates(ctx.run_dir, args.s3_estimates)
-        band_low, band_high = _load_s3_band(s3_estimates_path, window_meta=window_meta)
+        s3_payload = _load_json_payload(s3_estimates_path)
+        band_low, band_high = _load_s3_band(s3_payload, window_meta=window_meta)
+        event_id = _resolve_event_id(window_meta=window_meta, s3_payload=s3_payload)
+        band_220, band_221, band_strategy = _resolve_mode_bands(
+            band_low=band_low,
+            band_high=band_high,
+            event_id=event_id,
+        )
         global_flags: list[str] = []
         if window_meta is None:
             global_flags.append("missing_window_meta")
@@ -1191,11 +1302,21 @@ def main() -> int:
                 global_flags.append("s3_t0_selected_offset_out_of_range")
 
         if args.method == "spectral_two_pass":
-            est_220 = lambda sig, sr: _estimate_220_spectral(sig, sr, band_low=band_low, band_high=band_high)
-            est_221 = lambda sig, sr: _estimate_221_spectral_two_pass(sig, sr, band_low=band_low, band_high=band_high)
+            est_220 = lambda sig, sr: _estimate_spectral_in_band(sig, sr, band=band_220)
+            est_221 = lambda sig, sr: _estimate_221_spectral_two_pass_in_bands(
+                sig,
+                sr,
+                band_220=band_220,
+                band_221=band_221,
+            )
         else:
-            est_220 = lambda sig, sr: _estimate_220(sig, sr, band_low=band_low, band_high=band_high)
-            est_221 = lambda sig, sr: _estimate_221_from_signal(sig, sr, band_low=band_low, band_high=band_high)
+            est_220 = lambda sig, sr: _estimate_observables_in_band(sig, sr, band=band_220)
+            est_221 = lambda sig, sr: _estimate_221_from_signal_in_bands(
+                sig,
+                sr,
+                band_220=band_220,
+                band_221=band_221,
+            )
 
         mode_220, flags_220, ok_220 = evaluate_mode(
             signal,
@@ -1242,6 +1363,7 @@ def main() -> int:
             global_flags + flags_220 + flags_221,
             model_comparison=model_comparison,
             t0_offset_ms_from_s3=applied_t0_offset_ms,
+            band_strategy=band_strategy,
         )
 
         out_path = ctx.outputs_dir / "multimode_estimates.json"

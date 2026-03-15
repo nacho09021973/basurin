@@ -77,6 +77,25 @@ def test_losc_precheck_passes_with_l1_v1_when_h1_is_missing(tmp_path: Path) -> N
     assert "match_count_V1=1" in out
 
 
+def test_losc_precheck_finds_hdf5_in_detector_subdirectory(tmp_path: Path) -> None:
+    """rglob discovers HDF5 files placed inside detector sub-directories."""
+    losc_root = tmp_path / "losc"
+    h1_dir = losc_root / "GW170814" / "H1"
+    l1_dir = losc_root / "GW170814" / "L1"
+    h1_dir.mkdir(parents=True)
+    l1_dir.mkdir(parents=True)
+    (h1_dir / "H-H1_GWOSC.hdf5").write_bytes(b"h1")
+    (l1_dir / "L-L1_GWOSC.h5").write_bytes(b"l1")
+
+    proc = _run(["--event-id", "GW170814", "--losc-root", str(losc_root)])
+    out = proc.stdout + proc.stderr
+
+    assert proc.returncode == 0, out
+    assert "h5_count=2" in out
+    assert "match_count_H1=1" in out
+    assert "match_count_L1=1" in out
+
+
 def test_losc_precheck_subprocess_is_read_only_and_cwd_independent(tmp_path: Path) -> None:
     losc_root = tmp_path / "external" / "losc"
     event_dir = losc_root / "GW170104"
