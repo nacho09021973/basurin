@@ -409,7 +409,13 @@ def _estimate_spectral_in_band(signal: np.ndarray, fs: float, *, band: tuple[flo
 
 
 def _split_mode_bands(*, band_low: float, band_high: float) -> tuple[tuple[float, float], tuple[float, float]]:
-    mid = 0.5 * (band_low + band_high)
+    # Split at 60% to keep mode-220 (fundamental) well inside its sub-band.
+    # QNM ratio f_221/f_220 ≈ 1.5–1.7, so f_220 sits in the lower ~40% of
+    # a typical [150,400] Hz band.  A 50/50 split places the boundary at
+    # 275 Hz — only ~24 Hz above f_220 ≈ 251 Hz for GW150914, which trips
+    # the spectral estimator's df_floor band-edge guard (≈25 Hz for a 40 ms
+    # window) and forces a biased Hilbert fallback.
+    mid = band_low + 0.6 * (band_high - band_low)
     eps = 1e-6
     band_220 = (band_low, max(mid - eps, band_low + eps))
     band_221 = (min(mid + eps, band_high - eps), band_high)
