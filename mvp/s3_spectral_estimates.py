@@ -48,6 +48,47 @@ from basurin_io import write_json_atomic
 STAGE = "s3_spectral_estimates"
 
 
+
+def _load_measured_psd(psd_path: Path) -> dict[str, Any]:
+    payload = json.loads(psd_path.read_text(encoding="utf-8"))
+    freqs = np.asarray(payload.get("frequencies_hz", []), dtype=np.float64)
+    if freqs.ndim != 1 or freqs.size < 2 or not np.all(np.isfinite(freqs)):
+        raise ValueError(f"Invalid frequencies_hz in measured PSD: {psd_path}")
+    if not np.all(np.diff(freqs) > 0):
+        raise ValueError(f"frequencies_hz must be strictly increasing: {psd_path}")
+    return payload
+
+
+def _whiten_with_measured_psd(
+    strain: np.ndarray,
+    fs: float,
+    *,
+    detector: str,
+    psd_payload: dict[str, Any],
+) -> np.ndarray:
+    det_key = f"psd_{detector.upper()}"
+    raw_psd = psd_payload.get(det_key)
+    if not isinstance(raw_psd, list):
+        raise KeyError(det_key)
+
+    psd_freqs = np.asarray(psd_payload.get("frequencies_hz", []), dtype=np.float64)
+    psd_vals = np.asarray(raw_psd, dtype=np.float64)
+    if psd_vals.shape != psd_freqs.shape:
+        raise ValueError(f"{det_key} length mismatch with frequencies_hz")
+    if np.any(~np.isfinite(psd_vals)):
+        raise ValueError(f"{det_key} contains non-finite PSD values")
+    psd_vals = np.maximum(psd_vals, 1e-30)
+
+    n = strain.size
+    freqs = np.fft.rfftfreq(n, d=1.0 / fs)
+    interp = np.interp(freqs, psd_freqs, psd_vals, left=psd_vals[0], right=psd_vals[-1])
+    interp = np.maximum(interp, 1e-30)
+
+    spec = np.fft.rfft(strain)
+    white_spec = spec / np.sqrt(interp)
+    return np.fft.irfft(white_spec, n=n)
+
+
 def _lorentzian(nu: np.ndarray, A: float, f0: float, gamma: float, C: float) -> np.ndarray:
     """Single-sided Lorentzian model (peak only, for frequency range > 0).
 
@@ -310,6 +351,7 @@ def main() -> int:
     ap.add_argument("--band-high", type=float, default=400.0)
     ap.add_argument("--n-bootstrap", type=int, default=200,
                     help="Number of bootstrap resamples (0=skip)")
+    ap.add_argument("--psd-path", default=None, help="Path to measured_psd.json from extract_psd.py")
     args = ap.parse_args()
 
     run_id = args.run_id or args.run
@@ -321,6 +363,7 @@ def main() -> int:
     ctx = init_stage(run_id, STAGE, params={
         "band_low_hz": args.band_low, "band_high_hz": args.band_high,
         "method": "spectral_lorentzian", "n_bootstrap": args.n_bootstrap,
+        "psd_path": args.psd_path,
     })
 
     # Discover detector files (same pattern as s3)
@@ -342,6 +385,10 @@ def main() -> int:
         with open(wm_path, "r", encoding="utf-8") as f:
             window_meta = json.load(f)
 
+    psd_payload: dict[str, Any] | None = None
+    if args.psd_path:
+        psd_payload = _load_measured_psd(Path(args.psd_path))
+
     try:
         per_detector: dict[str, Any] = {}
         valid: list[dict[str, float]] = []
@@ -353,9 +400,23 @@ def main() -> int:
             if strain.ndim != 1 or not np.all(np.isfinite(strain)):
                 abort(ctx, f"{det}: invalid strain")
             try:
+                detector_psd_source = "internal_welch"
+                if psd_payload is not None:
+                    try:
+                        strain = _whiten_with_measured_psd(
+                            strain,
+                            fs,
+                            detector=det,
+                            psd_payload=psd_payload,
+                        )
+                        detector_psd_source = "external_measured_psd"
+                    except KeyError:
+                        print(f"[{STAGE}] WARNING: measured PSD missing detector={det}; falling back to internal Welch", flush=True)
+
                 est = estimate_spectral_observables(
                     strain, fs, args.band_low, args.band_high
                 )
+                est["psd_source"] = detector_psd_source
                 per_detector[det] = est
 
                 if not est["fit_converged"]:
@@ -465,6 +526,10 @@ def main() -> int:
                 combined_dict["sigma_log_Q"] = None
 
         # Build output (schema compatible with estimates.json for s4 consumption)
+        psd_source = "internal_welch"
+        if valid and all(v.get("psd_source") == "external_measured_psd" for v in valid):
+            psd_source = "external_measured_psd"
+
         estimates: dict[str, Any] = {
             "schema_version": "mvp_spectral_estimates_v1",
             "event_id": window_meta.get("event_id", "unknown"),
@@ -484,6 +549,7 @@ def main() -> int:
             },
             "per_detector": per_detector,
             "n_detectors_valid": len(valid),
+            "psd_source": psd_source,
         }
         if args.n_bootstrap > 0:
             estimates["bootstrap"] = {
@@ -494,8 +560,12 @@ def main() -> int:
         est_path = ctx.outputs_dir / "spectral_estimates.json"
         write_json_atomic(est_path, estimates)
 
-        finalize(ctx, artifacts={"spectral_estimates": est_path},
-                 results=estimates["combined"])
+        finalize(
+            ctx,
+            artifacts={"spectral_estimates": est_path},
+            results=estimates["combined"],
+            extra_summary={"psd_source": psd_source},
+        )
         return 0
 
     except SystemExit:

@@ -15,7 +15,7 @@ def match_hdf5_files(event_dir: Path) -> dict[str, list[Path]]:
     """
     try:
         all_files = [
-            p for p in event_dir.iterdir()
+            p for p in event_dir.rglob("*")
             if p.is_file() and p.suffix.lower() in {".h5", ".hdf5"}
         ]
     except OSError:

@@ -127,6 +127,7 @@ class TestMultimodeWiring(unittest.TestCase):
                         band_low=120.0,
                         band_high=280.0,
                         estimator="spectral",
+                        psd_path="runs/seed/psd/measured_psd.json",
                     )
                     self.assertEqual(rc, 0)
 
@@ -139,6 +140,7 @@ class TestMultimodeWiring(unittest.TestCase):
                         band_high=360.0,
                         s3b_method="spectral_two_pass",
                         estimator="spectral",
+                        psd_path="runs/seed/psd/measured_psd.json",
                     )
                     self.assertEqual(rc, 0)
 
@@ -160,6 +162,9 @@ class TestMultimodeWiring(unittest.TestCase):
             m_idx = args.index("--method")
             expected_method = "spectral_two_pass" if idx_call == 1 else "hilbert_peakband"
             self.assertEqual(args[m_idx + 1], expected_method)
+            self.assertIn("--psd-path", args)
+            p_idx = args.index("--psd-path")
+            self.assertEqual(args[p_idx + 1], "runs/seed/psd/measured_psd.json")
 
     def test_dual_estimator_runs_dual_method_pipeline(self) -> None:
         calls: list[dict[str, object]] = []
@@ -232,6 +237,7 @@ class TestMultimodeWiring(unittest.TestCase):
                         run_id="wire_dual",
                         synthetic=True,
                         estimator="dual",
+                        psd_path="runs/base/psd/measured_psd.json",
                     )
                     self.assertEqual(rc, 0)
 
@@ -244,12 +250,18 @@ class TestMultimodeWiring(unittest.TestCase):
         self.assertIn("--method", s3_call["args"])
         self.assertIn("hilbert_envelope", s3_call["args"])
 
+        s3_spectral_call = next(c for c in calls if c["label"] == "s3_spectral_estimates")
+        self.assertIn("--psd-path", s3_spectral_call["args"])
+        psd_idx = s3_spectral_call["args"].index("--psd-path")
+        self.assertEqual(s3_spectral_call["args"][psd_idx + 1], "runs/base/psd/measured_psd.json")
+
         s3b_call = next(c for c in calls if c["label"] == "s3b_multimode_estimates")
         idx = s3b_call["args"].index("--s3-estimates")
         self.assertEqual(
             s3b_call["args"][idx + 1],
             "wire_dual/s3_spectral_estimates/outputs/spectral_estimates.json",
         )
+        self.assertIn("--psd-path", s3b_call["args"])
 
 
 class TestMultimodePipelineBehavior(unittest.TestCase):
