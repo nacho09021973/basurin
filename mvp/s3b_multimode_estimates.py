@@ -52,7 +52,8 @@ S3B_220_BAND_WIDTH_FACTOR = 0.8
 S3B_220_MIN_HALF_WIDTH_HZ = 15.0
 S3B_220_Q_REF = 12.0
 S3B_FREQ_FLOOR_HZ = 10.0
-S3B_MIN_RESIDUAL_HIGH_BAND_HZ = 15.0
+S3B_221_OVERLAP_LOW_PAD_FRAC = 0.1
+S3B_221_OVERLAP_HIGH_PAD_FRAC = 0.2
 
 
 def compute_covariance(samples: np.ndarray) -> np.ndarray:
@@ -454,18 +455,24 @@ def _resolve_mode_bands(
     if not band_220[1] > band_220[0] + eps:
         return fallback_220, fallback_221, strategy
 
-    residual_low = min(max(band_220[1] + eps, float(band_low) + eps), float(band_high) - eps)
-    if float(band_high) - residual_low < S3B_MIN_RESIDUAL_HIGH_BAND_HZ:
+    pad_low_hz = float(S3B_221_OVERLAP_LOW_PAD_FRAC) * float(half_width_hz)
+    pad_high_hz = float(S3B_221_OVERLAP_HIGH_PAD_FRAC) * float(half_width_hz)
+    band_221 = (
+        max(float(band_low), float(band_220[0]) - pad_low_hz),
+        min(float(band_high), float(band_220[1]) + pad_high_hz),
+    )
+    if not band_221[1] > band_221[0] + eps:
         return fallback_220, fallback_221, strategy
-    band_221 = (residual_low, float(band_high))
 
     strategy = {
-        "method": "kerr_centered_220_residual_high",
+        "method": "kerr_centered_overlap",
         "event_id": event_id,
         "f220_kerr_hz": float(f220_kerr_hz),
         "width_factor": float(S3B_220_BAND_WIDTH_FACTOR),
         "min_half_width_hz": float(S3B_220_MIN_HALF_WIDTH_HZ),
         "half_width_hz": float(half_width_hz),
+        "mode_221_low_pad_hz": float(pad_low_hz),
+        "mode_221_high_pad_hz": float(pad_high_hz),
         "mode_220_band_hz": [float(band_220[0]), float(band_220[1])],
         "mode_221_band_hz": [float(band_221[0]), float(band_221[1])],
     }
@@ -1221,7 +1228,7 @@ def main() -> int:
     ap.add_argument("--max-lnq-span-220", type=float, default=3.0)
     ap.add_argument("--max-lnf-span-221", type=float, default=1.0)
     ap.add_argument("--max-lnq-span-221", type=float, default=1.0)
-    ap.add_argument("--min-valid-fraction-221", type=float, default=0.8)
+    ap.add_argument("--min-valid-fraction-221", type=float, default=0.5)
     ap.add_argument(
         "--cv-threshold-221",
         type=float,
