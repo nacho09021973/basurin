@@ -160,6 +160,11 @@ La implementacion canonica usa `contracts.log_stage_paths(ctx)` para ello.
 - `data/losc/<EVENT_ID>/` es input externo read-only.
 - Desde la raiz del repo, la ubicacion operativa es `./data/losc/<EVENT_ID>/`.
 - En este checkout concreto, eso resuelve bajo `/home/ignac/work/basurin/data/losc/<EVENT_ID>/`.
+- Si los HDF5 fisicos viven en otra caché local (por ejemplo `gw_events/strain/<EVENT_ID>/`), la politica canónica es exponerlos bajo `data/losc/<EVENT_ID>/` mediante symlink o bind mount. El pipeline no debe apuntar directamente a `gw_events/strain`.
+- Para validar visibilidad/naming antes de correr nada, usar `python tools/losc_precheck.py --event-id <EVENT_ID> --losc-root data/losc`.
+- Para poblar un evento suelto que falta en la caché canónica, usar `python tools/fetch_losc_event.py --event-id <EVENT_ID> --out-root data/losc`.
+- Para completar un lote de eventos rezagados, usar `bash tools/fetch_losc_batch.sh <events_file>`.
+- `tools/download_gw_events.py` y `tools/fetch_catalog_events.py` quedan como helpers de bootstrap/cohorte; no son la primera opción para reparar huecos puntuales de una caché ya existente.
 - `s1_fetch_strain` copia los HDF5 efectivamente usados a `runs/<run_id>/s1_fetch_strain/inputs/{H1,L1}.h5`.
 - La trazabilidad de esos inputs queda en `runs/<run_id>/s1_fetch_strain/outputs/provenance.json`.
 - Cuando un input externo se ancla dentro del run, debe quedar bajo `external_inputs/` o equivalente y hasheado.
@@ -349,6 +354,26 @@ Antes de ejecutar datos reales, verifique la visibilidad de HDF5 locales:
 ```bash
 python tools/losc_precheck.py --event-id GW150914 --losc-root data/losc
 ```
+
+Si los datos existen pero estan fuera de la vista canónica, reponga primero `data/losc` en vez de redirigir el pipeline:
+
+```bash
+ln -sfn ../../gw_events/strain/GW190412 data/losc/GW190412
+python tools/losc_precheck.py --event-id GW190412 --losc-root data/losc
+```
+
+Si faltan eventos completos en la caché, use los descargadores canónicos del repo y luego repita el precheck:
+
+```bash
+python tools/fetch_losc_event.py --event-id GW150914 --out-root data/losc
+bash tools/fetch_losc_batch.sh /tmp/events_missing.txt
+```
+
+Regla practica:
+
+- `data/losc` es la unica vista canónica que deben consumir `s1_fetch_strain`, `pipeline.py` y `experiment_offline_batch.py`.
+- Si una caché previa existe en `gw_events/strain`, se expone bajo `data/losc` con symlinks por evento; no se cambia el pipeline para leer `gw_events/strain`.
+- Para reparaciones incrementales, no improvisar one-offs: preferir `tools/losc_precheck.py`, `tools/fetch_losc_event.py` y `tools/fetch_losc_batch.sh`.
 
 Pipeline single consumiendo catalogo de `t0` ya auditado (usa `dual` por defecto):
 
