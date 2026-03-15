@@ -268,6 +268,80 @@ class TestMultimodeWiring(unittest.TestCase):
         )
         self.assertIn("--psd-path", s3b_call["args"])
 
+    def test_dual_estimator_falls_back_to_hilbert_when_s3_spectral_fails(self) -> None:
+        calls: list[dict[str, object]] = []
+        runs_root = Path("/tmp") / "basurin_wiring_test_dual_fallback"
+
+        def fake_run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s=None):
+            calls.append({"script": script, "label": label, "args": list(args), "run_id": run_id})
+            stage_dir = out_root / run_id / label / "outputs"
+            stage_dir.mkdir(parents=True, exist_ok=True)
+            if label == "s3_ringdown_estimates":
+                _write_fake_s3_estimates(out_root, run_id)
+            if label == "s3_spectral_estimates":
+                timeline["stages"].append({
+                    "stage": label,
+                    "script": script,
+                    "command": [script] + list(args),
+                    "started_utc": "now",
+                    "ended_utc": "now",
+                    "duration_s": 0.0,
+                    "returncode": 2,
+                    "timed_out": False,
+                })
+                pipeline._write_timeline(out_root, run_id, timeline)
+                return 2
+            if label == "s3b_multimode_estimates":
+                _write_fake_s3b_outputs(out_root, run_id)
+            if label == "s8_family_router":
+                (stage_dir / "family_router.json").write_text(
+                    json.dumps({"primary_family": "GR_KERR_BH", "families_to_run": ["GR_KERR_BH"]}),
+                    encoding="utf-8",
+                )
+            if label == "s4e_kerr_ratio_filter":
+                (stage_dir / "ratio_filter_result.json").write_text(
+                    json.dumps({"kerr_consistency": {"Rf_consistent": True}, "diagnostics": {"informativity_class": "LOW"}, "filtering": {"n_ratio_compatible": 1}}),
+                    encoding="utf-8",
+                )
+            timeline["stages"].append({
+                "stage": label,
+                "script": script,
+                "command": [script] + list(args),
+                "started_utc": "now",
+                "ended_utc": "now",
+                "duration_s": 0.0,
+                "returncode": 0,
+                "timed_out": False,
+            })
+            pipeline._write_timeline(out_root, run_id, timeline)
+            return 0
+
+        with mock.patch.object(pipeline, "_run_stage", side_effect=fake_run_stage):
+            with mock.patch.object(pipeline, "_parse_multimode_results", return_value={}):
+                with mock.patch.dict("os.environ", {"BASURIN_RUNS_ROOT": str(runs_root)}, clear=False):
+                    rc, _ = pipeline.run_multimode_event(
+                        event_id="GW150914",
+                        atlas_path="mvp/test_atlas_fixture.json",
+                        run_id="wire_dual_fallback",
+                        synthetic=True,
+                        estimator="dual",
+                        psd_path="runs/base/psd/measured_psd.json",
+                    )
+                    self.assertEqual(rc, 0)
+
+        labels = [c["label"] for c in calls]
+        self.assertIn("s3_ringdown_estimates", labels)
+        self.assertIn("s3_spectral_estimates", labels)
+        self.assertIn("s3b_multimode_estimates", labels)
+        self.assertNotIn("experiment_dual_method", labels)
+
+        s3b_call = next(c for c in calls if c["label"] == "s3b_multimode_estimates")
+        idx = s3b_call["args"].index("--s3-estimates")
+        self.assertEqual(
+            s3b_call["args"][idx + 1],
+            str(runs_root / "wire_dual_fallback" / "s3_ringdown_estimates" / "outputs" / "estimates.json"),
+        )
+
 
 class TestMultimodePipelineBehavior(unittest.TestCase):
     def test_parse_multimode_results_tracks_viability_and_s4d_status(self) -> None:

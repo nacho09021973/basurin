@@ -262,6 +262,9 @@ def _heartbeat(label: str, t0: float, stop: threading.Event, interval: float = 5
         print(f"[pipeline] {label} ... elapsed {mins:02d}:{secs:02d}", flush=True)
 
 
+_NONFATAL_STAGE_LABELS: set[str] = set()
+
+
 def _run_stage(
     script: str,
     args: list[str],
@@ -323,8 +326,9 @@ def _run_stage(
             file=sys.stderr, flush=True,
         )
     elif returncode != 0:
+        failure_tag = "WARNING" if label in _NONFATAL_STAGE_LABELS else "ABORT"
         print(
-            f"[pipeline] ABORT: {label} failed (exit={returncode}) after {mins:02d}:{secs:02d}",
+            f"[pipeline] {failure_tag}: {label} failed (exit={returncode}) after {mins:02d}:{secs:02d}",
             file=sys.stderr, flush=True,
         )
     else:
@@ -884,6 +888,89 @@ def _load_family_routes(out_root: Path, run_id: str) -> list[str]:
     return out
 
 
+def _run_dual_estimator_bundle(
+    *,
+    out_root: Path,
+    run_id: str,
+    timeline: dict[str, Any],
+    stage_timeout_s: float | None,
+    s3_args: list[str],
+    band_low: float,
+    band_high: float,
+    psd_path: str | None,
+) -> tuple[int, str | None]:
+    rc = _run_stage(
+        "s3_ringdown_estimates.py",
+        s3_args + ["--method", "hilbert_envelope"],
+        "s3_ringdown_estimates",
+        out_root,
+        run_id,
+        timeline,
+        stage_timeout_s,
+    )
+    if rc != 0:
+        return rc, None
+
+    s3_spectral_args = list(s3_args)
+    if psd_path:
+        s3_spectral_args.extend(["--psd-path", psd_path])
+    _NONFATAL_STAGE_LABELS.add("s3_spectral_estimates")
+    try:
+        rc = _run_stage(
+            "s3_spectral_estimates.py",
+            s3_spectral_args,
+            "s3_spectral_estimates",
+            out_root,
+            run_id,
+            timeline,
+            stage_timeout_s,
+        )
+    finally:
+        _NONFATAL_STAGE_LABELS.discard("s3_spectral_estimates")
+    if rc != 0:
+        print(
+            f"[pipeline] WARNING: s3_spectral_estimates failed (exit={rc}); "
+            "falling back to hilbert estimates",
+            file=sys.stderr,
+            flush=True,
+        )
+        timeline["dual_method_recommendation"] = "hilbert"
+        timeline["dual_method_fallback_reason"] = "s3_spectral_estimates_failed"
+        return 0, None
+
+    _NONFATAL_STAGE_LABELS.add("experiment_dual_method")
+    try:
+        rc = _run_stage(
+            "experiment_dual_method.py",
+            ["--run", run_id, "--band-low", str(band_low), "--band-high", str(band_high)],
+            "experiment_dual_method",
+            out_root,
+            run_id,
+            timeline,
+            stage_timeout_s,
+        )
+    finally:
+        _NONFATAL_STAGE_LABELS.discard("experiment_dual_method")
+    if rc != 0:
+        pass
+
+    dual_path = out_root / run_id / "experiment" / "DUAL_METHOD_V1" / "dual_method_comparison.json"
+    recommendation = "spectral"
+    if dual_path.exists():
+        try:
+            with open(dual_path, "r", encoding="utf-8") as f:
+                dual = json.load(f)
+            recommendation = dual.get("recommendation", "spectral")
+        except Exception:
+            pass
+
+    timeline["dual_method_recommendation"] = recommendation
+    timeline.pop("dual_method_fallback_reason", None)
+    if recommendation == "spectral":
+        return 0, "s3_spectral_estimates/outputs/spectral_estimates.json"
+    return 0, None
+
+
 def run_single_event(
     event_id: str,
     atlas_path: str,
@@ -1031,57 +1118,20 @@ def run_single_event(
         # estimates_path_override remains None: canonical path is s3_ringdown_estimates
 
     elif estimator == "dual":
-        # Run both Hilbert and spectral, then dual-method gate
-        rc = _run_stage(
-            "s3_ringdown_estimates.py",
-            s3_args + ["--method", "hilbert_envelope"],
-            "s3_ringdown_estimates",
-            out_root, run_id, timeline, stage_timeout_s,
+        rc, estimates_path_override = _run_dual_estimator_bundle(
+            out_root=out_root,
+            run_id=run_id,
+            timeline=timeline,
+            stage_timeout_s=stage_timeout_s,
+            s3_args=s3_args,
+            band_low=band_low,
+            band_high=band_high,
+            psd_path=psd_path,
         )
         if rc != 0:
             timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
             _write_timeline(out_root, run_id, timeline)
             return rc, run_id
-
-        s3_spectral_args = list(s3_args)
-        if psd_path:
-            s3_spectral_args.extend(["--psd-path", psd_path])
-        rc = _run_stage(
-            "s3_spectral_estimates.py", s3_spectral_args, "s3_spectral_estimates",
-            out_root, run_id, timeline, stage_timeout_s,
-        )
-        if rc != 0:
-            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-            _write_timeline(out_root, run_id, timeline)
-            return rc, run_id
-
-        rc = _run_stage(
-            "experiment_dual_method.py",
-            ["--run", run_id, "--band-low", str(band_low), "--band-high", str(band_high)],
-            "experiment_dual_method",
-            out_root, run_id, timeline, stage_timeout_s,
-        )
-        if rc != 0:
-            print(f"[pipeline] WARNING: dual method gate failed (exit={rc}), continuing",
-                  file=sys.stderr, flush=True)
-
-        # Determine which estimates to use based on dual method recommendation
-        dual_path = (out_root / run_id / "experiment" / "DUAL_METHOD_V1"
-                     / "dual_method_comparison.json")
-        recommendation = "spectral"
-        if dual_path.exists():
-            try:
-                with open(dual_path, "r", encoding="utf-8") as f:
-                    dual = json.load(f)
-                recommendation = dual.get("recommendation", "spectral")
-            except Exception:
-                pass
-
-        if recommendation == "spectral":
-            estimates_path_override = (
-                "s3_spectral_estimates/outputs/spectral_estimates.json"
-            )
-        timeline["dual_method_recommendation"] = recommendation
 
     else:
         print(f"[pipeline] ERROR: unknown estimator '{estimator}'", file=sys.stderr)
@@ -1337,53 +1387,20 @@ def run_multimode_event(
             return rc, run_id
 
     elif estimator == "dual":
-        rc = _run_stage(
-            "s3_ringdown_estimates.py",
-            s3_args + ["--method", "hilbert_envelope"],
-            "s3_ringdown_estimates",
-            out_root, run_id, timeline, stage_timeout_s,
+        rc, estimates_path_override = _run_dual_estimator_bundle(
+            out_root=out_root,
+            run_id=run_id,
+            timeline=timeline,
+            stage_timeout_s=stage_timeout_s,
+            s3_args=s3_args,
+            band_low=band_low,
+            band_high=band_high,
+            psd_path=psd_path,
         )
         if rc != 0:
             timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
             _write_timeline(out_root, run_id, timeline)
             return rc, run_id
-
-        s3_spectral_args = list(s3_args)
-        if psd_path:
-            s3_spectral_args.extend(["--psd-path", psd_path])
-        rc = _run_stage(
-            "s3_spectral_estimates.py",
-            s3_spectral_args,
-            "s3_spectral_estimates",
-            out_root, run_id, timeline, stage_timeout_s,
-        )
-        if rc != 0:
-            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-            _write_timeline(out_root, run_id, timeline)
-            return rc, run_id
-
-        rc = _run_stage(
-            "experiment_dual_method.py",
-            ["--run", run_id, "--band-low", str(band_low), "--band-high", str(band_high)],
-            "experiment_dual_method",
-            out_root, run_id, timeline, stage_timeout_s,
-        )
-        if rc != 0:
-            print(f"[pipeline] WARNING: dual method gate failed (exit={rc}), continuing", file=sys.stderr, flush=True)
-
-        dual_path = out_root / run_id / "experiment" / "DUAL_METHOD_V1" / "dual_method_comparison.json"
-        recommendation = "spectral"
-        if dual_path.exists():
-            try:
-                with open(dual_path, "r", encoding="utf-8") as f:
-                    dual = json.load(f)
-                recommendation = dual.get("recommendation", "spectral")
-            except Exception:
-                pass
-
-        if recommendation == "spectral":
-            estimates_path_override = "s3_spectral_estimates/outputs/spectral_estimates.json"
-        timeline["dual_method_recommendation"] = recommendation
 
     else:
         print(f"[pipeline] ERROR: unknown estimator '{estimator}'", file=sys.stderr)
