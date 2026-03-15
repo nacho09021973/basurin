@@ -1,6 +1,12 @@
 {
   "GW150914": {
-    "t0_gps": 1126259462.4204
+    "t0_gps": 1126259462.4204,
+    "dt_start_s": 0.003,
+    "window_duration_s": 0.040,
+    "M_f_source_msun": 63.1,
+    "redshift": 0.09,
+    "calibration_status": "PASS",
+    "calibration_criteria": {"f_hz": 264.6, "Q": 4.625, "tau_ms": 5.56}
   },
   "GW151226": {
     "t0_gps": 1135136350.6
@@ -15,7 +21,13 @@
     "t0_gps": 1186302519.8
   },
   "GW170814": {
-    "t0_gps": 1186741861.5
+    "t0_gps": 1186741861.5,
+    "dt_start_s": 0.015,
+    "window_duration_s": 0.040,
+    "M_f_source_msun": 53.2,
+    "redshift": 0.12,
+    "calibration_status": "PASS",
+    "calibration_criteria": {"f_hz": 323.8, "Q": 3.048, "tau_ms": 3.00}
   },
   "GW170818": {
     "t0_gps": 1187058327.1
