@@ -874,3 +874,75 @@ class TestBootstrapEstimator:
         )
         # The individual sample lists should differ (probability of identity ≈ 0)
         assert r1["samples"]["f_hz"] != r2["samples"]["f_hz"]
+
+
+def _make_colored_noise(n: int, fs: float, *, seed: int = 123) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    freqs = np.fft.rfftfreq(n, d=1.0 / fs)
+    scale = 1.0 / np.maximum(freqs, 1.0)
+    re = rng.normal(0.0, 1.0, size=freqs.size)
+    im = rng.normal(0.0, 1.0, size=freqs.size)
+    spec = (re + 1j * im) * scale
+    noise = np.fft.irfft(spec, n=n)
+    return noise / (np.std(noise) + 1e-30)
+
+
+def test_s3_spectral_with_measured_psd_whitening_smoke(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "s3_spectral_psd_smoke"
+    _create_run_valid(runs_root, run_id)
+
+    out_dir = runs_root / run_id / "s2_ringdown_window" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    fs = SAMPLE_RATE
+    duration = 0.5
+    n = int(fs * duration)
+    t = np.arange(n) / fs
+    signal = np.exp(-t / 0.004) * np.cos(2.0 * np.pi * 251.0 * t)
+    colored = _make_colored_noise(n, fs, seed=7)
+    strain = signal + 0.4 * colored
+
+    for det in ("H1", "L1"):
+        np.savez(out_dir / f"{det}_rd.npz", strain=strain.astype(np.float64), sample_rate_hz=np.float64(fs))
+
+    (out_dir / "window_meta.json").write_text(json.dumps({"event_id": "SYNTH"}), encoding="utf-8")
+    (runs_root / run_id / "s2_ringdown_window" / "stage_summary.json").write_text(
+        json.dumps({"stage": "s2_ringdown_window", "verdict": "PASS"}), encoding="utf-8"
+    )
+
+    freqs = np.linspace(0.0, fs / 2.0, n // 2 + 1)
+    psd = np.maximum(1e-6, 1.0 / np.maximum(freqs, 1.0) ** 2)
+    psd_path = tmp_path / "measured_psd.json"
+    psd_path.write_text(
+        json.dumps(
+            {
+                "frequencies_hz": [float(x) for x in freqs],
+                "psd_H1": [float(x) for x in psd],
+                "psd_L1": [float(x) for x in psd],
+                "sample_rate_hz": fs,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cmd = [
+        sys.executable,
+        str(MVP_DIR / "s3_spectral_estimates.py"),
+        "--run", run_id,
+        "--runs-root", str(runs_root),
+        "--band-low", "150",
+        "--band-high", "400",
+        "--n-bootstrap", "0",
+        "--psd-path", str(psd_path),
+    ]
+    result = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+    stage_dir = runs_root / run_id / "s3_spectral_estimates"
+    summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
+    estimates = json.loads((stage_dir / "outputs" / "spectral_estimates.json").read_text(encoding="utf-8"))
+
+    assert summary.get("psd_source") == "external_measured_psd"
+    assert estimates.get("psd_source") == "external_measured_psd"
+    assert 220.0 <= float(estimates["combined"]["f_hz"]) <= 280.0

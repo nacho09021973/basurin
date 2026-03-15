@@ -903,6 +903,7 @@ def run_single_event(
     offline_s2: bool = False,
     t0_catalog: str | None = None,
     estimator: str = "dual",
+    psd_path: str | None = None,
 ) -> tuple[int, str]:
     """Run full pipeline for a single event. Returns (exit_code, run_id)."""
     event_id = _require_nonempty_event_id(event_id, "--event-id")
@@ -1042,8 +1043,11 @@ def run_single_event(
             _write_timeline(out_root, run_id, timeline)
             return rc, run_id
 
+        s3_spectral_args = list(s3_args)
+        if psd_path:
+            s3_spectral_args.extend(["--psd-path", psd_path])
         rc = _run_stage(
-            "s3_spectral_estimates.py", s3_args, "s3_spectral_estimates",
+            "s3_spectral_estimates.py", s3_spectral_args, "s3_spectral_estimates",
             out_root, run_id, timeline, stage_timeout_s,
         )
         if rc != 0:
@@ -1146,6 +1150,7 @@ def run_multimode_event(
     s3b_method: str = "hilbert_peakband",
     estimator: str = "dual",
     offline: bool = False,
+    psd_path: str | None = None,
 ) -> tuple[int, str]:
     event_id = _require_nonempty_event_id(event_id, "--event-id")
     out_root = resolve_out_root("runs")
@@ -1343,9 +1348,12 @@ def run_multimode_event(
             _write_timeline(out_root, run_id, timeline)
             return rc, run_id
 
+        s3_spectral_args = list(s3_args)
+        if psd_path:
+            s3_spectral_args.extend(["--psd-path", psd_path])
         rc = _run_stage(
             "s3_spectral_estimates.py",
-            s3_args,
+            s3_spectral_args,
             "s3_spectral_estimates",
             out_root, run_id, timeline, stage_timeout_s,
         )
@@ -1388,6 +1396,8 @@ def run_multimode_event(
         "--seed", str(s3b_seed),
         "--method", s3b_method,
     ]
+    if psd_path:
+        s3b_args.extend(["--psd-path", psd_path])
     rc = _run_stage("s3b_multimode_estimates.py", s3b_args, "s3b_multimode_estimates", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
@@ -1656,6 +1666,7 @@ def main() -> int:
         help="Skip s1 download if outputs already exist and params match",
     )
     sp_single.add_argument("--with-t0-sweep", action="store_true", default=False)
+    sp_single.add_argument("--psd-path", default=None, help="Path to measured_psd.json for spectral whitening")
     sp_single.add_argument(
         "--local-hdf5",
         action="append",
@@ -1727,6 +1738,7 @@ def main() -> int:
         "--catalog-path", default=None,
         help="Optional GWTC catalog JSON for deviation analysis in s5",
     )
+    sp_multi.add_argument("--psd-path", default=None, help="Path to measured_psd.json for spectral whitening")
 
     # Single event multimode
     sp_multimode = sub.add_parser("multimode", help="Run single-event multimode pipeline")
@@ -1769,6 +1781,7 @@ def main() -> int:
         help="Forward local HDF5 detector mapping(s) to s1_fetch_strain (repeatable)",
     )
     sp_multimode.add_argument("--offline", action="store_true", default=False)
+    sp_multimode.add_argument("--psd-path", default=None, help="Path to measured_psd.json for spectral whitening")
 
     # Batch: multi-event GWTC pipeline (continue-on-failure mode)
     sp_batch = sub.add_parser(
@@ -1799,6 +1812,7 @@ def main() -> int:
         help="Optional GWTC catalog JSON for deviation analysis in s5",
     )
     sp_batch.add_argument("--offline", action="store_true", default=False)
+    sp_batch.add_argument("--psd-path", default=None, help="Path to measured_psd.json for spectral whitening")
 
     args = parser.parse_args()
 
@@ -1825,6 +1839,7 @@ def main() -> int:
             offline_s2=args.offline_s2,
             t0_catalog=window_catalog,
             estimator=args.estimator,
+            psd_path=args.psd_path,
         )
         return rc
 
@@ -1850,6 +1865,7 @@ def main() -> int:
             offline=args.offline,
             estimator=args.estimator,
             catalog_path=args.catalog_path,
+            psd_path=args.psd_path,
         )
         return rc
 
@@ -1874,6 +1890,7 @@ def main() -> int:
             estimator=args.estimator,
             catalog_path=args.catalog_path,
             abort_on_event_fail=False,
+            psd_path=args.psd_path,
         )
         return rc
 
@@ -1900,6 +1917,7 @@ def main() -> int:
             estimator=args.estimator,
             local_hdf5=args.local_hdf5,
             offline=args.offline,
+            psd_path=args.psd_path,
         )
         return rc
 

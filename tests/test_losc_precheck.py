@@ -93,3 +93,34 @@ def test_losc_precheck_subprocess_is_read_only_and_cwd_independent(tmp_path: Pat
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert before == after
+
+
+def test_losc_precheck_finds_hdf5_recursively(tmp_path: Path) -> None:
+    event_dir = tmp_path / "losc" / "GW150914"
+    (event_dir / "H1").mkdir(parents=True)
+    (event_dir / "L1").mkdir(parents=True)
+    (event_dir / "H1" / "H-H1_GWOSC_4KHZ_R1-1126259447-32.hdf5").write_bytes(b"h1")
+    (event_dir / "L1" / "L-L1_GWOSC_4KHZ_R1-1126259447-32.hdf5").write_bytes(b"l1")
+
+    proc = _run(["--event-id", "GW150914", "--losc-root", str(tmp_path / "losc")])
+    out = proc.stdout + proc.stderr
+
+    assert proc.returncode == 0, out
+    assert "h5_count=2" in out
+    assert "match_count_H1=1" in out
+    assert "match_count_L1=1" in out
+
+
+def test_losc_precheck_keeps_root_level_matching(tmp_path: Path) -> None:
+    event_dir = tmp_path / "losc" / "GW150914"
+    event_dir.mkdir(parents=True)
+    (event_dir / "H-H1_GWOSC.hdf5").write_bytes(b"h1")
+    (event_dir / "L-L1_GWOSC.hdf5").write_bytes(b"l1")
+
+    proc = _run(["--event-id", "GW150914", "--losc-root", str(tmp_path / "losc")])
+    out = proc.stdout + proc.stderr
+
+    assert proc.returncode == 0, out
+    assert "h5_count=2" in out
+    assert "match_count_H1=1" in out
+    assert "match_count_L1=1" in out

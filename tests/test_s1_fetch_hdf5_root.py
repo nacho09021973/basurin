@@ -67,6 +67,8 @@ def test_main_does_not_write_outside_runs_root(monkeypatch: pytest.MonkeyPatch, 
         lambda _path: (np.array([0.0, 1.0]), 4096.0, 1126259462.0, "stub"),
     )
 
+    monkeypatch.setattr(s1_fetch_strain, "_fetch_gps_center", lambda _event_id: 1126259462.0)
+
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -133,3 +135,17 @@ def test_autoresolve_hdf5_root_accepts_l1_v1_pair(tmp_path: Path) -> None:
 
     assert resolved["L1"] == l1.resolve()
     assert resolved["V1"] == v1.resolve()
+
+
+def test_match_hdf5_files_finds_nested_files(tmp_path: Path) -> None:
+    event_dir = tmp_path / "GW150914"
+    (event_dir / "H1").mkdir(parents=True)
+    (event_dir / "L1").mkdir(parents=True)
+    (event_dir / "H1" / "a_H1.hdf5").write_bytes(b"1")
+    (event_dir / "L1" / "b_L1.h5").write_bytes(b"2")
+
+    matches = s1_fetch_strain.match_hdf5_files(event_dir)
+
+    assert [p.name for p in matches["all"]] == ["a_H1.hdf5", "b_L1.h5"]
+    assert [p.name for p in matches["H1"]] == ["a_H1.hdf5"]
+    assert [p.name for p in matches["L1"]] == ["b_L1.h5"]

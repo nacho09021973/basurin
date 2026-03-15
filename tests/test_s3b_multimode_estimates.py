@@ -846,3 +846,74 @@ def test_cli_runs_root_still_enforces_run_valid_gate(tmp_path: Path) -> None:
     result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, env=env)
     assert result.returncode != 0
     assert "RUN_VALID" in result.stderr
+
+
+def _write_measured_psd(path: Path, *, include_h1: bool = True) -> None:
+    freqs = np.linspace(0.0, 2048.0, 1025)
+    payload: dict[str, object] = {
+        "frequencies_hz": [float(x) for x in freqs],
+        "sample_rate_hz": 4096.0,
+        "psd_L1": [1.0 for _ in freqs],
+    }
+    if include_h1:
+        payload["psd_H1"] = [1.0 for _ in freqs]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_cli_psd_path_sets_external_psd_source_when_detector_available(tmp_path: Path) -> None:
+    run_id = "subrun_psd_ok"
+    tmp_runs = tmp_path / "subruns_root"
+    _write_minimal_s2_inputs(tmp_runs, run_id)
+
+    psd_path = tmp_path / "measured_psd.json"
+    _write_measured_psd(psd_path, include_h1=True)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    cmd = [
+        sys.executable,
+        str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
+        "--runs-root", str(tmp_runs),
+        "--run-id", run_id,
+        "--n-bootstrap", "8",
+        "--seed", "101",
+        "--psd-path", str(psd_path),
+        "--method", "spectral_two_pass",
+    ]
+    env = os.environ.copy()
+    env.pop("BASURIN_RUNS_ROOT", None)
+
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+
+    summary_path = tmp_runs / run_id / "s3b_multimode_estimates" / "stage_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary.get("psd_source") == "external_measured_psd"
+
+
+def test_cli_psd_path_falls_back_when_detector_missing_in_psd(tmp_path: Path) -> None:
+    run_id = "subrun_psd_fallback"
+    tmp_runs = tmp_path / "subruns_root"
+    _write_minimal_s2_inputs(tmp_runs, run_id)
+
+    psd_path = tmp_path / "measured_psd_missing_h1.json"
+    _write_measured_psd(psd_path, include_h1=False)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    cmd = [
+        sys.executable,
+        str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
+        "--runs-root", str(tmp_runs),
+        "--run-id", run_id,
+        "--n-bootstrap", "8",
+        "--seed", "101",
+        "--psd-path", str(psd_path),
+    ]
+    env = os.environ.copy()
+    env.pop("BASURIN_RUNS_ROOT", None)
+
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+
+    summary_path = tmp_runs / run_id / "s3b_multimode_estimates" / "stage_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary.get("psd_source") == "internal_welch"
