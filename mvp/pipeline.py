@@ -1389,9 +1389,13 @@ def run_multimode_event(
         print(f"[pipeline] ERROR: unknown estimator '{estimator}'", file=sys.stderr)
         return 2, run_id
 
+    s3_estimates_relpath = Path(
+        estimates_path_override or "s3_ringdown_estimates/outputs/estimates.json"
+    )
+    s3_estimates_path = out_root / run_id / s3_estimates_relpath
     s3b_args = [
         "--run-id", run_id,
-        "--s3-estimates", f"{run_id}/{estimates_path_override or 's3_ringdown_estimates/outputs/estimates.json'}",
+        "--s3-estimates", str(s3_estimates_path),
         "--n-bootstrap", str(s3b_n_bootstrap),
         "--seed", str(s3b_seed),
         "--method", s3b_method,

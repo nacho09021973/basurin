@@ -1,5 +1,12 @@
 # BASURIN
 
+## Raiz canonica de trabajo
+
+- La unica raiz canonica de desarrollo para este proyecto es `/home/adnac/basurin/work/basurin`.
+- `/home/adnac/basurin/work` no debe usarse como repo de trabajo, ni como CWD para ejecutar Git, Codex, tests o stages.
+- La carpeta `/home/adnac/basurin/work` debe actuar solo como contenedor y no debe tener mas contenido operativo que la carpeta `basurin/`.
+- Si hay duda sobre la raiz activa, comprobar `git rev-parse --show-toplevel` antes de editar, testear o hacer `commit`.
+
 BASURIN es un pipeline contract-first para el analisis reproducible de ringdown en ondas gravitacionales. Su objetivo cientifico no es limitarse a una estimacion puntual Kerr del remanente, sino reconstruir, por evento y luego a nivel poblacional, regiones de geometria compatibles con los datos, preservando trazabilidad, gating semantico y auditoria de artefactos.
 
 El repositorio prioriza:
