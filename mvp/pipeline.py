@@ -44,9 +44,12 @@ for _cand in [_here.parents[0], _here.parents[1]]:
         break
 
 from basurin_io import resolve_out_root, sha256_file, write_json_atomic
+from mvp.s2_ringdown_window import estimate_dt_start_from_mass
 
 MVP_DIR = Path(__file__).resolve().parent
 DEFAULT_ATLAS_PATH = Path("docs/ringdown/atlas/atlas_berti_v2.json")
+DEFAULT_EVENT_MASS_CATALOG = MVP_DIR / "assets" / "event_mass_catalog_v1.json"
+DEFAULT_WINDOW_CATALOG = MVP_DIR / "assets" / "window_catalog_v1.json"
 FAMILY_STAGE_MAP: dict[str, tuple[str, str]] = {
     "GR_KERR_BH": ("s8a_family_gr_kerr.py", "s8a_family_gr_kerr"),
     "BNS_REMNANT": ("s8b_family_bns.py", "s8b_family_bns"),
@@ -971,13 +974,73 @@ def _run_dual_estimator_bundle(
     return 0, None
 
 
+def _resolve_adaptive_dt_start(
+    event_id: str,
+    dt_start_s: float | None,
+    final_mass_msun: float | None,
+    redshift: float | None,
+) -> tuple[float, str]:
+    """Resolve dt_start_s adaptively when not explicitly provided.
+
+    Resolution order:
+      1. If dt_start_s is not None → user override, use as-is
+      2. Window catalog entry with dt_start_s → use calibrated value
+      3. Event mass catalog with M_f and z → compute via estimate_dt_start_from_mass
+      4. CLI --final-mass-msun / --redshift → compute via estimate_dt_start_from_mass
+      5. Fallback to 0.003s with warning
+
+    Returns:
+        (dt_start_s, source_description)
+    """
+    # 1. Explicit user override
+    if dt_start_s is not None:
+        return dt_start_s, "user_explicit"
+
+    # 2. Check window catalog for calibrated dt_start
+    if DEFAULT_WINDOW_CATALOG.exists():
+        try:
+            with open(DEFAULT_WINDOW_CATALOG, "r") as f:
+                wcat = json.load(f)
+            entry = wcat.get(event_id, {})
+            if isinstance(entry, dict) and "dt_start_s" in entry:
+                val = float(entry["dt_start_s"])
+                print(f"[pipeline] dt_start_s={val:.4f} from window_catalog (calibrated) for {event_id}")
+                return val, "window_catalog_calibrated"
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # 3. Check event mass catalog
+    mf, z = final_mass_msun, redshift
+    if (mf is None or z is None) and DEFAULT_EVENT_MASS_CATALOG.exists():
+        try:
+            with open(DEFAULT_EVENT_MASS_CATALOG, "r") as f:
+                mcat = json.load(f)
+            ev = mcat.get("events", {}).get(event_id, {})
+            if mf is None and "M_f_source_msun" in ev:
+                mf = float(ev["M_f_source_msun"])
+            if z is None and "redshift" in ev:
+                z = float(ev["redshift"])
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # 4. Compute from mass if available
+    if mf is not None and z is not None:
+        val = estimate_dt_start_from_mass(mf, z)
+        print(f"[pipeline] dt_start_s={val:.4f} (adaptive: M_f={mf}, z={z}) for {event_id}")
+        return val, f"adaptive_mass(M_f={mf},z={z})"
+
+    # 5. Fallback
+    print(f"[pipeline] WARNING: no mass info for {event_id}, using default dt_start_s=0.003", flush=True)
+    return 0.003, "default_fallback"
+
+
 def run_single_event(
     event_id: str,
     atlas_path: str,
     run_id: str | None = None,
     synthetic: bool = False,
     duration_s: float = 32.0,
-    dt_start_s: float = 0.003,
+    dt_start_s: float | None = 0.003,
     window_duration_s: float = 0.06,
     band_low: float = 150.0,
     band_high: float = 400.0,
@@ -991,9 +1054,12 @@ def run_single_event(
     t0_catalog: str | None = None,
     estimator: str = "dual",
     psd_path: str | None = None,
+    final_mass_msun: float | None = None,
+    redshift: float | None = None,
 ) -> tuple[int, str]:
     """Run full pipeline for a single event. Returns (exit_code, run_id)."""
     event_id = _require_nonempty_event_id(event_id, "--event-id")
+    dt_start_s, dt_source = _resolve_adaptive_dt_start(event_id, dt_start_s, final_mass_msun, redshift)
     out_root = resolve_out_root("runs")
 
     if run_id is None:
@@ -1001,7 +1067,7 @@ def run_single_event(
 
     print(f"\n[pipeline] Starting single-event pipeline")
     print(f"[pipeline] event_id={event_id}, run_id={run_id}")
-    print(f"[pipeline] atlas={atlas_path}, synthetic={synthetic}")
+    print(f"[pipeline] atlas={atlas_path}, synthetic={synthetic}, dt_start_s={dt_start_s} ({dt_source})")
 
     _create_run_valid(out_root, run_id)
 
@@ -1186,7 +1252,7 @@ def run_multimode_event(
     run_id: str | None = None,
     synthetic: bool = False,
     duration_s: float = 32.0,
-    dt_start_s: float = 0.003,
+    dt_start_s: float | None = 0.003,
     window_duration_s: float = 0.06,
     band_low: float = 150.0,
     band_high: float = 400.0,
@@ -1201,8 +1267,11 @@ def run_multimode_event(
     estimator: str = "dual",
     offline: bool = False,
     psd_path: str | None = None,
+    final_mass_msun: float | None = None,
+    redshift: float | None = None,
 ) -> tuple[int, str]:
     event_id = _require_nonempty_event_id(event_id, "--event-id")
+    dt_start_s, dt_source = _resolve_adaptive_dt_start(event_id, dt_start_s, final_mass_msun, redshift)
     out_root = resolve_out_root("runs")
 
     if run_id is None:
@@ -1572,7 +1641,7 @@ def run_multi_event(
             "epsilon": kwargs.get("epsilon", 0.3),
             "band_low": kwargs.get("band_low", 150.0),
             "band_high": kwargs.get("band_high", 400.0),
-            "dt_start_s": kwargs.get("dt_start_s", 0.003),
+            "dt_start_s": kwargs.get("dt_start_s"),
             "window_duration_s": kwargs.get("window_duration_s", 0.06),
         },
     )
@@ -1673,7 +1742,8 @@ def main() -> int:
     sp_single.add_argument("--run-id", default=None)
     sp_single.add_argument("--synthetic", action="store_true")
     sp_single.add_argument("--duration-s", type=float, default=32.0)
-    sp_single.add_argument("--dt-start-s", type=float, default=0.003)
+    sp_single.add_argument("--dt-start-s", type=float, default=None,
+                           help="Override dt_start (default: adaptive from mass catalog)")
     sp_single.add_argument("--window-duration-s", type=float, default=0.06)
     sp_single.add_argument("--band-low", type=float, default=150.0)
     sp_single.add_argument("--band-high", type=float, default=400.0)
@@ -1687,6 +1757,10 @@ def main() -> int:
         help="Skip s1 download if outputs already exist and params match",
     )
     sp_single.add_argument("--with-t0-sweep", action="store_true", default=False)
+    sp_single.add_argument("--final-mass-msun", type=float, default=None,
+                           help="Final mass source frame (solar masses) for adaptive dt_start")
+    sp_single.add_argument("--redshift", type=float, default=None,
+                           help="Source redshift for adaptive dt_start estimation")
     sp_single.add_argument(
         "--local-hdf5",
         action="append",
@@ -1731,7 +1805,8 @@ def main() -> int:
     sp_multi.add_argument("--min-coverage", type=float, default=1.0)
     sp_multi.add_argument("--synthetic", action="store_true")
     sp_multi.add_argument("--duration-s", type=float, default=32.0)
-    sp_multi.add_argument("--dt-start-s", type=float, default=0.003)
+    sp_multi.add_argument("--dt-start-s", type=float, default=None,
+                          help="Override dt_start (default: adaptive from mass catalog)")
     sp_multi.add_argument("--window-duration-s", type=float, default=0.06)
     sp_multi.add_argument("--band-low", type=float, default=150.0)
     sp_multi.add_argument("--band-high", type=float, default=400.0)
@@ -1771,7 +1846,8 @@ def main() -> int:
     sp_multimode.add_argument("--run-id", default=None)
     sp_multimode.add_argument("--synthetic", action="store_true")
     sp_multimode.add_argument("--duration-s", type=float, default=32.0)
-    sp_multimode.add_argument("--dt-start-s", type=float, default=0.003)
+    sp_multimode.add_argument("--dt-start-s", type=float, default=None,
+                              help="Override dt_start (default: adaptive from mass catalog)")
     sp_multimode.add_argument("--window-duration-s", type=float, default=0.06)
     sp_multimode.add_argument("--band-low", type=float, default=150.0)
     sp_multimode.add_argument("--band-high", type=float, default=400.0)
@@ -1805,6 +1881,10 @@ def main() -> int:
     )
     sp_multimode.add_argument("--offline", action="store_true", default=False)
     sp_multimode.add_argument("--psd-path", default=None, help="Path to measured_psd.json for spectral whitening")
+    sp_multimode.add_argument("--final-mass-msun", type=float, default=None,
+                              help="Final mass source frame (solar masses) for adaptive dt_start")
+    sp_multimode.add_argument("--redshift", type=float, default=None,
+                              help="Source redshift for adaptive dt_start estimation")
 
     # Batch: multi-event GWTC pipeline (continue-on-failure mode)
     sp_batch = sub.add_parser(
@@ -1819,7 +1899,8 @@ def main() -> int:
     sp_batch.add_argument("--min-coverage", type=float, default=1.0)
     sp_batch.add_argument("--synthetic", action="store_true")
     sp_batch.add_argument("--duration-s", type=float, default=32.0)
-    sp_batch.add_argument("--dt-start-s", type=float, default=0.003)
+    sp_batch.add_argument("--dt-start-s", type=float, default=None,
+                          help="Override dt_start (default: adaptive from mass catalog)")
     sp_batch.add_argument("--window-duration-s", type=float, default=0.06)
     sp_batch.add_argument("--band-low", type=float, default=150.0)
     sp_batch.add_argument("--band-high", type=float, default=400.0)
@@ -1863,6 +1944,8 @@ def main() -> int:
             t0_catalog=window_catalog,
             estimator=args.estimator,
             psd_path=args.psd_path,
+            final_mass_msun=args.final_mass_msun,
+            redshift=args.redshift,
         )
         return rc
 
@@ -1941,6 +2024,8 @@ def main() -> int:
             local_hdf5=args.local_hdf5,
             offline=args.offline,
             psd_path=args.psd_path,
+            final_mass_msun=args.final_mass_msun,
+            redshift=args.redshift,
         )
         return rc
 
