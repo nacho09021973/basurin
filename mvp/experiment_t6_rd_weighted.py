@@ -97,21 +97,32 @@ def _extract_rows(obj: Any) -> list[dict[str, Any]]:
 
 
 def _phys_key(row: dict[str, Any]) -> tuple[str, str, float, float] | None:
-    fam = str(row.get("family", "")).strip().lower()
-    src = str(row.get("source", "")).strip().lower()
-    m = _as_float(row.get("M_solar"))
-    chi = _as_float(row.get("chi"))
+    md = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+
+    fam = str(md.get("family", row.get("family", ""))).strip().lower()
+    src = str(
+        md.get(
+            "source",
+            md.get("ref", row.get("source", row.get("ref", ""))),
+        )
+    ).strip().lower()
+    m = _as_float(md.get("M_solar", row.get("M_solar")))
+    chi = _as_float(md.get("chi", row.get("chi")))
+
     if not fam or not src or m is None or chi is None:
         return None
-    return (fam, src, m, chi)
+    return (fam, src, float(m), float(chi))
 
 
 def _af_value(row: dict[str, Any]) -> float | None:
-    af = _as_float(row.get("Af"))
+    md = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+
+    af = _as_float(md.get("Af", row.get("Af")))
     if af is not None:
         return af
-    m = _as_float(row.get("M_solar"))
-    chi = _as_float(row.get("chi"))
+
+    m = _as_float(md.get("M_solar", row.get("M_solar")))
+    chi = _as_float(md.get("chi", row.get("chi")))
     if m is None or chi is None or abs(chi) >= 1:
         return None
     return _black_hole_area(m, chi)
