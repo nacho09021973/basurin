@@ -768,6 +768,39 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         check_run_valid=True,
     ),
+    "experiment/phase6_temperature_stability_selection": StageContract(
+        name="experiment/phase6_temperature_stability_selection",
+        required_inputs=[
+            "experiment/phase5_temperature_sweep/outputs/temperature_sweep_metrics_v1.json",
+            "experiment/phase5_temperature_sweep/outputs/temperature_sweep_topk_v1.json",
+            "experiment/phase5_temperature_sweep/outputs/temperature_sweep_family_mass_v1.json",
+            "experiment/phase5_temperature_sweep/outputs/temperature_sweep_theory_mass_v1.json",
+            "experiment/phase5_temperature_sweep/outputs/temperature_sweep_top_geometry_v1.json",
+            "experiment/phase2c_support_ontology_basis/outputs/support_ontology_basis_v1.json",
+            "s5_aggregate/outputs/aggregate.json",
+            "experiment/phase3_weight_policy_basis/outputs/weight_policy_event_support_delta_lnL_softmax_mean_v1.json",
+            "experiment/phase4_renyi_diversity_baseline/outputs/renyi_diversity_event_support_delta_lnL_softmax_mean_v1.json",
+        ],
+        dynamic_inputs=[
+            "{source_run}/s4k_event_support_region/outputs/event_support_region.json",
+            "{source_run}/s4_geometry_filter/outputs/ranked_all_full.json",
+        ],
+        produced_outputs=[
+            "outputs/temperature_selection_v1.json",
+            "outputs/support_consensus_v1.json",
+            "outputs/weight_policy_selected_temperature_v1.json",
+            "outputs/renyi_diversity_selected_temperature_v1.json",
+            "outputs/stability_diagnostics_v1.json",
+        ],
+        upstream_stages=[
+            "experiment/phase5_temperature_sweep",
+            "experiment/phase2c_support_ontology_basis",
+            "s5_aggregate",
+            "experiment/phase3_weight_policy_basis",
+            "experiment/phase4_renyi_diversity_baseline",
+        ],
+        check_run_valid=True,
+    ),
 }
 
 
