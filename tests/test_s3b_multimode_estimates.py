@@ -171,10 +171,10 @@ def test_resolve_mode_bands_falls_back_to_midpoint_without_event_id() -> None:
         event_id=None,
     )
 
-    assert strategy["method"] == "midpoint_split"
+    assert strategy["method"] == "default_split_60_40"
     assert np.isclose(band_220[0], 150.0)
-    assert 274.999 < band_220[1] < 275.0
-    assert 275.0 < band_221[0] < 275.001
+    assert 299.999 < band_220[1] < 300.0
+    assert 300.0 < band_221[0] < 300.001
     assert np.isclose(band_221[1], 400.0)
 
 

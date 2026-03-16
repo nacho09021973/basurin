@@ -431,7 +431,7 @@ def _resolve_mode_bands(
 ) -> tuple[tuple[float, float], tuple[float, float], dict[str, Any]]:
     fallback_220, fallback_221 = _split_mode_bands(band_low=band_low, band_high=band_high)
     strategy: dict[str, Any] = {
-        "method": "midpoint_split",
+        "method": "default_split_60_40",
         "event_id": event_id,
         "mode_220_band_hz": [float(fallback_220[0]), float(fallback_220[1])],
         "mode_221_band_hz": [float(fallback_221[0]), float(fallback_221[1])],
