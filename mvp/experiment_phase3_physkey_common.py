@@ -21,7 +21,7 @@ import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, NamedTuple
 
 _here = Path(__file__).resolve()
 for _cand in (_here.parents[0], _here.parents[1]):
@@ -48,6 +48,15 @@ ROUND_CHI = 6
 
 # Type alias
 PhysKey = tuple[str, str, float, float]
+
+
+class _LoadStats(NamedTuple):
+    """Return value of _load_event_to_subrun_filtered – mapping + exclusion counters."""
+
+    mapping: dict[str, str]
+    n_total: int  # non-empty rows in results.csv
+    n_skipped_status: int  # rows dropped because status != PASS
+    n_skipped_missing_compat: int  # rows dropped because compatible_set.json absent
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +175,8 @@ def _load_event_to_subrun_filtered(
     results_csv: Path,
     out_root: Path,
     s4_compatible_relpath: str,
-) -> dict[str, str]:
-    """Return event→subrun mapping, keeping only:
+) -> _LoadStats:
+    """Return event→subrun mapping plus exclusion counters, keeping only:
     - rows where status == PASS (if the column exists)
     - rows where runs/<subrun>/<s4_compatible_relpath> exists on disk.
 
@@ -193,22 +202,33 @@ def _load_event_to_subrun_filtered(
                 f"ruta esperada exacta: {results_csv}. columnas disponibles: {fields}."
             )
         mapping: dict[str, str] = {}
+        n_total = 0
+        n_skipped_status = 0
+        n_skipped_missing_compat = 0
         for row in reader:
             ev = str(row.get(ev_col, "")).strip()
             sub = str(row.get(subrun_col, "")).strip()
             if not ev or not sub:
                 continue
+            n_total += 1
             # Skip FAIL rows when status column present
             if status_col:
                 status = str(row.get(status_col, "")).strip()
                 if status != "PASS":
+                    n_skipped_status += 1
                     continue
             # Skip if compatible_set.json missing for this subrun
             compat_path = out_root / sub / s4_compatible_relpath
             if not compat_path.exists():
+                n_skipped_missing_compat += 1
                 continue
             mapping[ev] = sub
-    return mapping
+    return _LoadStats(
+        mapping=mapping,
+        n_total=n_total,
+        n_skipped_status=n_skipped_status,
+        n_skipped_missing_compat=n_skipped_missing_compat,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -217,8 +237,16 @@ def _load_event_to_subrun_filtered(
 
 
 def _phys_key_to_str(key: PhysKey) -> str:
-    """Stable string representation of a phys_key tuple."""
-    return f"{key[0]}|{key[1]}|{key[2]}|{key[3]}"
+    """Stable, auditable JSON representation of a phys_key tuple.
+
+    Uses deterministic JSON array rather than a pipe-separated string so the
+    output is unambiguous regardless of family/provenance content.
+    """
+    return json.dumps(
+        [key[0], key[1], round(key[2], ROUND_M), round(key[3], ROUND_CHI)],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
 
 
 def _keys_to_sorted_list(keys: set[PhysKey]) -> list[str]:
@@ -249,9 +277,11 @@ def run_experiment(
     results_220_path = out_root / batch_220 / batch_results_relpath
     results_221_path = out_root / batch_221 / batch_results_relpath
 
-    # Load filtered mappings (PASS + compatible_set.json present)
-    map220 = _load_event_to_subrun_filtered(results_220_path, out_root, s4_compatible_relpath)
-    map221 = _load_event_to_subrun_filtered(results_221_path, out_root, s4_compatible_relpath)
+    # Load filtered mappings (PASS + compatible_set.json present) with exclusion counters
+    stats220 = _load_event_to_subrun_filtered(results_220_path, out_root, s4_compatible_relpath)
+    stats221 = _load_event_to_subrun_filtered(results_221_path, out_root, s4_compatible_relpath)
+    map220 = stats220.mapping
+    map221 = stats221.mapping
 
     valid_events_220 = set(map220.keys())
     valid_events_221 = set(map221.keys())
@@ -305,6 +335,12 @@ def run_experiment(
         "provenance_rule": "metadata.source if present else metadata.ref",
         "round_M": ROUND_M,
         "round_chi": ROUND_CHI,
+        "n_rows_total_220": stats220.n_total,
+        "n_rows_total_221": stats221.n_total,
+        "n_rows_skipped_status_220": stats220.n_skipped_status,
+        "n_rows_skipped_status_221": stats221.n_skipped_status,
+        "n_rows_skipped_missing_compatible_220": stats220.n_skipped_missing_compat,
+        "n_rows_skipped_missing_compatible_221": stats221.n_skipped_missing_compat,
         "n_events_valid_220": len(valid_events_220),
         "n_events_valid_221": len(valid_events_221),
         "n_common_events": len(common_events),
@@ -364,6 +400,12 @@ def run_experiment(
             "inputs": manifest_payload["inputs"],
             "outputs": output_records,
             "metrics": {
+                "n_rows_total_220": stats220.n_total,
+                "n_rows_total_221": stats221.n_total,
+                "n_rows_skipped_status_220": stats220.n_skipped_status,
+                "n_rows_skipped_status_221": stats221.n_skipped_status,
+                "n_rows_skipped_missing_compatible_220": stats220.n_skipped_missing_compat,
+                "n_rows_skipped_missing_compatible_221": stats221.n_skipped_missing_compat,
                 "n_common_events": len(common_events),
                 "n_K220": len(K220_global),
                 "n_K221": len(K221_global),

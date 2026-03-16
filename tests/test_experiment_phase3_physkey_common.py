@@ -2,10 +2,11 @@
 
 Coverage:
 1. test_base_case                  – common PASS event, non-empty phys_key intersection
-2. test_fail_rows_filtered         – FAIL rows in results.csv are skipped silently
+2. test_fail_rows_filtered         – FAIL rows skipped; exclusion counters in summary correct
 3. test_metadata_source_and_ref    – 220 uses metadata.source, 221 uses metadata.ref → k_inter == 1
 4. test_non_subset_cases           – 220 has extra phys_key not in 221 → appears in non_subset_cases
-5. test_missing_provenance_aborts  – compatible_set.json geometry missing provenance → ValueError
+5. test_missing_provenance_aborts  – geometry missing provenance → ValueError, no partial outputs
+6. test_missing_m_solar_aborts     – geometry missing M_solar → ValueError, no partial outputs
 """
 from __future__ import annotations
 
@@ -166,6 +167,15 @@ def test_fail_rows_filtered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     # E2 (FAIL) must be absent; only E1 counted
     assert result["n_common_events"] == 1
     assert result["n_events_valid_220"] == 1  # only E1 PASS from 220
+
+    # Exclusion metric traceability
+    assert result["n_rows_total_220"] == 2           # E1 PASS + E2 FAIL
+    assert result["n_rows_skipped_status_220"] == 1  # E2 FAIL
+    assert result["n_rows_skipped_missing_compatible_220"] == 0
+    assert result["n_rows_total_221"] == 1
+    assert result["n_rows_skipped_status_221"] == 0
+    assert result["n_rows_skipped_missing_compatible_221"] == 0
+
     csv_rows = list(
         csv.DictReader(
             (
@@ -400,3 +410,7 @@ def test_missing_m_solar_aborts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
             batch_220="batch220_abm",
             batch_221="batch221_abm",
         )
+
+    # Atomic write must not have committed partial outputs
+    exp_dir = tmp_path / "run_abort_m" / "experiment" / "phase3_physkey_common"
+    assert not exp_dir.exists()
