@@ -220,14 +220,16 @@ def download_for_event(
     downloaded: list[str] = []
 
     for det in detectors:
-        # Check if already present (skip if not force)
+        # Check if already present (skip if not force).
+        # Match any HDF5 with detector name in it for the target duration.
+        # This avoids re-downloading when GWOSC returns a different URL/mirror.
         if not force:
             existing = [
                 p for p in event_dir.iterdir()
                 if p.is_file()
                 and p.suffix.lower() in {".h5", ".hdf5"}
                 and det.upper() in p.name.upper()
-                and f"-{duration}." in p.name
+                and (f"-{duration}." in p.name or f"-{duration}-" in p.name)
             ]
             if existing:
                 print(f"    {det}: SKIP (already have {existing[0].name})")

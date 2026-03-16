@@ -235,6 +235,40 @@ def match_hdf5_files(event_dir: Path) -> dict[str, list[Path]]:
     }
 
 
+def _pick_best_hdf5_candidate(candidates: list[Path]) -> Path | None:
+    """Disambiguate multiple HDF5 files for one detector.
+
+    Scoring heuristic applied to GWOSC naming convention filenames like
+    ``H-H1_GWOSC_4KHZ_R1-1126259447-32.hdf5``:
+      - Prefer shorter duration (32s > 4096s) for event-centred analysis.
+      - Prefer 4KHz over 16KHz (pipeline default sample rate).
+    Returns the best candidate, or None if scoring cannot disambiguate.
+    """
+    import re
+
+    _DUR_RE = re.compile(r"-(\d+)\.(?:hdf5|h5)$", re.IGNORECASE)
+
+    def _score(p: Path) -> tuple[int, int]:
+        name = p.name
+        # Duration: shorter is better (invert so lower duration → higher score)
+        dur_m = _DUR_RE.search(name)
+        dur = int(dur_m.group(1)) if dur_m else 99999
+        dur_score = -dur  # shorter → higher
+        # Sample rate: prefer 4KHz (lower is better for pipeline default)
+        sr_score = 0
+        name_upper = name.upper()
+        if "4KHZ" in name_upper:
+            sr_score = 2
+        elif "16KHZ" in name_upper:
+            sr_score = 1
+        return (dur_score, sr_score)
+
+    scored = sorted(candidates, key=_score, reverse=True)
+    if len(scored) >= 2 and _score(scored[0]) == _score(scored[1]):
+        return None  # truly ambiguous
+    return scored[0]
+
+
 def _resolve_event_hdf5_or_die(*, hdf5_root: Path, event_id: str, detectors: list[str]) -> dict[str, Path]:
     event_dir = (hdf5_root / event_id).resolve()
     resolved: dict[str, Path] = {}
@@ -249,6 +283,12 @@ def _resolve_event_hdf5_or_die(*, hdf5_root: Path, event_id: str, detectors: lis
             continue
         if len(candidates) == 0:
             errors.append(f"- {det}: 0 archivos")
+            continue
+        # Disambiguate: prefer shorter-duration files (32s over 4096s) for
+        # event-centered analysis; among same duration prefer 4KHz over 16KHz.
+        best = _pick_best_hdf5_candidate(candidates)
+        if best is not None:
+            resolved[det] = best.resolve()
             continue
         shown = ", ".join(path.name for path in candidates[:4])
         suffix = " ..." if len(candidates) > 4 else ""
