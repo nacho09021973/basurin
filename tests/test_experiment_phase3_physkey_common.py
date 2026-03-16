@@ -1,12 +1,14 @@
 """Regression tests for mvp/experiment_phase3_physkey_common.py.
 
 Coverage:
-1. test_base_case                  – common PASS event, non-empty phys_key intersection
-2. test_fail_rows_filtered         – FAIL rows skipped; exclusion counters in summary correct
-3. test_metadata_source_and_ref    – 220 uses metadata.source, 221 uses metadata.ref → k_inter == 1
-4. test_non_subset_cases           – 220 has extra phys_key not in 221 → appears in non_subset_cases
-5. test_missing_provenance_aborts  – geometry missing provenance → ValueError, no partial outputs
-6. test_missing_m_solar_aborts     – geometry missing M_solar → ValueError, no partial outputs
+1. test_base_case                             – common PASS event, non-empty phys_key intersection
+2. test_fail_rows_filtered                    – FAIL rows skipped; exclusion counters in summary correct
+3. test_metadata_source_and_ref               – 220 uses metadata.source, 221 uses metadata.ref → k_inter == 1
+4. test_non_subset_cases                      – 220 has extra phys_key not in 221 → appears in non_subset_cases
+5. test_missing_provenance_aborts             – geometry missing provenance → ValueError, no partial outputs
+6. test_missing_m_solar_aborts                – geometry missing M_solar → ValueError, no partial outputs
+7. test_batch_gate_passes_with_stage_summary  – batch without RUN_VALID accepted via stage_summary PASS
+8. test_batch_gate_fails_when_verdict_not_pass – batch stage_summary verdict=FAIL → explicit abort
 """
 from __future__ import annotations
 
@@ -34,12 +36,28 @@ def _write_csv(path: Path, rows: list[dict[str, str]], fields: list[str]) -> Non
 
 
 def _mk_run(tmp_path: Path, run_id: str) -> Path:
-    """Create a minimal valid run directory with RUN_VALID/verdict.json = PASS."""
+    """Create a minimal valid host-run directory with RUN_VALID/verdict.json = PASS."""
     run_dir = tmp_path / run_id
     rv = run_dir / "RUN_VALID"
     rv.mkdir(parents=True, exist_ok=True)
     (rv / "verdict.json").write_text(json.dumps({"verdict": "PASS"}), encoding="utf-8")
     return run_dir
+
+
+def _mk_batch(tmp_path: Path, batch_id: str) -> Path:
+    """Create a minimal valid batch-run directory with offline_batch stage_summary PASS.
+
+    batch_220 / batch_221 are offline_batch artefacts, not pipeline host-runs.
+    Their completion contract is experiment/offline_batch/stage_summary.json verdict=PASS,
+    NOT RUN_VALID (which offline_batch does not materialise).
+    """
+    batch_dir = tmp_path / batch_id
+    ss_dir = batch_dir / "experiment" / "offline_batch"
+    ss_dir.mkdir(parents=True, exist_ok=True)
+    (ss_dir / "stage_summary.json").write_text(
+        json.dumps({"verdict": "PASS", "status": "PASS"}), encoding="utf-8"
+    )
+    return batch_dir
 
 
 def _write_compat(subrun_dir: Path, geoms: list[dict[str, Any]]) -> None:
@@ -68,8 +86,8 @@ def test_base_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
 
     _mk_run(tmp_path, "run_main")
-    batch220 = _mk_run(tmp_path, "batch220")
-    batch221 = _mk_run(tmp_path, "batch221")
+    batch220 = _mk_batch(tmp_path, "batch220")
+    batch221 = _mk_batch(tmp_path, "batch221")
     sub220 = _mk_run(tmp_path, "sub220_e1")
     sub221 = _mk_run(tmp_path, "sub221_e1")
 
@@ -132,8 +150,8 @@ def test_fail_rows_filtered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
 
     _mk_run(tmp_path, "run_fail_filter")
-    batch220 = _mk_run(tmp_path, "batch220_ff")
-    batch221 = _mk_run(tmp_path, "batch221_ff")
+    batch220 = _mk_batch(tmp_path, "batch220_ff")
+    batch221 = _mk_batch(tmp_path, "batch221_ff")
     sub_pass220 = _mk_run(tmp_path, "sub_pass220")
     sub_pass221 = _mk_run(tmp_path, "sub_pass221")
     sub_fail220 = _mk_run(tmp_path, "sub_fail220")
@@ -206,8 +224,8 @@ def test_metadata_source_and_ref(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
 
     _mk_run(tmp_path, "run_meta")
-    batch220 = _mk_run(tmp_path, "batch220_meta")
-    batch221 = _mk_run(tmp_path, "batch221_meta")
+    batch220 = _mk_batch(tmp_path, "batch220_meta")
+    batch221 = _mk_batch(tmp_path, "batch221_meta")
     sub220 = _mk_run(tmp_path, "sub220_meta")
     sub221 = _mk_run(tmp_path, "sub221_meta")
 
@@ -277,8 +295,8 @@ def test_non_subset_cases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
 
     _mk_run(tmp_path, "run_nonsub")
-    batch220 = _mk_run(tmp_path, "batch220_ns")
-    batch221 = _mk_run(tmp_path, "batch221_ns")
+    batch220 = _mk_batch(tmp_path, "batch220_ns")
+    batch221 = _mk_batch(tmp_path, "batch221_ns")
     sub220 = _mk_run(tmp_path, "sub220_ns")
     sub221 = _mk_run(tmp_path, "sub221_ns")
 
@@ -338,8 +356,8 @@ def test_missing_provenance_aborts(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
 
     _mk_run(tmp_path, "run_abort")
-    batch220 = _mk_run(tmp_path, "batch220_ab")
-    batch221 = _mk_run(tmp_path, "batch221_ab")
+    batch220 = _mk_batch(tmp_path, "batch220_ab")
+    batch221 = _mk_batch(tmp_path, "batch221_ab")
     sub220 = _mk_run(tmp_path, "sub220_ab")
     sub221 = _mk_run(tmp_path, "sub221_ab")
 
@@ -383,8 +401,8 @@ def test_missing_m_solar_aborts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
 
     _mk_run(tmp_path, "run_abort_m")
-    batch220 = _mk_run(tmp_path, "batch220_abm")
-    batch221 = _mk_run(tmp_path, "batch221_abm")
+    batch220 = _mk_batch(tmp_path, "batch220_abm")
+    batch221 = _mk_batch(tmp_path, "batch221_abm")
     sub220 = _mk_run(tmp_path, "sub220_abm")
     sub221 = _mk_run(tmp_path, "sub221_abm")
 
@@ -414,3 +432,89 @@ def test_missing_m_solar_aborts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     # Atomic write must not have committed partial outputs
     exp_dir = tmp_path / "run_abort_m" / "experiment" / "phase3_physkey_common"
     assert not exp_dir.exists()
+
+
+# ---------------------------------------------------------------------------
+# Test 7 – batch gating: stage_summary.json PASS (no RUN_VALID on batch)
+# ---------------------------------------------------------------------------
+
+
+def test_batch_gate_passes_with_stage_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Batch runs without RUN_VALID are accepted when offline_batch stage_summary is PASS.
+
+    This reflects the real contract: batch_220/221 are offline_batch artefacts, not
+    pipeline host-runs. require_run_valid must NOT be called on them.
+    """
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+
+    _mk_run(tmp_path, "run_host")
+    # Batches have NO RUN_VALID – only stage_summary PASS
+    batch220 = _mk_batch(tmp_path, "batch220_gate")
+    batch221 = _mk_batch(tmp_path, "batch221_gate")
+    sub220 = _mk_run(tmp_path, "sub220_gate")
+    sub221 = _mk_run(tmp_path, "sub221_gate")
+
+    _write_csv(
+        batch220 / "experiment" / "offline_batch" / "outputs" / "results.csv",
+        rows=[{"event_id": "E1", "subrun_id": "sub220_gate", "status": "PASS"}],
+        fields=["event_id", "subrun_id", "status"],
+    )
+    _write_csv(
+        batch221 / "experiment" / "offline_batch" / "outputs" / "results.csv",
+        rows=[{"event_id": "E1", "subrun_id": "sub221_gate", "status": "PASS"}],
+        fields=["event_id", "subrun_id", "status"],
+    )
+
+    geom = {"geometry_id": "g1", "family": "kerr", "source": "berti", "M_solar": 10.0, "chi": 0.5}
+    _write_compat(sub220, [geom])
+    _write_compat(sub221, [geom])
+
+    # Must not raise – batch gating uses stage_summary, not RUN_VALID
+    result = run_experiment(
+        run_id="run_host",
+        batch_220="batch220_gate",
+        batch_221="batch221_gate",
+    )
+    assert result["n_common_events"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Test 8 – batch gating: stage_summary.json verdict != PASS → abort
+# ---------------------------------------------------------------------------
+
+
+def test_batch_gate_fails_when_verdict_not_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Batch with stage_summary verdict != PASS must abort with an explicit error."""
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+
+    _mk_run(tmp_path, "run_host_fail")
+    batch220_dir = tmp_path / "batch220_fail_verdict"
+    ss_dir = batch220_dir / "experiment" / "offline_batch"
+    ss_dir.mkdir(parents=True, exist_ok=True)
+    (ss_dir / "stage_summary.json").write_text(
+        json.dumps({"verdict": "FAIL", "status": "FAIL"}), encoding="utf-8"
+    )
+    # results.csv present but irrelevant – verdict check fires first
+    _write_csv(
+        batch220_dir / "experiment" / "offline_batch" / "outputs" / "results.csv",
+        rows=[{"event_id": "E1", "subrun_id": "sub_x", "status": "PASS"}],
+        fields=["event_id", "subrun_id", "status"],
+    )
+
+    batch221 = _mk_batch(tmp_path, "batch221_fail_verdict_ok")
+    _write_csv(
+        batch221 / "experiment" / "offline_batch" / "outputs" / "results.csv",
+        rows=[{"event_id": "E1", "subrun_id": "sub_y", "status": "PASS"}],
+        fields=["event_id", "subrun_id", "status"],
+    )
+
+    with pytest.raises(ValueError, match="FAIL"):
+        run_experiment(
+            run_id="run_host_fail",
+            batch_220="batch220_fail_verdict",
+            batch_221="batch221_fail_verdict_ok",
+        )

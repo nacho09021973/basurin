@@ -167,6 +167,47 @@ def _extract_phys_keys(compatible_set_path: Path) -> set[PhysKey]:
 
 
 # ---------------------------------------------------------------------------
+# Batch-run gate (replaces require_run_valid for offline_batch inputs)
+# ---------------------------------------------------------------------------
+
+
+def _require_batch_pass(
+    out_root: Path,
+    batch_run_id: str,
+    batch_results_relpath: str,
+) -> None:
+    """Assert that an offline_batch run is complete and PASS.
+
+    batch_220 / batch_221 are not pipeline host-runs (no RUN_VALID);
+    their observable completion contract is:
+        runs/<batch>/experiment/offline_batch/stage_summary.json  with verdict == "PASS"
+        runs/<batch>/<batch_results_relpath>  (results.csv)
+
+    Raises FileNotFoundError or ValueError with actionable messages.
+    """
+    stage_summary = out_root / batch_run_id / "experiment" / "offline_batch" / "stage_summary.json"
+    if not stage_summary.exists():
+        raise FileNotFoundError(
+            f"offline_batch stage_summary not found: {stage_summary}. "
+            f"Comando exacto para regenerar upstream: "
+            f"python -m mvp.experiment_offline_batch --batch-run-id {batch_run_id}"
+        )
+    data = json.loads(stage_summary.read_text(encoding="utf-8"))
+    verdict = str(data.get("verdict", data.get("status", ""))).strip().upper()
+    if verdict != "PASS":
+        raise ValueError(
+            f"offline_batch verdict is not PASS for batch_run_id={batch_run_id!r}: {verdict!r}. "
+            f"Ruta exacta: {stage_summary}"
+        )
+    results_csv = out_root / batch_run_id / batch_results_relpath
+    if not results_csv.exists():
+        raise FileNotFoundError(
+            f"offline_batch results.csv not found: {results_csv}. "
+            f"Ruta esperada exacta según contrato del experimento."
+        )
+
+
+# ---------------------------------------------------------------------------
 # results.csv loading with PASS + compatible_set existence filter
 # ---------------------------------------------------------------------------
 
@@ -269,8 +310,8 @@ def run_experiment(
     out_root = resolve_out_root("runs")
     validate_run_id(run_id, out_root)
     require_run_valid(out_root, run_id)
-    require_run_valid(out_root, batch_220)
-    require_run_valid(out_root, batch_221)
+    _require_batch_pass(out_root, batch_220, batch_results_relpath)
+    _require_batch_pass(out_root, batch_221, batch_results_relpath)
 
     run_dir = out_root / run_id
 
