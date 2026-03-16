@@ -762,6 +762,7 @@ CONTRACTS: dict[str, StageContract] = {
         ],
         upstream_stages=[
             "experiment/phase2c_support_ontology_basis",
+            "s5_aggregate",
             "experiment/phase3_weight_policy_basis",
             "experiment/phase4_renyi_diversity_baseline",
         ],

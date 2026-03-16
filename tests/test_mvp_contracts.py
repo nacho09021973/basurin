@@ -57,6 +57,7 @@ class TestContractRegistry:
                        "experiment/phase3_weight_policy_basis",
                        "experiment/phase4_renyi_diversity_baseline",
                        "experiment/phase4b_renyi_policy_comparison",
+                       "experiment/phase5_temperature_sweep",
                        "psd_extract",
                        "experiment_ex8_area_consistency",
                        "s4g_mode220_geometry_filter", "s4h_mode221_geometry_filter",
