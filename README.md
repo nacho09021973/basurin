@@ -24,6 +24,30 @@ El repositorio prioriza:
 - La resolucion de la raiz de salida debe hacerse con `basurin_io.resolve_out_root("runs")`.
 - El documento de rutas operativo sigue siendo [`docs/readme_rutas.md`](docs/readme_rutas.md).
 
+## Mapa operativo por fases
+
+Para evitar ambigüedad sobre qué hace cada fase, qué artefactos produce y qué gate habilita el siguiente paso, el proyecto mantiene documentación específica por fase:
+
+- [Fase 1 — Preparación, auditoría LOSC/t0 y entrada de eventos](docs/fases/fase_1_readme.md)
+- [Fase 2 — Poblaciones offline batch (220 / 221)](docs/fases/fase_2_readme.md)
+- [Fase 3 — Intersección 220 vs 221 y soporte común](docs/fases/fase_3_readme.md)
+- [Fase 4 — E5: área del horizonte y entropía en soporte físico común](docs/fases/fase_4_readme.md)
+
+### Regla de uso
+
+Antes de ejecutar una fase o interpretar sus outputs:
+
+1. leer su `fase_<n>_readme.md`
+2. identificar los `run_id` canónicos vigentes
+3. verificar el gate de salida de la fase anterior
+4. no reutilizar outputs históricos si su upstream ya fue corregido
+
+### Estado actual
+
+- La fase 2 dispone ya de batches canónicos corregidos para 220 y 221.
+- La fase 3 tiene diagnóstico físico correcto, pero todavía requiere formalización canónica del script/contrato.
+- La fase 4 (E5) es rehacible, pero debe reconstruirse con los batches corregidos y con la definición actual de `phys_key`.
+
 ## Leyenda de estado
 
 - **Implementado**: existe entrypoint/contrato/artefacto en el repositorio actual.
