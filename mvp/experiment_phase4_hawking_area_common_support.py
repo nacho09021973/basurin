@@ -272,6 +272,8 @@ def run_experiment(
         "batch_220": batch_220,
         "batch_221": batch_221,
         "created_utc": utc_now_iso(),
+        "discriminative_filter": False,
+        "filter_role": "domain_admissibility_only",
         "gating": {
             "host_run_valid": True,
             "batch_220_pass": True,
