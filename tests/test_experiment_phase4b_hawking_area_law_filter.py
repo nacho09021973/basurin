@@ -1,17 +1,27 @@
 """Regression tests for mvp/experiment_phase4b_hawking_area_law_filter.py.
 
 Coverage:
- 1. test_phase4b_requires_host_run_valid_pass
- 2. test_phase4b_requires_phase4_upstream_present_and_pass
- 3. test_phase4b_requires_initial_area_csv_with_required_columns
- 4. test_phase4b_requires_all_event_ids_present
- 5. test_phase4b_rejects_non_numeric_or_non_finite_A_initial
- 6. test_phase4b_applies_relational_filter_A_final_ge_A_initial
- 7. test_phase4b_preserves_phys_key_columns
- 8. test_phase4b_writes_only_under_runs_host_run_experiment_phase4b
- 9. test_phase4b_logs_out_root_stage_dir_outputs_dir_stage_summary_manifest
-10. test_phase4b_summary_declares_discriminative_filter
-11. test_phase4_current_summary_can_declare_non_discriminative_role
+ 1. test_phase4b_requires_host_run_valid_pass (2 variants)
+ 2. test_phase4b_requires_phase4_upstream_present_and_pass (3 variants)
+ 3. test_phase4b_requires_gwtc_posteriors_dir_present
+ 4. test_phase4b_requires_one_posterior_file_per_event
+ 5. test_phase4b_rejects_missing_or_empty_samples
+ 6. test_phase4b_rejects_missing_required_sample_fields
+ 7. test_phase4b_rejects_non_numeric_or_non_finite_sample_values
+ 8. test_phase4b_rejects_invalid_component_spin_abs_gt_1
+ 9. test_phase4b_derives_initial_area_quantiles_from_samples
+10. test_phase4b_uses_sample_median_as_default_initial_area_estimator
+11. test_phase4b_applies_relational_filter_A_final_ge_A_initial
+12. test_phase4b_preserves_phys_key_columns
+13. test_phase4b_writes_only_under_runs_host_run_experiment_phase4b
+14. test_phase4b_logs_out_root_stage_dir_outputs_dir_stage_summary_manifest
+15. test_phase4b_summary_declares_historical_area_theorem_runs_not_used
+16. test_phase4b_does_not_require_manual_per_event_initial_area_csv
+17. test_phase4b_summary_declares_discriminative_filter
+18. test_phase4_current_summary_can_declare_non_discriminative_role
+19. test_phase4_live_stage_summary_declares_non_discriminative
+20. test_phase4b_hawking_filter_summary_schema
+21. test_phase4b_hawking_filter_support_summary_schema
 """
 from __future__ import annotations
 
@@ -25,6 +35,8 @@ import pytest
 
 from mvp.experiment_phase4b_hawking_area_law_filter import (
     REQUIRED_UNITS,
+    _derive_initial_area_stats,
+    _kerr_area,
     run_experiment,
 )
 
@@ -104,20 +116,33 @@ def _mk_phase4_upstream(
     return phase4_dir
 
 
-def _mk_initial_area_csv(
+def _mk_gwtc_posteriors(
     run_dir: Path,
-    rows: list[dict[str, Any]],
+    event_samples: dict[str, list[dict]],
 ) -> Path:
-    ext_dir = run_dir / "external_inputs" / "hawking_area_initial"
-    ext_dir.mkdir(parents=True, exist_ok=True)
-    path = ext_dir / "per_event_initial_area.csv"
-    fields = ["event_id", "A_initial", "source_ref", "method", "units"]
-    _write_csv(path, rows, fields)
-    return path
+    """Create gwtc_posteriors/<event_id>.json files under external_inputs/."""
+    posteriors_dir = run_dir / "external_inputs" / "gwtc_posteriors"
+    posteriors_dir.mkdir(parents=True, exist_ok=True)
+    for eid, samples in event_samples.items():
+        data = {"event_id": eid, "samples": samples}
+        (posteriors_dir / f"{eid}.json").write_text(
+            json.dumps(data, indent=2), encoding="utf-8"
+        )
+    return posteriors_dir
+
+
+def _default_samples() -> list[dict]:
+    """Default IMR posterior samples for one event.
+
+    m1=5, m2=3, chi1=0.1, chi2=0.1 →
+    A_initial ≈ 8π*25*(1+√0.99) + 8π*9*(1+√0.99) ≈ 1706 M_sun²
+    (much less than the final areas in _default_hawking_rows).
+    """
+    return [{"m1_source": 5.0, "m2_source": 3.0, "chi1": 0.1, "chi2": 0.1}]
 
 
 def _default_hawking_rows() -> list[dict[str, Any]]:
-    """Two rows for event E1: both should pass (A_final > 1.0)."""
+    """Two rows for event E1: both should pass (A_final >> A_initial≈1706)."""
     M1, chi1 = 10.0, 0.5
     A1 = _hawking_area(M1, chi1)
     S1 = A1 / 4.0
@@ -136,23 +161,11 @@ def _default_hawking_rows() -> list[dict[str, Any]]:
     ]
 
 
-def _default_initial_rows(A_initial: float = 1.0) -> list[dict[str, Any]]:
-    return [
-        {
-            "event_id": "E1",
-            "A_initial": A_initial,
-            "source_ref": "test_ref",
-            "method": "test_method",
-            "units": REQUIRED_UNITS,
-        }
-    ]
-
-
 def _full_setup(
     tmp_path: Path,
     run_id: str = "run_host",
     hawking_rows: list[dict[str, Any]] | None = None,
-    initial_rows: list[dict[str, Any]] | None = None,
+    event_samples: dict[str, list[dict]] | None = None,
 ) -> Path:
     """Create a fully valid setup and return run_dir."""
     run_dir = _mk_run_valid(tmp_path, run_id)
@@ -160,10 +173,9 @@ def _full_setup(
         run_dir,
         hawking_rows if hawking_rows is not None else _default_hawking_rows(),
     )
-    _mk_initial_area_csv(
-        run_dir,
-        initial_rows if initial_rows is not None else _default_initial_rows(),
-    )
+    if event_samples is None:
+        event_samples = {"E1": _default_samples()}
+    _mk_gwtc_posteriors(run_dir, event_samples)
     return run_dir
 
 
@@ -207,8 +219,7 @@ def test_phase4b_requires_phase4_upstream_present(
 ) -> None:
     """Abort if phase4 stage_summary.json is absent."""
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
-    run_dir = _mk_run_valid(tmp_path, "run_no_p4")
-    # No phase4 upstream created at all
+    _mk_run_valid(tmp_path, "run_no_p4")
 
     with pytest.raises(FileNotFoundError):
         run_experiment(run_id="run_no_p4")
@@ -221,7 +232,7 @@ def test_phase4b_requires_phase4_upstream_verdict_pass(
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
     run_dir = _mk_run_valid(tmp_path, "run_p4fail")
     _mk_phase4_upstream(run_dir, _default_hawking_rows(), verdict="FAIL")
-    _mk_initial_area_csv(run_dir, _default_initial_rows())
+    _mk_gwtc_posteriors(run_dir, {"E1": _default_samples()})
 
     with pytest.raises(RuntimeError, match="not PASS"):
         run_experiment(run_id="run_p4fail")
@@ -234,8 +245,7 @@ def test_phase4b_requires_phase4_hawking_area_csv(
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
     run_dir = _mk_run_valid(tmp_path, "run_no_hawk")
     _mk_phase4_upstream(run_dir, _default_hawking_rows())
-    _mk_initial_area_csv(run_dir, _default_initial_rows())
-    # Remove the hawking area CSV
+    _mk_gwtc_posteriors(run_dir, {"E1": _default_samples()})
     (run_dir / "experiment" / _PHASE4_NAME / "outputs" / "per_event_hawking_area.csv").unlink()
 
     with pytest.raises(FileNotFoundError):
@@ -243,79 +253,34 @@ def test_phase4b_requires_phase4_hawking_area_csv(
 
 
 # ---------------------------------------------------------------------------
-# Test 3 – initial area CSV schema validation
+# Test 3 – gwtc_posteriors directory must be present
 # ---------------------------------------------------------------------------
 
 
-def test_phase4b_requires_initial_area_csv_exists(
+def test_phase4b_requires_gwtc_posteriors_dir_present(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Abort if per_event_initial_area.csv is missing entirely."""
+    """Abort if external_inputs/gwtc_posteriors/ directory is missing."""
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
-    run_dir = _mk_run_valid(tmp_path, "run_no_init")
+    run_dir = _mk_run_valid(tmp_path, "run_no_post")
     _mk_phase4_upstream(run_dir, _default_hawking_rows())
-    # No initial area CSV
+    # No posteriors directory created
 
-    with pytest.raises(FileNotFoundError):
-        run_experiment(run_id="run_no_init")
-
-
-@pytest.mark.parametrize("missing_col", ["event_id", "A_initial", "source_ref", "method", "units"])
-def test_phase4b_requires_initial_area_csv_with_required_columns(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing_col: str
-) -> None:
-    """Abort if any required column is missing from per_event_initial_area.csv."""
-    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
-    run_dir = _mk_run_valid(tmp_path, f"run_no_{missing_col}")
-    _mk_phase4_upstream(run_dir, _default_hawking_rows())
-
-    # Build row with the required column removed
-    row = {
-        "event_id": "E1",
-        "A_initial": 1.0,
-        "source_ref": "ref",
-        "method": "fit",
-        "units": REQUIRED_UNITS,
-    }
-    del row[missing_col]
-    fields = [c for c in ["event_id", "A_initial", "source_ref", "method", "units"]
-              if c != missing_col]
-    ext_dir = run_dir / "external_inputs" / "hawking_area_initial"
-    ext_dir.mkdir(parents=True, exist_ok=True)
-    _write_csv(ext_dir / "per_event_initial_area.csv", [row], fields)
-
-    with pytest.raises(ValueError, match="missing required columns"):
-        run_experiment(run_id=f"run_no_{missing_col}")
-
-
-def test_phase4b_rejects_incompatible_units(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Abort if units value is not REQUIRED_UNITS."""
-    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
-    run_dir = _mk_run_valid(tmp_path, "run_bad_units")
-    _mk_phase4_upstream(run_dir, _default_hawking_rows())
-    _mk_initial_area_csv(
-        run_dir,
-        [{"event_id": "E1", "A_initial": 1.0, "source_ref": "r", "method": "m",
-          "units": "wrong_units"}],
-    )
-
-    with pytest.raises(ValueError, match="incompatible"):
-        run_experiment(run_id="run_bad_units")
+    with pytest.raises(FileNotFoundError, match="gwtc_posteriors"):
+        run_experiment(run_id="run_no_post")
 
 
 # ---------------------------------------------------------------------------
-# Test 4 – all event_ids must be present in initial area CSV
+# Test 4 – one posterior file per event required
 # ---------------------------------------------------------------------------
 
 
-def test_phase4b_requires_all_event_ids_present(
+def test_phase4b_requires_one_posterior_file_per_event(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Abort if any event_id in phase4 hawking rows lacks an A_initial entry."""
+    """Abort if a required posterior file is missing for one event."""
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
-    run_dir = _mk_run_valid(tmp_path, "run_missing_eid")
+    run_dir = _mk_run_valid(tmp_path, "run_miss_ev")
 
     # Phase4 has events E1 and E2
     rows = _default_hawking_rows()
@@ -327,36 +292,118 @@ def test_phase4b_requires_all_event_ids_present(
     })
     _mk_phase4_upstream(run_dir, rows)
 
-    # Initial area CSV only has E1 (missing E2)
-    _mk_initial_area_csv(run_dir, _default_initial_rows())
+    # Only provide posterior for E1, missing E2
+    _mk_gwtc_posteriors(run_dir, {"E1": _default_samples()})
 
-    with pytest.raises(ValueError, match="Missing A_initial"):
-        run_experiment(run_id="run_missing_eid")
+    with pytest.raises(FileNotFoundError):
+        run_experiment(run_id="run_miss_ev")
 
 
 # ---------------------------------------------------------------------------
-# Test 5 – reject non-numeric or non-finite A_initial
+# Test 5 – reject missing or empty samples
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("bad_val", ["not_a_number", "nan", "inf", "-inf", ""])
-def test_phase4b_rejects_non_numeric_or_non_finite_A_initial(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad_val: str
+@pytest.mark.parametrize("bad_samples,exc_type", [
+    ([], ValueError),
+    ("not_a_list", ValueError),
+])
+def test_phase4b_rejects_missing_or_empty_samples(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    bad_samples: Any,
+    exc_type: type,
 ) -> None:
-    """Abort if A_initial is non-numeric or non-finite."""
+    """Abort if samples is empty or not a list."""
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
-    run_id = f"run_bad_a_{bad_val.replace('-', 'neg').replace('.', 'dot')}"
+    run_dir = _mk_run_valid(tmp_path, "run_empty_samp")
+    _mk_phase4_upstream(run_dir, _default_hawking_rows())
+
+    posteriors_dir = run_dir / "external_inputs" / "gwtc_posteriors"
+    posteriors_dir.mkdir(parents=True, exist_ok=True)
+    (posteriors_dir / "E1.json").write_text(
+        json.dumps({"event_id": "E1", "samples": bad_samples}), encoding="utf-8"
+    )
+
+    with pytest.raises((ValueError, TypeError)):
+        run_experiment(run_id="run_empty_samp")
+
+
+def test_phase4b_rejects_missing_samples_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Abort if posterior JSON has no 'samples' key."""
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    run_dir = _mk_run_valid(tmp_path, "run_no_samp_key")
+    _mk_phase4_upstream(run_dir, _default_hawking_rows())
+
+    posteriors_dir = run_dir / "external_inputs" / "gwtc_posteriors"
+    posteriors_dir.mkdir(parents=True, exist_ok=True)
+    (posteriors_dir / "E1.json").write_text(
+        json.dumps({"event_id": "E1"}), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="samples"):
+        run_experiment(run_id="run_no_samp_key")
+
+
+# ---------------------------------------------------------------------------
+# Test 6 – reject missing required sample fields
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("missing_field", ["m1_source", "m2_source", "chi1", "chi2"])
+def test_phase4b_rejects_missing_required_sample_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing_field: str
+) -> None:
+    """Abort if any required sample field is absent."""
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    run_id = f"run_no_{missing_field}"
     run_dir = _mk_run_valid(tmp_path, run_id)
     _mk_phase4_upstream(run_dir, _default_hawking_rows())
 
-    ext_dir = run_dir / "external_inputs" / "hawking_area_initial"
-    ext_dir.mkdir(parents=True, exist_ok=True)
-    fields = ["event_id", "A_initial", "source_ref", "method", "units"]
-    _write_csv(
-        ext_dir / "per_event_initial_area.csv",
-        [{"event_id": "E1", "A_initial": bad_val, "source_ref": "r",
-          "method": "m", "units": REQUIRED_UNITS}],
-        fields,
+    sample = {"m1_source": 5.0, "m2_source": 3.0, "chi1": 0.1, "chi2": 0.1}
+    del sample[missing_field]
+
+    posteriors_dir = run_dir / "external_inputs" / "gwtc_posteriors"
+    posteriors_dir.mkdir(parents=True, exist_ok=True)
+    (posteriors_dir / "E1.json").write_text(
+        json.dumps({"event_id": "E1", "samples": [sample]}), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match=missing_field):
+        run_experiment(run_id=run_id)
+
+
+# ---------------------------------------------------------------------------
+# Test 7 – reject non-numeric or non-finite sample values
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("field,bad_val", [
+    ("m1_source", "not_a_number"),
+    ("m2_source", "nan"),
+    ("chi1", "inf"),
+    ("chi2", "-inf"),
+    ("m1_source", ""),
+])
+def test_phase4b_rejects_non_numeric_or_non_finite_sample_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, bad_val: str
+) -> None:
+    """Abort if any sample field is non-numeric or non-finite."""
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    safe_val = bad_val.replace("-", "neg").replace(".", "dot").replace("_", "u")
+    run_id = f"run_badval_{field}_{safe_val}"[:64]
+    run_dir = _mk_run_valid(tmp_path, run_id)
+    _mk_phase4_upstream(run_dir, _default_hawking_rows())
+
+    sample: dict[str, Any] = {"m1_source": 5.0, "m2_source": 3.0, "chi1": 0.1, "chi2": 0.1}
+    sample[field] = bad_val
+
+    posteriors_dir = run_dir / "external_inputs" / "gwtc_posteriors"
+    posteriors_dir.mkdir(parents=True, exist_ok=True)
+    (posteriors_dir / "E1.json").write_text(
+        json.dumps({"event_id": "E1", "samples": [sample]}), encoding="utf-8"
     )
 
     with pytest.raises(ValueError):
@@ -364,7 +411,116 @@ def test_phase4b_rejects_non_numeric_or_non_finite_A_initial(
 
 
 # ---------------------------------------------------------------------------
-# Test 6 – relational filter A_final >= A_initial
+# Test 8 – reject invalid component spin |chi| > 1
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("field,bad_spin", [
+    ("chi1", 1.001),
+    ("chi2", -1.5),
+])
+def test_phase4b_rejects_invalid_component_spin_abs_gt_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, bad_spin: float
+) -> None:
+    """Abort if |chi1| > 1 or |chi2| > 1 in any sample."""
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    run_id = f"run_badspin_{field}"
+    run_dir = _mk_run_valid(tmp_path, run_id)
+    _mk_phase4_upstream(run_dir, _default_hawking_rows())
+
+    sample: dict[str, Any] = {"m1_source": 5.0, "m2_source": 3.0, "chi1": 0.1, "chi2": 0.1}
+    sample[field] = bad_spin
+
+    posteriors_dir = run_dir / "external_inputs" / "gwtc_posteriors"
+    posteriors_dir.mkdir(parents=True, exist_ok=True)
+    (posteriors_dir / "E1.json").write_text(
+        json.dumps({"event_id": "E1", "samples": [sample]}), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError):
+        run_experiment(run_id=run_id)
+
+
+# ---------------------------------------------------------------------------
+# Test 9 – derives initial area quantiles from samples
+# ---------------------------------------------------------------------------
+
+
+def test_phase4b_derives_initial_area_quantiles_from_samples() -> None:
+    """_derive_initial_area_stats returns correct p10/p50/p90 and n_samples."""
+    # 3 samples with known A_initial values
+    samples = [
+        {"m1_source": 5.0, "m2_source": 3.0, "chi1": 0.0, "chi2": 0.0},  # A1+A2 = small
+        {"m1_source": 10.0, "m2_source": 6.0, "chi1": 0.0, "chi2": 0.0},  # medium
+        {"m1_source": 20.0, "m2_source": 12.0, "chi1": 0.0, "chi2": 0.0},  # large
+    ]
+    # Expected: A = 16*pi*M^2 for chi=0
+    expected = sorted([
+        16 * math.pi * (5**2 + 3**2),
+        16 * math.pi * (10**2 + 6**2),
+        16 * math.pi * (20**2 + 12**2),
+    ])
+
+    stats = _derive_initial_area_stats("E_test", samples)
+
+    assert stats["n_samples"] == 3
+    assert abs(stats["p50"] - expected[1]) < 1e-6  # median is middle value
+    assert stats["p10"] <= stats["p50"] <= stats["p90"]
+
+
+# ---------------------------------------------------------------------------
+# Test 10 – uses sample median as default initial area estimator
+# ---------------------------------------------------------------------------
+
+
+def test_phase4b_uses_sample_median_as_default_initial_area_estimator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A_initial used in filter equals p50 of the sample distribution."""
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+
+    # 3 samples: sorted A_initial values are [low, mid, high]
+    # Median = mid value
+    samples = [
+        {"m1_source": 1.0, "m2_source": 1.0, "chi1": 0.0, "chi2": 0.0},
+        {"m1_source": 5.0, "m2_source": 5.0, "chi1": 0.0, "chi2": 0.0},
+        {"m1_source": 20.0, "m2_source": 20.0, "chi1": 0.0, "chi2": 0.0},
+    ]
+    # A_initial for mid sample: 2 * 16*pi*25 = 800*pi ≈ 2513
+    a_mid = 2 * 16 * math.pi * 25
+
+    # Use a large final area so the row passes regardless
+    A_final = 8 * _hawking_area(30.0, 0.1)
+    run_dir = _full_setup(
+        tmp_path, "run_median",
+        hawking_rows=[{
+            "event_id": "E1", "family": "kerr", "provenance": "fits",
+            "M_solar": 30.0, "chi": 0.1, "A": A_final, "S": A_final / 4.0,
+            "hawking_pass": True,
+        }],
+        event_samples={"E1": samples},
+    )
+
+    result = run_experiment(run_id="run_median")
+    ss = result["stage_summary"]
+
+    # stage_summary must declare estimator
+    assert ss["initial_area_definition"]["estimator"] == "sample_median"
+
+    # Check per_event_initial_area_from_posteriors.csv has p50 matching a_mid
+    exp_dir = tmp_path / "run_median" / "experiment" / _PHASE4B_NAME
+    derived_csv = exp_dir / "outputs" / "per_event_initial_area_from_posteriors.csv"
+    rows = list(csv.DictReader(derived_csv.open(encoding="utf-8")))
+    assert len(rows) == 1
+    assert abs(float(rows[0]["A_initial_p50"]) - a_mid) < 1e-3
+
+    # hawking_filter_summary declares estimator
+    hfs = result["hawking_filter_summary"]
+    assert hfs["initial_area_estimator"] == "sample_median"
+
+
+# ---------------------------------------------------------------------------
+# Test 11 – relational filter A_final >= A_initial
 # ---------------------------------------------------------------------------
 
 
@@ -374,16 +530,18 @@ def test_phase4b_applies_relational_filter_A_final_ge_A_initial(
     """Some rows pass (A_final >= A_initial) and some fail (A_final < A_initial)."""
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
 
-    # Row 1: M=10, chi=0.5 → A≈4691  (large, will PASS for A_initial=3000)
-    # Row 2: M=5,  chi=0.3 → A≈1228  (small, will FAIL for A_initial=3000)
+    # Row 1: M=10, chi=0.5 → A_final ≈ 4691  (PASS for A_initial≈3041)
+    # Row 2: M=5,  chi=0.3 → A_final ≈ 1228  (FAIL for A_initial≈3041)
     M1, chi1 = 10.0, 0.5
-    A1 = _hawking_area(M1, chi1)  # ≈4691
+    A1 = _hawking_area(M1, chi1)
     M2, chi2 = 5.0, 0.3
-    A2 = _hawking_area(M2, chi2)  # ≈1228
-    A_init = 3000.0  # between A2 and A1
+    A2 = _hawking_area(M2, chi2)
 
-    assert A1 > A_init  # row1 passes
-    assert A2 < A_init  # row2 fails
+    # Posterior sample that gives A_initial_p50 between A2 and A1
+    # m1=m2=5.5, chi=0 → A_initial = 2 * 16*pi*30.25 ≈ 3041
+    a_init_p50 = 2 * 16 * math.pi * 5.5**2
+    assert A1 > a_init_p50  # row1 passes
+    assert A2 < a_init_p50  # row2 fails
 
     hawking_rows = [
         {
@@ -397,14 +555,12 @@ def test_phase4b_applies_relational_filter_A_final_ge_A_initial(
             "A": A2, "S": A2 / 4.0, "hawking_pass": True,
         },
     ]
+    samples = [{"m1_source": 5.5, "m2_source": 5.5, "chi1": 0.0, "chi2": 0.0}]
 
     run_dir = _full_setup(
         tmp_path, "run_filter",
         hawking_rows=hawking_rows,
-        initial_rows=[{
-            "event_id": "E1", "A_initial": A_init,
-            "source_ref": "ref", "method": "fit", "units": REQUIRED_UNITS,
-        }],
+        event_samples={"E1": samples},
     )
 
     result = run_experiment(run_id="run_filter")
@@ -416,7 +572,6 @@ def test_phase4b_applies_relational_filter_A_final_ge_A_initial(
     assert hfs["n_rows_hawking_pass"] < hfs["n_rows_input_common"]
     assert hfs["n_rows_hawking_fail"] > 0
 
-    # Verify filter CSV
     exp_dir = tmp_path / "run_filter" / "experiment" / _PHASE4B_NAME
     filter_csv = exp_dir / "outputs" / "per_event_hawking_filter.csv"
     rows = list(csv.DictReader(filter_csv.open(encoding="utf-8")))
@@ -428,14 +583,12 @@ def test_phase4b_applies_relational_filter_A_final_ge_A_initial(
     assert len(fail_rows) == 1
     assert abs(float(pass_rows[0]["M_solar"]) - M1) < 1e-9
     assert abs(float(fail_rows[0]["M_solar"]) - M2) < 1e-9
-
-    # area_gap signs
-    assert float(pass_rows[0]["area_gap"]) > 0.0   # A_final > A_initial
-    assert float(fail_rows[0]["area_gap"]) < 0.0   # A_final < A_initial
+    assert float(pass_rows[0]["area_gap"]) > 0.0
+    assert float(fail_rows[0]["area_gap"]) < 0.0
 
 
 # ---------------------------------------------------------------------------
-# Test 7 – phys_key columns preserved
+# Test 12 – phys_key columns preserved
 # ---------------------------------------------------------------------------
 
 
@@ -457,7 +610,6 @@ def test_phase4b_preserves_phys_key_columns(
     for r in rows:
         for col in ("family", "provenance", "M_solar", "chi"):
             assert col in r, f"Missing phys_key column {col!r} in filter CSV"
-        # phys_key fields must be non-empty
         assert r["family"].strip()
         assert r["provenance"].strip()
         assert r["M_solar"].strip()
@@ -465,7 +617,7 @@ def test_phase4b_preserves_phys_key_columns(
 
 
 # ---------------------------------------------------------------------------
-# Test 8 – writes only under runs/<host_run>/experiment/phase4b...
+# Test 13 – writes only under runs/<host_run>/experiment/phase4b...
 # ---------------------------------------------------------------------------
 
 
@@ -484,8 +636,8 @@ def test_phase4b_writes_only_under_runs_host_run_experiment_phase4b(
     assert (exp_dir / "outputs" / "per_event_hawking_filter.csv").exists()
     assert (exp_dir / "outputs" / "hawking_filter_summary.json").exists()
     assert (exp_dir / "outputs" / "hawking_filter_support_summary.json").exists()
+    assert (exp_dir / "outputs" / "per_event_initial_area_from_posteriors.csv").exists()
 
-    # No other directory should contain phase4b experiment outputs
     for p in tmp_path.iterdir():
         if p.is_dir() and p.name != "run_isolation":
             assert not (p / "experiment" / _PHASE4B_NAME).exists(), (
@@ -494,7 +646,7 @@ def test_phase4b_writes_only_under_runs_host_run_experiment_phase4b(
 
 
 # ---------------------------------------------------------------------------
-# Test 9 – entrypoint logging
+# Test 14 – entrypoint logging
 # ---------------------------------------------------------------------------
 
 
@@ -518,7 +670,58 @@ def test_phase4b_logs_out_root_stage_dir_outputs_dir_stage_summary_manifest(
 
 
 # ---------------------------------------------------------------------------
-# Test 10 – stage_summary declares discriminative filter
+# Test 15 – stage_summary declares historical runs not used
+# ---------------------------------------------------------------------------
+
+
+def test_phase4b_summary_declares_historical_area_theorem_runs_not_used(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """stage_summary notes must explicitly state historical runs are not used."""
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    _full_setup(tmp_path, "run_hist")
+    result = run_experiment(run_id="run_hist")
+
+    notes = " ".join(result["stage_summary"].get("notes", []))
+    assert "historical" in notes.lower() or "analysis_area_theorem" in notes.lower(), (
+        "stage_summary.notes must mention historical runs quarantine"
+    )
+
+    # Also verify in the written JSON
+    exp_dir = tmp_path / "run_hist" / "experiment" / _PHASE4B_NAME
+    ss = json.loads((exp_dir / "stage_summary.json").read_text(encoding="utf-8"))
+    notes_written = " ".join(ss.get("notes", []))
+    assert "historical" in notes_written.lower() or "analysis_area_theorem" in notes_written.lower()
+
+
+# ---------------------------------------------------------------------------
+# Test 16 – does not require manual per_event_initial_area.csv
+# ---------------------------------------------------------------------------
+
+
+def test_phase4b_does_not_require_manual_per_event_initial_area_csv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Run must succeed without any manual per_event_initial_area.csv present."""
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    run_dir = _full_setup(tmp_path, "run_no_manual_csv")
+
+    # Explicitly verify the old CSV location does NOT exist
+    old_csv = run_dir / "external_inputs" / "hawking_area_initial" / "per_event_initial_area.csv"
+    assert not old_csv.exists(), "Test setup must not create the old manual CSV"
+
+    # Must succeed without it
+    result = run_experiment(run_id="run_no_manual_csv")
+    assert result["stage_summary"]["verdict"] == "PASS"
+
+    # The derived CSV is an output, not an input
+    exp_dir = run_dir / "experiment" / _PHASE4B_NAME
+    derived_csv = exp_dir / "outputs" / "per_event_initial_area_from_posteriors.csv"
+    assert derived_csv.exists(), "Derived CSV must be written as output"
+
+
+# ---------------------------------------------------------------------------
+# Test 17 – stage_summary declares discriminative filter
 # ---------------------------------------------------------------------------
 
 
@@ -537,25 +740,29 @@ def test_phase4b_summary_declares_discriminative_filter(
     assert ss["discriminative_filter"] is True
     assert "discriminative" in ss["filter_role"].lower()
 
-    # notes must mention discriminative
     notes = " ".join(ss.get("notes", []))
     assert "discriminative" in notes.lower()
 
-    # filter_definition contract
     fd = ss["filter_definition"]
     assert fd["rule"] == "A_final >= A_initial"
     assert fd["tolerance"] == 0.0
     assert fd["stable_identifier"] == "phys_key"
 
-    # gating sub-fields
+    # New gating fields (posteriors-based)
     for gf in [
         "host_run_valid", "phase4_upstream_present", "phase4_upstream_pass",
-        "initial_area_input_present", "initial_area_schema_valid",
-        "initial_area_units_compatible",
+        "gwtc_posteriors_present", "gwtc_posteriors_schema_valid",
+        "gwtc_posteriors_event_coverage_complete",
     ]:
         assert ss["gating"][gf] is True, f"gating.{gf} must be True"
 
-    # metrics
+    # initial_area_definition
+    iad = ss["initial_area_definition"]
+    assert iad["source"] == "gwtc_posteriors"
+    assert iad["estimator"] == "sample_median"
+    assert "8*pi" in iad["component_formula"]
+    assert iad["units"] == REQUIRED_UNITS
+
     for mf in [
         "n_rows_input_common", "n_rows_hawking_pass", "n_rows_hawking_fail",
         "n_events_total", "n_events_with_nonempty_hawking",
@@ -565,40 +772,35 @@ def test_phase4b_summary_declares_discriminative_filter(
 
 
 # ---------------------------------------------------------------------------
-# Test 11 – Phase4 current stage_summary declares non-discriminative role
+# Test 18 – Phase4 current stage_summary declares non-discriminative role
 # ---------------------------------------------------------------------------
 
 
 def test_phase4_current_summary_can_declare_non_discriminative_role(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Phase4 stage_summary must declare filter_role=domain_admissibility_only
-    and discriminative_filter=False to distinguish itself from Phase4B.
-    """
+    """Phase4 stage_summary must declare filter_role=domain_admissibility_only."""
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
     run_dir = _full_setup(tmp_path, "run_p4role")
 
-    # Check the stubbed phase4 stage_summary (written by _mk_phase4_upstream)
     ss_path = run_dir / "experiment" / _PHASE4_NAME / "stage_summary.json"
     ss = json.loads(ss_path.read_text(encoding="utf-8"))
 
-    assert ss.get("discriminative_filter") is False, (
-        "Phase4 stage_summary must declare discriminative_filter=False"
-    )
-    assert ss.get("filter_role") == "domain_admissibility_only", (
-        "Phase4 stage_summary must declare filter_role='domain_admissibility_only'"
-    )
+    assert ss.get("discriminative_filter") is False
+    assert ss.get("filter_role") == "domain_admissibility_only"
+
+
+# ---------------------------------------------------------------------------
+# Test 19 – live Phase4 declares non-discriminative
+# ---------------------------------------------------------------------------
 
 
 def test_phase4_live_stage_summary_declares_non_discriminative(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The live Phase4 module must write discriminative_filter=False
-    and filter_role=domain_admissibility_only in its stage_summary.
-
-    Uses a minimal invocation of Phase4's run_experiment directly.
-    """
+    """The live Phase4 module must write discriminative_filter=False."""
     import json as _json
+
     from mvp.experiment_phase4_hawking_area_common_support import (
         run_experiment as p4_run,
     )
@@ -637,21 +839,15 @@ def test_phase4_live_stage_summary_declares_non_discriminative(
 
     p4_run(run_id=host, batch_220=b220, batch_221=b221)
 
-    ss_path = (
-        tmp_path / host / "experiment" / _PHASE4_NAME / "stage_summary.json"
-    )
+    ss_path = tmp_path / host / "experiment" / _PHASE4_NAME / "stage_summary.json"
     ss = _json.loads(ss_path.read_text(encoding="utf-8"))
 
-    assert ss.get("discriminative_filter") is False, (
-        "Live Phase4 must declare discriminative_filter=False"
-    )
-    assert ss.get("filter_role") == "domain_admissibility_only", (
-        "Live Phase4 must declare filter_role='domain_admissibility_only'"
-    )
+    assert ss.get("discriminative_filter") is False
+    assert ss.get("filter_role") == "domain_admissibility_only"
 
 
 # ---------------------------------------------------------------------------
-# Additional contract: summary JSON schemas
+# Test 20 – hawking_filter_summary.json schema
 # ---------------------------------------------------------------------------
 
 
@@ -670,6 +866,7 @@ def test_phase4b_hawking_filter_summary_schema(
 
     for f in [
         "schema_version", "host_run", "source_phase4_experiment",
+        "initial_area_source", "initial_area_estimator",
         "filter_rule", "tolerance", "units",
         "n_rows_input_common", "n_rows_hawking_pass", "n_rows_hawking_fail",
         "pass_fraction", "n_events_total", "n_events_with_nonempty_hawking",
@@ -680,14 +877,21 @@ def test_phase4b_hawking_filter_summary_schema(
     assert hfs["schema_version"] == "hawking_filter_summary_v1"
     assert hfs["filter_rule"] == "A_final >= A_initial"
     assert hfs["units"] == REQUIRED_UNITS
+    assert hfs["initial_area_source"] == "external_inputs/gwtc_posteriors"
+    assert hfs["initial_area_estimator"] == "sample_median"
     for q in ("p10", "p50", "p90"):
         assert q in hfs["area_gap_quantiles"], f"Missing quantile {q!r}"
+
+
+# ---------------------------------------------------------------------------
+# Test 21 – hawking_filter_support_summary.json schema
+# ---------------------------------------------------------------------------
 
 
 def test_phase4b_hawking_filter_support_summary_schema(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """hawking_filter_support_summary.json must have schema_version and rows."""
+    """hawking_filter_support_summary.json must have schema_version, rows, and n_samples."""
     monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
     _full_setup(tmp_path, "run_supsummary")
     run_experiment(run_id="run_supsummary")
@@ -705,5 +909,6 @@ def test_phase4b_hawking_filter_support_summary_schema(
 
     for row in hfss["rows"]:
         for f in ["event_id", "n_input_rows", "n_pass_rows", "n_fail_rows",
-                  "pass_fraction", "empty_after_filter", "A_initial"]:
+                  "pass_fraction", "empty_after_filter", "A_initial", "n_samples"]:
             assert f in row, f"Missing field {f!r} in support_summary row"
+        assert isinstance(row["n_samples"], int) and row["n_samples"] > 0
