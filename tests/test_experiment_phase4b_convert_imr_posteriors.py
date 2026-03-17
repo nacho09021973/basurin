@@ -938,3 +938,87 @@ def test_stage_summary_explains_chain_phase3_phase4a_plus_external_imr_to_phase4
     assert ss["validation"]["schema_extractable"] is True
     assert ss["validation"]["numeric_samples_valid"] is True
     assert "m1_source" in ss["field_mapping"]
+
+
+# ---------------------------------------------------------------------------
+# Test 21: HDF5 substring match (IGWN-prefix filenames)
+# ---------------------------------------------------------------------------
+
+
+def test_convert_hdf5_matches_event_id_by_substring_when_filename_has_igwn_prefix(
+    tmp_path, monkeypatch
+):
+    """HDF5 file with IGWN-style prefix is located via substring match.
+
+    Fixture: IGWN-GWTC3p0-v2-GW200129_065458_PEDataRelease_mixed_cosmo.h5
+    event_id: GW200129_065458
+    Expected: event does NOT appear in missing_source_events.
+    """
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    run_dir = _mk_run_valid(tmp_path)
+    event_id = "GW200129_065458"
+    _mk_phase4_upstream(run_dir, [_hawking_row(event_id)])
+
+    source_dir = tmp_path / "sources"
+    igwn_filename = f"IGWN-GWTC3p0-v2-{event_id}_PEDataRelease_mixed_cosmo.h5"
+    _mk_hdf5_file(source_dir, event_id, filename=igwn_filename, rows=[(35.0, 28.0, 0.4, 0.1)])
+
+    result = run_experiment(
+        _RUN_ID,
+        source_dir=source_dir,
+        input_format="hdf5",
+        field_mapping=_HDF5_MAPPING,
+        mode="validate_only",
+        hdf5_dataset=_HDF5_DATASET,
+    )
+
+    inv = result["inventory"]
+    assert event_id not in inv["missing_source_events"], (
+        f"{event_id} must not be missing when file {igwn_filename!r} is present"
+    )
+    assert inv["n_missing"] == 0
+    cs = result["conversion_summary"]
+    # location note must mention substring_match
+    notes_text = " ".join(cs["notes"])
+    assert "substring_match" in notes_text or cs["schema_extractable"] is True
+
+
+# ---------------------------------------------------------------------------
+# Test 22: JSON substring match (filename with prefix)
+# ---------------------------------------------------------------------------
+
+
+def test_convert_json_matches_event_id_by_substring_when_filename_has_prefix(
+    tmp_path, monkeypatch
+):
+    """JSON file with a leading prefix is located via substring match.
+
+    Fixture: IGWN-GWTC3p0-v2-GW200224_222234_PEDataRelease_mixed_cosmo.json
+    event_id: GW200224_222234
+    Expected: event does NOT appear in missing_source_events.
+    """
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    run_dir = _mk_run_valid(tmp_path)
+    event_id = "GW200224_222234"
+    _mk_phase4_upstream(run_dir, [_hawking_row(event_id)])
+
+    source_dir = tmp_path / "sources"
+    igwn_filename = f"IGWN-GWTC3p0-v2-{event_id}_PEDataRelease_mixed_cosmo.json"
+    _mk_source_json(source_dir, event_id, [_source_sample()], filename=igwn_filename)
+
+    result = run_experiment(
+        _RUN_ID,
+        source_dir=source_dir,
+        input_format="json",
+        field_mapping=_default_mapping(),
+        mode="validate_only",
+    )
+
+    inv = result["inventory"]
+    assert event_id not in inv["missing_source_events"], (
+        f"{event_id} must not be missing when file {igwn_filename!r} is present"
+    )
+    assert inv["n_missing"] == 0
+    cs = result["conversion_summary"]
+    assert cs["schema_extractable"] is True
+    assert result["stage_summary"]["verdict"] == "PASS"

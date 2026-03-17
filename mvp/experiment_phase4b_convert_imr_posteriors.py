@@ -145,22 +145,32 @@ def _locate_source_file(
     """Find source file for event_id in source_dir.
 
     Returns (path_or_None, location_note).
-    First tries exact match <event_id>.<ext>, then glob <event_id>*.<ext>.
-    If event_id is derived from filename via glob, that is noted in location_note.
+    Tries in order (multiple matches at each level: sorted alphabetically, first chosen):
+      1. exact match:     <event_id>.<ext>
+      2. prefix match:    <event_id>*.<ext>
+      3. substring match: *<event_id>*.<ext>
     """
     ext = ".json" if input_format == "json" else ".h5"
 
-    # Exact match
+    # 1. Exact match
     exact = source_dir / f"{event_id}{ext}"
     if exact.exists():
         return exact, "exact_filename_match"
 
-    # Glob match (first alphabetical); event_id derived from filename
+    # 2. Prefix match: <event_id>*.<ext>
     matches = sorted(source_dir.glob(f"{event_id}*{ext}"))
     if matches:
         return (
             matches[0],
-            f"glob_match:{matches[0].name} (event_id derived from filename)",
+            f"prefix_match:{matches[0].name} (event_id is filename prefix)",
+        )
+
+    # 3. Substring match: *<event_id>*.<ext>
+    matches = sorted(source_dir.glob(f"*{event_id}*{ext}"))
+    if matches:
+        return (
+            matches[0],
+            f"substring_match:{matches[0].name} (event_id found as substring in filename)",
         )
 
     return None, "not_found"
