@@ -13,6 +13,16 @@ Coverage:
 10. test_convert_validate_only_writes_only_stage_outputs
 11. test_convert_logs_out_root_stage_dir_outputs_dir_stage_summary_manifest
 12. test_stage_summary_explains_chain_phase3_phase4a_plus_external_imr_to_phase4b
+
+HDF5 coverage:
+13. test_convert_hdf5_requires_hdf5_dataset_argument
+14. test_convert_hdf5_validate_only_fails_if_dataset_missing
+15. test_convert_hdf5_validate_only_fails_if_mapped_field_missing
+16. test_convert_hdf5_validate_only_fails_if_non_numeric_or_non_finite
+17. test_convert_hdf5_validate_only_passes_with_valid_structured_dataset
+18. test_convert_hdf5_write_output_creates_canonical_json
+19. test_convert_hdf5_respects_overwrite_existing_flag
+20. test_stage_summary_explains_chain_phase3_phase4a_plus_external_imr_to_phase4b_for_hdf5_path
 """
 from __future__ import annotations
 
@@ -22,11 +32,15 @@ import math
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
+
+h5py = pytest.importorskip("h5py", reason="h5py required for HDF5 tests")
 
 from mvp.experiment_phase4b_convert_imr_posteriors import (
     EXPERIMENT_NAME,
     PHASE4_UPSTREAM_NAME,
+    _extract_hdf5_samples,
     _extract_json_samples,
     _inventory_source,
     _locate_source_file,
@@ -596,3 +610,331 @@ def test_stage_summary_explains_chain_phase3_phase4a_plus_external_imr_to_phase4
 
     # Verdict
     assert ss["verdict"] == "PASS"
+
+
+# ===========================================================================
+# HDF5 shared helpers
+# ===========================================================================
+
+_HDF5_DATASET = "C01:Mixed/posterior_samples"
+_HDF5_FIELDS = ["mass_1_source", "mass_2_source", "a_1", "a_2"]
+_HDF5_MAPPING = {
+    "m1_source": "mass_1_source",
+    "m2_source": "mass_2_source",
+    "chi1": "a_1",
+    "chi2": "a_2",
+}
+
+
+def _mk_hdf5_file(
+    source_dir: Path,
+    event_id: str,
+    dataset_path: str = _HDF5_DATASET,
+    fields: list[str] | None = None,
+    rows: list[tuple] | None = None,
+    filename: str | None = None,
+) -> Path:
+    """Create a minimal HDF5 file with a compound (structured) dataset."""
+    if fields is None:
+        fields = _HDF5_FIELDS
+    if rows is None:
+        rows = [(30.0, 25.0, 0.3, 0.2)]
+
+    source_dir.mkdir(parents=True, exist_ok=True)
+    fname = filename or f"{event_id}.h5"
+    p = source_dir / fname
+
+    dt = np.dtype([(f, "f8") for f in fields])
+    arr = np.array(rows, dtype=dt)
+
+    with h5py.File(str(p), "w") as f:
+        f.create_dataset(dataset_path, data=arr)
+
+    return p
+
+
+# ---------------------------------------------------------------------------
+# Test 13: HDF5 requires --hdf5-dataset argument
+# ---------------------------------------------------------------------------
+
+
+def test_convert_hdf5_requires_hdf5_dataset_argument(tmp_path, monkeypatch):
+    """run_experiment raises ValueError if input_format=hdf5 and no hdf5_dataset."""
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    run_dir = _mk_run_valid(tmp_path)
+    _mk_phase4_upstream(run_dir, [_hawking_row("GW150914")])
+    source_dir = tmp_path / "sources"
+    _mk_hdf5_file(source_dir, "GW150914")
+
+    with pytest.raises(ValueError, match="hdf5-dataset"):
+        run_experiment(
+            _RUN_ID,
+            source_dir=source_dir,
+            input_format="hdf5",
+            field_mapping=_HDF5_MAPPING,
+            mode="validate_only",
+            hdf5_dataset=None,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test 14: HDF5 validate_only fails if dataset path missing inside HDF5 file
+# ---------------------------------------------------------------------------
+
+
+def test_convert_hdf5_validate_only_fails_if_dataset_missing(tmp_path, monkeypatch):
+    """Abort if the specified dataset path is absent from the HDF5 file."""
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    run_dir = _mk_run_valid(tmp_path)
+    _mk_phase4_upstream(run_dir, [_hawking_row("GW150914")])
+    source_dir = tmp_path / "sources"
+    # Create HDF5 with a different dataset than the one we'll request
+    _mk_hdf5_file(source_dir, "GW150914", dataset_path="C01:Other/posterior_samples")
+
+    with pytest.raises(RuntimeError, match="Cannot extract required fields"):
+        run_experiment(
+            _RUN_ID,
+            source_dir=source_dir,
+            input_format="hdf5",
+            field_mapping=_HDF5_MAPPING,
+            mode="validate_only",
+            hdf5_dataset="C01:Missing/posterior_samples",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test 15: HDF5 validate_only fails if mapped field is absent from dataset
+# ---------------------------------------------------------------------------
+
+
+def test_convert_hdf5_validate_only_fails_if_mapped_field_missing(
+    tmp_path, monkeypatch
+):
+    """Abort if a mapped source field is absent from the HDF5 dataset."""
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    run_dir = _mk_run_valid(tmp_path)
+    _mk_phase4_upstream(run_dir, [_hawking_row("GW150914")])
+    source_dir = tmp_path / "sources"
+    # HDF5 file is missing field 'a_2' (chi2 mapping)
+    _mk_hdf5_file(
+        source_dir,
+        "GW150914",
+        fields=["mass_1_source", "mass_2_source", "a_1"],
+        rows=[(30.0, 25.0, 0.3)],
+    )
+
+    with pytest.raises(RuntimeError, match="Cannot extract required fields"):
+        run_experiment(
+            _RUN_ID,
+            source_dir=source_dir,
+            input_format="hdf5",
+            field_mapping=_HDF5_MAPPING,
+            mode="validate_only",
+            hdf5_dataset=_HDF5_DATASET,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test 16: HDF5 validate_only fails if values are non-numeric or non-finite
+# ---------------------------------------------------------------------------
+
+
+def test_convert_hdf5_validate_only_fails_if_non_numeric_or_non_finite(
+    tmp_path, monkeypatch
+):
+    """Abort if any HDF5 sample value is NaN or Inf."""
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    run_dir = _mk_run_valid(tmp_path)
+    _mk_phase4_upstream(run_dir, [_hawking_row("GW150914")])
+    source_dir = tmp_path / "sources"
+
+    # Write HDF5 with a NaN in chi1
+    _mk_hdf5_file(
+        source_dir,
+        "GW150914",
+        rows=[(30.0, 25.0, float("nan"), 0.2)],
+    )
+
+    with pytest.raises(RuntimeError, match="Cannot extract required fields"):
+        run_experiment(
+            _RUN_ID,
+            source_dir=source_dir,
+            input_format="hdf5",
+            field_mapping=_HDF5_MAPPING,
+            mode="validate_only",
+            hdf5_dataset=_HDF5_DATASET,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test 17: HDF5 validate_only passes with valid structured dataset
+# ---------------------------------------------------------------------------
+
+
+def test_convert_hdf5_validate_only_passes_with_valid_structured_dataset(
+    tmp_path, monkeypatch
+):
+    """validate_only succeeds and reports correct summary for valid HDF5 input."""
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    run_dir = _mk_run_valid(tmp_path)
+    _mk_phase4_upstream(run_dir, [_hawking_row("GW150914")])
+    source_dir = tmp_path / "sources"
+    _mk_hdf5_file(source_dir, "GW150914", rows=[(35.0, 28.0, 0.4, 0.1)])
+
+    result = run_experiment(
+        _RUN_ID,
+        source_dir=source_dir,
+        input_format="hdf5",
+        field_mapping=_HDF5_MAPPING,
+        mode="validate_only",
+        hdf5_dataset=_HDF5_DATASET,
+    )
+
+    cs = result["conversion_summary"]
+    assert cs["input_format"] == "hdf5"
+    assert cs["hdf5_dataset"] == _HDF5_DATASET
+    assert cs["schema_extractable"] is True
+    assert cs["numeric_samples_valid"] is True
+    assert cs["field_mapping"] == _HDF5_MAPPING
+    assert result["stage_summary"]["verdict"] == "PASS"
+    assert result["stage_summary"]["hdf5_dataset"] == _HDF5_DATASET
+
+    # No canonical JSON written in validate_only mode
+    posteriors_dir = run_dir / "external_inputs" / "gwtc_posteriors"
+    assert not (posteriors_dir / "GW150914.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# Test 18: HDF5 write_output creates canonical JSON
+# ---------------------------------------------------------------------------
+
+
+def test_convert_hdf5_write_output_creates_canonical_json(tmp_path, monkeypatch):
+    """write_output mode writes correct canonical JSON from HDF5 input."""
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    run_dir = _mk_run_valid(tmp_path)
+    events = ["GW150914", "GW170814"]
+    _mk_phase4_upstream(run_dir, [_hawking_row(e) for e in events])
+    source_dir = tmp_path / "sources"
+    for eid in events:
+        _mk_hdf5_file(source_dir, eid, rows=[(35.0, 28.0, 0.4, 0.1)])
+
+    result = run_experiment(
+        _RUN_ID,
+        source_dir=source_dir,
+        input_format="hdf5",
+        field_mapping=_HDF5_MAPPING,
+        mode="write_output",
+        hdf5_dataset=_HDF5_DATASET,
+    )
+
+    posteriors_dir = run_dir / "external_inputs" / "gwtc_posteriors"
+    for eid in events:
+        out_path = posteriors_dir / f"{eid}.json"
+        assert out_path.exists(), f"Expected canonical JSON: {out_path}"
+        data = json.loads(out_path.read_text(encoding="utf-8"))
+        assert data["event_id"] == eid
+        assert isinstance(data["samples"], list)
+        assert len(data["samples"]) == 1
+        s = data["samples"][0]
+        assert set(s.keys()) == {"m1_source", "m2_source", "chi1", "chi2"}
+        assert s["m1_source"] == pytest.approx(35.0)
+        assert s["chi1"] == pytest.approx(0.4)
+
+    cs = result["conversion_summary"]
+    assert cs["files_written"] == 2
+    assert cs["input_format"] == "hdf5"
+    assert cs["hdf5_dataset"] == _HDF5_DATASET
+
+
+# ---------------------------------------------------------------------------
+# Test 19: HDF5 respects --overwrite-existing flag
+# ---------------------------------------------------------------------------
+
+
+def test_convert_hdf5_respects_overwrite_existing_flag(tmp_path, monkeypatch):
+    """HDF5 path respects overwrite_existing exactly as JSON path does."""
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    run_dir = _mk_run_valid(tmp_path)
+    _mk_phase4_upstream(run_dir, [_hawking_row("GW150914")])
+    source_dir = tmp_path / "sources"
+    _mk_hdf5_file(source_dir, "GW150914", rows=[(35.0, 28.0, 0.4, 0.1)])
+
+    # Pre-populate sentinel
+    posteriors_dir = run_dir / "external_inputs" / "gwtc_posteriors"
+    posteriors_dir.mkdir(parents=True, exist_ok=True)
+    sentinel = {
+        "event_id": "GW150914",
+        "samples": [{"m1_source": 999.0, "m2_source": 999.0, "chi1": 0.0, "chi2": 0.0}],
+    }
+    existing_path = posteriors_dir / "GW150914.json"
+    existing_path.write_text(json.dumps(sentinel), encoding="utf-8")
+    original_content = existing_path.read_text(encoding="utf-8")
+
+    # Run without overwrite — sentinel must be preserved
+    result = run_experiment(
+        _RUN_ID,
+        source_dir=source_dir,
+        input_format="hdf5",
+        field_mapping=_HDF5_MAPPING,
+        mode="write_output",
+        overwrite_existing=False,
+        hdf5_dataset=_HDF5_DATASET,
+    )
+    assert existing_path.read_text(encoding="utf-8") == original_content
+    assert result["conversion_summary"]["files_skipped_existing"] == 1
+
+    # Run with overwrite — sentinel must be replaced
+    result2 = run_experiment(
+        _RUN_ID,
+        source_dir=source_dir,
+        input_format="hdf5",
+        field_mapping=_HDF5_MAPPING,
+        mode="write_output",
+        overwrite_existing=True,
+        hdf5_dataset=_HDF5_DATASET,
+    )
+    updated = json.loads(existing_path.read_text(encoding="utf-8"))
+    assert updated["samples"][0]["m1_source"] == pytest.approx(35.0)
+    assert result2["conversion_summary"]["files_written"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Test 20: stage_summary explains chain for HDF5 path
+# ---------------------------------------------------------------------------
+
+
+def test_stage_summary_explains_chain_phase3_phase4a_plus_external_imr_to_phase4b_for_hdf5_path(
+    tmp_path, monkeypatch
+):
+    """stage_summary for HDF5 path contains chain notes and hdf5_dataset key."""
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(tmp_path))
+    run_dir = _mk_run_valid(tmp_path)
+    _mk_phase4_upstream(run_dir, [_hawking_row("GW150914")])
+    source_dir = tmp_path / "sources"
+    _mk_hdf5_file(source_dir, "GW150914")
+
+    result = run_experiment(
+        _RUN_ID,
+        source_dir=source_dir,
+        input_format="hdf5",
+        field_mapping=_HDF5_MAPPING,
+        mode="validate_only",
+        hdf5_dataset=_HDF5_DATASET,
+    )
+
+    ss = result["stage_summary"]
+    assert ss["experiment_name"] == EXPERIMENT_NAME
+    assert ss["input_format"] == "hdf5"
+    assert ss["hdf5_dataset"] == _HDF5_DATASET
+    assert ss["verdict"] == "PASS"
+
+    notes_text = " ".join(ss["notes"])
+    assert "phase4b_hawking_area_law_filter" in notes_text
+    assert "Phase4" in notes_text or "Phase3" in notes_text or "external" in notes_text
+    assert "hdf5" in notes_text.lower() or _HDF5_DATASET in notes_text
+
+    assert ss["gating"]["source_event_coverage_complete"] is True
+    assert ss["validation"]["schema_extractable"] is True
+    assert ss["validation"]["numeric_samples_valid"] is True
+    assert "m1_source" in ss["field_mapping"]

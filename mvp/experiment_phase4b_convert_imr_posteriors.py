@@ -21,9 +21,11 @@ Modes:
 
 Supported input formats:
   --input-format json   JSON files with configurable field mapping (fully implemented).
-  --input-format hdf5   NOT IMPLEMENTED. See notes in conversion_summary.json.
+  --input-format hdf5   HDF5 files via h5py; requires --hdf5-dataset <dataset_path>.
+                        Reads compound (structured) datasets, e.g.:
+                        --hdf5-dataset C01:Mixed/posterior_samples
 
-Field mapping (required for json format):
+Field mapping (required for both formats):
   --field-m1 <source_field>    Source field name mapping to m1_source
   --field-m2 <source_field>    Source field name mapping to m2_source
   --field-chi1 <source_field>  Source field name mapping to chi1
@@ -84,14 +86,6 @@ _PHASE4_REQUIRED_ARTIFACTS = [
     "outputs/per_event_hawking_area.csv",
 ]
 
-_HDF5_GAP_NOTE = (
-    "HDF5 input format is not implemented. "
-    "Only JSON input format is supported. "
-    "Gap: real GWTC posterior HDF5 files use dataset paths like "
-    "'/C01:IMRPhenomXPHM/posterior_samples' with fields varying by approximant. "
-    "To add HDF5 support: implement _extract_hdf5_samples() using h5py "
-    "and register it in run_experiment()."
-)
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +266,102 @@ def _extract_json_samples(
 
 
 # ---------------------------------------------------------------------------
+# HDF5 sample extraction with field mapping
+# ---------------------------------------------------------------------------
+
+
+def _extract_hdf5_samples(
+    path: Path,
+    dataset_path: str,
+    field_mapping: dict[str, str],
+) -> tuple[list[dict[str, float]], list[str]]:
+    """Extract and map samples from an HDF5 compound (structured) dataset.
+
+    Args:
+        path:          Path to the HDF5 file.
+        dataset_path:  Dataset path inside the HDF5 file, e.g.
+                       'C01:Mixed/posterior_samples'.
+        field_mapping: {"m1_source": "<source_field>", ...}
+
+    Returns:
+        (canonical_samples, notes)
+
+    Raises:
+        ImportError:  h5py not installed.
+        ValueError:   Dataset not found, not structured, missing fields,
+                      non-numeric or non-finite values, or empty dataset.
+    """
+    try:
+        import h5py  # noqa: PLC0415
+    except ImportError:
+        raise ImportError(
+            f"[{EXPERIMENT_NAME}] h5py is required for HDF5 input format. "
+            "Install with: pip install h5py"
+        )
+
+    notes: list[str] = []
+
+    with h5py.File(str(path), "r") as f:
+        if dataset_path not in f:
+            raise ValueError(
+                f"[{EXPERIMENT_NAME}] Dataset '{dataset_path}' not found in "
+                f"HDF5 file: {path}"
+            )
+        ds = f[dataset_path]
+        data = ds[()]  # numpy structured array
+
+    if not hasattr(data, "dtype") or data.dtype.names is None:
+        raise ValueError(
+            f"[{EXPERIMENT_NAME}] Dataset '{dataset_path}' is not a structured "
+            f"(compound) array in: {path}"
+        )
+
+    available_fields = set(data.dtype.names)
+
+    # Validate all mapped source fields exist
+    for canonical, source_field in field_mapping.items():
+        if source_field not in available_fields:
+            raise ValueError(
+                f"[{EXPERIMENT_NAME}] Missing mapped field '{source_field}' "
+                f"(-> canonical '{canonical}') in dataset '{dataset_path}': {path}. "
+                f"Available fields: {sorted(available_fields)}"
+            )
+
+    if len(data) == 0:
+        raise ValueError(
+            f"[{EXPERIMENT_NAME}] Empty dataset '{dataset_path}' in: {path}"
+        )
+
+    # Extract and validate all rows
+    canonical_samples: list[dict[str, float]] = []
+    for i in range(len(data)):
+        csample: dict[str, float] = {}
+        for canonical, source_field in field_mapping.items():
+            val = data[source_field][i]
+            try:
+                fval = float(val)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"[{EXPERIMENT_NAME}] Non-numeric value {val!r} for field "
+                    f"'{source_field}' (-> '{canonical}') in dataset "
+                    f"'{dataset_path}' row {i}: {path}"
+                )
+            if not math.isfinite(fval):
+                raise ValueError(
+                    f"[{EXPERIMENT_NAME}] Non-finite value {fval} for field "
+                    f"'{source_field}' (-> '{canonical}') in dataset "
+                    f"'{dataset_path}' row {i}: {path}"
+                )
+            csample[canonical] = fval
+        canonical_samples.append(csample)
+
+    notes.append(
+        f"HDF5 dataset '{dataset_path}' extracted {len(canonical_samples)} rows"
+    )
+    return canonical_samples, notes
+
+
+# ---------------------------------------------------------------------------
 # Canonical JSON builder
 # ---------------------------------------------------------------------------
 
@@ -366,26 +456,29 @@ def run_experiment(
     mode: str,  # "validate_only" | "write_output"
     overwrite_existing: bool = False,
     out_name: str = EXPERIMENT_NAME,
+    hdf5_dataset: str | None = None,
 ) -> dict[str, Any]:
     """Convert real IMR posteriors to canonical Phase4B external input.
 
     Args:
         run_id:             Host run identifier.
         source_dir:         Directory containing real posterior files.
-        input_format:       "json" (HDF5 not implemented).
+        input_format:       "json" or "hdf5".
         field_mapping:      {"m1_source": src_field, "m2_source": ...,
                              "chi1": ..., "chi2": ...}.
         mode:               "validate_only" | "write_output".
         overwrite_existing: If True, overwrite existing canonical JSONs in
                             write_output mode (default: skip existing).
         out_name:           Experiment directory name (default: EXPERIMENT_NAME).
+        hdf5_dataset:       Dataset path within HDF5 files, required when
+                            input_format == "hdf5" (e.g. "C01:Mixed/posterior_samples").
 
     Returns:
         dict with keys "inventory", "conversion_summary", "stage_summary".
 
     Raises:
-        ValueError:         Invalid mode, input_format, or incomplete field_mapping.
-        NotImplementedError: input_format == "hdf5".
+        ValueError:         Invalid mode, input_format, incomplete field_mapping,
+                            or missing hdf5_dataset when input_format == "hdf5".
         FileNotFoundError:  Missing RUN_VALID, Phase4 upstream artifacts, or source_dir.
         RuntimeError:       RUN_VALID or Phase4 verdict != PASS, coverage incomplete,
                             or field extraction fails.
@@ -394,10 +487,10 @@ def run_experiment(
         raise ValueError(f"[{EXPERIMENT_NAME}] Invalid mode: {mode!r}")
     if input_format not in ("json", "hdf5"):
         raise ValueError(f"[{EXPERIMENT_NAME}] Invalid input_format: {input_format!r}")
-    if input_format == "hdf5":
-        raise NotImplementedError(
-            f"[{EXPERIMENT_NAME}] HDF5 input format is not implemented. "
-            f"{_HDF5_GAP_NOTE}"
+    if input_format == "hdf5" and not hdf5_dataset:
+        raise ValueError(
+            f"[{EXPERIMENT_NAME}] --hdf5-dataset is required when "
+            f"--input-format hdf5"
         )
 
     # Validate field_mapping completeness
@@ -449,8 +542,12 @@ def run_experiment(
         "This experiment converts real IMR posteriors to the canonical external "
         "input consumed by phase4b_hawking_area_law_filter.",
         "Correct chain: Phase3/Phase4A output + external IMR input -> Phase4B.",
-        _HDF5_GAP_NOTE,
     ]
+    if input_format == "hdf5":
+        notes.append(
+            f"HDF5 input: dataset '{hdf5_dataset}'. "
+            "event_id derived from filename stem (same rule as JSON path)."
+        )
 
     for eid in required_event_ids:
         src_path, loc_note = _locate_source_file(source_path, eid, input_format)
@@ -462,7 +559,14 @@ def run_experiment(
             per_event_errors[eid] = "source file not found after coverage check"
             continue
         try:
-            samples, extract_notes = _extract_json_samples(src_path, eid, field_mapping)
+            if input_format == "json":
+                samples, extract_notes = _extract_json_samples(
+                    src_path, eid, field_mapping
+                )
+            else:  # hdf5
+                samples, extract_notes = _extract_hdf5_samples(
+                    src_path, hdf5_dataset, field_mapping  # type: ignore[arg-type]
+                )
             per_event_samples[eid] = samples
             for en in extract_notes:
                 notes.append(en)
@@ -507,6 +611,7 @@ def run_experiment(
         "host_run": run_id,
         "source_dir": str(source_path),
         "input_format": input_format,
+        "hdf5_dataset": hdf5_dataset if input_format == "hdf5" else None,
         "mode": mode,
         "field_mapping": field_mapping,
         "coverage_complete": coverage_complete,
@@ -532,6 +637,7 @@ def run_experiment(
         },
         "mode": mode,
         "input_format": input_format,
+        "hdf5_dataset": hdf5_dataset if input_format == "hdf5" else None,
         "field_mapping": field_mapping,
         "inventory": {
             "n_required": inv["n_required"],
@@ -548,7 +654,11 @@ def run_experiment(
             "This experiment converts real IMR posteriors to the canonical external "
             "input consumed by phase4b_hawking_area_law_filter.",
             "Correct chain: Phase3/Phase4A output + external IMR input -> Phase4B.",
-        ],
+        ] + (
+            [f"HDF5 input: dataset '{hdf5_dataset}'. "
+             "event_id derived from filename stem (same rule as JSON path)."]
+            if input_format == "hdf5" else []
+        ),
     }
 
     # --- Atomic write (tempdir + shutil.move) ---
@@ -655,7 +765,7 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         dest="input_format",
         choices=["json", "hdf5"],
-        help="Input format of posterior files (hdf5 not implemented)",
+        help="Input format of posterior files",
     )
     # Field mapping
     ap.add_argument(
@@ -685,7 +795,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--hdf5-dataset",
         dest="hdf5_dataset",
         default=None,
-        help="(optional, hdf5 only) Dataset path within HDF5 file (not implemented)",
+        help=(
+            "Dataset path within HDF5 file, required when --input-format hdf5. "
+            "Example: C01:Mixed/posterior_samples"
+        ),
     )
     # Mode (mutually exclusive)
     mode_group = ap.add_mutually_exclusive_group(required=True)
@@ -713,6 +826,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
+
+    if args.input_format == "hdf5" and not args.hdf5_dataset:
+        print(
+            "error: --hdf5-dataset is required when --input-format hdf5",
+            file=sys.stderr,
+        )
+        return 2
+
     mode = "validate_only" if args.validate_only else "write_output"
     field_mapping = {
         "m1_source": args.field_m1,
@@ -727,6 +848,7 @@ def main() -> int:
         field_mapping=field_mapping,
         mode=mode,
         overwrite_existing=args.overwrite_existing,
+        hdf5_dataset=args.hdf5_dataset if args.input_format == "hdf5" else None,
     )
     return 0
 
