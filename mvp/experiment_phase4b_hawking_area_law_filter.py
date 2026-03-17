@@ -1,21 +1,31 @@
 #!/usr/bin/env python3
-"""Non-canonical experiment: phase4b Hawking area-law discriminative filter.
+"""Phase4B: Hawking area-law discriminative filter.
 
 Reads per_event_hawking_area.csv produced by phase4_hawking_area_common_support
 and applies the relational filter:
 
     hawking_pass = (A_final >= A_initial)
 
-where A_initial comes from a canonical external input per event:
+where A_initial is derived from GWTC IMR posterior samples per event:
 
-    runs/<host_run>/external_inputs/hawking_area_initial/per_event_initial_area.csv
+    runs/<host_run>/external_inputs/gwtc_posteriors/<EVENT_ID>.json
 
-Units convention (mandatory, exact string match required for all rows):
+Schema per file (minimum):
+    {
+        "event_id": "GWXXXX",
+        "samples": [
+            {"m1_source": <Msun>, "m2_source": <Msun>, "chi1": <dim>, "chi2": <dim>},
+            ...
+        ]
+    }
 
-    REQUIRED_UNITS = "geom_solar_mass_sq"
+Component area formula:
+    A = 8 * pi * M^2 * (1 + sqrt(1 - chi^2))
+    M in solar masses, chi dimensionless.
+    Units: geom_solar_mass_sq
 
-    Consistent with A = 8*pi*M^2*(1 + sqrt(1 - chi^2)), M in solar masses
-    (geometric units, area in M_sun^2).
+A_initial per event = median(A1(sample) + A2(sample)) over samples.
+Estimator: sample_median (p50).
 
 Phase4 upstream is read-only.  All writes go under:
 
@@ -67,10 +77,30 @@ _PHASE4_REQUIRED_ARTIFACTS = [
     "outputs/hawking_area_summary.json",
 ]
 
-# Required columns in the external canonical input CSV
-_INITIAL_AREA_REQUIRED_COLUMNS = frozenset(
-    {"event_id", "A_initial", "source_ref", "method", "units"}
-)
+# Required fields in each posterior sample
+_POSTERIOR_REQUIRED_FIELDS = ("m1_source", "m2_source", "chi1", "chi2")
+
+
+# ---------------------------------------------------------------------------
+# Physics: Kerr area formula
+# ---------------------------------------------------------------------------
+
+
+def _kerr_area(M_solar: float, chi: float) -> float:
+    """Kerr BH area: A = 8*pi*M^2*(1+sqrt(1-chi^2)).
+
+    Units: M in solar masses, chi dimensionless.  Result in geom_solar_mass_sq.
+    Raises ValueError if M_solar <= 0 or |chi| > 1.
+    """
+    if not math.isfinite(M_solar) or M_solar <= 0.0:
+        raise ValueError(
+            f"[phase4b] Invalid mass M_solar={M_solar}: must be finite and > 0"
+        )
+    if not math.isfinite(chi) or abs(chi) > 1.0:
+        raise ValueError(
+            f"[phase4b] Invalid spin chi={chi}: |chi| must be <= 1 and finite"
+        )
+    return 8.0 * math.pi * M_solar**2 * (1.0 + math.sqrt(1.0 - chi**2))
 
 
 # ---------------------------------------------------------------------------
@@ -101,57 +131,131 @@ def _require_phase4_upstream(phase4_dir: Path) -> dict[str, Any]:
     return ss
 
 
-def _load_initial_area_csv(path: Path) -> dict[str, float]:
-    """Load per_event_initial_area.csv and return {event_id: A_initial}.
+def _validate_posterior_sample(sample: dict, idx: int) -> None:
+    """Validate a single posterior sample: required fields, numeric, finite."""
+    for field in _POSTERIOR_REQUIRED_FIELDS:
+        if field not in sample:
+            raise ValueError(
+                f"[phase4b] Sample {idx}: missing required field {field!r}"
+            )
+        val = sample[field]
+        try:
+            fval = float(val)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"[phase4b] Sample {idx}: field {field!r}={val!r} is not numeric"
+            )
+        if not math.isfinite(fval):
+            raise ValueError(
+                f"[phase4b] Sample {idx}: field {field!r}={fval} is not finite"
+            )
 
-    Validates:
-    - File exists (FileNotFoundError if not)
-    - Required columns present (ValueError if missing)
-    - units == REQUIRED_UNITS for every row (ValueError if not)
-    - A_initial is numeric and finite for every row (ValueError if not)
+
+def _load_posterior_file(path: Path) -> dict[str, Any]:
+    """Load and validate a single GWTC posterior JSON file.
+
+    Raises FileNotFoundError if path does not exist.
+    Raises ValueError on schema violations (missing keys, empty samples,
+    non-numeric/non-finite values, invalid spin/mass).
     """
     if not path.exists():
-        raise FileNotFoundError(
-            f"[phase4b] External input not found: {path}"
-        )
+        raise FileNotFoundError(f"[phase4b] Posterior file not found: {path}")
 
-    with path.open(encoding="utf-8", newline="") as fh:
-        reader = csv.DictReader(fh)
-        rows = list(reader)
-        columns = frozenset(reader.fieldnames or [])
+    data = json.loads(path.read_text(encoding="utf-8"))
 
-    missing_cols = _INITIAL_AREA_REQUIRED_COLUMNS - columns
-    if missing_cols:
+    if "event_id" not in data:
+        raise ValueError(f"[phase4b] Posterior file {path.name}: missing 'event_id'")
+    if "samples" not in data:
+        raise ValueError(f"[phase4b] Posterior file {path.name}: missing 'samples'")
+
+    samples = data["samples"]
+    if not isinstance(samples, list) or len(samples) == 0:
         raise ValueError(
-            f"[phase4b] per_event_initial_area.csv missing required columns: "
-            f"{sorted(missing_cols)}"
+            f"[phase4b] Posterior file {path.name}: 'samples' must be a non-empty list"
         )
 
-    mapping: dict[str, float] = {}
-    for i, row in enumerate(rows):
-        eid = row["event_id"].strip()
-        units_val = row.get("units", "").strip()
-        if units_val != REQUIRED_UNITS:
+    for i, s in enumerate(samples):
+        _validate_posterior_sample(s, i)
+        # Physics constraints: abort on bad spin or mass
+        m1 = float(s["m1_source"])
+        m2 = float(s["m2_source"])
+        chi1 = float(s["chi1"])
+        chi2 = float(s["chi2"])
+        if m1 <= 0.0:
             raise ValueError(
-                f"[phase4b] Row {i} (event_id={eid!r}): units={units_val!r} "
-                f"incompatible with required units {REQUIRED_UNITS!r}"
+                f"[phase4b] {path.name} sample {i}: m1_source={m1} must be > 0"
             )
-        raw_a = row.get("A_initial", "")
-        try:
-            a_val = float(raw_a)
-        except (ValueError, TypeError):
+        if m2 <= 0.0:
             raise ValueError(
-                f"[phase4b] Row {i} (event_id={eid!r}): "
-                f"A_initial={raw_a!r} is not numeric"
+                f"[phase4b] {path.name} sample {i}: m2_source={m2} must be > 0"
             )
-        if not math.isfinite(a_val):
+        if abs(chi1) > 1.0:
             raise ValueError(
-                f"[phase4b] Row {i} (event_id={eid!r}): "
-                f"A_initial={a_val} is not finite"
+                f"[phase4b] {path.name} sample {i}: |chi1|={abs(chi1):.6f} > 1"
             )
-        mapping[eid] = a_val
+        if abs(chi2) > 1.0:
+            raise ValueError(
+                f"[phase4b] {path.name} sample {i}: |chi2|={abs(chi2):.6f} > 1"
+            )
 
-    return mapping
+    return data
+
+
+def _load_gwtc_posteriors(
+    posteriors_dir: Path,
+    required_event_ids: set[str],
+) -> dict[str, list[dict]]:
+    """Load and validate GWTC posterior JSON files for all required events.
+
+    Expects: <posteriors_dir>/<event_id>.json per event.
+    Returns {event_id: [sample_dicts]}.
+    Raises FileNotFoundError if directory or any required file is missing.
+    Raises ValueError on schema or event_id mismatch.
+    """
+    if not posteriors_dir.is_dir():
+        raise FileNotFoundError(
+            f"[phase4b] GWTC posteriors directory not found: {posteriors_dir}"
+        )
+
+    result: dict[str, list[dict]] = {}
+    for eid in sorted(required_event_ids):
+        path = posteriors_dir / f"{eid}.json"
+        data = _load_posterior_file(path)
+        file_eid = data["event_id"]
+        if file_eid != eid:
+            raise ValueError(
+                f"[phase4b] Posterior file {path.name}: event_id={file_eid!r} "
+                f"does not match expected {eid!r}"
+            )
+        result[eid] = data["samples"]
+
+    return result
+
+
+def _derive_initial_area_stats(
+    event_id: str,
+    samples: list[dict],
+) -> dict[str, Any]:
+    """Derive A_initial statistics from IMR posterior samples for one event.
+
+    A_initial(sample) = A1(m1_source, chi1) + A2(m2_source, chi2)
+    where A = 8*pi*M^2*(1+sqrt(1-chi^2)).
+
+    Default estimator: sample_median (p50).
+    Returns dict with n_samples, p10, p50, p90.
+    """
+    a_vals: list[float] = []
+    for s in samples:
+        A1 = _kerr_area(float(s["m1_source"]), float(s["chi1"]))
+        A2 = _kerr_area(float(s["m2_source"]), float(s["chi2"]))
+        a_vals.append(A1 + A2)
+    sorted_vals = sorted(a_vals)
+    return {
+        "n_samples": len(sorted_vals),
+        "p10": _percentile_sorted(sorted_vals, 10.0),
+        "p50": _percentile_sorted(sorted_vals, 50.0),
+        "p90": _percentile_sorted(sorted_vals, 90.0),
+    }
 
 
 def _check_event_coverage(
@@ -183,25 +287,31 @@ def run_experiment(
 
     run_dir = out_root / run_id
     phase4_dir = run_dir / "experiment" / PHASE4_UPSTREAM_NAME
-    initial_area_path = (
-        run_dir
-        / "external_inputs"
-        / "hawking_area_initial"
-        / "per_event_initial_area.csv"
-    )
+    posteriors_dir = run_dir / "external_inputs" / "gwtc_posteriors"
 
     # --- Gating: Phase4 upstream ---
     _require_phase4_upstream(phase4_dir)
-
-    # --- Gating: external canonical input ---
-    initial_area_map = _load_initial_area_csv(initial_area_path)
 
     # --- Load Phase4 hawking area rows ---
     hawking_csv_path = phase4_dir / "outputs" / "per_event_hawking_area.csv"
     with hawking_csv_path.open(encoding="utf-8", newline="") as fh:
         hawking_rows = list(csv.DictReader(fh))
 
-    # --- Check event_id coverage ---
+    # --- Gating: GWTC posteriors ---
+    required_event_ids = {r["event_id"] for r in hawking_rows}
+    posteriors_by_event = _load_gwtc_posteriors(posteriors_dir, required_event_ids)
+
+    # --- Derive A_initial per event from posterior samples ---
+    event_area_stats: dict[str, dict[str, Any]] = {}
+    for eid, samples in posteriors_by_event.items():
+        event_area_stats[eid] = _derive_initial_area_stats(eid, samples)
+
+    # Default estimator: sample median (p50)
+    initial_area_map: dict[str, float] = {
+        eid: stats["p50"] for eid, stats in event_area_stats.items()
+    }
+
+    # --- Explicit event coverage check (belt-and-suspenders) ---
     _check_event_coverage(hawking_rows, initial_area_map)
 
     # --- Apply relational filter ---
@@ -227,7 +337,7 @@ def run_experiment(
 
         A_initial = initial_area_map[eid]
         area_gap = A_final - A_initial
-        # Default tolerance = 0.0 → strict inequality (no tolerance)
+        # Default tolerance = 0.0 → strict (no tolerance)
         h_pass = math.isfinite(A_final) and (A_final >= A_initial - tolerance)
 
         if h_pass:
@@ -263,6 +373,7 @@ def run_experiment(
                 "n_input_rows": 0,
                 "n_pass_rows": 0,
                 "A_initial": initial_area_map[eid],
+                "n_samples": event_area_stats[eid]["n_samples"],
             }
         event_stats[eid]["n_input_rows"] += 1
         if fr["hawking_pass"]:
@@ -289,6 +400,7 @@ def run_experiment(
                 "pass_fraction": pf,
                 "empty_after_filter": empty,
                 "A_initial": stats["A_initial"],
+                "n_samples": stats["n_samples"],
             }
         )
 
@@ -302,6 +414,8 @@ def run_experiment(
         "schema_version": "hawking_filter_summary_v1",
         "host_run": run_id,
         "source_phase4_experiment": PHASE4_UPSTREAM_NAME,
+        "initial_area_source": "external_inputs/gwtc_posteriors",
+        "initial_area_estimator": "sample_median",
         "filter_rule": "A_final >= A_initial",
         "tolerance": tolerance,
         "units": REQUIRED_UNITS,
@@ -335,15 +449,21 @@ def run_experiment(
             "host_run_valid": True,
             "phase4_upstream_present": True,
             "phase4_upstream_pass": True,
-            "initial_area_input_present": True,
-            "initial_area_schema_valid": True,
-            "initial_area_units_compatible": True,
+            "gwtc_posteriors_present": True,
+            "gwtc_posteriors_schema_valid": True,
+            "gwtc_posteriors_event_coverage_complete": True,
         },
         "inputs": {
             "phase4_stage_summary": str(phase4_dir / "stage_summary.json"),
             "phase4_manifest": str(phase4_dir / "manifest.json"),
             "phase4_per_event_hawking_area": str(hawking_csv_path),
-            "initial_area_csv": str(initial_area_path),
+            "gwtc_posteriors_dir": str(posteriors_dir),
+        },
+        "initial_area_definition": {
+            "source": "gwtc_posteriors",
+            "estimator": "sample_median",
+            "component_formula": "8*pi*M^2*(1+sqrt(1-chi^2))",
+            "units": REQUIRED_UNITS,
         },
         "filter_definition": {
             "rule": "A_final >= A_initial",
@@ -362,6 +482,7 @@ def run_experiment(
         "notes": [
             "This phase is the discriminative Hawking area-law filter.",
             "Phase4 upstream remains domain-admissibility only.",
+            "Historical analysis_area_theorem runs are not used as numeric upstream.",
         ],
     }
 
@@ -400,13 +521,40 @@ def run_experiment(
         out_support_summary = tmp_outputs / "hawking_filter_support_summary.json"
         write_json_atomic(out_support_summary, hawking_filter_support_summary)
 
-        outputs = [out_filter_csv, out_filter_summary, out_support_summary]
+        # 4. per_event_initial_area_from_posteriors.csv (derived artifact, not primary input)
+        out_initial_area_csv = tmp_outputs / "per_event_initial_area_from_posteriors.csv"
+        initial_area_fields = [
+            "event_id", "n_samples",
+            "A_initial_p10", "A_initial_p50", "A_initial_p90",
+            "source_ref", "method", "units",
+        ]
+        initial_area_derived_rows = []
+        for eid in sorted(event_area_stats):
+            stats = event_area_stats[eid]
+            initial_area_derived_rows.append({
+                "event_id": eid,
+                "n_samples": stats["n_samples"],
+                "A_initial_p10": stats["p10"],
+                "A_initial_p50": stats["p50"],
+                "A_initial_p90": stats["p90"],
+                "source_ref": str(posteriors_dir / f"{eid}.json"),
+                "method": "kerr_component_area_sum_from_imr_samples",
+                "units": REQUIRED_UNITS,
+            })
+        with out_initial_area_csv.open("w", encoding="utf-8", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=initial_area_fields)
+            writer.writeheader()
+            writer.writerows(initial_area_derived_rows)
+
+        outputs = [
+            out_filter_csv, out_filter_summary, out_support_summary, out_initial_area_csv,
+        ]
         output_records = [
             {"path": str(p.relative_to(tmp_stage)), "sha256": sha256_file(p)}
             for p in outputs
         ]
 
-        # 4. manifest.json
+        # 5. manifest.json
         manifest_payload: dict[str, Any] = {
             "schema_version": "mvp_manifest_v1",
             "run_id": run_id,
@@ -417,15 +565,17 @@ def run_experiment(
                     "path": str(hawking_csv_path),
                     "sha256": sha256_file(hawking_csv_path),
                 },
+            ] + [
                 {
-                    "path": str(initial_area_path),
-                    "sha256": sha256_file(initial_area_path),
-                },
+                    "path": str(posteriors_dir / f"{eid}.json"),
+                    "sha256": sha256_file(posteriors_dir / f"{eid}.json"),
+                }
+                for eid in sorted(required_event_ids)
             ],
         }
         write_json_atomic(tmp_stage / "manifest.json", manifest_payload)
 
-        # 5. stage_summary.json
+        # 6. stage_summary.json
         stage_summary["outputs"] = output_records
         write_json_atomic(tmp_stage / "stage_summary.json", stage_summary)
 
