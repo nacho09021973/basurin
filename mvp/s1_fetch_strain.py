@@ -133,6 +133,23 @@ def _generate_synthetic_strain(
     return (signal * 1e-21 + noise).astype(np.float64), fs, "synthetic_v1"
 
 
+def _extract_gps_from_catalog_entry(entry: Any) -> float | None:
+    if isinstance(entry, dict):
+        for key in ("GPS", "gps", "t0_gps", "event_time_gps", "gpstime", "gps_time"):
+            value = entry.get(key)
+            if isinstance(value, (int, float)):
+                return float(value)
+        t0_ref = entry.get("t0_ref")
+        if isinstance(t0_ref, dict):
+            for key in ("value_gps", "t0_gps", "gps"):
+                value = t0_ref.get(key)
+                if isinstance(value, (int, float)):
+                    return float(value)
+    elif isinstance(entry, (int, float)):
+        return float(entry)
+    return None
+
+
 def _fetch_gps_center(event_id: str) -> float:
     lookup_keys = [event_id]
     if "_" in event_id:
@@ -146,13 +163,10 @@ def _fetch_gps_center(event_id: str) -> float:
             catalog = json.load(f)
         if isinstance(catalog, dict):
             for lookup_key in lookup_keys:
-                entry = catalog.get(lookup_key)
-                if not isinstance(entry, dict):
-                    continue
-                for key in ("GPS", "gps", "t0_gps", "event_time_gps", "gpstime", "gps_time"):
-                    if key in entry:
-                        print(f"[s1_fetch_strain] GPS resolved from canonical catalog: {entry[key]}", flush=True)
-                        return float(entry[key])
+                gps = _extract_gps_from_catalog_entry(catalog.get(lookup_key))
+                if gps is not None:
+                    print(f"[s1_fetch_strain] GPS resolved from canonical catalog: {gps}", flush=True)
+                    return gps
     print(f"[s1_fetch_strain] GPS lookup: querying GWOSC API for {event_id} ...", flush=True)
     try:
         import requests
