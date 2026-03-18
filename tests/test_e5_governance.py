@@ -253,7 +253,7 @@ class TestE5HBlindPrediction:
             {"geometry_id": "edgb_001", "family": "edgb"},
             {"geometry_id": "edgb_002", "family": "edgb"},
         ])
-        from experiment.e5h_blind_prediction import blind_prediction
+        from mvp.experiment.e5h_blind_prediction import blind_prediction
         result = blind_prediction(["run_001", "run_002", "run_003"], runs_root=str(runs_root))
         assert result["schema_version"] == "e5h-0.1"
         assert result["n_events"] == 3
@@ -267,7 +267,7 @@ class TestE5HBlindPrediction:
         make_run("run_001", geometries=geoms)
         make_run("run_002", geometries=geoms)
         make_run("run_003", geometries=geoms)
-        from experiment.e5h_blind_prediction import blind_prediction
+        from mvp.experiment.e5h_blind_prediction import blind_prediction
         result = blind_prediction(["run_001", "run_002", "run_003"], runs_root=str(runs_root))
         assert result["mean_recall"] == 1.0
         assert result["mean_precision"] == 1.0
@@ -276,7 +276,7 @@ class TestE5HBlindPrediction:
         runs_root, make_run = tmp_runs
         make_run("run_001")
         make_run("run_002")
-        from experiment.e5h_blind_prediction import blind_prediction
+        from mvp.experiment.e5h_blind_prediction import blind_prediction
         with pytest.raises(ValueError, match="at least 3"):
             blind_prediction(["run_001", "run_002"], runs_root=str(runs_root))
 

@@ -323,7 +323,7 @@ Esto no es estabilidad (E5-B). Es **poder predictivo** — el estándar de oro e
 **Uso:**
 
 ```bash
-python experiment/e5h_blind_prediction.py \
+python mvp/experiment/e5h_blind_prediction.py \
   --run-ids GW150914_v1 GW170817_v1 GW190521_v1 \
   --strategy intersection --dry-run
 ```
