@@ -36,6 +36,10 @@ Objetivo: que una IA (o humano) no pierda 5–6 horas diarias por confundir `RUN
   - `runs/<run_id>/external_inputs/...`
   - `runs/<run_id>/<stage>/outputs/`
   - `runs/<run_id>/experiment/<name>/`
+- **Fase 5 experimental (autoridad diaria de selección):**
+  - `runs/prep_fase5_catalog_20260318T170928Z/outputs/canonical_run_ids_strict_real_52.txt`
+  - `runs/prep_fase5_catalog_20260318T170928Z/outputs/canonical_event_run_map_strict_real_52.tsv`
+  - `runs/prep_fase5_catalog_20260318T170928Z/outputs/event_run_selection_latest_strict_real_pass_52.json`
 - **MALDA sobre un run gobernado:**
   - `runs/<RUN_ID>/experiment/malda_feature_table/outputs/event_features.csv`
   - `runs/<RUN_ID>/experiment/malda_discovery/outputs/discovery_summary.json`
@@ -233,6 +237,22 @@ runs/<run_id>/experiment/e5f_verdict_aggregation/outputs/population_verdict.json
 runs/<run_id>/experiment/e5h_blind_prediction/outputs/prediction_summary.json
 runs/<run_id>/experiment/e5z_gpr_emulator/outputs/predicted_minima.json
 ```
+
+---
+
+## Fase 5 experimental: autoridad operativa diaria
+
+- Referencia gobernante de preparación: `runs/prep_fase5_catalog_20260318T170928Z/`.
+- Referencia de catálogo conservadora (`54` eventos): `runs/prep_fase5_catalog_20260318T170928Z/outputs/eligible_events_conservative.json` y `runs/prep_fase5_catalog_20260318T170928Z/outputs/eligible_events_conservative.txt`.
+- Base materializada de trabajo actual (`52` runs canónicos `strict-real`): `runs/prep_fase5_catalog_20260318T170928Z/outputs/canonical_run_ids_strict_real_52.txt` y `runs/prep_fase5_catalog_20260318T170928Z/outputs/canonical_event_run_map_strict_real_52.tsv`.
+- Regla de selección gobernante por evento: `runs/prep_fase5_catalog_20260318T170928Z/outputs/event_run_selection_latest_strict_real_pass_52.json`.
+- Universo permitido: `run_id` que contiene `_real_`.
+- Exclusiones obligatorias: `_real_offline_` y `_real_offline_rescue_`.
+- Criterio de elección: entre candidatos válidos con `RUN_VALID=PASS`, seleccionar el más reciente por timestamp UTC embebido en el sufijo del `run_id`.
+- Eventos excluidos de la base `strict-real` actual por falta de candidato válido: `GW170817` y `GW200115_042309`.
+- Catálogos divergentes retirados a cuarentena y sin autoridad operativa: `quarantine/phase5_catalog_ambiguity_20260318/gwtc_quality_events.repo_root.csv`, `quarantine/phase5_catalog_ambiguity_20260318/gwtc_quality_events.gw_events.csv`, `quarantine/phase5_catalog_ambiguity_20260318/gwtc_quality_events.data_losc.csv`.
+- Para arrancar E5-A/E5-B/E5-C/E5-F, usar `canonical_run_ids_strict_real_52.txt` y `canonical_event_run_map_strict_real_52.tsv`; no seleccionar runs desde listas históricas dispersas ni desde catálogos locales previos.
+- Nada downstream debe ejecutarse si `RUN_VALID != PASS`.
 
 ---
 

@@ -61,9 +61,22 @@ REQUIRED_CANONICAL_GATES = {
 ```python
 from mvp.experiment.base_contract import validate_and_load_run
 
-run_dir, summary = validate_and_load_run("GW150914_v1")
+run_dir, summary = validate_and_load_run("<RUN_ID_CANONICO>")
 # Si run_valid != PASS → GovernanceViolation
 ```
+
+---
+
+## Base operativa diaria gobernante
+
+- El código fuente de los módulos E5 vive en `mvp/experiment/`; la autoridad operativa diaria vive en artefactos bajo `runs/prep_fase5_catalog_20260318T170928Z/`.
+- La cohorte conservadora de catálogo es de `54` eventos y vive en `runs/prep_fase5_catalog_20260318T170928Z/outputs/eligible_events_conservative.json` y `runs/prep_fase5_catalog_20260318T170928Z/outputs/eligible_events_conservative.txt`. Es referencia de catálogo, no lista diaria de runs.
+- La base materializada de trabajo actual para Fase 5 es de `52` runs canónicos `strict-real` y debe consumirse desde `runs/prep_fase5_catalog_20260318T170928Z/outputs/canonical_run_ids_strict_real_52.txt` y `runs/prep_fase5_catalog_20260318T170928Z/outputs/canonical_event_run_map_strict_real_52.tsv`.
+- La selección gobernante por evento está documentada en `runs/prep_fase5_catalog_20260318T170928Z/outputs/event_run_selection_latest_strict_real_pass_52.json`: universo permitido `run_id` que contiene `_real_`; exclusiones obligatorias `_real_offline_` y `_real_offline_rescue_`; entre candidatos válidos con `RUN_VALID=PASS`, se elige el más reciente por timestamp UTC embebido en el sufijo del `run_id`.
+- Los eventos `GW170817` y `GW200115_042309` quedan excluidos de la base `strict-real` actual por no tener candidato válido.
+- Las listas históricas dispersas y los catálogos previos no deben usarse como autoridad operativa. Los catálogos divergentes quedaron retirados a `quarantine/phase5_catalog_ambiguity_20260318/`.
+- Para arrancar E5-A/E5-B/E5-C/E5-F en operación diaria, la entrada operativa debe salir de `canonical_run_ids_strict_real_52.txt` y `canonical_event_run_map_strict_real_52.tsv`. Los ejemplos CLI de esta página son sintácticos y no sustituyen esos artefactos.
+- Nada downstream debe ejecutarse si `RUN_VALID != PASS`.
 
 ---
 
@@ -84,11 +97,13 @@ run_dir, summary = validate_and_load_run("GW150914_v1")
 | `persistence_histogram.json` | Distribución de apariciones por familia |
 | `manifest.json` | SHA-256 de todos los inputs |
 
+**Entrada operativa diaria:** cargar `--run-ids` desde `runs/prep_fase5_catalog_20260318T170928Z/outputs/canonical_run_ids_strict_real_52.txt` y usar `runs/prep_fase5_catalog_20260318T170928Z/outputs/canonical_event_run_map_strict_real_52.tsv` como traza evento → run.
+
 **Uso:**
 
 ```bash
 python mvp/experiment/e5a_multi_event_aggregation.py \
-  --run-ids GW150914_v1 GW170817_v1 --dry-run
+  --run-ids <RUN_ID_1> <RUN_ID_2> --dry-run
 ```
 
 **Requisitos:** ≥ 2 runs con `RUN_VALID=PASS`.
@@ -118,11 +133,13 @@ python mvp/experiment/e5a_multi_event_aggregation.py \
 - `UNSTABLE`: varianza > 0.20
 - `SINGLETON`: N ≤ 1 (no evaluable)
 
+**Entrada operativa diaria:** cargar `--run-ids` desde `runs/prep_fase5_catalog_20260318T170928Z/outputs/canonical_run_ids_strict_real_52.txt` y usar `runs/prep_fase5_catalog_20260318T170928Z/outputs/canonical_event_run_map_strict_real_52.tsv` como traza evento → run.
+
 **Uso:**
 
 ```bash
 python mvp/experiment/e5b_jackknife.py \
-  --run-ids GW150914_v1 GW170817_v1 GW190521_v1 --dry-run
+  --run-ids <RUN_ID_1> <RUN_ID_2> <RUN_ID_3> --dry-run
 ```
 
 **Requisitos:** ≥ 3 runs.
@@ -155,10 +172,12 @@ Pesos por defecto: `(0.5, 0.4, 0.1)` — **actualmente arbitrarios**, pendientes
 
 **Invariante:** `ranked_geometries.json` solo contiene geometry_ids presentes en `compatible_set.json`. Ningún geometry_id nuevo introducido.
 
+**Entrada operativa diaria:** el universo permitido de `run_id` está fijado por `runs/prep_fase5_catalog_20260318T170928Z/outputs/canonical_run_ids_strict_real_52.txt`; el `run_id` canónico por evento debe resolverse desde `runs/prep_fase5_catalog_20260318T170928Z/outputs/canonical_event_run_map_strict_real_52.tsv`.
+
 **Uso:**
 
 ```bash
-python mvp/experiment/e5c_ranking.py --run-id GW150914_v1 --weights 0.5 0.4 0.1
+python mvp/experiment/e5c_ranking.py --run-id <RUN_ID_CANONICO> --weights 0.5 0.4 0.1
 ```
 
 **Criterio de promoción:** Pesos justificados por Fisher information geometry (Método Brunete) + reproducibilidad en ≥ 3 eventos.
@@ -251,11 +270,13 @@ python mvp/experiment/e5e_query.py \
 | ≥ 50% | `MODERATE` |
 | < 50% | `WEAK` |
 
+**Entrada operativa diaria:** cargar `--run-ids` desde `runs/prep_fase5_catalog_20260318T170928Z/outputs/canonical_run_ids_strict_real_52.txt` y usar `runs/prep_fase5_catalog_20260318T170928Z/outputs/canonical_event_run_map_strict_real_52.tsv` como traza evento → run.
+
 **Uso:**
 
 ```bash
 python mvp/experiment/e5f_verdict_aggregation.py \
-  --run-ids GW150914_v1 GW170817_v1 GW190521_v1 --dry-run
+  --run-ids <RUN_ID_1> <RUN_ID_2> <RUN_ID_3> --dry-run
 ```
 
 **Impacto científico:** produce el resultado que aparece en la sección de resultados del paper de exclusión espectral: *"X% de eventos soportan familia Y"*.

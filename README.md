@@ -50,6 +50,16 @@ Antes de ejecutar una fase o interpretar sus outputs:
 - La fase 4 (E5) es rehacible, pero debe reconstruirse con los batches corregidos y con la definición actual de `phys_key`.
 - La fase 5 tiene los 9 módulos experimentales (E5-A a E5-H, E5-Z) implementados en `mvp/experiment/` con 30/30 tests de gobernanza pasando. Ver [`docs/fases/fase_5_readme.md`](docs/fases/fase_5_readme.md).
 
+### Referencia operativa vigente de Fase 5 experimental
+
+- El código fuente de Fase 5 vive en `mvp/experiment/`; la preparación gobernante y la entrada operativa diaria viven en artefactos bajo `runs/prep_fase5_catalog_20260318T170928Z/`.
+- La cohorte conservadora de catálogo es de `54` eventos y se documenta en `runs/prep_fase5_catalog_20260318T170928Z/outputs/eligible_events_conservative.json` y `runs/prep_fase5_catalog_20260318T170928Z/outputs/eligible_events_conservative.txt`.
+- La base materializada de trabajo actual para Fase 5 es de `52` runs canónicos `strict-real`; para arrancar E5-A/E5-B/E5-C/E5-F deben usarse `runs/prep_fase5_catalog_20260318T170928Z/outputs/canonical_run_ids_strict_real_52.txt` y `runs/prep_fase5_catalog_20260318T170928Z/outputs/canonical_event_run_map_strict_real_52.tsv`.
+- La selección gobernante por evento está fijada en `runs/prep_fase5_catalog_20260318T170928Z/outputs/event_run_selection_latest_strict_real_pass_52.json`: universo permitido `run_id` que contiene `_real_`; exclusiones obligatorias `_real_offline_` y `_real_offline_rescue_`; entre candidatos válidos con `RUN_VALID=PASS`, se selecciona el más reciente por timestamp UTC embebido en el sufijo del `run_id`.
+- `GW170817` y `GW200115_042309` quedan fuera de la base `strict-real` actual por no tener candidato válido.
+- Las listas históricas y los catálogos previos no deben usarse como autoridad operativa. Los catálogos divergentes quedaron retirados a `quarantine/phase5_catalog_ambiguity_20260318/`.
+- Nada downstream debe ejecutarse si `RUN_VALID != PASS`.
+
 ## Leyenda de estado
 
 - **Implementado**: existe entrypoint/contrato/artefacto en el repositorio actual.
