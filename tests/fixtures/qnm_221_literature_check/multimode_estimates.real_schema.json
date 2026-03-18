@@ -1,0 +1,120 @@
+{
+  "modes": [
+    {
+      "Sigma": null,
+      "fit": {
+        "bootstrap_seed": 44,
+        "method": "hilbert_peakband",
+        "n_bootstrap": 8,
+        "stability": {
+          "cv_Q": null,
+          "cv_f": null,
+          "lnQ_p10": 2.2680725805177815,
+          "lnQ_p50": 4.771153684729276,
+          "lnQ_p90": 6.962245526541217,
+          "lnQ_span": 4.694172946023436,
+          "lnf_p10": 5.11939678353516,
+          "lnf_p50": 5.122999429255215,
+          "lnf_p90": 5.13048282304138,
+          "lnf_span": 0.011086039506219336,
+          "n_failed": 2,
+          "n_successful": 6,
+          "valid_fraction": 0.75
+        }
+      },
+      "label": "220",
+      "ln_Q": null,
+      "ln_f": null,
+      "mode": [
+        2,
+        2,
+        0
+      ]
+    },
+    {
+      "Sigma": null,
+      "fit": {
+        "bootstrap_seed": 45,
+        "method": "hilbert_peakband",
+        "n_bootstrap": 8,
+        "stability": {
+          "cv_Q": 0.9269076017362324,
+          "cv_f": 0.004038871409970993,
+          "lnQ_p10": 5.179823817925718,
+          "lnQ_p50": 6.346396037462847,
+          "lnQ_p90": 7.407649497360353,
+          "lnQ_span": 2.227825679434635,
+          "lnf_p10": 5.817293253526043,
+          "lnf_p50": 5.820746901344163,
+          "lnf_p90": 5.826816175195583,
+          "lnf_span": 0.009522921669540274,
+          "n_failed": 0,
+          "n_successful": 8,
+          "valid_fraction": 1.0
+        }
+      },
+      "label": "221",
+      "ln_Q": null,
+      "ln_f": null,
+      "mode": [
+        2,
+        2,
+        1
+      ]
+    }
+  ],
+  "modes_target": [
+    {
+      "label": "220",
+      "mode": [
+        2,
+        2,
+        0
+      ]
+    },
+    {
+      "label": "221",
+      "mode": [
+        2,
+        2,
+        1
+      ]
+    }
+  ],
+  "results": {
+    "messages": [
+      "Best-effort multimode fit: one or more modes unavailable or unstable."
+    ],
+    "quality_flags": [
+      "220_Sigma_invalid",
+      "220_lnQ_span_explosive",
+      "220_no_point_estimate",
+      "221_Sigma_invalid",
+      "221_lnQ_span_explosive",
+      "221_no_point_estimate",
+      "missing_window_meta"
+    ],
+    "quality_gates": {
+      "two_mode_preferred": false
+    },
+    "verdict": "INSUFFICIENT_DATA"
+  },
+  "run_id": "golden_schema_case",
+  "schema_version": "multimode_estimates_v1",
+  "source": {
+    "band_strategy": {
+      "event_id": null,
+      "method": "default_split_60_40",
+      "mode_220_band_hz": [
+        150.0,
+        299.999999
+      ],
+      "mode_221_band_hz": [
+        300.000001,
+        400.0
+      ]
+    },
+    "stage": "s2_ringdown_window",
+    "window": null
+  }
+}

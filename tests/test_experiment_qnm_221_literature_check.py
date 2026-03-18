@@ -124,3 +124,24 @@ def test_summary_contains_required_fields_and_valid_verdict(tmp_path: Path, monk
     )
     assert REQUIRED_SUMMARY_FIELDS.issubset(summary.keys())
     assert summary["verdict"] in mod.ALLOWED_VERDICTS
+
+
+def test_extract_221_from_real_s3b_schema_fixture() -> None:
+    fixture_path = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "qnm_221_literature_check"
+        / "multimode_estimates.real_schema.json"
+    )
+    data = json.loads(fixture_path.read_text(encoding="utf-8"))
+    s3_estimates = {"combined": {"f_hz": 250.0, "Q": 10.0}}
+
+    f221, tau221, policy = mod._extract_221_from_multimode(data, s3_estimates)
+
+    assert policy in {
+        "mode_221.fit.stability.p50",
+        "explicit_mode_221",
+        "joint_3d_ln_ratio_times_s3_f220",
+    }
+    assert f221 is None or f221 > 0.0
+    assert tau221 is None or tau221 > 0.0
