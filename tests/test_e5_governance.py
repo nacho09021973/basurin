@@ -334,7 +334,7 @@ class TestE5ZGPREmulator:
         runs_root, make_run = tmp_runs
         geoms = self._make_kerr_geometries(n=20)
         make_run("run_gpr", geometries=geoms)
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
         result = emulate_family("run_gpr", "kerr", target="d2", runs_root=str(runs_root))
         assert result["status"] == "SUCCESS"
         assert result["r2_score"] >= 0.90
@@ -349,7 +349,7 @@ class TestE5ZGPREmulator:
         runs_root, make_run = tmp_runs
         geoms = self._make_2d_geometries(n_per_axis=6)
         make_run("run_2d", geometries=geoms)
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
         result = emulate_family("run_2d", "edgb", target="d2", runs_root=str(runs_root))
         assert result["status"] == "SUCCESS"
         assert result["r2_score"] >= 0.90
@@ -362,7 +362,7 @@ class TestE5ZGPREmulator:
         runs_root, make_run = tmp_runs
         geoms = self._make_kerr_geometries(n=10)  # coarser grid
         make_run("run_coarse", geometries=geoms)
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
         result = emulate_family("run_coarse", "kerr", target="d2", runs_root=str(runs_root))
         if result["status"] == "SUCCESS":
             # With a coarse grid, GP should find a better minimum between nodes
@@ -385,7 +385,7 @@ class TestE5ZGPREmulator:
                 "metadata": {"spin": spin, "chi": spin},
             })
         make_run("run_noisy", geometries=geoms)
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
         result = emulate_family("run_noisy", "kerr", target="d2", runs_root=str(runs_root))
         assert result["status"] == "SURFACE_UNLEARNABLE"
         assert result["r2_score"] < 0.90
@@ -395,7 +395,7 @@ class TestE5ZGPREmulator:
         runs_root, make_run = tmp_runs
         geoms = self._make_kerr_geometries(n=20)
         make_run("run_conf", geometries=geoms)
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
         result = emulate_family("run_conf", "kerr", target="d2", runs_root=str(runs_root))
         assert result["status"] == "SUCCESS"
         conf = result["no_hidden_minimum_confidence"]
@@ -410,7 +410,7 @@ class TestE5ZGPREmulator:
              "d2": 1.0, "metadata": {"spin": 0.5, "chi": 0.5}},
         ]
         make_run("run_tiny", geometries=geoms)
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
         result = emulate_family("run_tiny", "kerr", target="d2", runs_root=str(runs_root))
         assert result["status"] == "INSUFFICIENT_DATA"
 
@@ -419,7 +419,7 @@ class TestE5ZGPREmulator:
         runs_root, make_run = tmp_runs
         make_run("run_fail", run_valid="FAIL", geometries=self._make_kerr_geometries())
         from experiment.base_contract import GovernanceViolation
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
         with pytest.raises(GovernanceViolation):
             emulate_family("run_fail", "kerr", runs_root=str(runs_root))
 
@@ -428,7 +428,7 @@ class TestE5ZGPREmulator:
         runs_root, make_run = tmp_runs
         geoms = self._make_kerr_geometries(n=15) + self._make_2d_geometries(n_per_axis=5)
         make_run("run_multi", geometries=geoms)
-        from experiment.e5z_gpr_emulator import emulate_all_families
+        from mvp.experiment.e5z_gpr_emulator import emulate_all_families
         result = emulate_all_families("run_multi", families=["kerr", "edgb"],
                                       runs_root=str(runs_root))
         assert "kerr" in result["per_family_results"]
@@ -439,7 +439,7 @@ class TestE5ZGPREmulator:
         runs_root, make_run = tmp_runs
         geoms = self._make_kerr_geometries(n=15)
         make_run("run_out", geometries=geoms)
-        from experiment.e5z_gpr_emulator import run_emulator
+        from mvp.experiment.e5z_gpr_emulator import run_emulator
         result = run_emulator("run_out", families=["kerr"],
                               runs_root=str(runs_root))
         out_dir = runs_root / "run_out" / "experiment" / "continuous_emulator"

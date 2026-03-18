@@ -199,14 +199,14 @@ class TestGovernance:
     def test_rejects_invalid_run(self, failed_run):
         runs_root, run_id = failed_run
         from experiment.base_contract import GovernanceViolation
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
         with pytest.raises(GovernanceViolation, match="RUN_VALID=FAIL"):
             emulate_family(run_id, "edgb", runs_root=str(runs_root))
 
     def test_no_writes_to_canonical(self):
         """E5-Z source code must not write to canonical directories."""
         from pathlib import Path
-        src = (Path(__file__).parent.parent / "experiment" / "e5z_gpr_emulator.py").read_text()
+        src = (Path(__file__).parent.parent / "mvp" / "experiment" / "e5z_gpr_emulator.py").read_text()
         for canonical in ["s4_geometry_filter", "s3b_multimode_estimates", "s1_fetch_strain"]:
             write_lines = [
                 l for l in src.split("\n")
@@ -221,7 +221,7 @@ class TestGPEmulator:
     def test_edgb_quadratic_bowl(self, edgb_run):
         """GP should find the minimum near chi=0.7, zeta=0.15 on a clean quadratic bowl."""
         runs_root, run_id = edgb_run
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
 
         result = emulate_family(run_id, "edgb", target="d2", runs_root=str(runs_root))
 
@@ -240,7 +240,7 @@ class TestGPEmulator:
     def test_1d_kerr(self, kerr_run):
         """GP should work on 1D parameter space (Kerr, only chi)."""
         runs_root, run_id = kerr_run
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
 
         result = emulate_family(run_id, "kerr", target="d2", runs_root=str(runs_root))
 
@@ -256,7 +256,7 @@ class TestGPEmulator:
     def test_surface_unlearnable(self, noisy_run):
         """Extremely noisy data should trigger SURFACE_UNLEARNABLE."""
         runs_root, run_id = noisy_run
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
 
         result = emulate_family(run_id, "edgb", target="d2", runs_root=str(runs_root))
 
@@ -283,7 +283,7 @@ class TestGPEmulator:
         est_dir.mkdir()
         _write_json(est_dir / "estimates.json", {})
 
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
         result = emulate_family(run_id, "edgb", runs_root=str(runs_root))
         assert result["status"] == "INSUFFICIENT_DATA"
 
@@ -294,7 +294,7 @@ class TestDeterminism:
     def test_same_input_same_output(self, edgb_run):
         """Two runs with identical input must produce identical results."""
         runs_root, run_id = edgb_run
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
 
         r1 = emulate_family(run_id, "edgb", runs_root=str(runs_root))
         r2 = emulate_family(run_id, "edgb", runs_root=str(runs_root))
@@ -310,7 +310,7 @@ class TestHiddenMinimumConfidence:
     def test_confidence_present(self, edgb_run):
         """Result must contain hidden minimum confidence."""
         runs_root, run_id = edgb_run
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
 
         result = emulate_family(run_id, "edgb", runs_root=str(runs_root))
         conf = result["no_hidden_minimum_confidence"]
@@ -322,7 +322,7 @@ class TestHiddenMinimumConfidence:
     def test_clean_bowl_high_confidence(self, edgb_run):
         """A clean quadratic bowl should give high confidence."""
         runs_root, run_id = edgb_run
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
 
         result = emulate_family(run_id, "edgb", runs_root=str(runs_root))
         conf = result["no_hidden_minimum_confidence"]
@@ -340,7 +340,7 @@ class TestMultiFamily:
     def test_emulate_all(self, edgb_run):
         """emulate_all_families should handle families without data gracefully."""
         runs_root, run_id = edgb_run
-        from experiment.e5z_gpr_emulator import emulate_all_families
+        from mvp.experiment.e5z_gpr_emulator import emulate_all_families
 
         result = emulate_all_families(
             run_id, families=["edgb", "dcs"], runs_root=str(runs_root)
@@ -357,7 +357,7 @@ class TestSurfaceGrid:
     def test_grid_dimensions(self, edgb_run):
         """Surface grid should have correct dimensions."""
         runs_root, run_id = edgb_run
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
 
         result = emulate_family(
             run_id, "edgb", grid_resolution=10, runs_root=str(runs_root)
@@ -373,7 +373,7 @@ class TestSurfaceGrid:
     def test_1d_grid(self, kerr_run):
         """1D family should produce 1D grid."""
         runs_root, run_id = kerr_run
-        from experiment.e5z_gpr_emulator import emulate_family
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
 
         result = emulate_family(
             run_id, "kerr", grid_resolution=20, runs_root=str(runs_root)
@@ -391,7 +391,7 @@ class TestFileOutput:
     def test_write_outputs(self, edgb_run):
         """run_emulator should write all expected files."""
         runs_root, run_id = edgb_run
-        from experiment.e5z_gpr_emulator import run_emulator
+        from mvp.experiment.e5z_gpr_emulator import run_emulator
 
         run_emulator(
             run_id, families=["edgb"],

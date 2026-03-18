@@ -388,13 +388,13 @@ Cuando el referee diga *"su malla de dCS es gruesa, se les escapó una compatibl
 
 ```bash
 # Emular una familia
-python experiment/e5z_gpr_emulator.py --run-id GW150914_v1 --families kerr edgb
+python mvp/experiment/e5z_gpr_emulator.py --run-id GW150914_v1 --families kerr edgb
 
 # Emular todas las familias conocidas
-python experiment/e5z_gpr_emulator.py --run-id GW150914_v1
+python mvp/experiment/e5z_gpr_emulator.py --run-id GW150914_v1
 
 # Usar kernel RBF en vez de Matérn 5/2
-python experiment/e5z_gpr_emulator.py --run-id GW150914_v1 --kernel RBF
+python mvp/experiment/e5z_gpr_emulator.py --run-id GW150914_v1 --kernel RBF
 ```
 
 **Nota epistemológica:** BASURIN core mide realidades numéricas (waveforms que existen). E5-Z crea ficciones estadísticas de alta precisión (waveforms interpoladas no integradas en NR). Mezclar medición directa con predicción estadística destruiría la inmutabilidad del pipeline. Por eso vive en Fase 5.
