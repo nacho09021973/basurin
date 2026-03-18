@@ -194,13 +194,55 @@ Si eso no coincide con el árbol real donde está `RUN_VALID/verdict.json`, el s
 
 ---
 
+## Namespace experimental: código fuente vs artefactos
+
+**Esta distinción es crítica para no confundir rutas de código con rutas de artefactos.**
+
+| Tipo | Ruta | Descripción |
+|------|------|-------------|
+| Código fuente experimental | `mvp/experiment/` | Paquete Python con módulos E5-A a E5-H, E5-Z y `base_contract.py`. Reside en el árbol del repositorio. |
+| Artefactos experimentales | `runs/<run_id>/experiment/<nombre>/` | Outputs producidos por ejecución de módulos E5. Gobernados por `RUN_VALID`. |
+
+> **Nota de migración:** el paquete top-level `./experiment` fue retirado. El namespace canónico vigente del código experimental es `mvp/experiment`. Imports legacy `from experiment...` o rutas `experiment/...` (sin prefijo `mvp/`) son obsoletos.
+
+Ejemplos de rutas de código fuente experimental (Fase 5):
+
+```text
+mvp/experiment/__init__.py
+mvp/experiment/base_contract.py
+mvp/experiment/e5a_multi_event_aggregation.py
+mvp/experiment/e5b_jackknife.py
+mvp/experiment/e5c_ranking.py
+mvp/experiment/e5d_bridge_malda.py
+mvp/experiment/e5e_query.py
+mvp/experiment/e5f_verdict_aggregation.py
+mvp/experiment/e5h_blind_prediction.py
+mvp/experiment/e5z_gpr_emulator.py
+mvp/experiment/sandbox/          # E5-G: aislamiento total
+```
+
+Ejemplos de artefactos experimentales Fase 5 (bajo run gobernado):
+
+```text
+runs/<run_id>/experiment/e5a_multi_event_aggregation/outputs/aggregation_result.json
+runs/<run_id>/experiment/e5b_jackknife/outputs/stability_per_geometry.json
+runs/<run_id>/experiment/e5c_ranking/outputs/ranked_geometries.json
+runs/<run_id>/experiment/e5d_bridge_malda/outputs/malda_input_payload.json
+runs/<run_id>/experiment/e5e_query/outputs/query_<hash>.json
+runs/<run_id>/experiment/e5f_verdict_aggregation/outputs/population_verdict.json
+runs/<run_id>/experiment/e5h_blind_prediction/outputs/prediction_summary.json
+runs/<run_id>/experiment/e5z_gpr_emulator/outputs/predicted_minima.json
+```
+
+---
+
 ## Rutas canónicas
 
 - `data/losc/<EVENT_ID>/`: caché local *read-only* de HDF5 (external input). No es generado por el pipeline.
 - `gw_events/strain/<EVENT_ID>/`: caché cruda/histórica opcional. Si existe, debe exponerse bajo `data/losc/<EVENT_ID>/` mediante symlink o bind mount antes de ejecutar el pipeline.
 - `runs/<run_id>/external_inputs/...`: anclaje determinista de releases externos (por ejemplo, `siegel_220_210.tar.gz`) con hash verificable para trazabilidad.
 - `runs/<run_id>/<stage>/outputs/`: artefactos producidos por stages. Deben convivir con `manifest.json` y `stage_summary.json`, incluyendo hashes SHA256.
-- `runs/<run_id>/experiment/<name>/`: espacio para experimentos; no debe mutar artefactos canónicos de stages ya emitidos.
+- `runs/<run_id>/experiment/<name>/`: espacio de artefactos para experimentos; no debe mutar artefactos canónicos de stages ya emitidos. El código fuente de estos experimentos vive en `mvp/experiment/`.
 
 ### MALDA: rutas exactas y orden estricto
 

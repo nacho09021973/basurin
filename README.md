@@ -32,6 +32,7 @@ Para evitar ambigüedad sobre qué hace cada fase, qué artefactos produce y qu�
 - [Fase 2 — Poblaciones offline batch (220 / 221)](docs/fases/fase_2_readme.md)
 - [Fase 3 — Intersección 220 vs 221 y soporte común](docs/fases/fase_3_readme.md)
 - [Fase 4 — E5: área del horizonte y entropía en soporte físico común](docs/fases/fase_4_readme.md)
+- [Fase 5 — Catálogo de alternativas experimentales E5 (`mvp/experiment`)](docs/fases/fase_5_readme.md)
 
 ### Regla de uso
 
@@ -47,6 +48,7 @@ Antes de ejecutar una fase o interpretar sus outputs:
 - La fase 2 dispone ya de batches canónicos corregidos para 220 y 221.
 - La fase 3 tiene diagnóstico físico correcto, pero todavía requiere formalización canónica del script/contrato.
 - La fase 4 (E5) es rehacible, pero debe reconstruirse con los batches corregidos y con la definición actual de `phys_key`.
+- La fase 5 tiene los 9 módulos experimentales (E5-A a E5-H, E5-Z) implementados en `mvp/experiment/` con 30/30 tests de gobernanza pasando. Ver [`docs/fases/fase_5_readme.md`](docs/fases/fase_5_readme.md).
 
 ## Leyenda de estado
 
@@ -204,7 +206,19 @@ Regla practica:
 - Lo canonico vive en `mvp/` y `mvp/contracts.py`.
 - Los experimentos viven bajo `runs/<run_id>/experiment/<name>/...`.
 - Un experimento no debe mutar artefactos canonicos ya emitidos.
-- La exploracion sin contrato cientifico suficientemente cerrado debe quedarse en `experiment/`.
+- La exploracion sin contrato cientifico suficientemente cerrado debe quedarse en `mvp/experiment/` (sandbox E5-G) o en un subespacio explicitamente aislado dentro del namespace experimental.
+
+#### Namespace experimental (`mvp/experiment`)
+
+El paquete `mvp/experiment/` es el namespace experimental gobernado del proyecto. Contiene los nueve módulos de Fase 5 (E5-A a E5-H, E5-Z) más el contrato universal de entrada (`base_contract.py`).
+
+> **Nota de migración:** el paquete top-level `./experiment` fue retirado. Cualquier referencia legacy a `from experiment...` o rutas de código `experiment/...` debe actualizarse a `mvp.experiment...` / `mvp/experiment/...`.
+
+Distinción importante:
+- **Código fuente experimental**: `mvp/experiment/` (árbol del repositorio).
+- **Artefactos experimentales producidos por ejecución**: `runs/<run_id>/experiment/<nombre>/` (árbol de run, gobernado por `RUN_VALID`).
+
+`mvp/experiment/` no es el pipeline canónico. Es un espacio experimental gobernado que opera sobre las conclusiones del pipeline (s1→s8), no sobre los datos directamente.
 
 ### 3.7 Excepcion documentada
 
