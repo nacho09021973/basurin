@@ -588,6 +588,10 @@ def test_s3b_allows_220_only_ok_when_221_insufficient() -> None:
     assert payload["modes"][1]["ln_f"] is None
     assert any(flag.startswith("221_") for flag in payload["results"]["quality_flags"])
     assert any("proceeding with 220-only" in message for message in payload["results"]["messages"])
+    # H1 audit: mode_221_usable contract
+    assert payload["mode_221_usable"] is False
+    assert isinstance(payload["mode_221_usable_reason"], str)
+    assert payload["mode_221_usable_reason"] != "ok"
 
 
 def test_discover_s2_npz_prefers_h1_then_l1(tmp_path: Path) -> None:
@@ -955,3 +959,58 @@ def test_cli_psd_path_falls_back_when_detector_missing_in_psd(tmp_path: Path) ->
     summary_path = tmp_runs / run_id / "s3b_multimode_estimates" / "stage_summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary.get("psd_source") == "internal_welch"
+
+
+# ── H1 audit regression: mode_221_usable contract in build_results_payload ──
+
+
+def test_build_results_payload_mode_221_usable_true_when_ok() -> None:
+    """When mode_221_ok=True, payload must carry mode_221_usable=True, reason='ok'."""
+    mode_220 = _summary_mode_payload(label="220", f_hz=250.0, q=12.0, valid_fraction=0.9)
+    mode_221 = _summary_mode_payload(label="221", f_hz=350.0, q=6.0, valid_fraction=0.8)
+    payload = build_results_payload(
+        run_id="audit_ok",
+        window_meta=None,
+        mode_220=mode_220,
+        mode_220_ok=True,
+        mode_221=mode_221,
+        mode_221_ok=True,
+        flags=[],
+    )
+    assert payload["mode_221_usable"] is True
+    assert payload["mode_221_usable_reason"] == "ok"
+
+
+def test_build_results_payload_mode_221_usable_false_with_explosive_flags() -> None:
+    """When mode_221_ok=False and flags include 221 explosions, reason is the first 221 flag."""
+    mode_220 = _summary_mode_payload(label="220", f_hz=250.0, q=12.0, valid_fraction=0.9)
+    mode_221 = _summary_mode_payload(label="221", f_hz=350.0, q=6.0, valid_fraction=0.1)
+    flags = ["221_cv_Q_explosive", "221_lnQ_span_explosive", "220_something"]
+    payload = build_results_payload(
+        run_id="audit_explosive",
+        window_meta=None,
+        mode_220=mode_220,
+        mode_220_ok=True,
+        mode_221=mode_221,
+        mode_221_ok=False,
+        flags=flags,
+    )
+    assert payload["mode_221_usable"] is False
+    assert payload["mode_221_usable_reason"].startswith("221_")
+
+
+def test_build_results_payload_mode_221_usable_false_generic_reason() -> None:
+    """When mode_221_ok=False and no 221-prefixed flags, reason falls back to first flag or generic."""
+    mode_220 = _summary_mode_payload(label="220", f_hz=250.0, q=12.0, valid_fraction=0.9)
+    mode_221 = _summary_mode_payload(label="221", f_hz=350.0, q=6.0, valid_fraction=0.0)
+    payload = build_results_payload(
+        run_id="audit_generic",
+        window_meta=None,
+        mode_220=mode_220,
+        mode_220_ok=True,
+        mode_221=mode_221,
+        mode_221_ok=False,
+        flags=[],
+    )
+    assert payload["mode_221_usable"] is False
+    assert payload["mode_221_usable_reason"] == "mode_221_not_ok"

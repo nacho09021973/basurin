@@ -85,6 +85,17 @@ def _extract_mode_dict_candidates(obj: Any) -> list[dict[str, Any]]:
 
 
 def _upstream_221_block_reason(multimode: dict[str, Any]) -> str | None:
+    # Canonical gate: honour the formal mode_221_usable contract from s3b.
+    mode_221_usable = multimode.get("mode_221_usable")
+    if mode_221_usable is False:
+        reason = multimode.get("mode_221_usable_reason") or "mode_221_not_usable"
+        return f"upstream_mode_221_not_usable:{reason}"
+    if mode_221_usable is True:
+        # Canonical gate says usable — skip legacy heuristics.
+        return None
+
+    # Legacy / fallback path: inspect quality_flags and verdict for
+    # artefacts produced before mode_221_usable was added.
     results = multimode.get("results") if isinstance(multimode.get("results"), dict) else {}
     raw_flags = results.get("quality_flags")
     flags = [str(flag).strip() for flag in raw_flags if str(flag).strip()] if isinstance(raw_flags, list) else []
@@ -95,7 +106,7 @@ def _upstream_221_block_reason(multimode: dict[str, Any]) -> str | None:
     verdict = results.get("verdict")
     if isinstance(verdict, str):
         verdict = verdict.strip()
-        if verdict and verdict != "PASS":
+        if verdict and verdict not in {"PASS", "OK"}:
             return f"upstream_221_verdict:{verdict}"
     return None
 
