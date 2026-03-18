@@ -107,7 +107,7 @@ class TestE5EQuery:
     def test_basic_query(self, tmp_runs):
         runs_root, make_run = tmp_runs
         make_run("run_001")
-        from experiment.e5e_query import execute_query
+        from mvp.experiment.e5e_query import execute_query
         result = execute_query("family == 'edgb'", ["run_001"], runs_root=str(runs_root))
         assert result["schema_version"] == "e5e-0.1"
         assert result["result_count"] == 2
@@ -116,14 +116,14 @@ class TestE5EQuery:
     def test_numeric_query(self, tmp_runs):
         runs_root, make_run = tmp_runs
         make_run("run_001")
-        from experiment.e5e_query import execute_query
+        from mvp.experiment.e5e_query import execute_query
         result = execute_query("mahalanobis_d2 < 3.0", ["run_001"], runs_root=str(runs_root))
         assert result["result_count"] == 1  # only edgb_001 with d2=2.1
 
     def test_idempotency(self, tmp_runs):
         runs_root, make_run = tmp_runs
         make_run("run_001")
-        from experiment.e5e_query import execute_query
+        from mvp.experiment.e5e_query import execute_query
         r1 = execute_query("family == 'edgb'", ["run_001"], runs_root=str(runs_root))
         r2 = execute_query("family == 'edgb'", ["run_001"], runs_root=str(runs_root))
         assert r1["query_id"] == r2["query_id"]
@@ -134,7 +134,7 @@ class TestE5EQuery:
         runs_root, make_run = tmp_runs
         make_run("run_fail", run_valid="FAIL")
         from mvp.experiment.base_contract import GovernanceViolation
-        from experiment.e5e_query import execute_query
+        from mvp.experiment.e5e_query import execute_query
         with pytest.raises(GovernanceViolation):
             execute_query("family == 'edgb'", ["run_fail"], runs_root=str(runs_root))
 

@@ -214,7 +214,7 @@ Operadores soportados: `==`, `!=`, `<`, `<=`, `>`, `>=`. Cláusulas conectadas p
 **Uso:**
 
 ```bash
-python experiment/e5e_query.py \
+python mvp/experiment/e5e_query.py \
   --query "family == 'edgb' AND mahalanobis_d2 < 5.0" \
   --run-ids GW150914_v1 --dry-run
 ```
