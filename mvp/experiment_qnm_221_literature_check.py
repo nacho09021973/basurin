@@ -84,8 +84,28 @@ def _extract_mode_dict_candidates(obj: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _upstream_221_block_reason(multimode: dict[str, Any]) -> str | None:
+    results = multimode.get("results") if isinstance(multimode.get("results"), dict) else {}
+    raw_flags = results.get("quality_flags")
+    flags = [str(flag).strip() for flag in raw_flags if str(flag).strip()] if isinstance(raw_flags, list) else []
+    flagged_221 = [flag for flag in flags if flag.startswith("221_")]
+    if flagged_221:
+        return f"upstream_221_quality_flags:{','.join(flagged_221)}"
+
+    verdict = results.get("verdict")
+    if isinstance(verdict, str):
+        verdict = verdict.strip()
+        if verdict and verdict != "PASS":
+            return f"upstream_221_verdict:{verdict}"
+    return None
+
+
 def _extract_221_from_multimode(multimode: dict[str, Any], s3_estimates: dict[str, Any] | None) -> tuple[float | None, float | None, str]:
     """Minimal explicit policy for recovering the 221 estimate from s3b."""
+    block_reason = _upstream_221_block_reason(multimode)
+    if block_reason is not None:
+        return None, None, block_reason
+
     for item in _extract_mode_dict_candidates(multimode):
         label = str(item.get("label", item.get("mode", ""))).strip()
         ell = item.get("l")
@@ -617,8 +637,11 @@ def _decide_verdict(
     gate_c: dict[str, Any],
     f221: float | None,
     tau221: float | None,
+    extraction_policy: str,
 ) -> tuple[str, str]:
     if f221 is None:
+        if extraction_policy.startswith("upstream_221_"):
+            return "INSUFFICIENT_DATA", extraction_policy
         return "INSUFFICIENT_DATA", "missing_221_frequency_measurement"
     if f221 <= 0.0:
         return "REJECTED", "non_physical_221_frequency"
@@ -730,6 +753,7 @@ def main(argv: list[str] | None = None) -> int:
         gate_c=gate_c,
         f221=f221_measured,
         tau221=tau221_measured,
+        extraction_policy=extraction_policy,
     )
     if verdict not in ALLOWED_VERDICTS:
         raise RuntimeError(f"invalid verdict: {verdict}")

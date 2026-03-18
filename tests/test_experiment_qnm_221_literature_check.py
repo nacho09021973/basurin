@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -60,6 +61,37 @@ def _write_minimal_s3b(root: Path, run_id: str) -> None:
                 "Sigma_3d": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
                 "point_estimate": [0.0, 0.0, 0.0],
             },
+        },
+    )
+
+
+def _write_s3b_221_fit(
+    root: Path,
+    run_id: str,
+    *,
+    verdict: str = "PASS",
+    quality_flags: list[str] | None = None,
+) -> None:
+    write_json_atomic(
+        root / run_id / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json",
+        {
+            "schema_version": "multimode_estimates_v1",
+            "results": {
+                "verdict": verdict,
+                "quality_flags": [] if quality_flags is None else quality_flags,
+            },
+            "modes": [
+                {
+                    "label": "221",
+                    "mode": [2, 2, 1],
+                    "fit": {
+                        "stability": {
+                            "lnf_p50": math.log(250.0),
+                            "lnQ_p50": math.log(5.0),
+                        }
+                    },
+                }
+            ],
         },
     )
 
@@ -163,6 +195,79 @@ def test_summary_contains_required_fields_and_valid_verdict(tmp_path: Path, monk
     assert summary["verdict"] in mod.ALLOWED_VERDICTS
 
 
+def test_main_returns_insufficient_data_when_upstream_221_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    run_id = "r_221_flagged"
+    _write_run_valid(runs_root, run_id, "PASS")
+    _write_minimal_s3(runs_root, run_id)
+    _write_s3b_221_fit(
+        runs_root,
+        run_id,
+        verdict="INSUFFICIENT_DATA",
+        quality_flags=[
+            "220_lnQ_span_explosive",
+            "221_cv_Q_explosive",
+            "221_lnQ_span_explosive",
+        ],
+    )
+    _write_model_comp(runs_root, run_id)
+    _write_remnant(runs_root, run_id)
+
+    def _should_not_predict(_: float, __: float) -> tuple[float, float, dict[str, str]]:
+        raise AssertionError("blocked upstream 221 must not reach Gate A Kerr prediction")
+
+    monkeypatch.setattr(mod, "_predict_kerr_221", _should_not_predict)
+    rc = mod.main(["--run-id", run_id])
+    assert rc == 0
+
+    summary = json.loads(
+        (runs_root / run_id / "experiment" / "qnm_221_literature_check" / "outputs" / "summary_221_validation.json").read_text(encoding="utf-8")
+    )
+    stage_summary = json.loads(
+        (runs_root / run_id / "experiment" / "qnm_221_literature_check" / "stage_summary.json").read_text(encoding="utf-8")
+    )
+
+    reason = "upstream_221_quality_flags:221_cv_Q_explosive,221_lnQ_span_explosive"
+    assert summary["f221_measured"] is None
+    assert summary["tau221_measured"] is None
+    assert summary["extraction_policy"] == reason
+    assert summary["verdict"] == "INSUFFICIENT_DATA"
+    assert summary["verdict_reason"] == reason
+    assert summary["gates"]["A"]["status"] == "NOT_AVAILABLE"
+    assert summary["gates"]["A"]["reason"] == "missing_measured_f_or_tau_221"
+    assert stage_summary["verdict"] == "PASS"
+    assert stage_summary["results"]["verdict"] == "INSUFFICIENT_DATA"
+    assert stage_summary["results"]["verdict_reason"] == reason
+
+
+def test_main_uses_stability_p50_when_upstream_passes_cleanly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    run_id = "r_221_pass"
+    _write_run_valid(runs_root, run_id, "PASS")
+    _write_minimal_s3(runs_root, run_id)
+    _write_s3b_221_fit(runs_root, run_id, verdict="PASS", quality_flags=[])
+    _write_model_comp(runs_root, run_id)
+    _write_remnant(runs_root, run_id)
+
+    expected_tau = 5.0 / (math.pi * 250.0)
+    monkeypatch.setattr(mod, "_predict_kerr_221", lambda mf, af: (250.0, expected_tau, {"tool": "fake"}))
+    rc = mod.main(["--run-id", run_id])
+    assert rc == 0
+
+    summary = json.loads(
+        (runs_root / run_id / "experiment" / "qnm_221_literature_check" / "outputs" / "summary_221_validation.json").read_text(encoding="utf-8")
+    )
+
+    assert summary["extraction_policy"] == "mode_221.fit.stability.p50"
+    assert summary["f221_measured"] == pytest.approx(250.0)
+    assert summary["tau221_measured"] == pytest.approx(expected_tau)
+    assert summary["gates"]["A"]["status"] == "PASS"
+
+
 def test_extract_221_from_real_s3b_schema_fixture() -> None:
     fixture_path = (
         Path(__file__).resolve().parent
@@ -175,13 +280,9 @@ def test_extract_221_from_real_s3b_schema_fixture() -> None:
 
     f221, tau221, policy = mod._extract_221_from_multimode(data, s3_estimates)
 
-    assert policy in {
-        "mode_221.fit.stability.p50",
-        "explicit_mode_221",
-        "joint_3d_ln_ratio_times_s3_f220",
-    }
-    assert f221 is None or f221 > 0.0
-    assert tau221 is None or tau221 > 0.0
+    assert f221 is None
+    assert tau221 is None
+    assert policy == "upstream_221_quality_flags:221_Sigma_invalid,221_lnQ_span_explosive,221_no_point_estimate"
 
 
 def test_extract_mf_af_from_external_h5_prefers_mixed_dataset(tmp_path: Path) -> None:
