@@ -32,10 +32,21 @@ def _write_run_valid(root: Path, run_id: str, verdict: str = "PASS") -> None:
     write_json_atomic(root / run_id / "RUN_VALID" / "verdict.json", {"verdict": verdict})
 
 
+def _write_run_provenance(root: Path, run_id: str, event_id: str) -> None:
+    write_json_atomic(
+        root / run_id / "run_provenance.json",
+        {
+            "schema_version": "run_provenance_v1",
+            "run_id": run_id,
+            "invocation": {"event_id": event_id},
+        },
+    )
+
+
 def _write_minimal_s3(root: Path, run_id: str) -> None:
     write_json_atomic(
         root / run_id / "s3_ringdown_estimates" / "outputs" / "estimates.json",
-        {"combined": {"f_hz": 250.0, "Q": 10.0}},
+        {"event_id": "GW150914", "combined": {"f_hz": 250.0, "Q": 10.0}},
     )
 
 
@@ -67,6 +78,32 @@ def _write_model_comp(root: Path, run_id: str) -> None:
 
 def _write_remnant(root: Path, run_id: str) -> None:
     write_json_atomic(root / run_id / "external_inputs" / "remnant_kerr.json", {"Mf": 1.0, "af": 0.7})
+
+
+def _write_gwtc_remnant_h5(
+    root: Path,
+    run_id: str,
+    *,
+    event_id: str,
+    mixed_rows: list[tuple[float, float]],
+    other_rows: list[tuple[float, float]] | None = None,
+    mixed_fields: tuple[str, ...] = ("final_mass", "final_spin"),
+) -> Path:
+    h5py = pytest.importorskip("h5py")
+    np = pytest.importorskip("numpy")
+
+    raw_dir = root / run_id / "external_inputs" / "gwtc_posteriors" / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    path = raw_dir / f"IGWN-GWTC3p0-v2-{event_id}_PEDataRelease_mixed_cosmo.h5"
+
+    with h5py.File(str(path), "w") as h5:
+        mixed_dtype = np.dtype([(field, "f8") for field in mixed_fields])
+        h5.create_dataset("C01:Mixed/posterior_samples", data=np.array(mixed_rows, dtype=mixed_dtype))
+        if other_rows is not None:
+            other_dtype = np.dtype([("final_mass", "f8"), ("final_spin", "f8")])
+            h5.create_dataset("C01:IMRPhenomXPHM/posterior_samples", data=np.array(other_rows, dtype=other_dtype))
+
+    return path
 
 
 def test_abort_if_run_valid_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -145,3 +182,97 @@ def test_extract_221_from_real_s3b_schema_fixture() -> None:
     }
     assert f221 is None or f221 > 0.0
     assert tau221 is None or tau221 > 0.0
+
+
+def test_extract_mf_af_from_external_h5_prefers_mixed_dataset(tmp_path: Path) -> None:
+    event_id = "GW200129_065458"
+    path = _write_gwtc_remnant_h5(
+        tmp_path,
+        "r_h5",
+        event_id=event_id,
+        mixed_rows=[(55.0, 0.62), (60.0, 0.70), (65.0, 0.78)],
+        other_rows=[(80.0, 0.20), (90.0, 0.30), (100.0, 0.40)],
+    )
+
+    mf, af, meta = mod._extract_mf_af_from_h5(path)
+
+    assert mf == pytest.approx(60.0)
+    assert af == pytest.approx(0.70)
+    assert meta["dataset_path"] == "C01:Mixed/posterior_samples"
+    assert meta["reason"] is None
+
+
+def test_summary_uses_external_h5_remnant_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    run_id = "mvp_GW200129_065458_20260318T080000Z"
+    event_id = "GW200129_065458"
+    _write_run_valid(runs_root, run_id, "PASS")
+    _write_run_provenance(runs_root, run_id, event_id)
+    _write_minimal_s3(runs_root, run_id)
+    _write_minimal_s3b(runs_root, run_id)
+    _write_model_comp(runs_root, run_id)
+    _write_gwtc_remnant_h5(
+        runs_root,
+        run_id,
+        event_id=event_id,
+        mixed_rows=[(58.0, 0.66), (60.0, 0.70), (63.0, 0.73)],
+    )
+
+    seen: dict[str, float] = {}
+
+    def _fake_predict(mf: float, af: float) -> tuple[float, float, dict[str, str]]:
+        seen["mf"] = mf
+        seen["af"] = af
+        return 250.0, 5.0 / (3.141592653589793 * 250.0), {"tool": "fake"}
+
+    monkeypatch.setattr(mod, "_predict_kerr_221", _fake_predict)
+    rc = mod.main(["--run-id", run_id])
+    assert rc == 0
+
+    summary = json.loads(
+        (runs_root / run_id / "experiment" / "qnm_221_literature_check" / "outputs" / "summary_221_validation.json").read_text(encoding="utf-8")
+    )
+
+    assert seen["mf"] == pytest.approx(60.0)
+    assert seen["af"] == pytest.approx(0.70)
+    assert summary["mf_source"].endswith(".h5")
+    assert summary["af_source"].endswith(".h5")
+    assert summary["remnant_extraction_reason"] is None
+    assert summary["f221_kerr"] == pytest.approx(250.0)
+    assert summary["tau221_kerr"] == pytest.approx(5.0 / (3.141592653589793 * 250.0))
+
+
+def test_external_h5_without_final_spin_degrades_cleanly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    run_id = "mvp_GW200129_065458_20260318T090000Z"
+    event_id = "GW200129_065458"
+    _write_run_valid(runs_root, run_id, "PASS")
+    _write_run_provenance(runs_root, run_id, event_id)
+    _write_minimal_s3(runs_root, run_id)
+    _write_minimal_s3b(runs_root, run_id)
+    _write_model_comp(runs_root, run_id)
+    _write_gwtc_remnant_h5(
+        runs_root,
+        run_id,
+        event_id=event_id,
+        mixed_rows=[(58.0,), (60.0,), (63.0,)],
+        mixed_fields=("final_mass",),
+    )
+
+    rc = mod.main(["--run-id", run_id])
+    assert rc == 0
+
+    summary = json.loads(
+        (runs_root / run_id / "experiment" / "qnm_221_literature_check" / "outputs" / "summary_221_validation.json").read_text(encoding="utf-8")
+    )
+
+    assert summary["mf_source"].endswith(".h5")
+    assert summary["af_source"].endswith(".h5")
+    assert summary["f221_kerr"] is None
+    assert summary["tau221_kerr"] is None
+    assert summary["verdict"] == "INSUFFICIENT_DATA"
+    assert summary["remnant_extraction_reason"] == "no_posterior_samples_with_final_mass_and_final_spin"

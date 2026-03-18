@@ -9,6 +9,7 @@ import math
 import re
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 _here = Path(__file__).resolve()
@@ -27,6 +28,8 @@ from basurin_io import (
     write_manifest,
     write_stage_summary,
 )
+from mvp import contracts
+from mvp.kerr_qnm_fits import kerr_qnm
 
 EXPERIMENT_STAGE = "experiment/qnm_221_literature_check"
 ALLOWED_VERDICTS = {
@@ -36,6 +39,9 @@ ALLOWED_VERDICTS = {
     "INSUFFICIENT_DATA",
 }
 T0MS_RE = re.compile(r"__t0ms(\d+)")
+EVENT_ID_RE = re.compile(r"(GW\d{6}(?:_\d{6})?)")
+REMNANT_H5_SUFFIXES = {".h5", ".hdf5", ".nc"}
+PREFERRED_POSTERIOR_DATASETS = ("C01:Mixed/posterior_samples",)
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -159,7 +165,7 @@ def _extract_model_selection_metric(model_comp: dict[str, Any]) -> tuple[str, fl
     return "NOT_AVAILABLE", None, two_mode_preferred, None, "metric_missing"
 
 
-def _discover_remnant_path(run_dir: Path) -> Path | None:
+def _discover_remnant_path(run_dir: Path, *, event_id: str | None) -> Path | None:
     candidates = [
         run_dir / "external_inputs" / "remnant_kerr.json",
         run_dir / "external_inputs" / "remnant.json",
@@ -170,7 +176,25 @@ def _discover_remnant_path(run_dir: Path) -> Path | None:
     for path in candidates:
         if path.exists():
             return path
-    return None
+    raw_dir = run_dir / "external_inputs" / "gwtc_posteriors" / "raw"
+    if not raw_dir.exists():
+        return None
+    h5_candidates = sorted(
+        path
+        for path in raw_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in REMNANT_H5_SUFFIXES
+    )
+    if not h5_candidates:
+        return None
+    if event_id:
+        exact = [path for path in h5_candidates if event_id in path.name]
+        if exact:
+            return exact[0]
+        canonical = event_id.split("_", 1)[0]
+        partial = [path for path in h5_candidates if canonical in path.name]
+        if partial:
+            return partial[0]
+    return h5_candidates[0]
 
 
 def _extract_mf_af(remnant: dict[str, Any]) -> tuple[float | None, float | None]:
@@ -181,35 +205,155 @@ def _extract_mf_af(remnant: dict[str, Any]) -> tuple[float | None, float | None]
     return mf, af
 
 
-def _predict_kerr_221(mf: float, af: float) -> tuple[float, float, dict[str, Any]]:
-    try:
-        import qnm  # type: ignore
-    except Exception as exc:
-        raise RuntimeError(f"qnm_unavailable: {exc}") from exc
+def _extract_event_id(run_dir: Path, run_id: str, s3_estimates: dict[str, Any] | None) -> str | None:
+    provenance_path = run_dir / "run_provenance.json"
+    if provenance_path.exists():
+        provenance = _load_json(provenance_path)
+        invocation = provenance.get("invocation")
+        if isinstance(invocation, dict):
+            value = invocation.get("event_id")
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        value = provenance.get("event_id")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    if isinstance(s3_estimates, dict):
+        value = s3_estimates.get("event_id")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    match = EVENT_ID_RE.search(run_id)
+    return match.group(1) if match else None
 
+
+def _percentiles(values: Any) -> tuple[float | None, float | None, float | None]:
+    try:
+        import numpy as np  # noqa: PLC0415
+    except ImportError as exc:
+        raise RuntimeError(f"numpy_unavailable: {exc}") from exc
+
+    arr = np.asarray(values, dtype=float)
+    if arr.ndim == 0:
+        arr = arr.reshape(1)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return None, None, None
+    p10, p50, p90 = np.percentile(arr, [10.0, 50.0, 90.0])
+    return float(p10), float(p50), float(p90)
+
+
+def _find_posterior_samples_dataset(path: Path) -> tuple[str | None, tuple[str, ...], str | None]:
+    try:
+        import h5py  # noqa: PLC0415
+    except ImportError as exc:
+        return None, (), f"h5py_unavailable: {exc}"
+
+    with h5py.File(str(path), "r") as h5:
+        for preferred in PREFERRED_POSTERIOR_DATASETS:
+            if preferred not in h5:
+                continue
+            ds = h5[preferred]
+            names = tuple(ds.dtype.names or ())
+            if "final_mass" in names and "final_spin" in names:
+                return preferred, names, None
+
+        dataset_paths: list[str] = []
+
+        def _visit(name: str, obj: Any) -> None:
+            if not isinstance(obj, h5py.Dataset):
+                return
+            if not name.endswith("posterior_samples"):
+                return
+            names = tuple(obj.dtype.names or ())
+            if "final_mass" in names and "final_spin" in names:
+                dataset_paths.append(name)
+
+        h5.visititems(_visit)
+        if dataset_paths:
+            chosen = sorted(dataset_paths)[0]
+            names = tuple(h5[chosen].dtype.names or ())
+            return chosen, names, None
+    return None, (), "no_posterior_samples_with_final_mass_and_final_spin"
+
+
+def _extract_mf_af_from_h5(path: Path) -> tuple[float | None, float | None, dict[str, Any]]:
+    dataset_path, names, reason = _find_posterior_samples_dataset(path)
+    meta: dict[str, Any] = {
+        "source_format": "hdf5",
+        "selection_policy": (
+            "prefer C01:Mixed/posterior_samples; fallback to the first posterior_samples "
+            "dataset with final_mass and final_spin; use p50 of each field"
+        ),
+        "dataset_path": dataset_path,
+        "available_fields": list(names),
+        "reason": reason,
+    }
+    if dataset_path is None:
+        return None, None, meta
+
+    try:
+        import h5py  # noqa: PLC0415
+    except ImportError as exc:
+        meta["reason"] = f"h5py_unavailable: {exc}"
+        return None, None, meta
+
+    with h5py.File(str(path), "r") as h5:
+        data = h5[dataset_path][()]
+
+    try:
+        mf_p10, mf_p50, mf_p90 = _percentiles(data["final_mass"])
+        af_p10, af_p50, af_p90 = _percentiles(data["final_spin"])
+    except RuntimeError as exc:
+        meta["reason"] = str(exc)
+        return None, None, meta
+
+    meta.update(
+        {
+            "mf_p10": mf_p10,
+            "mf_p50": mf_p50,
+            "mf_p90": mf_p90,
+            "af_p10": af_p10,
+            "af_p50": af_p50,
+            "af_p90": af_p90,
+            "reason": None if mf_p50 is not None and af_p50 is not None else "non_finite_final_mass_or_spin",
+        }
+    )
+    return mf_p50, af_p50, meta
+
+
+def _load_remnant_estimate(path: Path) -> tuple[float | None, float | None, dict[str, Any]]:
+    if path.suffix.lower() in REMNANT_H5_SUFFIXES:
+        return _extract_mf_af_from_h5(path)
+
+    remnant = _load_json(path)
+    mf, af = _extract_mf_af(remnant)
+    return (
+        mf,
+        af,
+        {
+            "source_format": "json",
+            "selection_policy": "first non-null canonical key among Mf/mf/final_mass and af/chi_f/final_spin",
+            "reason": None if mf is not None and af is not None else "missing_json_mf_or_af",
+        },
+    )
+
+
+def _predict_kerr_221(mf: float, af: float) -> tuple[float, float, dict[str, Any]]:
     if mf <= 0.0:
         raise ValueError(f"invalid Mf={mf}")
-    if not (-0.999 <= af <= 0.999):
+    if not (0.0 <= af <= 0.999):
         raise ValueError(f"invalid af={af}")
-
-    mode = qnm.modes_cache(s=-2, l=2, m=2, n=1)
-    omega, _, _ = mode(a=af)
-    omega_r = float(getattr(omega, "real", omega.real))
-    omega_i = abs(float(getattr(omega, "imag", omega.imag)))
-    if omega_r <= 0.0 or omega_i <= 0.0:
-        raise RuntimeError(f"invalid_qnm_omega: {omega}")
-
-    f221 = omega_r / (2.0 * math.pi * mf)
-    tau221 = (1.0 / omega_i) * mf
+    prediction = kerr_qnm(mf, af, (2, 2, 1))
+    if prediction.f_hz <= 0.0 or prediction.tau_s <= 0.0:
+        raise RuntimeError(f"invalid_kerr_qnm_prediction: {prediction}")
     return (
-        f221,
-        tau221,
+        float(prediction.f_hz),
+        float(prediction.tau_s),
         {
-            "tool": "qnm",
+            "tool": "mvp.kerr_qnm_fits.kerr_qnm",
             "mode": "221",
             "a_final": af,
             "M_final": mf,
-            "omega_complex": [omega_r, -omega_i],
+            "Q": float(prediction.Q),
         },
     )
 
@@ -525,7 +669,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.model_comparison_path
         else run_dir / "s3b_multimode_estimates" / "outputs" / "model_comparison.json"
     )
-    remnant_path = Path(args.remnant_json) if args.remnant_json else _discover_remnant_path(run_dir)
+    s3_data = _load_json(s3_estimates_path) if s3_estimates_path.exists() else None
+    event_id = _extract_event_id(run_dir, args.run_id, s3_data)
+    remnant_path = Path(args.remnant_json) if args.remnant_json else _discover_remnant_path(run_dir, event_id=event_id)
 
     input_records: list[dict[str, str]] = []
     for label, path in (
@@ -543,7 +689,6 @@ def main(argv: list[str] | None = None) -> int:
                 }
             )
 
-    s3_data = _load_json(s3_estimates_path) if s3_estimates_path.exists() else None
     s3b_data = _load_json(source_estimates_path) if source_estimates_path.exists() else {}
     f221_measured, tau221_measured, extraction_policy = _extract_221_from_multimode(s3b_data, s3_data)
 
@@ -551,11 +696,11 @@ def main(argv: list[str] | None = None) -> int:
     af = None
     mf_source = None
     af_source = None
+    remnant_meta: dict[str, Any] | None = None
     if remnant_path is not None and remnant_path.exists():
-        remnant_data = _load_json(remnant_path)
-        mf, af = _extract_mf_af(remnant_data)
         mf_source = _rel_to(run_dir, remnant_path)
         af_source = _rel_to(run_dir, remnant_path)
+        mf, af, remnant_meta = _load_remnant_estimate(remnant_path)
 
     gate_a = _gate_a_kerr(
         f_meas=f221_measured,
@@ -595,6 +740,7 @@ def main(argv: list[str] | None = None) -> int:
         "remnant_source_path": _rel_to(run_dir, remnant_path) if remnant_path is not None else None,
         "mf": mf,
         "af": af,
+        "remnant_meta": remnant_meta,
         "f221_kerr": gate_a["f221_kerr"],
         "tau221_kerr": gate_a["tau221_kerr"],
         "status": gate_a["status"],
@@ -611,6 +757,8 @@ def main(argv: list[str] | None = None) -> int:
             "primary measurement uses canonical s3b_multimode_estimates from the PASS run; "
             "t0 subruns are used only for Gate B."
         ),
+        "remnant_selection_policy": None if remnant_meta is None else remnant_meta.get("selection_policy"),
+        "remnant_extraction_reason": None if remnant_meta is None else remnant_meta.get("reason"),
         "mf_source": mf_source,
         "af_source": af_source,
         "f221_measured": f221_measured,
@@ -668,7 +816,7 @@ def main(argv: list[str] | None = None) -> int:
         },
     }
     stage_summary_path = write_stage_summary(stage_dir, stage_summary_payload)
-    manifest_path = write_manifest(
+    write_manifest(
         stage_dir,
         {
             "kerr_oracle_221": kerr_path,
@@ -680,11 +828,7 @@ def main(argv: list[str] | None = None) -> int:
         extra={"inputs": input_records, "verdict": "PASS"},
     )
 
-    print(f"OUT_ROOT={out_root}")
-    print(f"STAGE_DIR={stage_dir}")
-    print(f"OUTPUTS_DIR={outputs_dir}")
-    print(f"STAGE_SUMMARY={stage_summary_path}")
-    print(f"MANIFEST={manifest_path}")
+    contracts.log_stage_paths(SimpleNamespace(out_root=out_root, stage_dir=stage_dir, outputs_dir=outputs_dir))
     return 0
 
 
