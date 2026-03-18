@@ -151,7 +151,7 @@ class TestE5FVerdictAggregation:
                 "kerr_newman": {"verdict": "SUPPORTED"},
             }
         })
-        from experiment.e5f_verdict_aggregation import aggregate_verdicts
+        from mvp.experiment.e5f_verdict_aggregation import aggregate_verdicts
         result = aggregate_verdicts(["run_001", "run_002"], runs_root=str(runs_root))
         assert result["n_events_aggregated"] == 2
         assert result["verdict_source_only"] is True
@@ -163,7 +163,7 @@ class TestE5FVerdictAggregation:
         make_run("run_good")
         make_run("run_bad", run_valid="FAIL")
         from mvp.experiment.base_contract import GovernanceViolation
-        from experiment.e5f_verdict_aggregation import aggregate_verdicts
+        from mvp.experiment.e5f_verdict_aggregation import aggregate_verdicts
         with pytest.raises(GovernanceViolation):
             aggregate_verdicts(["run_good", "run_bad"], runs_root=str(runs_root))
 

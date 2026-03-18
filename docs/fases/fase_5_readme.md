@@ -248,7 +248,7 @@ python mvp/experiment/e5e_query.py \
 **Uso:**
 
 ```bash
-python experiment/e5f_verdict_aggregation.py \
+python mvp/experiment/e5f_verdict_aggregation.py \
   --run-ids GW150914_v1 GW170817_v1 GW190521_v1 --dry-run
 ```
 
