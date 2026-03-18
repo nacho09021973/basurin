@@ -6,7 +6,7 @@ external inference framework (MALDA, pyRing, or analog).
 
 GOVERNANCE WARNING: The target schema (malda_schema.json) is an external
 dependency not controlled by BASURIN.  This file MUST exist before execution:
-  experiment/e5d_bridge_malda/external_input/malda_schema.json
+  mvp/experiment/e5d_bridge_malda/external_input/malda_schema.json
 
 This bridge NEVER writes to any canonical directory.  It is a one-way
 translation layer.

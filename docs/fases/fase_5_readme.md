@@ -176,7 +176,7 @@ python mvp/experiment/e5c_ranking.py --run-id GW150914_v1 --weights 0.5 0.4 0.1
 **Precondición obligatoria:**
 
 ```bash
-[ -f experiment/e5d_bridge_malda/external_input/malda_schema.json ] || \
+[ -f mvp/experiment/e5d_bridge_malda/external_input/malda_schema.json ] || \
   echo "ERROR: bridge no ejecutable"
 ```
 
