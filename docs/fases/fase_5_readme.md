@@ -53,7 +53,7 @@ REQUIRED_CANONICAL_GATES = {
 **Invariante primario:** ninguna alternativa puede consumir un `run_id` cuyo `stage_summary.json` no tenga `run_valid: "PASS"`. Violación → excepción `GovernanceViolation`.
 
 ```python
-from experiment.base_contract import validate_and_load_run
+from mvp.experiment.base_contract import validate_and_load_run
 
 run_dir, summary = validate_and_load_run("GW150914_v1")
 # Si run_valid != PASS → GovernanceViolation

@@ -198,7 +198,7 @@ def failed_run(tmp_path):
 class TestGovernance:
     def test_rejects_invalid_run(self, failed_run):
         runs_root, run_id = failed_run
-        from experiment.base_contract import GovernanceViolation
+        from mvp.experiment.base_contract import GovernanceViolation
         from mvp.experiment.e5z_gpr_emulator import emulate_family
         with pytest.raises(GovernanceViolation, match="RUN_VALID=FAIL"):
             emulate_family(run_id, "edgb", runs_root=str(runs_root))

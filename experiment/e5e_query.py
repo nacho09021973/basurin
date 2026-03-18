@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from experiment.base_contract import (
+from mvp.experiment.base_contract import (
     GovernanceViolation,
     REQUIRED_CANONICAL_GATES,
     _write_json_atomic,

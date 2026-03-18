@@ -77,26 +77,26 @@ class TestBaseContractGovernance:
     def test_assert_run_valid_pass(self, tmp_runs):
         runs_root, make_run = tmp_runs
         run_dir = make_run("run_001")
-        from experiment.base_contract import assert_run_valid
+        from mvp.experiment.base_contract import assert_run_valid
         summary = assert_run_valid(run_dir / "stage_summary.json")
         assert summary["run_valid"] == "PASS"
 
     def test_assert_run_valid_fail_raises(self, tmp_runs):
         runs_root, make_run = tmp_runs
         run_dir = make_run("run_fail", run_valid="FAIL")
-        from experiment.base_contract import assert_run_valid, GovernanceViolation
+        from mvp.experiment.base_contract import assert_run_valid, GovernanceViolation
         with pytest.raises(GovernanceViolation, match="RUN_VALID=FAIL"):
             assert_run_valid(run_dir / "stage_summary.json")
 
     def test_assert_run_valid_warn_raises(self, tmp_runs):
         runs_root, make_run = tmp_runs
         run_dir = make_run("run_warn", run_valid="WARN")
-        from experiment.base_contract import assert_run_valid, GovernanceViolation
+        from mvp.experiment.base_contract import assert_run_valid, GovernanceViolation
         with pytest.raises(GovernanceViolation):
             assert_run_valid(run_dir / "stage_summary.json")
 
     def test_assert_run_valid_missing_file(self, tmp_path):
-        from experiment.base_contract import assert_run_valid
+        from mvp.experiment.base_contract import assert_run_valid
         with pytest.raises(FileNotFoundError):
             assert_run_valid(tmp_path / "nonexistent.json")
 
@@ -133,7 +133,7 @@ class TestE5EQuery:
     def test_rejects_invalid_run(self, tmp_runs):
         runs_root, make_run = tmp_runs
         make_run("run_fail", run_valid="FAIL")
-        from experiment.base_contract import GovernanceViolation
+        from mvp.experiment.base_contract import GovernanceViolation
         from experiment.e5e_query import execute_query
         with pytest.raises(GovernanceViolation):
             execute_query("family == 'edgb'", ["run_fail"], runs_root=str(runs_root))
@@ -162,7 +162,7 @@ class TestE5FVerdictAggregation:
         runs_root, make_run = tmp_runs
         make_run("run_good")
         make_run("run_bad", run_valid="FAIL")
-        from experiment.base_contract import GovernanceViolation
+        from mvp.experiment.base_contract import GovernanceViolation
         from experiment.e5f_verdict_aggregation import aggregate_verdicts
         with pytest.raises(GovernanceViolation):
             aggregate_verdicts(["run_good", "run_bad"], runs_root=str(runs_root))
@@ -418,7 +418,7 @@ class TestE5ZGPREmulator:
         """E5-Z must reject runs with RUN_VALID != PASS."""
         runs_root, make_run = tmp_runs
         make_run("run_fail", run_valid="FAIL", geometries=self._make_kerr_geometries())
-        from experiment.base_contract import GovernanceViolation
+        from mvp.experiment.base_contract import GovernanceViolation
         from mvp.experiment.e5z_gpr_emulator import emulate_family
         with pytest.raises(GovernanceViolation):
             emulate_family("run_fail", "kerr", runs_root=str(runs_root))
