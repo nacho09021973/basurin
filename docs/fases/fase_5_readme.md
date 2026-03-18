@@ -152,7 +152,7 @@ Pesos por defecto: `(0.5, 0.4, 0.1)` — **actualmente arbitrarios**, pendientes
 **Uso:**
 
 ```bash
-python experiment/e5c_ranking.py --run-id GW150914_v1 --weights 0.5 0.4 0.1
+python mvp/experiment/e5c_ranking.py --run-id GW150914_v1 --weights 0.5 0.4 0.1
 ```
 
 **Criterio de promoción:** Pesos justificados por Fisher information geometry (Método Brunete) + reproducibilidad en ≥ 3 eventos.

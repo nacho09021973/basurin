@@ -223,7 +223,7 @@ class TestE5CRanking:
     def test_basic_ranking(self, tmp_runs):
         runs_root, make_run = tmp_runs
         make_run("run_001")
-        from experiment.e5c_ranking import rank_geometries
+        from mvp.experiment.e5c_ranking import rank_geometries
         result = rank_geometries("run_001", runs_root=str(runs_root))
         assert result["schema_version"] == "e5c-0.1"
         assert len(result["ranked"]) == 3
@@ -235,7 +235,7 @@ class TestE5CRanking:
         """Ranking must not introduce new geometry_ids."""
         runs_root, make_run = tmp_runs
         make_run("run_001")
-        from experiment.e5c_ranking import rank_geometries
+        from mvp.experiment.e5c_ranking import rank_geometries
         result = rank_geometries("run_001", runs_root=str(runs_root))
         ranked_ids = {g["geometry_id"] for g in result["ranked"]}
         assert ranked_ids == {"edgb_001", "edgb_002", "kerr_newman_001"}
