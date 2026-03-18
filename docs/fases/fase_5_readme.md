@@ -115,7 +115,7 @@ python mvp/experiment/e5a_multi_event_aggregation.py \
 **Uso:**
 
 ```bash
-python experiment/e5b_jackknife.py \
+python mvp/experiment/e5b_jackknife.py \
   --run-ids GW150914_v1 GW170817_v1 GW190521_v1 --dry-run
 ```
 

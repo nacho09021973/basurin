@@ -202,7 +202,7 @@ class TestE5BJackknife:
         make_run("run_003", geometries=[
             {"geometry_id": "edgb_001", "family": "edgb"},
         ])
-        from experiment.e5b_jackknife import jackknife_analysis
+        from mvp.experiment.e5b_jackknife import jackknife_analysis
         result = jackknife_analysis(["run_001", "run_002", "run_003"], runs_root=str(runs_root))
         assert result["n_events"] == 3
         assert "edgb_001" in result["geometry_stability"]
@@ -212,7 +212,7 @@ class TestE5BJackknife:
         runs_root, make_run = tmp_runs
         make_run("run_001")
         make_run("run_002")
-        from experiment.e5b_jackknife import jackknife_analysis
+        from mvp.experiment.e5b_jackknife import jackknife_analysis
         with pytest.raises(ValueError, match="at least 3"):
             jackknife_analysis(["run_001", "run_002"], runs_root=str(runs_root))
 
