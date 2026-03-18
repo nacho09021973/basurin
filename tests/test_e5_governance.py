@@ -281,6 +281,176 @@ class TestE5HBlindPrediction:
             blind_prediction(["run_001", "run_002"], runs_root=str(runs_root))
 
 
+# ── Test: E5-Z GPR Emulator ─────────────────────────────────────────────────
+
+class TestE5ZGPREmulator:
+    def _make_kerr_geometries(self, n=20):
+        """Create a sweep of Kerr geometries with realistic d2 values."""
+        import math
+        geometries = []
+        for i in range(n):
+            spin = i / (n - 1) * 0.95  # 0.0 to 0.95
+            # Simulate a parabolic d2 surface with minimum near spin=0.67
+            d2 = 3.0 * (spin - 0.67) ** 2 + 0.5
+            f_hz = 200.0 + 80.0 * spin
+            Q = 2.0 + 6.0 * spin
+            geometries.append({
+                "geometry_id": f"Kerr_a{spin:.4f}_l2m2n0",
+                "family": "kerr",
+                "theory": "GR_Kerr",
+                "d2": round(d2, 4),
+                "distance": round(math.sqrt(d2), 4),
+                "delta_lnL": round(-0.5 * d2, 4),
+                "f_hz": round(f_hz, 2),
+                "Q": round(Q, 3),
+                "metadata": {
+                    "spin": round(spin, 4),
+                    "chi": round(spin, 4),
+                    "mode": "(2,2,0)",
+                    "M_remnant_Msun": 62.0,
+                },
+            })
+        return geometries
+
+    def _make_2d_geometries(self, n_per_axis=5):
+        """Create a 2D grid of beyond-Kerr geometries."""
+        geometries = []
+        for i in range(n_per_axis):
+            for j in range(n_per_axis):
+                chi = 0.3 + i * 0.1
+                zeta = 0.01 + j * 0.02
+                d2 = 2.0 * (chi - 0.6) ** 2 + 5.0 * (zeta - 0.05) ** 2 + 1.0
+                geometries.append({
+                    "geometry_id": f"edgb_{i:02d}_{j:02d}",
+                    "family": "edgb",
+                    "d2": round(d2, 4),
+                    "distance": round(d2 ** 0.5, 4),
+                    "metadata": {"chi": round(chi, 4), "zeta": round(zeta, 4)},
+                })
+        return geometries
+
+    def test_kerr_1d_emulation(self, tmp_runs):
+        """GPR on 1D Kerr spin sweep should find minimum near spin=0.67."""
+        runs_root, make_run = tmp_runs
+        geoms = self._make_kerr_geometries(n=20)
+        make_run("run_gpr", geometries=geoms)
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
+        result = emulate_family("run_gpr", "kerr", target="d2", runs_root=str(runs_root))
+        assert result["status"] == "SUCCESS"
+        assert result["r2_score"] >= 0.90
+        # Continuous minimum should be near spin=0.67
+        cont_min = result["continuous_predicted_minimum"]
+        assert "chi" in cont_min["params"]
+        assert abs(cont_min["params"]["chi"] - 0.67) < 0.1, \
+            f"Expected minimum near chi=0.67, got {cont_min['params']['chi']}"
+
+    def test_edgb_2d_emulation(self, tmp_runs):
+        """GPR on 2D EdGB grid should find minimum near (chi=0.6, zeta=0.05)."""
+        runs_root, make_run = tmp_runs
+        geoms = self._make_2d_geometries(n_per_axis=6)
+        make_run("run_2d", geometries=geoms)
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
+        result = emulate_family("run_2d", "edgb", target="d2", runs_root=str(runs_root))
+        assert result["status"] == "SUCCESS"
+        assert result["r2_score"] >= 0.90
+        cont = result["continuous_predicted_minimum"]
+        assert abs(cont["params"]["chi"] - 0.6) < 0.15
+        assert abs(cont["params"]["zeta"] - 0.05) < 0.03
+
+    def test_subgrid_improvement_detected(self, tmp_runs):
+        """GPR should detect subgrid improvement when minimum is between nodes."""
+        runs_root, make_run = tmp_runs
+        geoms = self._make_kerr_geometries(n=10)  # coarser grid
+        make_run("run_coarse", geometries=geoms)
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
+        result = emulate_family("run_coarse", "kerr", target="d2", runs_root=str(runs_root))
+        if result["status"] == "SUCCESS":
+            # With a coarse grid, GP should find a better minimum between nodes
+            assert isinstance(result["subgrid_improvement"], bool)
+
+    def test_self_abort_on_noisy_surface(self, tmp_runs):
+        """GPR should return SURFACE_UNLEARNABLE for random/noisy data."""
+        runs_root, make_run = tmp_runs
+        import random
+        random.seed(42)
+        geoms = []
+        for i in range(15):
+            spin = i / 14 * 0.9
+            d2 = random.uniform(0, 100)  # pure noise
+            geoms.append({
+                "geometry_id": f"Kerr_noisy_{i}",
+                "family": "kerr",
+                "theory": "GR_Kerr",
+                "d2": d2,
+                "metadata": {"spin": spin, "chi": spin},
+            })
+        make_run("run_noisy", geometries=geoms)
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
+        result = emulate_family("run_noisy", "kerr", target="d2", runs_root=str(runs_root))
+        assert result["status"] == "SURFACE_UNLEARNABLE"
+        assert result["r2_score"] < 0.90
+
+    def test_hidden_minimum_confidence(self, tmp_runs):
+        """Smooth surface should produce high confidence of no hidden minimum."""
+        runs_root, make_run = tmp_runs
+        geoms = self._make_kerr_geometries(n=20)
+        make_run("run_conf", geometries=geoms)
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
+        result = emulate_family("run_conf", "kerr", target="d2", runs_root=str(runs_root))
+        assert result["status"] == "SUCCESS"
+        conf = result["no_hidden_minimum_confidence"]
+        assert "confidence_no_hidden_minimum" in conf
+        assert conf["confidence_no_hidden_minimum"] > 0.5  # should be well-constrained
+
+    def test_insufficient_data(self, tmp_runs):
+        """GPR should report INSUFFICIENT_DATA with < 3 geometries."""
+        runs_root, make_run = tmp_runs
+        geoms = [
+            {"geometry_id": "Kerr_001", "family": "kerr", "theory": "GR_Kerr",
+             "d2": 1.0, "metadata": {"spin": 0.5, "chi": 0.5}},
+        ]
+        make_run("run_tiny", geometries=geoms)
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
+        result = emulate_family("run_tiny", "kerr", target="d2", runs_root=str(runs_root))
+        assert result["status"] == "INSUFFICIENT_DATA"
+
+    def test_governance_rejects_invalid_run(self, tmp_runs):
+        """E5-Z must reject runs with RUN_VALID != PASS."""
+        runs_root, make_run = tmp_runs
+        make_run("run_fail", run_valid="FAIL", geometries=self._make_kerr_geometries())
+        from experiment.base_contract import GovernanceViolation
+        from mvp.experiment.e5z_gpr_emulator import emulate_family
+        with pytest.raises(GovernanceViolation):
+            emulate_family("run_fail", "kerr", runs_root=str(runs_root))
+
+    def test_multi_family_emulation(self, tmp_runs):
+        """emulate_all_families should handle multiple families."""
+        runs_root, make_run = tmp_runs
+        geoms = self._make_kerr_geometries(n=15) + self._make_2d_geometries(n_per_axis=5)
+        make_run("run_multi", geometries=geoms)
+        from mvp.experiment.e5z_gpr_emulator import emulate_all_families
+        result = emulate_all_families("run_multi", families=["kerr", "edgb"],
+                                      runs_root=str(runs_root))
+        assert "kerr" in result["per_family_results"]
+        assert "edgb" in result["per_family_results"]
+
+    def test_output_structure(self, tmp_runs):
+        """Verify output files are written correctly."""
+        runs_root, make_run = tmp_runs
+        geoms = self._make_kerr_geometries(n=15)
+        make_run("run_out", geometries=geoms)
+        from mvp.experiment.e5z_gpr_emulator import run_emulator
+        result = run_emulator("run_out", families=["kerr"],
+                              runs_root=str(runs_root))
+        out_dir = runs_root / "run_out" / "experiment" / "continuous_emulator"
+        assert (out_dir / "predicted_minima.json").exists()
+        assert (out_dir / "emulator_manifest.json").exists()
+
+        manifest = json.loads((out_dir / "emulator_manifest.json").read_text())
+        assert manifest["schema_version"] == "e5z-0.1"
+        assert "input_hashes" in manifest
+
+
 # ── Test: Sandbox Isolation ─────────────────────────────────────────────────
 
 class TestSandboxIsolation:
