@@ -25,7 +25,7 @@ from mvp.experiment.base_contract import (
     validate_and_load_run,
     write_manifest,
 )
-from experiment.e5a_multi_event_aggregation import _extract_geometry_ids
+from mvp.experiment.e5a_multi_event_aggregation import _extract_geometry_ids
 
 SCHEMA_VERSION = "e5b-0.1"
 EXPERIMENT_NAME = "jackknife_stability"

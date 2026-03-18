@@ -81,7 +81,7 @@ run_dir, summary = validate_and_load_run("GW150914_v1")
 **Uso:**
 
 ```bash
-python experiment/e5a_multi_event_aggregation.py \
+python mvp/experiment/e5a_multi_event_aggregation.py \
   --run-ids GW150914_v1 GW170817_v1 --dry-run
 ```
 

@@ -178,7 +178,7 @@ class TestE5AMultiEvent:
             {"geometry_id": "edgb_001", "family": "edgb"},
             {"geometry_id": "dcs_001", "family": "dcs"},
         ])
-        from experiment.e5a_multi_event_aggregation import aggregate_events
+        from mvp.experiment.e5a_multi_event_aggregation import aggregate_events
         result = aggregate_events(["run_001", "run_002"], runs_root=str(runs_root))
         assert result["schema_version"] == "e5a-0.1"
         assert result["intersection_count"] == 1  # only edgb_001 in both
@@ -187,7 +187,7 @@ class TestE5AMultiEvent:
     def test_requires_min_2_runs(self, tmp_runs):
         runs_root, make_run = tmp_runs
         make_run("run_001")
-        from experiment.e5a_multi_event_aggregation import aggregate_events
+        from mvp.experiment.e5a_multi_event_aggregation import aggregate_events
         with pytest.raises(ValueError, match="at least 2"):
             aggregate_events(["run_001"], runs_root=str(runs_root))
 
