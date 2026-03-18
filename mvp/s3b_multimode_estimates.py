@@ -994,6 +994,22 @@ def compute_model_comparison(
     }
 
 
+def _mode_221_usable_reason(mode_221_ok: bool, flags: list[str]) -> str:
+    """Determine the canonical reason for mode 221 usability.
+
+    Returns ``"ok"`` when usable; otherwise the most relevant flag or reason.
+    """
+    if mode_221_ok:
+        return "ok"
+    # Prefer the first 221-specific quality flag as the reason.
+    for flag in sorted(flags):
+        if flag.startswith("221_"):
+            return flag
+    if flags:
+        return flags[0]
+    return "mode_221_not_ok"
+
+
 def build_results_payload(
     run_id: str,
     window_meta: dict[str, Any] | None,
@@ -1038,6 +1054,8 @@ def build_results_payload(
         "modes_target": TARGET_MODES,
         "results": results,
         "modes": [mode_220, mode_221],
+        "mode_221_usable": bool(mode_221_ok),
+        "mode_221_usable_reason": _mode_221_usable_reason(mode_221_ok, flags),
     }
 
 

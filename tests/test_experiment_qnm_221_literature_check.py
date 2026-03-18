@@ -377,3 +377,89 @@ def test_external_h5_without_final_spin_degrades_cleanly(tmp_path: Path, monkeyp
     assert summary["tau221_kerr"] is None
     assert summary["verdict"] == "INSUFFICIENT_DATA"
     assert summary["remnant_extraction_reason"] == "no_posterior_samples_with_final_mass_and_final_spin"
+
+
+# ── H1 audit regression: mode_221_usable contract blocks downstream ──
+
+
+def test_mode_221_usable_false_blocks_extraction_despite_p50_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When mode_221_usable=false, downstream must NOT extract f221/tau221 even if p50 is present."""
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    run_id = "r_221_usable_false"
+    _write_run_valid(runs_root, run_id, "PASS")
+    _write_minimal_s3(runs_root, run_id)
+
+    # Write a multimode_estimates with p50 values present but mode_221_usable=false.
+    # This is the critical scenario: upstream says the mode is not usable for
+    # physical inference, yet numeric values exist.
+    write_json_atomic(
+        runs_root / run_id / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json",
+        {
+            "schema_version": "multimode_estimates_v1",
+            "results": {
+                "verdict": "OK",  # 220 is fine
+                "quality_flags": [],  # no 221_ flags — this is the key: the formal gate catches it
+            },
+            "modes": [
+                {
+                    "label": "221",
+                    "mode": [2, 2, 1],
+                    "fit": {
+                        "stability": {
+                            "lnf_p50": math.log(350.0),
+                            "lnQ_p50": math.log(4.0),
+                        }
+                    },
+                }
+            ],
+            "mode_221_usable": False,
+            "mode_221_usable_reason": "221_lnQ_span_explosive",
+        },
+    )
+    _write_model_comp(runs_root, run_id)
+    _write_remnant(runs_root, run_id)
+
+    # If extraction were not blocked, _predict_kerr_221 would be called.
+    def _should_not_be_called(_mf: float, _af: float) -> tuple[float, float, dict[str, str]]:
+        raise AssertionError("mode_221_usable=false must prevent Gate A Kerr from being reached")
+
+    monkeypatch.setattr(mod, "_predict_kerr_221", _should_not_be_called)
+    rc = mod.main(["--run-id", run_id])
+    assert rc == 0
+
+    summary = json.loads(
+        (runs_root / run_id / "experiment" / "qnm_221_literature_check" / "outputs" / "summary_221_validation.json").read_text(encoding="utf-8")
+    )
+
+    assert summary["f221_measured"] is None
+    assert summary["tau221_measured"] is None
+    assert summary["verdict"] == "INSUFFICIENT_DATA"
+    assert "mode_221_not_usable" in summary["extraction_policy"]
+
+
+def test_extract_221_honours_canonical_gate_over_legacy_flags() -> None:
+    """The canonical mode_221_usable gate takes precedence over flag inspection."""
+    # Case 1: mode_221_usable=false, no 221_ flags → blocked
+    multimode_blocked = {
+        "mode_221_usable": False,
+        "mode_221_usable_reason": "221_cv_Q_explosive",
+        "results": {"verdict": "OK", "quality_flags": []},
+        "modes": [{"label": "221", "mode": [2, 2, 1], "fit": {"stability": {"lnf_p50": 5.8, "lnQ_p50": 2.0}}}],
+    }
+    f, tau, policy = mod._extract_221_from_multimode(multimode_blocked, None)
+    assert f is None
+    assert tau is None
+    assert "upstream_mode_221_not_usable" in policy
+
+    # Case 2: mode_221_usable=true, clean flags → allowed
+    multimode_allowed = {
+        "mode_221_usable": True,
+        "mode_221_usable_reason": "ok",
+        "results": {"verdict": "OK", "quality_flags": []},
+        "modes": [{"label": "221", "mode": [2, 2, 1], "fit": {"stability": {"lnf_p50": 5.8, "lnQ_p50": 2.0}}}],
+    }
+    f, tau, policy = mod._extract_221_from_multimode(multimode_allowed, None)
+    assert f is not None
+    assert policy == "mode_221.fit.stability.p50"
