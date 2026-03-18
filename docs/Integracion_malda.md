@@ -116,8 +116,8 @@ BASURIN centraliza requisitos/salidas por stage en `mvp/contracts.py`, con inici
 3. **Deriva de formatos de artefactos.**  
    *Mitigación:* contrato puente versionado y validador de compatibilidad antes de cada corrida experimental.
 
-4. **Crecimiento de superficie canónica en BASURIN.**  
-   *Mitigación:* regla estricta: lo incierto/físico-exploratorio vive en `experiment/`; el core no se infla.
+4. **Crecimiento de superficie canónica en BASURIN.**
+   *Mitigación:* regla estricta: lo incierto/físico-exploratorio vive en `mvp/experiment/` (código fuente) y sus artefactos en `runs/<run_id>/experiment/<nombre>/`; el core (`mvp/`) no se infla.
 
 ---
 

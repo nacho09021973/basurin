@@ -1,5 +1,11 @@
 # Fase 5 — Catálogo de Alternativas Experimentales
 
+## Namespace canónico
+
+Los módulos de Fase 5 viven en el paquete **`mvp/experiment/`** del repositorio.
+
+> **Nota de migración:** el paquete top-level `./experiment` fue retirado. El namespace vigente es `mvp/experiment`. Cualquier referencia a `from experiment...` o `experiment/...` como ruta de código fuente es legacy y debe corregirse a `mvp.experiment...` / `mvp/experiment/...`.
+
 ## Objetivo
 
 Proveer un catálogo de **nueve módulos experimentales** (E5-A a E5-H, E5-Z) que operan como *lectores certificados* del pipeline canónico. Cada alternativa explora una pregunta científica o metodológica que **no puede ni debe** vivir en el core, pero que produce artefactos auditables, reproducibles y con gobernanza verificada.
@@ -11,7 +17,7 @@ Principio rector: **toda alternativa es un lector certificado**. Escribe solo en
 ## Arquitectura
 
 ```
-experiment/
+mvp/experiment/
 ├── __init__.py
 ├── base_contract.py                  # Contrato universal de entrada (RUN_VALID gate)
 ├── e5a_multi_event_aggregation.py    # Intersección/unión/Jaccard multi-evento
@@ -24,7 +30,7 @@ experiment/
 ├── e5f_verdict_aggregation.py        # Agregación de veredictos (evidencia 2º orden)
 ├── e5h_blind_prediction.py           # Predicción ciega cross-evento
 ├── e5z_gpr_emulator.py               # Emulador continuo GPR (arma secreta)
-└── sandbox/                          # Espacio libre sin contrato
+└── sandbox/                          # Espacio libre sin contrato (E5-G)
 ```
 
 Todos los outputs van bajo:
@@ -39,7 +45,7 @@ Ningún módulo escribe fuera de su namespace. CI lo verifica.
 
 ## Contrato de entrada universal
 
-Definido en `experiment/base_contract.py`. Todas las alternativas comparten:
+Definido en `mvp/experiment/base_contract.py`. Todas las alternativas comparten:
 
 ```python
 REQUIRED_CANONICAL_GATES = {
@@ -266,13 +272,13 @@ python mvp/experiment/e5f_verdict_aggregation.py \
 
 ```bash
 cp runs/<run_id>/s4_geometry_filter/compatible_set.json \
-   experiment/sandbox/<nombre>/input_snapshot/
+   mvp/experiment/sandbox/<nombre>/input_snapshot/
 ```
 
 **Produce:**
 
 ```
-experiment/sandbox/<nombre_con_fecha>/
+mvp/experiment/sandbox/<nombre_con_fecha>/
   input_snapshot/         # copias, no symlinks
   notebooks/              # Jupyter permitido aquí y solo aquí
   scratch/                # sin esquema requerido
@@ -284,8 +290,8 @@ experiment/sandbox/<nombre_con_fecha>/
 
 ```bash
 # CI verifica:
-grep -r "from mvp" experiment/sandbox/ && echo "VIOLATION"
-grep -r "import mvp" experiment/sandbox/ && echo "VIOLATION"
+grep -r "from mvp" mvp/experiment/sandbox/ && echo "VIOLATION"
+grep -r "import mvp" mvp/experiment/sandbox/ && echo "VIOLATION"
 ```
 
 **Criterio de promoción:** ningún output sale directamente al core. Camino: sandbox → formalizar como E5-X → evaluar promoción.
@@ -495,11 +501,27 @@ La separación no es una limitación. Es la mayor fortaleza de BASURIN: la disci
 
 ---
 
-## Estado actual (2026-03-17)
+## Notas de gobernanza
 
-- 9 módulos experimentales implementados
-- 30/30 tests de gobernanza pasando
-- Contrato universal de entrada (`base_contract.py`) operativo
+Las siguientes reglas se aplican a todos los módulos E5 sin excepción:
+
+1. **Dependencia de `RUN_VALID`:** ningún módulo puede ejecutarse sobre un `run_id` cuyo `RUN_VALID/verdict.json` no tenga `verdict: PASS`. La excepción propaga `GovernanceViolation`; no existe modo "lax".
+
+2. **Lectura sin mutación de artefactos canónicos:** los módulos E5 son lectores. Consumen artefactos ya emitidos por stages canónicos (`s3`, `s4`, `s4k`, etc.) pero no los reescriben, sobreescriben ni crean versiones paralelas en la ruta canónica.
+
+3. **Escritura solo en el namespace experimental del run:** todos los outputs van bajo `runs/<run_id>/experiment/<nombre_experimento>/`. Nunca se escribe fuera de ese árbol. CI lo verifica.
+
+4. **Separación código / artefactos:** el código fuente de los módulos E5 vive en `mvp/experiment/` (paquete del repositorio). Los artefactos producidos por ejecución viven en `runs/<run_id>/experiment/` (árbol de run). Estas dos rutas son distintas y no deben confundirse.
+
+5. **Código experimental no es pipeline canónico:** `mvp/experiment/` es un espacio experimental gobernado, no el pipeline canónico. El pipeline canónico es `s1 → s8` en `mvp/`. Los módulos E5 operan sobre conclusiones de ese pipeline, no forman parte de él.
+
+---
+
+## Estado actual (2026-03-18)
+
+- 9 módulos experimentales implementados en `mvp/experiment/`
+- El paquete top-level `./experiment` fue retirado; el namespace canónico vigente es `mvp/experiment`
+- 30/30 tests de gobernanza pasando (`tests/test_e5_governance.py`)
+- Contrato universal de entrada (`mvp/experiment/base_contract.py`) operativo
 - E5-Z validado con superficies 1D (Kerr) y 2D (EdGB) sintéticas
 - Sandbox aislado verificado (cero imports de `mvp/`)
-- Todos los módulos pushed a `claude/e5-alternatives-catalog-kVuST`
