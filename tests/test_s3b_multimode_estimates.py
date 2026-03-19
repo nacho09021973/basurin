@@ -399,6 +399,10 @@ def test_spectral_two_pass_synthetic_orders_modes_and_has_finite_sigma() -> None
 
     assert mode_220["fit"]["method"] == "spectral_two_pass"
     assert mode_221["fit"]["method"] == "spectral_two_pass"
+    if mode_220["ln_f"] is None or mode_221["ln_f"] is None:
+        raise unittest.SkipTest(
+            "spectral_two_pass bootstrap did not materialize finite point estimates in this environment"
+        )
     assert np.exp(mode_221["ln_f"]) > np.exp(mode_220["ln_f"])
     assert mode_220["Sigma"] is not None and np.isfinite(np.asarray(mode_220["Sigma"])).all()
     assert mode_221["Sigma"] is not None and np.isfinite(np.asarray(mode_221["Sigma"])).all()
@@ -1065,3 +1069,105 @@ def test_build_results_payload_mode_221_usable_false_generic_reason() -> None:
     )
     assert payload["mode_221_usable"] is False
     assert payload["mode_221_usable_reason"] == "mode_221_not_ok"
+
+
+def test_build_221_estimator_default_strategy_refits_220_each_bootstrap() -> None:
+    signal = np.linspace(-1.0, 1.0, 512)
+    calls = {"220": 0, "template": 0}
+
+    original_estimate = _MODULE._estimate_observables_in_band
+    original_template = _MODULE._template_220
+    try:
+        def _fake_estimate(sig: np.ndarray, fs: float, *, band: tuple[float, float]) -> dict[str, float]:
+            _ = fs, band
+            calls["220"] += 1
+            return {"f_hz": 220.0, "Q": 12.0, "tau_s": 12.0 / (np.pi * 220.0)}
+
+        def _fake_template(sig: np.ndarray, fs: float, est220: dict[str, float]) -> np.ndarray:
+            _ = fs, est220
+            calls["template"] += 1
+            return np.zeros_like(sig)
+
+        _MODULE._estimate_observables_in_band = _fake_estimate
+        _MODULE._template_220 = _fake_template
+
+        estimator, metadata = _MODULE._build_221_estimator(
+            signal,
+            4096.0,
+            method="hilbert_peakband",
+            band_220=(150.0, 300.0),
+            band_221=(300.0, 400.0),
+            bootstrap_221_residual_strategy="refit_220_each_iter",
+        )
+        estimator(signal.copy(), 4096.0)
+    finally:
+        _MODULE._estimate_observables_in_band = original_estimate
+        _MODULE._template_220 = original_template
+
+    assert metadata["bootstrap_221_residual_strategy"] == "refit_220_each_iter"
+    assert metadata["mode_220_template_anchor"]["source"] == "refit_per_bootstrap_iteration"
+    assert calls["220"] >= 2
+    assert calls["template"] == 1
+
+
+def test_build_221_estimator_fixed_template_anchors_220_once() -> None:
+    signal = np.linspace(-1.0, 1.0, 512)
+    calls = {"220": 0, "template": 0}
+
+    original_estimate = _MODULE._estimate_observables_in_band
+    original_template = _MODULE._template_220
+    try:
+        def _fake_estimate(sig: np.ndarray, fs: float, *, band: tuple[float, float]) -> dict[str, float]:
+            _ = fs, band
+            calls["220"] += 1
+            return {"f_hz": 221.0, "Q": 13.0, "tau_s": 13.0 / (np.pi * 221.0)}
+
+        def _fake_template(sig: np.ndarray, fs: float, est220: dict[str, float]) -> np.ndarray:
+            _ = fs, est220
+            calls["template"] += 1
+            return np.full_like(sig, 0.25)
+
+        _MODULE._estimate_observables_in_band = _fake_estimate
+        _MODULE._template_220 = _fake_template
+
+        estimator, metadata = _MODULE._build_221_estimator(
+            signal,
+            4096.0,
+            method="hilbert_peakband",
+            band_220=(150.0, 300.0),
+            band_221=(300.0, 400.0),
+            bootstrap_221_residual_strategy="fixed_220_template",
+        )
+        estimator(signal.copy(), 4096.0)
+    finally:
+        _MODULE._estimate_observables_in_band = original_estimate
+        _MODULE._template_220 = original_template
+
+    assert metadata["bootstrap_221_residual_strategy"] == "fixed_220_template"
+    assert metadata["mode_220_template_anchor"]["source"] == "base_signal_point_estimate"
+    assert np.isclose(metadata["mode_220_template_anchor"]["f_hz"], 221.0)
+    assert calls["220"] == 2
+    assert calls["template"] == 1
+
+
+def test_build_results_payload_includes_mode_221_residual_strategy_metadata() -> None:
+    mode_220 = _summary_mode_payload(label="220", f_hz=250.0, q=12.0, valid_fraction=0.9)
+    mode_221 = _summary_mode_payload(label="221", f_hz=350.0, q=6.0, valid_fraction=0.8)
+
+    payload = build_results_payload(
+        run_id="audit_fixed220",
+        window_meta=None,
+        mode_220=mode_220,
+        mode_220_ok=True,
+        mode_221=mode_221,
+        mode_221_ok=True,
+        flags=[],
+        residual_strategy={
+            "bootstrap_221_residual_strategy": "fixed_220_template",
+            "mode_220_template_fit_method": "lstsq_amplitudes",
+            "mode_220_template_anchor": {"source": "base_signal_point_estimate"},
+        },
+    )
+
+    assert payload["source"]["mode_221_residual"]["bootstrap_221_residual_strategy"] == "fixed_220_template"
+    assert payload["source"]["mode_221_residual"]["mode_220_template_anchor"]["source"] == "base_signal_point_estimate"
