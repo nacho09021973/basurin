@@ -56,6 +56,7 @@ S3B_220_Q_REF = 12.0
 S3B_FREQ_FLOOR_HZ = 10.0
 S3B_221_OVERLAP_LOW_PAD_FRAC = 0.1
 S3B_221_OVERLAP_HIGH_PAD_FRAC = 0.2
+MODE_221_RESIDUAL_STRATEGIES = ("refit_220_each_iter", "fixed_220_template")
 
 
 def _resolve_f221_kerr_hz(event_id: str) -> float | None:
@@ -582,6 +583,78 @@ def _estimate_221_spectral_two_pass_in_bands(
     return _estimate_spectral_in_band(residual, fs, band=band_221)
 
 
+def _mode_221_residual_band_estimator(
+    method: str,
+    *,
+    band_221: tuple[float, float],
+) -> Callable[[np.ndarray, float], dict[str, float]]:
+    if method == "spectral_two_pass":
+        return lambda sig, sr: _estimate_spectral_in_band(sig, sr, band=band_221)
+    return lambda sig, sr: _estimate_observables_in_band(sig, sr, band=band_221)
+
+
+def _mode_221_refit_each_iter_estimator(
+    method: str,
+    *,
+    band_220: tuple[float, float],
+    band_221: tuple[float, float],
+) -> Callable[[np.ndarray, float], dict[str, float]]:
+    if method == "spectral_two_pass":
+        return lambda sig, sr: _estimate_221_spectral_two_pass_in_bands(
+            sig,
+            sr,
+            band_220=band_220,
+            band_221=band_221,
+        )
+    return lambda sig, sr: _estimate_221_from_signal_in_bands(
+        sig,
+        sr,
+        band_220=band_220,
+        band_221=band_221,
+    )
+
+
+def _prepare_mode_221_bootstrap_inputs(
+    signal: np.ndarray,
+    fs: float,
+    *,
+    method: str,
+    band_220: tuple[float, float],
+    band_221: tuple[float, float],
+    residual_strategy: str,
+) -> tuple[np.ndarray, Callable[[np.ndarray, float], dict[str, float]], dict[str, Any], list[str]]:
+    strategy_meta: dict[str, Any] = {
+        "strategy": residual_strategy,
+        "template_scope": "per_bootstrap_iter",
+        "bootstrap_signal": "full_signal",
+    }
+    if residual_strategy == "refit_220_each_iter":
+        return (
+            signal,
+            _mode_221_refit_each_iter_estimator(method, band_220=band_220, band_221=band_221),
+            strategy_meta,
+            [],
+        )
+
+    if method == "spectral_two_pass":
+        est220 = _estimate_spectral_in_band(signal, fs, band=band_220)
+    else:
+        est220 = _estimate_observables_in_band(signal, fs, band=band_220)
+    residual_signal = signal - _template_220(signal, fs, est220)
+    strategy_meta.update(
+        {
+            "template_scope": "full_signal_once",
+            "bootstrap_signal": "fixed_220_residual",
+        }
+    )
+    return (
+        residual_signal,
+        _mode_221_residual_band_estimator(method, band_221=band_221),
+        strategy_meta,
+        [],
+    )
+
+
 def _mode_null(
     label: str,
     mode: list[int],
@@ -1052,6 +1125,7 @@ def build_results_payload(
     model_comparison: dict[str, Any] | None = None,
     t0_offset_ms_from_s3: float = 0.0,
     band_strategy: dict[str, Any] | None = None,
+    mode_221_residual: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     verdict = "OK" if mode_220_ok else "INSUFFICIENT_DATA"
     messages: list[str] = []
@@ -1076,6 +1150,9 @@ def build_results_payload(
         source["t0_offset_ms_from_s3"] = float(t0_offset_ms_from_s3)
     if band_strategy is not None:
         source["band_strategy"] = band_strategy
+    if mode_221_residual is not None:
+        source["mode_221_residual"] = dict(mode_221_residual)
+        source["mode_221_strategy"] = mode_221_residual.get("strategy")
 
     return {
         "schema_version": "multimode_estimates_v1",
@@ -1259,7 +1336,7 @@ def _json_strictify(value: Any) -> Any:
     return value
 
 
-def main() -> int:
+def _build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="MVP s3b multimode estimates")
     ap.add_argument("--run-id", required=True)
     ap.add_argument("--runs-root", default=None, help="Override BASURIN_RUNS_ROOT for this invocation")
@@ -1272,6 +1349,11 @@ def main() -> int:
         default="hilbert_peakband",
         choices=["hilbert_peakband", "spectral_two_pass"],
     )
+    ap.add_argument(
+        "--bootstrap-221-residual-strategy",
+        default="refit_220_each_iter",
+        choices=list(MODE_221_RESIDUAL_STRATEGIES),
+    )
     ap.add_argument("--max-lnf-span-220", type=float, default=1.0)
     ap.add_argument("--max-lnq-span-220", type=float, default=3.0)
     ap.add_argument("--max-lnf-span-221", type=float, default=1.0)
@@ -1283,6 +1365,11 @@ def main() -> int:
         default=1.0,
         help="Only adds flags; does NOT gate verdict directly",
     )
+    return ap
+
+
+def main() -> int:
+    ap = _build_arg_parser()
     args = ap.parse_args()
 
     if args.runs_root:
@@ -1295,6 +1382,7 @@ def main() -> int:
             "n_bootstrap": args.n_bootstrap,
             "seed": args.seed,
             "method": args.method,
+            "bootstrap_221_residual_strategy": args.bootstrap_221_residual_strategy,
             "psd_path": args.psd_path,
             "max_lnf_span_220": args.max_lnf_span_220,
             "max_lnq_span_220": args.max_lnq_span_220,
@@ -1358,20 +1446,17 @@ def main() -> int:
 
         if args.method == "spectral_two_pass":
             est_220 = lambda sig, sr: _estimate_spectral_in_band(sig, sr, band=band_220)
-            est_221 = lambda sig, sr: _estimate_221_spectral_two_pass_in_bands(
-                sig,
-                sr,
-                band_220=band_220,
-                band_221=band_221,
-            )
         else:
             est_220 = lambda sig, sr: _estimate_observables_in_band(sig, sr, band=band_220)
-            est_221 = lambda sig, sr: _estimate_221_from_signal_in_bands(
-                sig,
-                sr,
-                band_220=band_220,
-                band_221=band_221,
-            )
+        mode_221_signal, est_221, mode_221_residual, mode_221_strategy_flags = _prepare_mode_221_bootstrap_inputs(
+            signal,
+            fs,
+            method=args.method,
+            band_220=band_220,
+            band_221=band_221,
+            residual_strategy=args.bootstrap_221_residual_strategy,
+        )
+        global_flags.extend(mode_221_strategy_flags)
 
         mode_220, flags_220, ok_220 = evaluate_mode(
             signal,
@@ -1388,7 +1473,7 @@ def main() -> int:
             method=args.method,
         )
         mode_221, flags_221, ok_221 = evaluate_mode(
-            signal,
+            mode_221_signal,
             fs,
             label="221",
             mode=[2, 2, 1],
@@ -1419,6 +1504,7 @@ def main() -> int:
             model_comparison=model_comparison,
             t0_offset_ms_from_s3=applied_t0_offset_ms,
             band_strategy=band_strategy,
+            mode_221_residual=mode_221_residual,
         )
 
         out_path = ctx.outputs_dir / "multimode_estimates.json"
