@@ -1142,8 +1142,74 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
             second_dt_idx = s2_calls[1].index("--dt-start-s")
             self.assertEqual(s2_calls[0][first_dt_idx + 1], "0.003")
             self.assertEqual(s2_calls[1][second_dt_idx + 1], "0.023")
+            first_shift_idx = s2_calls[0].index("--t0-shift-ms")
+            second_shift_idx = s2_calls[1].index("--t0-shift-ms")
+            self.assertEqual(s2_calls[0][first_shift_idx + 1], "0.0")
+            self.assertEqual(s2_calls[1][second_shift_idx + 1], "0.0")
             self.assertEqual(len(s3_calls), 1)
             self.assertNotIn("--t0-scan-ms", s3_calls[0])
+
+    def test_multimode_forwards_opt_in_t0_shift_ms_to_s2_and_timeline(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runs_root = Path(td) / "runs"
+            s2_calls: list[list[str]] = []
+
+            def fake_run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s=None):
+                stage_dir = out_root / run_id / label / "outputs"
+                stage_dir.mkdir(parents=True, exist_ok=True)
+                if label == "s2_ringdown_window":
+                    s2_calls.append(list(args))
+                if label == "s3_ringdown_estimates":
+                    _write_fake_s3_estimates(out_root, run_id)
+                if label == "s3b_multimode_estimates":
+                    _write_fake_s3b_outputs(out_root, run_id)
+                if label == "s4g_mode220_geometry_filter":
+                    (stage_dir / "mode220_filter.json").write_text(json.dumps({"accepted_geometry_ids": ["geo_A"]}), encoding="utf-8")
+                if label == "s4h_mode221_geometry_filter":
+                    (stage_dir / "mode221_filter.json").write_text(json.dumps({"geometry_ids": ["geo_A"], "verdict": "PASS"}), encoding="utf-8")
+                if label == "s4i_common_geometry_intersection":
+                    (stage_dir / "common_intersection.json").write_text(json.dumps({"common_geometry_ids": ["geo_A"], "n_common": 1, "mode221_skipped": False, "verdict": "PASS"}), encoding="utf-8")
+                if label == "s4f_area_observation":
+                    (stage_dir / "area_obs.json").write_text(json.dumps({"area_data": {}, "observation_status": "AREA_DATA_AVAILABLE", "policy": "mass_only_lower_bound_v1"}), encoding="utf-8")
+                if label == "s4j_hawking_area_filter":
+                    (stage_dir / "hawking_area_filter.json").write_text(json.dumps({"golden_geometry_ids": ["geo_A"], "n_golden": 1, "area_obs_present": True, "area_constraint_applied": True, "verdict": "PASS"}), encoding="utf-8")
+                if label == "s4c_kerr_consistency":
+                    (stage_dir / "kerr_consistency.json").write_text(json.dumps({"kerr_consistent": True, "d2_min": 1.0}), encoding="utf-8")
+                if label == "s4d_kerr_from_multimode":
+                    (stage_dir / "kerr_from_multimode.json").write_text(json.dumps({"status": "PASS"}), encoding="utf-8")
+                    (stage_dir / "kerr_extraction.json").write_text(json.dumps({"verdict": "PASS"}), encoding="utf-8")
+                if label == "s4k_event_support_region":
+                    (stage_dir / "event_support_region.json").write_text(json.dumps({"analysis_path": "MULTIMODE_INTERSECTION", "support_region_status": "SUPPORT_REGION_AVAILABLE", "n_final_geometries": 1, "downstream_status": {"class": "MULTIMODE_USABLE", "reasons": []}}), encoding="utf-8")
+                if label == "s7_beyond_kerr_deviation_score":
+                    (stage_dir / "beyond_kerr_score.json").write_text(json.dumps({"verdict": "GR_CONSISTENT"}), encoding="utf-8")
+                if label == "s8_family_router":
+                    (stage_dir / "family_router.json").write_text(json.dumps({"primary_family": "GR_KERR_BH", "families_to_run": ["GR_KERR_BH"]}), encoding="utf-8")
+                if label == "s4e_kerr_ratio_filter":
+                    (stage_dir / "ratio_filter_result.json").write_text(json.dumps({"kerr_consistency": {"Rf_consistent": True}, "diagnostics": {"informativity_class": "LOW"}, "filtering": {"n_ratio_compatible": 1}}), encoding="utf-8")
+                if label == "s8a_family_gr_kerr":
+                    (stage_dir / "gr_kerr_family.json").write_text(json.dumps({"status": "EVALUATED", "assessment": "SUPPORTED", "reason": "test"}), encoding="utf-8")
+                timeline["stages"].append({"stage": label, "script": script, "command": [script] + list(args), "started_utc": "now", "ended_utc": "now", "duration_s": 0.0, "returncode": 0, "timed_out": False})
+                pipeline._write_timeline(out_root, run_id, timeline)
+                return 0
+
+            with mock.patch.dict("os.environ", {"BASURIN_RUNS_ROOT": str(runs_root)}, clear=False):
+                with mock.patch.object(pipeline, "_run_stage", side_effect=fake_run_stage):
+                    with mock.patch.object(pipeline, "_parse_multimode_results", return_value={}):
+                        rc, run_id = pipeline.run_multimode_event(
+                            event_id="GW150914",
+                            atlas_path="mvp/test_atlas_fixture.json",
+                            synthetic=True,
+                            t0_shift_ms=0.5,
+                        )
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(s2_calls), 1)
+            shift_idx = s2_calls[0].index("--t0-shift-ms")
+            self.assertEqual(s2_calls[0][shift_idx + 1], "0.5")
+            timeline = json.loads((runs_root / run_id / "pipeline_timeline.json").read_text(encoding="utf-8"))
+            self.assertEqual(timeline["window_config"]["t0_shift_ms"], 0.5)
+            self.assertAlmostEqual(timeline["window_config"]["dt_start_base_s"], 0.003)
+            self.assertAlmostEqual(timeline["window_config"]["dt_start_effective_s"], 0.0035)
 
     def test_multi_forwards_with_t0_sweep_to_each_event(self) -> None:
         calls = []

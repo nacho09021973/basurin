@@ -258,6 +258,55 @@ class TestS2RingdownWindowContract(unittest.TestCase):
             manifest_inputs = manifest.get("inputs", [])
             self.assertTrue(any(i.get("path") == "external_inputs/gwosc/event_time/GW_REMOTE_ONLY.json" for i in manifest_inputs))
 
+    def test_t0_shift_ms_is_opt_in_and_traced_in_window_meta(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runs_root = Path(td) / "runs"
+            run_id = "s2_t0_shift_trace"
+            rv = runs_root / run_id / "RUN_VALID"
+            rv.mkdir(parents=True, exist_ok=True)
+            (rv / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
+
+            s1_outputs = runs_root / run_id / "s1_fetch_strain" / "outputs"
+            s1_outputs.mkdir(parents=True, exist_ok=True)
+            np.savez(
+                s1_outputs / "strain.npz",
+                H1=np.ones(4096, dtype=np.float64),
+                gps_start=np.float64(1_000_000.0),
+                sample_rate_hz=np.float64(4096.0),
+            )
+
+            old = os.environ.get("BASURIN_RUNS_ROOT")
+            old_argv = sys.argv[:]
+            window_catalog = runs_root / "window_catalog.json"
+            window_catalog.write_text(json.dumps({"GW150914": {"t0_gps": 1_000_000.0}}), encoding="utf-8")
+            os.environ["BASURIN_RUNS_ROOT"] = str(runs_root)
+            sys.argv = [
+                "s2_ringdown_window.py",
+                "--run", run_id,
+                "--event-id", "GW150914",
+                "--dt-start-s", "0.003",
+                "--t0-shift-ms", "0.5",
+                "--duration-s", "0.0005",
+                "--window-catalog", str(window_catalog),
+            ]
+            try:
+                rc = s2_main()
+            finally:
+                sys.argv = old_argv
+                if old is None:
+                    os.environ.pop("BASURIN_RUNS_ROOT", None)
+                else:
+                    os.environ["BASURIN_RUNS_ROOT"] = old
+
+            self.assertEqual(rc, 0)
+            summary = json.loads((runs_root / run_id / "s2_ringdown_window" / "stage_summary.json").read_text("utf-8"))
+            window_meta = summary["results"]
+            self.assertEqual(window_meta["dt_start_s"], 0.003)
+            self.assertEqual(window_meta["t0_shift_ms"], 0.5)
+            self.assertAlmostEqual(window_meta["t0_shift_s"], 0.0005)
+            self.assertAlmostEqual(window_meta["dt_start_effective_s"], 0.0035)
+            self.assertAlmostEqual(window_meta["t_start_gps"], 1_000_000.0035)
+
 
 if __name__ == "__main__":
     unittest.main()

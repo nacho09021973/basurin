@@ -1271,9 +1271,12 @@ def run_multimode_event(
     psd_path: str | None = None,
     final_mass_msun: float | None = None,
     redshift: float | None = None,
+    t0_shift_ms: float = 0.0,
 ) -> tuple[int, str]:
     event_id = _require_nonempty_event_id(event_id, "--event-id")
     dt_start_s, dt_source = _resolve_adaptive_dt_start(event_id, dt_start_s, final_mass_msun, redshift)
+    t0_shift_ms = float(t0_shift_ms)
+    effective_dt_start_s = dt_start_s + (t0_shift_ms / 1000.0)
     out_root = resolve_out_root("runs")
 
     if run_id is None:
@@ -1298,6 +1301,8 @@ def run_multimode_event(
             "band_low": band_low,
             "band_high": band_high,
             "dt_start_s": dt_start_s,
+            "t0_shift_ms": t0_shift_ms,
+            "dt_start_effective_s": effective_dt_start_s,
             "window_duration_s": window_duration_s,
         },
     )
@@ -1335,6 +1340,12 @@ def run_multimode_event(
             "support_region_n_final": None,
             "support_region_analysis_path": None,
         },
+        "window_config": {
+            "dt_start_base_s": dt_start_s,
+            "t0_shift_ms": t0_shift_ms,
+            "dt_start_effective_s": effective_dt_start_s,
+            "dt_start_source": dt_source,
+        },
     }
     _write_timeline(out_root, run_id, timeline)
 
@@ -1369,6 +1380,7 @@ def run_multimode_event(
     s2_args = [
         "--run", run_id, "--event-id", event_id,
         "--dt-start-s", str(dt_start_s),
+        "--t0-shift-ms", str(t0_shift_ms),
         "--duration-s", str(window_duration_s),
     ]
     if offline:
@@ -1405,6 +1417,7 @@ def run_multimode_event(
             s2_selected_args = [
                 "--run", run_id, "--event-id", event_id,
                 "--dt-start-s", str(selected_dt_start_s),
+                "--t0-shift-ms", "0.0",
                 "--duration-s", str(window_duration_s),
             ]
             if offline:
@@ -1852,6 +1865,12 @@ def main() -> int:
     sp_multimode.add_argument("--duration-s", type=float, default=32.0)
     sp_multimode.add_argument("--dt-start-s", type=float, default=None,
                               help="Override dt_start (default: adaptive from mass catalog)")
+    sp_multimode.add_argument(
+        "--t0-shift-ms",
+        type=float,
+        default=0.0,
+        help="Experimental opt-in shift [ms] applied to the multimode s2 window on top of --dt-start-s.",
+    )
     sp_multimode.add_argument("--window-duration-s", type=float, default=0.06)
     sp_multimode.add_argument("--band-low", type=float, default=150.0)
     sp_multimode.add_argument("--band-high", type=float, default=400.0)
@@ -2043,6 +2062,7 @@ def main() -> int:
             psd_path=args.psd_path,
             final_mass_msun=args.final_mass_msun,
             redshift=args.redshift,
+            t0_shift_ms=args.t0_shift_ms,
         )
         return rc
 

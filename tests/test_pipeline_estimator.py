@@ -167,6 +167,19 @@ class TestPipelineEstimatorArg:
         source = inspect.getsource(main)
         assert "batch" in source, "pipeline.main() should have batch mode"
 
+    def test_run_multimode_event_has_t0_shift_ms_param(self):
+        import inspect
+        from mvp.pipeline import run_multimode_event
+        sig = inspect.signature(run_multimode_event)
+        assert "t0_shift_ms" in sig.parameters
+        assert sig.parameters["t0_shift_ms"].default == 0.0
+
+    def test_multimode_cli_exposes_t0_shift_ms(self):
+        import inspect
+        from mvp.pipeline import main
+        source = inspect.getsource(main)
+        assert "--t0-shift-ms" in source
+
     def test_spectral_path_passes_method_spectral_lorentzian(self):
         """When estimator='spectral', run_single_event must pass --method spectral_lorentzian."""
         import inspect

@@ -384,6 +384,12 @@ def main() -> int:
     ap.add_argument("--runs-root", default=None, help="Override BASURIN_RUNS_ROOT for this invocation")
     ap.add_argument("--event-id", default="GW150914")
     ap.add_argument("--dt-start-s", type=float, default=0.003)
+    ap.add_argument(
+        "--t0-shift-ms",
+        type=float,
+        default=0.0,
+        help="Optional experimental shift, in milliseconds, applied on top of --dt-start-s.",
+    )
     ap.add_argument("--duration-s", type=float, default=0.06)
     ap.add_argument(
         "--clip-window",
@@ -410,6 +416,7 @@ def main() -> int:
 
     ctx = init_stage(run_id, STAGE, params={
         "event_id": args.event_id, "dt_start_s": args.dt_start_s,
+        "t0_shift_ms": args.t0_shift_ms,
         "duration_s": args.duration_s, "window_catalog": args.window_catalog,
         "offline": args.offline,
     })
@@ -464,7 +471,9 @@ def main() -> int:
                 "path": str(gwosc_cache.relative_to(ctx.run_dir)),
                 "sha256": sha256_file(gwosc_cache),
             })
-        t_start_gps = t0_gps + args.dt_start_s
+        t0_shift_s = float(args.t0_shift_ms) / 1000.0
+        effective_dt_start_s = float(args.dt_start_s) + t0_shift_s
+        t_start_gps = t0_gps + effective_dt_start_s
         t_end_gps = t_start_gps + args.duration_s
 
         data = np.load(strain_path)
@@ -502,7 +511,7 @@ def main() -> int:
                     any_t0_clipped = True
                     i_start = i_start_clamped
                     t_start_det = gps_start + (i_start / fs)
-                    t0_det = t_start_det - args.dt_start_s
+                    t0_det = t_start_det - effective_dt_start_s
 
             i_end = i_start + n_out
             if i_start < 0 or i_end > strain.size:
@@ -572,7 +581,11 @@ def main() -> int:
             "t0_details": t0_details,
             "t0_used_cache": bool(t0_used_cache),
             "gwosc_cache_path": gwosc_cache_path,
-            "dt_start_s": args.dt_start_s, "duration_s": args.duration_s,
+            "dt_start_s": args.dt_start_s,
+            "t0_shift_ms": float(args.t0_shift_ms),
+            "t0_shift_s": t0_shift_s,
+            "dt_start_effective_s": effective_dt_start_s,
+            "duration_s": args.duration_s,
             "t_start_gps": t_start_gps, "t_end_gps": t_end_gps,
             "sample_rate_hz": fs, "detectors": detectors, "n_samples": n_out,
             "clip_window": bool(args.clip_window),
