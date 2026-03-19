@@ -140,6 +140,7 @@ class TestMultimodeWiring(unittest.TestCase):
                         band_low=180.0,
                         band_high=360.0,
                         s3b_method="spectral_two_pass",
+                        bootstrap_221_residual_strategy="fixed_220_template",
                         estimator="spectral",
                         psd_path="runs/seed/psd/measured_psd.json",
                     )
@@ -169,6 +170,9 @@ class TestMultimodeWiring(unittest.TestCase):
             self.assertIn("--psd-path", args)
             p_idx = args.index("--psd-path")
             self.assertEqual(args[p_idx + 1], "runs/seed/psd/measured_psd.json")
+            strategy_idx = args.index("--bootstrap-221-residual-strategy")
+            expected_strategy = "fixed_220_template" if idx_call == 1 else "refit_220_each_iter"
+            self.assertEqual(args[strategy_idx + 1], expected_strategy)
 
     def test_dual_estimator_runs_dual_method_pipeline(self) -> None:
         calls: list[dict[str, object]] = []
@@ -1269,6 +1273,23 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                 s3_spectral_args = by_label.get("s3_spectral_estimates", [])
                 self.assertIn("--psd-path", s3_spectral_args,
                               f"--psd-path not in s3_spectral_estimates args: {s3_spectral_args}")
+
+
+class TestMultimodeCliParser(unittest.TestCase):
+    def test_pipeline_multimode_help_lists_bootstrap_221_residual_strategy_flag(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        result = pipeline.subprocess.run(
+            [pipeline.sys.executable, "-m", "mvp.pipeline", "multimode", "-h"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("--bootstrap-221-residual-strategy", result.stdout)
+        self.assertIn("fixed_220_template", result.stdout)
+        self.assertIn("refit_220_each_iter", result.stdout)
 
 
 if __name__ == "__main__":

@@ -56,6 +56,7 @@ S3B_220_Q_REF = 12.0
 S3B_FREQ_FLOOR_HZ = 10.0
 S3B_221_OVERLAP_LOW_PAD_FRAC = 0.1
 S3B_221_OVERLAP_HIGH_PAD_FRAC = 0.2
+BOOTSTRAP_221_RESIDUAL_STRATEGIES = ("refit_220_each_iter", "fixed_220_template")
 
 
 def _resolve_f221_kerr_hz(event_id: str) -> float | None:
@@ -582,6 +583,25 @@ def _estimate_221_spectral_two_pass_in_bands(
     return _estimate_spectral_in_band(residual, fs, band=band_221)
 
 
+def _make_fixed_template_221_estimator(
+    signal: np.ndarray,
+    fs: float,
+    *,
+    estimate_220: Callable[[np.ndarray, float], dict[str, float]],
+    estimate_221: Callable[[np.ndarray, float], dict[str, float]],
+) -> Callable[[np.ndarray, float], dict[str, float]]:
+    fixed_est220 = estimate_220(signal, fs)
+    fixed_template = _template_220(signal, fs, fixed_est220)
+
+    def _estimator(resampled_signal: np.ndarray, resampled_fs: float) -> dict[str, float]:
+        if resampled_signal.shape != fixed_template.shape:
+            raise ValueError("fixed 220 template length mismatch")
+        residual = resampled_signal - fixed_template
+        return estimate_221(residual, resampled_fs)
+
+    return _estimator
+
+
 def _mode_null(
     label: str,
     mode: list[int],
@@ -1052,6 +1072,7 @@ def build_results_payload(
     model_comparison: dict[str, Any] | None = None,
     t0_offset_ms_from_s3: float = 0.0,
     band_strategy: dict[str, Any] | None = None,
+    bootstrap_221_residual_strategy: str = "refit_220_each_iter",
 ) -> dict[str, Any]:
     verdict = "OK" if mode_220_ok else "INSUFFICIENT_DATA"
     messages: list[str] = []
@@ -1076,6 +1097,8 @@ def build_results_payload(
         source["t0_offset_ms_from_s3"] = float(t0_offset_ms_from_s3)
     if band_strategy is not None:
         source["band_strategy"] = band_strategy
+    source["mode_221_residual"] = {"strategy": bootstrap_221_residual_strategy}
+    source["mode_221_strategy"] = bootstrap_221_residual_strategy
 
     return {
         "schema_version": "multimode_estimates_v1",
@@ -1283,6 +1306,12 @@ def main() -> int:
         default=1.0,
         help="Only adds flags; does NOT gate verdict directly",
     )
+    ap.add_argument(
+        "--bootstrap-221-residual-strategy",
+        choices=list(BOOTSTRAP_221_RESIDUAL_STRATEGIES),
+        default="refit_220_each_iter",
+        help="Residual bootstrap strategy for mode 221",
+    )
     args = ap.parse_args()
 
     if args.runs_root:
@@ -1302,6 +1331,7 @@ def main() -> int:
             "max_lnq_span_221": args.max_lnq_span_221,
             "min_valid_fraction_221": args.min_valid_fraction_221,
             "cv_threshold_221": args.cv_threshold_221,
+            "bootstrap_221_residual_strategy": args.bootstrap_221_residual_strategy,
             "psd_path": args.psd_path,
         },
     )
@@ -1358,6 +1388,7 @@ def main() -> int:
 
         if args.method == "spectral_two_pass":
             est_220 = lambda sig, sr: _estimate_spectral_in_band(sig, sr, band=band_220)
+            est_221_residual = lambda sig, sr: _estimate_spectral_in_band(sig, sr, band=band_221)
             est_221 = lambda sig, sr: _estimate_221_spectral_two_pass_in_bands(
                 sig,
                 sr,
@@ -1366,11 +1397,20 @@ def main() -> int:
             )
         else:
             est_220 = lambda sig, sr: _estimate_observables_in_band(sig, sr, band=band_220)
+            est_221_residual = lambda sig, sr: _estimate_observables_in_band(sig, sr, band=band_221)
             est_221 = lambda sig, sr: _estimate_221_from_signal_in_bands(
                 sig,
                 sr,
                 band_220=band_220,
                 band_221=band_221,
+            )
+
+        if args.bootstrap_221_residual_strategy == "fixed_220_template":
+            est_221 = _make_fixed_template_221_estimator(
+                signal,
+                fs,
+                estimate_220=est_220,
+                estimate_221=est_221_residual,
             )
 
         mode_220, flags_220, ok_220 = evaluate_mode(
@@ -1419,6 +1459,7 @@ def main() -> int:
             model_comparison=model_comparison,
             t0_offset_ms_from_s3=applied_t0_offset_ms,
             band_strategy=band_strategy,
+            bootstrap_221_residual_strategy=args.bootstrap_221_residual_strategy,
         )
 
         out_path = ctx.outputs_dir / "multimode_estimates.json"

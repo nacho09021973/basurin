@@ -229,6 +229,65 @@ def test_resolve_mode_bands_falls_back_to_midpoint_without_event_id() -> None:
     assert np.isclose(band_221[1], 400.0)
 
 
+
+def test_build_results_payload_records_default_bootstrap_221_residual_strategy() -> None:
+    mode_220 = _summary_mode_payload(label="220", f_hz=250.0, q=12.0, valid_fraction=0.8)
+    mode_221 = _summary_mode_payload(label="221", f_hz=330.0, q=4.0, valid_fraction=0.6)
+
+    payload = build_results_payload(
+        run_id="run_default_strategy",
+        window_meta=None,
+        mode_220=mode_220,
+        mode_220_ok=True,
+        mode_221=mode_221,
+        mode_221_ok=True,
+        flags=[],
+    )
+
+    assert payload["source"]["mode_221_residual"]["strategy"] == "refit_220_each_iter"
+    assert payload["source"]["mode_221_strategy"] == "refit_220_each_iter"
+
+
+def test_main_accepts_bootstrap_221_residual_strategy_and_records_metadata(tmp_path: Path) -> None:
+    run_id = "subrun_fixed220"
+    tmp_runs = tmp_path / "subruns_root"
+    _write_minimal_s2_inputs(tmp_runs, run_id)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    cmd = [
+        sys.executable,
+        str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
+        "--runs-root",
+        str(tmp_runs),
+        "--run-id",
+        run_id,
+        "--n-bootstrap",
+        "8",
+        "--seed",
+        "101",
+        "--bootstrap-221-residual-strategy",
+        "fixed_220_template",
+    ]
+
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+    output_path = tmp_runs / run_id / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["source"]["mode_221_residual"]["strategy"] == "fixed_220_template"
+    assert payload["source"]["mode_221_strategy"] == "fixed_220_template"
+
+
+def test_stage_help_lists_bootstrap_221_residual_strategy_flag() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cmd = [sys.executable, "-m", "mvp.s3b_multimode_estimates", "-h"]
+
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert "--bootstrap-221-residual-strategy" in result.stdout
+    assert "fixed_220_template" in result.stdout
+    assert "refit_220_each_iter" in result.stdout
+
 def test_main_populates_source_window_and_avoids_missing_flag(tmp_path: Path) -> None:
     run_id = "subrun_003"
     tmp_runs = tmp_path / "subruns_root"
