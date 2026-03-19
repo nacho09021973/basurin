@@ -25,6 +25,8 @@ from mvp.multimode_viability import (
     evaluate_science_evidence,
     evaluate_systematics_gate,
 )
+from mvp.gwtc_events import get_event
+from mvp.kerr_qnm_fits import kerr_qnm
 from mvp.s3_ringdown_estimates import (
     _compute_kerr_centered_band,
     _resolve_f220_kerr_hz,
@@ -54,6 +56,21 @@ S3B_220_Q_REF = 12.0
 S3B_FREQ_FLOOR_HZ = 10.0
 S3B_221_OVERLAP_LOW_PAD_FRAC = 0.1
 S3B_221_OVERLAP_HIGH_PAD_FRAC = 0.2
+
+
+def _resolve_f221_kerr_hz(event_id: str) -> float | None:
+    """Resolve Kerr f221 from catalog remnant mass/spin when available."""
+    evt = get_event(event_id)
+    if not evt:
+        return None
+    m_final = evt.get("m_final_msun")
+    chi_final = evt.get("chi_final")
+    if m_final is None or chi_final is None:
+        return None
+    qnm = kerr_qnm(float(m_final), float(chi_final), (2, 2, 1))
+    if not math.isfinite(qnm.f_hz):
+        return None
+    return float(qnm.f_hz)
 
 
 def compute_covariance(samples: np.ndarray) -> np.ndarray:
@@ -455,11 +472,22 @@ def _resolve_mode_bands(
     if not band_220[1] > band_220[0] + eps:
         return fallback_220, fallback_221, strategy
 
+    f221_kerr_hz = _resolve_f221_kerr_hz(event_id)
+    if f221_kerr_hz is None or not math.isfinite(float(f221_kerr_hz)):
+        return fallback_220, fallback_221, strategy
+
+    raw_221 = (
+        max(float(band_low), float(f221_kerr_hz) - half_width_hz),
+        min(float(band_high), float(f221_kerr_hz) + half_width_hz),
+    )
+    if not raw_221[1] > raw_221[0] + eps:
+        return fallback_220, fallback_221, strategy
+
     pad_low_hz = float(S3B_221_OVERLAP_LOW_PAD_FRAC) * float(half_width_hz)
     pad_high_hz = float(S3B_221_OVERLAP_HIGH_PAD_FRAC) * float(half_width_hz)
     band_221 = (
-        max(float(band_low), float(band_220[0]) - pad_low_hz),
-        min(float(band_high), float(band_220[1]) + pad_high_hz),
+        max(float(band_low), float(raw_221[0]) - pad_low_hz),
+        min(float(band_high), float(raw_221[1]) + pad_high_hz),
     )
     if not band_221[1] > band_221[0] + eps:
         return fallback_220, fallback_221, strategy
@@ -468,11 +496,13 @@ def _resolve_mode_bands(
         "method": "kerr_centered_overlap",
         "event_id": event_id,
         "f220_kerr_hz": float(f220_kerr_hz),
+        "f221_kerr_hz": float(f221_kerr_hz),
         "width_factor": float(S3B_220_BAND_WIDTH_FACTOR),
         "min_half_width_hz": float(S3B_220_MIN_HALF_WIDTH_HZ),
         "half_width_hz": float(half_width_hz),
         "mode_221_low_pad_hz": float(pad_low_hz),
         "mode_221_high_pad_hz": float(pad_high_hz),
+        "mode_221_raw_band_hz": [float(raw_221[0]), float(raw_221[1])],
         "mode_220_band_hz": [float(band_220[0]), float(band_220[1])],
         "mode_221_band_hz": [float(band_221[0]), float(band_221[1])],
     }

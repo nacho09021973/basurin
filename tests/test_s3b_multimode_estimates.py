@@ -143,7 +143,7 @@ def test_discover_s2_window_meta_from_manifest(tmp_path: Path) -> None:
     assert _discover_s2_window_meta(run_dir) == meta_path
 
 
-def test_resolve_mode_bands_prefers_kerr_centered_220_for_known_event() -> None:
+def test_resolve_mode_bands_prefers_kerr_centered_bands_for_known_event() -> None:
     band_220, band_221, strategy = _MODULE._resolve_mode_bands(
         band_low=150.0,
         band_high=400.0,
@@ -152,16 +152,67 @@ def test_resolve_mode_bands_prefers_kerr_centered_220_for_known_event() -> None:
 
     assert strategy["method"] == "kerr_centered_overlap"
     assert np.isclose(strategy["f220_kerr_hz"], 271.45861530076854)
+    assert np.isclose(strategy["f221_kerr_hz"], 265.25439211404966)
     assert np.isclose(band_220[0], 253.3613742807173)
     assert np.isclose(band_220[1], 289.55585632081977)
     assert np.isclose(strategy["mode_221_low_pad_hz"], 1.8097241020051242)
     assert np.isclose(strategy["mode_221_high_pad_hz"], 3.6194482040102484)
-    assert np.isclose(band_221[0], 251.55165017871218)
-    assert np.isclose(band_221[1], 293.17530452483004)
-    assert band_221[0] < band_220[0]
-    assert band_221[1] > band_220[1]
+    assert np.isclose(strategy["mode_221_raw_band_hz"][0], 247.1571510939984)
+    assert np.isclose(strategy["mode_221_raw_band_hz"][1], 283.3516331341009)
+    assert np.isclose(band_221[0], 245.34742699199327)
+    assert np.isclose(band_221[1], 286.97108133811116)
+    assert abs(np.mean(band_221) - strategy["f221_kerr_hz"]) < abs(np.mean(band_221) - strategy["f220_kerr_hz"])
     assert strategy["mode_220_band_hz"] == [band_220[0], band_220[1]]
     assert strategy["mode_221_band_hz"] == [band_221[0], band_221[1]]
+
+
+def test_resolve_mode_bands_keeps_220_unchanged_when_rebuilding_221() -> None:
+    band_220, _band_221, strategy = _MODULE._resolve_mode_bands(
+        band_low=150.0,
+        band_high=400.0,
+        event_id="GW150914",
+    )
+
+    assert np.isclose(band_220[0], 253.3613742807173)
+    assert np.isclose(band_220[1], 289.55585632081977)
+    assert strategy["mode_220_band_hz"] == [band_220[0], band_220[1]]
+
+
+def test_resolve_mode_bands_metadata_matches_effective_bands() -> None:
+    band_220, band_221, strategy = _MODULE._resolve_mode_bands(
+        band_low=150.0,
+        band_high=400.0,
+        event_id="GW150914",
+    )
+
+    assert strategy["mode_220_band_hz"] == [band_220[0], band_220[1]]
+    assert strategy["mode_221_band_hz"] == [band_221[0], band_221[1]]
+    assert strategy["mode_221_raw_band_hz"][0] < strategy["mode_221_raw_band_hz"][1]
+    assert strategy["mode_221_band_hz"][0] <= strategy["mode_221_raw_band_hz"][0]
+    assert strategy["mode_221_band_hz"][1] >= strategy["mode_221_raw_band_hz"][1]
+
+
+def test_resolve_mode_bands_221_does_not_collapse_to_220_when_well_separated() -> None:
+    original_f220 = _MODULE._resolve_f220_kerr_hz
+    original_f221 = _MODULE._resolve_f221_kerr_hz
+    try:
+        _MODULE._resolve_f220_kerr_hz = lambda _event_id: 220.0
+        _MODULE._resolve_f221_kerr_hz = lambda _event_id: 330.0
+        band_220, band_221, strategy = _MODULE._resolve_mode_bands(
+            band_low=150.0,
+            band_high=400.0,
+            event_id="GWsynthetic",
+        )
+    finally:
+        _MODULE._resolve_f220_kerr_hz = original_f220
+        _MODULE._resolve_f221_kerr_hz = original_f221
+
+    assert strategy["method"] == "kerr_centered_overlap"
+    assert np.isclose(strategy["f220_kerr_hz"], 220.0)
+    assert np.isclose(strategy["f221_kerr_hz"], 330.0)
+    assert np.mean(band_221) > np.mean(band_220)
+    assert band_221[0] > band_220[1]
+    assert abs(np.mean(band_221) - 330.0) < abs(np.mean(band_221) - 220.0)
 
 
 def test_resolve_mode_bands_falls_back_to_midpoint_without_event_id() -> None:
