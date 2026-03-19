@@ -30,6 +30,7 @@ from mvp.pipeline import (
     _generate_run_id,
     _run_stage,
     run_multi_event,
+    run_multimode_event,
     run_single_event,
 )
 
@@ -686,3 +687,104 @@ def test_pipeline_single_cli_prioritizes_window_catalog_over_t0_catalog(tmp_path
 
     assert rc == 0
     assert captured["t0_catalog"] == "catalogs/window.json"
+
+
+def test_run_multimode_event_forwards_bootstrap_221_residual_strategy_to_s3b(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_root = _make_runs_root(tmp_path)
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    monkeypatch.setattr(pipeline, "_run_preflight_viability", lambda *a, **kw: None)
+
+    captured_s3b_args: list[str] = []
+
+    def fake_run_stage(
+        script: str,
+        args: list[str],
+        label: str,
+        out_root: Path,
+        run_id: str,
+        timeline: dict[str, Any],
+        stage_timeout_s: float | None = None,
+    ) -> int:
+        _ = script, out_root, run_id, timeline, stage_timeout_s
+        if label == "s3b_multimode_estimates":
+            captured_s3b_args[:] = list(args)
+            return 1
+        return 0
+
+    monkeypatch.setattr(pipeline, "_run_stage", fake_run_stage)
+
+    rc, _run_id = run_multimode_event(
+        event_id="GW150914",
+        atlas_path="fake_atlas.json",
+        run_id="multimode_wire_flag",
+        synthetic=True,
+        estimator="hilbert",
+        bootstrap_221_residual_strategy="fixed_220_template",
+    )
+
+    assert rc == 1
+    assert "--bootstrap-221-residual-strategy" in captured_s3b_args
+    idx = captured_s3b_args.index("--bootstrap-221-residual-strategy")
+    assert captured_s3b_args[idx + 1] == "fixed_220_template"
+
+
+def test_pipeline_multimode_cli_accepts_bootstrap_221_residual_strategy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_root = _make_runs_root(tmp_path)
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    captured: dict[str, Any] = {}
+
+    def fake_run_multimode_event(*args: Any, **kwargs: Any) -> tuple[int, str]:
+        _ = args
+        captured.update(kwargs)
+        return 0, "run_ok"
+
+    monkeypatch.setattr(pipeline, "run_multimode_event", fake_run_multimode_event)
+    monkeypatch.setattr(sys, "argv", [
+        "pipeline.py",
+        "multimode",
+        "--event-id",
+        "GW150914",
+        "--atlas-path",
+        "fake_atlas.json",
+        "--bootstrap-221-residual-strategy",
+        "fixed_220_template",
+    ])
+
+    rc = pipeline.main()
+
+    assert rc == 0
+    assert captured["bootstrap_221_residual_strategy"] == "fixed_220_template"
+
+
+def test_pipeline_multimode_cli_defaults_bootstrap_221_residual_strategy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_root = _make_runs_root(tmp_path)
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    captured: dict[str, Any] = {}
+
+    def fake_run_multimode_event(*args: Any, **kwargs: Any) -> tuple[int, str]:
+        _ = args
+        captured.update(kwargs)
+        return 0, "run_ok"
+
+    monkeypatch.setattr(pipeline, "run_multimode_event", fake_run_multimode_event)
+    monkeypatch.setattr(sys, "argv", [
+        "pipeline.py",
+        "multimode",
+        "--event-id",
+        "GW150914",
+        "--atlas-path",
+        "fake_atlas.json",
+    ])
+
+    rc = pipeline.main()
+
+    assert rc == 0
+    assert captured["bootstrap_221_residual_strategy"] == "refit_220_each_iter"
