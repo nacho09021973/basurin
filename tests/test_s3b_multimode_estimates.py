@@ -229,6 +229,42 @@ def test_resolve_mode_bands_falls_back_to_midpoint_without_event_id() -> None:
     assert np.isclose(band_221[1], 400.0)
 
 
+
+
+def test_resolve_mode_bands_coherent_harmonic_band_keeps_220_and_exposes_shared_220_221_band() -> None:
+    band_220, band_221, strategy = _MODULE._resolve_mode_bands(
+        band_low=150.0,
+        band_high=400.0,
+        event_id="GW150914",
+        band_strategy="coherent_harmonic_band",
+    )
+
+    assert strategy["method"] == "coherent_harmonic_band"
+    assert strategy["shared_band_modes"] == ["220", "221"]
+    assert strategy["shared_band_hz"] == [band_220[0], band_221[1]]
+    assert strategy["mode_220_band_hz"] == [band_220[0], band_220[1]]
+    assert strategy["mode_220_band_role"] == "estimation_band"
+    assert strategy["mode_221_band_role"] == "shared_coherent_band"
+    assert strategy["logical_subbands_within_shared_band"] is True
+    assert strategy["logical_subbands_hz"]["220"] == strategy["mode_220_band_hz"]
+    assert strategy["logical_subbands_hz"]["221"][0] >= band_220[0]
+    assert strategy["logical_subbands_hz"]["221"][1] <= band_221[1]
+
+
+def test_stage_arg_parser_accepts_band_strategy_and_default() -> None:
+    parser = _MODULE._build_arg_parser()
+
+    args = parser.parse_args([
+        "--run-id",
+        "run_cli",
+        "--band-strategy",
+        "coherent_harmonic_band",
+    ])
+    default_args = parser.parse_args(["--run-id", "run_default"])
+
+    assert args.band_strategy == "coherent_harmonic_band"
+    assert default_args.band_strategy == "kerr_centered_overlap"
+
 def test_stage_arg_parser_accepts_bootstrap_221_residual_strategy_and_default() -> None:
     parser = _MODULE._build_arg_parser()
 

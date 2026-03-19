@@ -140,6 +140,7 @@ class TestMultimodeWiring(unittest.TestCase):
                         band_low=180.0,
                         band_high=360.0,
                         s3b_method="spectral_two_pass",
+                        band_strategy="coherent_harmonic_band",
                         estimator="spectral",
                         psd_path="runs/seed/psd/measured_psd.json",
                     )
@@ -166,6 +167,10 @@ class TestMultimodeWiring(unittest.TestCase):
             m_idx = args.index("--method")
             expected_method = "spectral_two_pass" if idx_call == 1 else "hilbert_peakband"
             self.assertEqual(args[m_idx + 1], expected_method)
+            self.assertIn("--band-strategy", args)
+            b_idx = args.index("--band-strategy")
+            expected_band_strategy = "coherent_harmonic_band" if idx_call == 1 else "kerr_centered_overlap"
+            self.assertEqual(args[b_idx + 1], expected_band_strategy)
             self.assertIn("--psd-path", args)
             p_idx = args.index("--psd-path")
             self.assertEqual(args[p_idx + 1], "runs/seed/psd/measured_psd.json")

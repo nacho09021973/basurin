@@ -448,20 +448,24 @@ def _resolve_mode_bands(
     band_low: float,
     band_high: float,
     event_id: str | None,
+    band_strategy: str = "kerr_centered_overlap",
 ) -> tuple[tuple[float, float], tuple[float, float], dict[str, Any]]:
     fallback_220, fallback_221 = _split_mode_bands(band_low=band_low, band_high=band_high)
-    strategy: dict[str, Any] = {
+    default_strategy: dict[str, Any] = {
         "method": "default_split_60_40",
         "event_id": event_id,
         "mode_220_band_hz": [float(fallback_220[0]), float(fallback_220[1])],
         "mode_221_band_hz": [float(fallback_221[0]), float(fallback_221[1])],
     }
+    if band_strategy == "default_split_60_40":
+        return fallback_220, fallback_221, default_strategy
+
     if not event_id:
-        return fallback_220, fallback_221, strategy
+        return fallback_220, fallback_221, default_strategy
 
     f220_kerr_hz = _resolve_f220_kerr_hz(event_id)
     if f220_kerr_hz is None or not math.isfinite(float(f220_kerr_hz)):
-        return fallback_220, fallback_221, strategy
+        return fallback_220, fallback_221, default_strategy
 
     kerr_low, kerr_high, half_width_hz = _compute_kerr_centered_band(
         f220_kerr_hz=float(f220_kerr_hz),
@@ -473,18 +477,18 @@ def _resolve_mode_bands(
     eps = 1e-6
     band_220 = (max(float(band_low), float(kerr_low)), min(float(band_high), float(kerr_high)))
     if not band_220[1] > band_220[0] + eps:
-        return fallback_220, fallback_221, strategy
+        return fallback_220, fallback_221, default_strategy
 
     f221_kerr_hz = _resolve_f221_kerr_hz(event_id)
     if f221_kerr_hz is None or not math.isfinite(float(f221_kerr_hz)):
-        return fallback_220, fallback_221, strategy
+        return fallback_220, fallback_221, default_strategy
 
     raw_221 = (
         max(float(band_low), float(f221_kerr_hz) - half_width_hz),
         min(float(band_high), float(f221_kerr_hz) + half_width_hz),
     )
     if not raw_221[1] > raw_221[0] + eps:
-        return fallback_220, fallback_221, strategy
+        return fallback_220, fallback_221, default_strategy
 
     pad_low_hz = float(S3B_221_OVERLAP_LOW_PAD_FRAC) * float(half_width_hz)
     pad_high_hz = float(S3B_221_OVERLAP_HIGH_PAD_FRAC) * float(half_width_hz)
@@ -493,7 +497,33 @@ def _resolve_mode_bands(
         min(float(band_high), float(raw_221[1]) + pad_high_hz),
     )
     if not band_221[1] > band_221[0] + eps:
-        return fallback_220, fallback_221, strategy
+        return fallback_220, fallback_221, default_strategy
+
+    if band_strategy == "coherent_harmonic_band":
+        shared_band = _mode_221_shared_band(band_220, band_221)
+        strategy = {
+            "method": "coherent_harmonic_band",
+            "event_id": event_id,
+            "shared_band_hz": [float(shared_band[0]), float(shared_band[1])],
+            "shared_band_modes": ["220", "221"],
+            "f220_kerr_hz": float(f220_kerr_hz),
+            "f221_kerr_hz": float(f221_kerr_hz),
+            "width_factor": float(S3B_220_BAND_WIDTH_FACTOR),
+            "min_half_width_hz": float(S3B_220_MIN_HALF_WIDTH_HZ),
+            "half_width_hz": float(half_width_hz),
+            "mode_221_low_pad_hz": float(pad_low_hz),
+            "mode_221_high_pad_hz": float(pad_high_hz),
+            "mode_220_band_hz": [float(band_220[0]), float(band_220[1])],
+            "mode_221_band_hz": [float(band_220[0]), float(band_221[1])],
+            "mode_220_band_role": "estimation_band",
+            "mode_221_band_role": "shared_coherent_band",
+            "logical_subbands_hz": {
+                "220": [float(band_220[0]), float(band_220[1])],
+                "221": [float(band_221[0]), float(band_221[1])],
+            },
+            "logical_subbands_within_shared_band": True,
+        }
+        return band_220, shared_band, strategy
 
     strategy = {
         "method": "kerr_centered_overlap",
@@ -1421,6 +1451,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         choices=list(MODE_221_TOPOLOGIES),
         help="Opt-in 221 extraction topology; default preserves the current rigid spectral split.",
     )
+    ap.add_argument(
+        "--band-strategy",
+        default="kerr_centered_overlap",
+        choices=["default_split_60_40", "kerr_centered_overlap", "coherent_harmonic_band"],
+        help="Band allocation strategy for the canonical 220/221 multimode stage.",
+    )
     ap.add_argument("--max-lnf-span-220", type=float, default=1.0)
     ap.add_argument("--max-lnq-span-220", type=float, default=3.0)
     ap.add_argument("--max-lnf-span-221", type=float, default=1.0)
@@ -1451,6 +1487,7 @@ def main() -> int:
             "method": args.method,
             "bootstrap_221_residual_strategy": args.bootstrap_221_residual_strategy,
             "mode_221_topology": args.mode_221_topology,
+            "band_strategy": args.band_strategy,
             "psd_path": args.psd_path,
             "max_lnf_span_220": args.max_lnf_span_220,
             "max_lnq_span_220": args.max_lnq_span_220,
@@ -1476,6 +1513,7 @@ def main() -> int:
             band_low=band_low,
             band_high=band_high,
             event_id=event_id,
+            band_strategy=args.band_strategy,
         )
         global_flags: list[str] = []
         if window_meta is None:
