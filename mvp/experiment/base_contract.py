@@ -28,9 +28,9 @@ for _cand in [_here.parents[0], _here.parents[1]]:
 # ── Canonical gate paths (relative to run_dir) ─────────────────────────────
 
 REQUIRED_CANONICAL_GATES = {
-    "compatible_set": "s4_geometry_filter/compatible_set.json",
-    "stage_summary": "stage_summary.json",
-    "verdict": "verdict.json",
+    "compatible_set": "s4_geometry_filter/outputs/compatible_set.json",
+    "stage_summary": "RUN_VALID/verdict.json",
+    "verdict": "RUN_VALID/verdict.json",
     "estimates": "s3b_multimode_estimates/estimates.json",
 }
 
@@ -60,7 +60,7 @@ def sha256_file(path: str | Path) -> str:
 def assert_run_valid(stage_summary_path: str | Path) -> dict:
     """Abort if RUN_VALID != PASS.  Returns the loaded summary on success."""
     summary = load_json(stage_summary_path)
-    status = summary.get("run_valid", summary.get("status"))
+    status = summary.get("run_valid", summary.get("status", summary.get("verdict")))
     if status != "PASS":
         raise GovernanceViolation(
             f"RUN_VALID={status} in {stage_summary_path}"
