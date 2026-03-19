@@ -57,6 +57,8 @@ S3B_FREQ_FLOOR_HZ = 10.0
 S3B_221_OVERLAP_LOW_PAD_FRAC = 0.1
 S3B_221_OVERLAP_HIGH_PAD_FRAC = 0.2
 MODE_221_RESIDUAL_STRATEGIES = ("refit_220_each_iter", "fixed_220_template")
+MODE_221_TOPOLOGIES = ("rigid_spectral_split", "shared_band_early_taper")
+MODE_221_EARLY_TAPER_TAU_FACTOR = 1.0
 
 
 def _resolve_f221_kerr_hz(event_id: str) -> float | None:
@@ -583,14 +585,53 @@ def _estimate_221_spectral_two_pass_in_bands(
     return _estimate_spectral_in_band(residual, fs, band=band_221)
 
 
+def _mode_221_shared_band(band_220: tuple[float, float], band_221: tuple[float, float]) -> tuple[float, float]:
+    return float(band_220[0]), float(band_221[1])
+
+
+def _apply_early_time_taper(signal: np.ndarray, fs: float, *, tau_s: float, tau_factor: float = MODE_221_EARLY_TAPER_TAU_FACTOR) -> np.ndarray:
+    if signal.ndim != 1:
+        raise ValueError("signal must be 1D for early-time taper")
+    tau_eff = float(tau_s) * float(tau_factor)
+    if not math.isfinite(tau_eff) or tau_eff <= 0.0:
+        raise ValueError(f"invalid early-time taper tau: {tau_s!r}")
+    t = np.arange(signal.size, dtype=float) / fs
+    weights = np.exp(-t / tau_eff)
+    return signal * weights
+
+
+def _estimate_221_in_topology(
+    signal: np.ndarray,
+    fs: float,
+    *,
+    band_220: tuple[float, float],
+    band_221: tuple[float, float],
+    method: str,
+    topology: str,
+) -> dict[str, float]:
+    estimator = _estimate_spectral_in_band if method == "spectral_two_pass" else _estimate_observables_in_band
+    est220 = estimator(signal, fs, band=band_220)
+    residual = signal - _template_220(signal, fs, est220)
+    estimate_band = band_221
+    if topology == "shared_band_early_taper":
+        residual = _apply_early_time_taper(residual, fs, tau_s=float(est220["tau_s"]))
+        estimate_band = _mode_221_shared_band(band_220, band_221)
+    return estimator(residual, fs, band=estimate_band)
+
+
 def _mode_221_residual_band_estimator(
     method: str,
     *,
+    band_220: tuple[float, float],
     band_221: tuple[float, float],
+    topology: str,
 ) -> Callable[[np.ndarray, float], dict[str, float]]:
+    estimate_band = band_221 if topology == "rigid_spectral_split" else _mode_221_shared_band(band_220, band_221)
     if method == "spectral_two_pass":
-        return lambda sig, sr: _estimate_spectral_in_band(sig, sr, band=band_221)
-    return lambda sig, sr: _estimate_observables_in_band(sig, sr, band=band_221)
+        base_estimator = lambda sig, sr: _estimate_spectral_in_band(sig, sr, band=estimate_band)
+    else:
+        base_estimator = lambda sig, sr: _estimate_observables_in_band(sig, sr, band=estimate_band)
+    return base_estimator
 
 
 def _mode_221_refit_each_iter_estimator(
@@ -598,19 +639,15 @@ def _mode_221_refit_each_iter_estimator(
     *,
     band_220: tuple[float, float],
     band_221: tuple[float, float],
+    topology: str,
 ) -> Callable[[np.ndarray, float], dict[str, float]]:
-    if method == "spectral_two_pass":
-        return lambda sig, sr: _estimate_221_spectral_two_pass_in_bands(
-            sig,
-            sr,
-            band_220=band_220,
-            band_221=band_221,
-        )
-    return lambda sig, sr: _estimate_221_from_signal_in_bands(
+    return lambda sig, sr: _estimate_221_in_topology(
         sig,
         sr,
         band_220=band_220,
         band_221=band_221,
+        method=method,
+        topology=topology,
     )
 
 
@@ -622,16 +659,33 @@ def _prepare_mode_221_bootstrap_inputs(
     band_220: tuple[float, float],
     band_221: tuple[float, float],
     residual_strategy: str,
+    topology: str,
 ) -> tuple[np.ndarray, Callable[[np.ndarray, float], dict[str, float]], dict[str, Any], list[str]]:
     strategy_meta: dict[str, Any] = {
         "strategy": residual_strategy,
+        "topology": topology,
         "template_scope": "per_bootstrap_iter",
         "bootstrap_signal": "full_signal",
     }
+    if topology == "shared_band_early_taper":
+        strategy_meta.update(
+            {
+                "estimation_band": "shared_220_221_band",
+                "time_weighting": "early_exponential_taper",
+                "time_weighting_tau_factor": float(MODE_221_EARLY_TAPER_TAU_FACTOR),
+            }
+        )
+    else:
+        strategy_meta["estimation_band"] = "rigid_221_band"
     if residual_strategy == "refit_220_each_iter":
         return (
             signal,
-            _mode_221_refit_each_iter_estimator(method, band_220=band_220, band_221=band_221),
+            _mode_221_refit_each_iter_estimator(
+                method,
+                band_220=band_220,
+                band_221=band_221,
+                topology=topology,
+            ),
             strategy_meta,
             [],
         )
@@ -641,6 +695,8 @@ def _prepare_mode_221_bootstrap_inputs(
     else:
         est220 = _estimate_observables_in_band(signal, fs, band=band_220)
     residual_signal = signal - _template_220(signal, fs, est220)
+    if topology == "shared_band_early_taper":
+        residual_signal = _apply_early_time_taper(residual_signal, fs, tau_s=float(est220["tau_s"]))
     strategy_meta.update(
         {
             "template_scope": "full_signal_once",
@@ -649,7 +705,12 @@ def _prepare_mode_221_bootstrap_inputs(
     )
     return (
         residual_signal,
-        _mode_221_residual_band_estimator(method, band_221=band_221),
+        _mode_221_residual_band_estimator(
+            method,
+            band_220=band_220,
+            band_221=band_221,
+            topology=topology,
+        ),
         strategy_meta,
         [],
     )
@@ -1354,6 +1415,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default="refit_220_each_iter",
         choices=list(MODE_221_RESIDUAL_STRATEGIES),
     )
+    ap.add_argument(
+        "--mode-221-topology",
+        default="rigid_spectral_split",
+        choices=list(MODE_221_TOPOLOGIES),
+        help="Opt-in 221 extraction topology; default preserves the current rigid spectral split.",
+    )
     ap.add_argument("--max-lnf-span-220", type=float, default=1.0)
     ap.add_argument("--max-lnq-span-220", type=float, default=3.0)
     ap.add_argument("--max-lnf-span-221", type=float, default=1.0)
@@ -1383,6 +1450,7 @@ def main() -> int:
             "seed": args.seed,
             "method": args.method,
             "bootstrap_221_residual_strategy": args.bootstrap_221_residual_strategy,
+            "mode_221_topology": args.mode_221_topology,
             "psd_path": args.psd_path,
             "max_lnf_span_220": args.max_lnf_span_220,
             "max_lnq_span_220": args.max_lnq_span_220,
@@ -1455,6 +1523,7 @@ def main() -> int:
             band_220=band_220,
             band_221=band_221,
             residual_strategy=args.bootstrap_221_residual_strategy,
+            topology=args.mode_221_topology,
         )
         global_flags.extend(mode_221_strategy_flags)
 

@@ -244,6 +244,21 @@ def test_stage_arg_parser_accepts_bootstrap_221_residual_strategy_and_default() 
     assert default_args.bootstrap_221_residual_strategy == "refit_220_each_iter"
 
 
+def test_stage_arg_parser_accepts_mode_221_topology_and_default() -> None:
+    parser = _MODULE._build_arg_parser()
+
+    args = parser.parse_args([
+        "--run-id",
+        "run_cli",
+        "--mode-221-topology",
+        "shared_band_early_taper",
+    ])
+    default_args = parser.parse_args(["--run-id", "run_default"])
+
+    assert args.mode_221_topology == "shared_band_early_taper"
+    assert default_args.mode_221_topology == "rigid_spectral_split"
+
+
 def test_prepare_mode_221_bootstrap_inputs_fixed_template_reuses_fixed_220_residual() -> None:
     signal = np.linspace(-1.0, 1.0, 16)
     calls: list[tuple[str, tuple[float, float], np.ndarray]] = []
@@ -268,6 +283,7 @@ def test_prepare_mode_221_bootstrap_inputs_fixed_template_reuses_fixed_220_resid
             band_220=(150.0, 250.0),
             band_221=(250.0, 400.0),
             residual_strategy="fixed_220_template",
+            topology="rigid_spectral_split",
         )
         estimate = estimator(np.ones_like(signal), 4096.0)
     finally:
@@ -284,6 +300,48 @@ def test_prepare_mode_221_bootstrap_inputs_fixed_template_reuses_fixed_220_resid
     assert np.allclose(calls[0][2], signal)
     assert calls[1][1] == (250.0, 400.0)
     assert np.allclose(calls[1][2], np.ones_like(signal))
+
+
+def test_prepare_mode_221_bootstrap_inputs_shared_topology_uses_shared_band_and_taper() -> None:
+    signal = np.linspace(-1.0, 1.0, 16)
+    calls: list[tuple[tuple[float, float], np.ndarray]] = []
+    original_estimate = _MODULE._estimate_observables_in_band
+    original_template = _MODULE._template_220
+
+    def _fake_estimate(sig: np.ndarray, _fs: float, *, band: tuple[float, float]) -> dict[str, float]:
+        calls.append((band, sig.copy()))
+        return {"f_hz": 220.0, "Q": 12.0, "tau_s": 12.0 / (np.pi * 220.0)}
+
+    def _fake_template(sig: np.ndarray, _fs: float, est220: dict[str, float]) -> np.ndarray:
+        assert est220["f_hz"] == 220.0
+        return np.full_like(sig, 0.25)
+
+    _MODULE._estimate_observables_in_band = _fake_estimate
+    _MODULE._template_220 = _fake_template
+    try:
+        bootstrap_signal, estimator, strategy_meta, flags = _MODULE._prepare_mode_221_bootstrap_inputs(
+            signal,
+            4096.0,
+            method="hilbert_peakband",
+            band_220=(150.0, 250.0),
+            band_221=(250.0, 400.0),
+            residual_strategy="fixed_220_template",
+            topology="shared_band_early_taper",
+        )
+        estimate = estimator(np.ones_like(signal), 4096.0)
+    finally:
+        _MODULE._estimate_observables_in_band = original_estimate
+        _MODULE._template_220 = original_template
+
+    assert flags == []
+    assert strategy_meta["topology"] == "shared_band_early_taper"
+    assert strategy_meta["estimation_band"] == "shared_220_221_band"
+    assert strategy_meta["time_weighting"] == "early_exponential_taper"
+    assert strategy_meta["time_weighting_tau_factor"] == 1.0
+    assert not np.allclose(bootstrap_signal, signal - 0.25)
+    assert estimate["f_hz"] == 220.0
+    assert calls[0][0] == (150.0, 250.0)
+    assert calls[1][0] == (150.0, 400.0)
 
 
 def test_main_populates_source_window_and_avoids_missing_flag(tmp_path: Path) -> None:
@@ -375,6 +433,37 @@ def test_main_records_fixed_220_template_strategy_in_artifact_metadata(tmp_path:
     assert payload["source"]["mode_221_residual"]["strategy"] == "fixed_220_template"
     assert payload["source"]["mode_221_residual"]["template_scope"] == "full_signal_once"
     assert payload["source"]["mode_221_strategy"] == "fixed_220_template"
+
+
+def test_main_records_shared_topology_in_artifact_metadata(tmp_path: Path) -> None:
+    run_id = "subrun_shared_topology"
+    tmp_runs = tmp_path / "subruns_root"
+    _write_minimal_s2_inputs(tmp_runs, run_id)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    cmd = [
+        sys.executable,
+        str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
+        "--runs-root",
+        str(tmp_runs),
+        "--run-id",
+        run_id,
+        "--n-bootstrap",
+        "8",
+        "--seed",
+        "101",
+        "--mode-221-topology",
+        "shared_band_early_taper",
+    ]
+
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+    output_path = tmp_runs / run_id / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["source"]["mode_221_residual"]["topology"] == "shared_band_early_taper"
+    assert payload["source"]["mode_221_residual"]["estimation_band"] == "shared_220_221_band"
+    assert payload["source"]["mode_221_residual"]["time_weighting"] == "early_exponential_taper"
 
 
 def test_summary_blocks_do_not_emit_multimode_ok_for_unusable_221(tmp_path: Path) -> None:
