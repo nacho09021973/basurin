@@ -903,7 +903,10 @@ def main() -> int:
                 print(f"[s1_fetch_strain] WARNING: local HDF5 mode could not resolve GPS center ({exc}); proceeding without target crop", flush=True)
                 gps_center = None
         elif args.synthetic:
-            gps_center = 1126259462.4204
+            try:
+                gps_center = _fetch_gps_center(args.event_id)
+            except Exception:
+                gps_center = 1126259462.4204
         else:
             if args.offline:
                 raise RuntimeError(
