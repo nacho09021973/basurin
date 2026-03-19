@@ -102,3 +102,150 @@ def test_main_writes_auditable_outputs_under_runs_root(tmp_path: Path, monkeypat
     assert len(rows) == 8
     assert "mode_221_usable_reason" in csv_text
     assert all(str(path).startswith(str(runs_root)) for path in [compare_run])
+
+
+
+def test_evaluate_runs_improved_when_candidate_crosses_usability_gate() -> None:
+    baseline = {
+        "run_id": "base",
+        "mode_221_usable": False,
+        "mode_221_usable_reason": "221_lnQ_span_explosive",
+        "valid_fraction": 0.42,
+        "cv_Q": 1.20,
+        "lnQ_span": 1.30,
+        "cv_f": 0.30,
+        "lnf_span": 0.40,
+    }
+    candidate = {
+        "run_id": "cand",
+        "mode_221_usable": True,
+        "mode_221_usable_reason": "ok",
+        "valid_fraction": 0.61,
+        "cv_Q": 0.80,
+        "lnQ_span": 0.70,
+        "cv_f": 0.20,
+        "lnf_span": 0.20,
+    }
+
+    result = __import__("mvp.tools.evaluate_221_strategy", fromlist=["*"]).evaluate_runs(
+        baseline,
+        candidate,
+        valid_fraction_delta=0.05,
+        spread_delta=0.05,
+    )
+
+    assert result["verdict"] == "improved"
+    assert "candidate crossed the main usability gate" in " ".join(result["trace"])
+
+
+
+def test_evaluate_runs_neutral_when_both_unusable_but_candidate_metrics_improve() -> None:
+    baseline = {
+        "run_id": "base",
+        "mode_221_usable": False,
+        "mode_221_usable_reason": "221_valid_fraction_low",
+        "valid_fraction": 0.20,
+        "cv_Q": 1.10,
+        "lnQ_span": 1.40,
+        "cv_f": 0.40,
+        "lnf_span": 0.60,
+    }
+    candidate = {
+        "run_id": "cand",
+        "mode_221_usable": False,
+        "mode_221_usable_reason": "221_valid_fraction_low",
+        "valid_fraction": 0.28,
+        "cv_Q": 0.90,
+        "lnQ_span": 1.10,
+        "cv_f": 0.30,
+        "lnf_span": 0.50,
+    }
+
+    result = __import__("mvp.tools.evaluate_221_strategy", fromlist=["*"]).evaluate_runs(
+        baseline,
+        candidate,
+        valid_fraction_delta=0.05,
+        spread_delta=0.05,
+    )
+
+    assert result["verdict"] == "neutral"
+    assert result["summary"]["better_metrics"]
+    assert result["rules"]["still_unusable_policy"].startswith("if both runs")
+
+
+
+def test_evaluate_runs_degraded_when_both_usable_and_candidate_is_worse() -> None:
+    baseline = {
+        "run_id": "base",
+        "mode_221_usable": True,
+        "mode_221_usable_reason": "ok",
+        "valid_fraction": 0.72,
+        "cv_Q": 0.40,
+        "lnQ_span": 0.45,
+        "cv_f": 0.10,
+        "lnf_span": 0.15,
+    }
+    candidate = {
+        "run_id": "cand",
+        "mode_221_usable": True,
+        "mode_221_usable_reason": "ok",
+        "valid_fraction": 0.60,
+        "cv_Q": 0.55,
+        "lnQ_span": 0.60,
+        "cv_f": 0.18,
+        "lnf_span": 0.22,
+    }
+
+    result = __import__("mvp.tools.evaluate_221_strategy", fromlist=["*"]).evaluate_runs(
+        baseline,
+        candidate,
+        valid_fraction_delta=0.05,
+        spread_delta=0.05,
+    )
+
+    assert result["verdict"] == "degraded"
+    assert "valid_fraction" in result["summary"]["worse_metrics"]
+
+
+
+def test_evaluate_cli_reads_runs_from_runs_root(tmp_path: Path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs_root"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    for run_id, usable, reason, vf, cvf, cvq, lnf, lnq in [
+        ("baseline_run", False, "221_lnQ_span_explosive", 0.35, 0.20, 1.10, 0.25, 1.40),
+        ("candidate_run", True, "ok", 0.60, 0.10, 0.60, 0.10, 0.70),
+    ]:
+        run_dir = runs_root / run_id
+        rv = run_dir / "RUN_VALID"
+        rv.mkdir(parents=True, exist_ok=True)
+        (rv / "verdict.json").write_text('{"verdict": "PASS"}', encoding="utf-8")
+        _write_multimode_artifact(
+            run_dir,
+            usable=usable,
+            reason=reason,
+            valid_fraction=vf,
+            cv_f=cvf,
+            cv_q=cvq,
+            lnf_span=lnf,
+            lnq_span=lnq,
+        )
+
+    module_eval = __import__("mvp.tools.evaluate_221_strategy", fromlist=["*"])
+    from io import StringIO
+    import contextlib
+
+    buf = StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = module_eval.main([
+            "--baseline-run",
+            "baseline_run",
+            "--candidate-run",
+            "candidate_run",
+        ])
+
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["verdict"] == "improved"
+    assert payload["baseline"]["run_id"] == "baseline_run"
+    assert payload["candidate"]["run_id"] == "candidate_run"
