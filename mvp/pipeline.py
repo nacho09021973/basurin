@@ -1265,6 +1265,7 @@ def run_multimode_event(
     s3b_seed: int = 12345,
     s3b_method: str = "hilbert_peakband",
     bootstrap_221_residual_strategy: str = "refit_220_each_iter",
+    band_strategy: str = "kerr_centered_overlap",
     estimator: str = "dual",
     offline: bool = False,
     psd_path: str | None = None,
@@ -1487,6 +1488,7 @@ def run_multimode_event(
         "--seed", str(s3b_seed),
         "--method", s3b_method,
         "--bootstrap-221-residual-strategy", bootstrap_221_residual_strategy,
+        "--band-strategy", band_strategy,
     ]
     if psd_path:
         s3b_args.extend(["--psd-path", psd_path])
@@ -1880,6 +1882,12 @@ def main() -> int:
         default="refit_220_each_iter",
     )
     sp_multimode.add_argument(
+        "--band-strategy",
+        choices=["default_split_60_40", "kerr_centered_overlap", "coherent_harmonic_band"],
+        default="kerr_centered_overlap",
+        help="Band allocation strategy forwarded to s3b_multimode_estimates",
+    )
+    sp_multimode.add_argument(
         "--local-hdf5",
         action="append",
         default=[],
@@ -2028,6 +2036,7 @@ def main() -> int:
             s3b_seed=args.s3b_seed,
             s3b_method=args.s3b_method,
             bootstrap_221_residual_strategy=args.bootstrap_221_residual_strategy,
+            band_strategy=args.band_strategy,
             estimator=args.estimator,
             local_hdf5=args.local_hdf5,
             offline=args.offline,
