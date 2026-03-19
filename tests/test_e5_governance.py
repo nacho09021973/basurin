@@ -31,12 +31,11 @@ def tmp_runs(tmp_path):
         run_dir = runs_root / run_id
         run_dir.mkdir(parents=True)
 
-        # stage_summary.json
-        summary = {"run_valid": run_valid, "run_id": run_id}
-        _write(run_dir / "stage_summary.json", summary)
+        # RUN_VALID/verdict.json
+        _write(run_dir / "RUN_VALID" / "verdict.json", {"verdict": run_valid, "run_id": run_id})
 
         # compatible_set.json
-        cs_dir = run_dir / "s4_geometry_filter"
+        cs_dir = run_dir / "s4_geometry_filter" / "outputs"
         cs_dir.mkdir(parents=True)
         geoms = geometries or [
             {"geometry_id": "edgb_001", "family": "edgb", "mahalanobis_d2": 2.1, "delta_lnL": 0.5, "saturation_221": 0.1},
@@ -44,6 +43,10 @@ def tmp_runs(tmp_path):
             {"geometry_id": "kerr_newman_001", "family": "kerr_newman", "mahalanobis_d2": 3.5, "delta_lnL": 0.7, "saturation_221": 0.05},
         ]
         _write(cs_dir / "compatible_set.json", {"geometries": geoms})
+        _write(
+            run_dir / "s4_geometry_filter" / "stage_summary.json",
+            {"stage": "s4_geometry_filter", "verdict": "PASS", "run_id": run_id},
+        )
 
         # verdict.json
         v = verdict or {
@@ -78,22 +81,22 @@ class TestBaseContractGovernance:
         runs_root, make_run = tmp_runs
         run_dir = make_run("run_001")
         from mvp.experiment.base_contract import assert_run_valid
-        summary = assert_run_valid(run_dir / "stage_summary.json")
-        assert summary["run_valid"] == "PASS"
+        summary = assert_run_valid(run_dir / "RUN_VALID" / "verdict.json")
+        assert summary["verdict"] == "PASS"
 
     def test_assert_run_valid_fail_raises(self, tmp_runs):
         runs_root, make_run = tmp_runs
         run_dir = make_run("run_fail", run_valid="FAIL")
         from mvp.experiment.base_contract import assert_run_valid, GovernanceViolation
         with pytest.raises(GovernanceViolation, match="RUN_VALID=FAIL"):
-            assert_run_valid(run_dir / "stage_summary.json")
+            assert_run_valid(run_dir / "RUN_VALID" / "verdict.json")
 
     def test_assert_run_valid_warn_raises(self, tmp_runs):
         runs_root, make_run = tmp_runs
         run_dir = make_run("run_warn", run_valid="WARN")
         from mvp.experiment.base_contract import assert_run_valid, GovernanceViolation
         with pytest.raises(GovernanceViolation):
-            assert_run_valid(run_dir / "stage_summary.json")
+            assert_run_valid(run_dir / "RUN_VALID" / "verdict.json")
 
     def test_assert_run_valid_missing_file(self, tmp_path):
         from mvp.experiment.base_contract import assert_run_valid

@@ -28,9 +28,10 @@ for _cand in [_here.parents[0], _here.parents[1]]:
 # ── Canonical gate paths (relative to run_dir) ─────────────────────────────
 
 REQUIRED_CANONICAL_GATES = {
+    "run_valid": "RUN_VALID/verdict.json",
     "compatible_set": "s4_geometry_filter/outputs/compatible_set.json",
-    "stage_summary": "RUN_VALID/verdict.json",
-    "verdict": "RUN_VALID/verdict.json",
+    "stage_summary": "s4_geometry_filter/stage_summary.json",
+    "verdict": "verdict.json",
     "estimates": "s3b_multimode_estimates/estimates.json",
 }
 
@@ -57,15 +58,15 @@ def sha256_file(path: str | Path) -> str:
     return h.hexdigest()
 
 
-def assert_run_valid(stage_summary_path: str | Path) -> dict:
-    """Abort if RUN_VALID != PASS.  Returns the loaded summary on success."""
-    summary = load_json(stage_summary_path)
-    status = summary.get("run_valid", summary.get("status", summary.get("verdict")))
+def assert_run_valid(run_valid_path: str | Path) -> dict:
+    """Abort if ``RUN_VALID/verdict.json`` is missing or not ``PASS``."""
+    verdict = load_json(run_valid_path)
+    status = verdict.get("verdict")
     if status != "PASS":
         raise GovernanceViolation(
-            f"RUN_VALID={status} in {stage_summary_path}"
+            f"RUN_VALID={status} in {run_valid_path}"
         )
-    return summary
+    return verdict
 
 
 def resolve_run_dir(run_id: str, runs_root: str | Path | None = None) -> Path:
@@ -81,13 +82,15 @@ def resolve_run_dir(run_id: str, runs_root: str | Path | None = None) -> Path:
 
 
 def validate_and_load_run(run_id: str, runs_root: str | Path | None = None) -> tuple[Path, dict]:
-    """Validate a run and return (run_dir, stage_summary).
+    """Validate a run and return ``(run_dir, stage_summary)``.
 
     Raises GovernanceViolation if run is not PASS.
     """
     run_dir = resolve_run_dir(run_id, runs_root)
+    run_valid_path = run_dir / REQUIRED_CANONICAL_GATES["run_valid"]
+    assert_run_valid(run_valid_path)
     summary_path = run_dir / REQUIRED_CANONICAL_GATES["stage_summary"]
-    summary = assert_run_valid(summary_path)
+    summary = load_json(summary_path)
     return run_dir, summary
 
 
