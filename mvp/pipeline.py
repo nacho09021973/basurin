@@ -1272,6 +1272,9 @@ def run_multimode_event(
     final_mass_msun: float | None = None,
     redshift: float | None = None,
     t0_shift_ms: float = 0.0,
+    max_lnq_span_221: float = 1.0,
+    mode_221_topology: str = "rigid_spectral_split",
+    min_valid_fraction_221: float = 0.5,
 ) -> tuple[int, str]:
     event_id = _require_nonempty_event_id(event_id, "--event-id")
     dt_start_s, dt_source = _resolve_adaptive_dt_start(event_id, dt_start_s, final_mass_msun, redshift)
@@ -1502,6 +1505,9 @@ def run_multimode_event(
         "--method", s3b_method,
         "--bootstrap-221-residual-strategy", bootstrap_221_residual_strategy,
         "--band-strategy", band_strategy,
+        "--max-lnq-span-221", str(max_lnq_span_221),
+        "--mode-221-topology", mode_221_topology,
+        "--min-valid-fraction-221", str(min_valid_fraction_221),
     ]
     if psd_path:
         s3b_args.extend(["--psd-path", psd_path])
@@ -1901,6 +1907,20 @@ def main() -> int:
         default="refit_220_each_iter",
     )
     sp_multimode.add_argument(
+        "--max-lnq-span-221", type=float, default=1.0,
+        help="Max ln(Q) span (P90-P10) for mode 221 usability gate (default: 1.0)",
+    )
+    sp_multimode.add_argument(
+        "--mode-221-topology",
+        choices=["rigid_spectral_split", "shared_band_early_taper"],
+        default="rigid_spectral_split",
+        help="221 extraction topology (shared_band_early_taper weights early ringdown)",
+    )
+    sp_multimode.add_argument(
+        "--min-valid-fraction-221", type=float, default=0.5,
+        help="Min bootstrap success fraction for mode 221 (default: 0.5)",
+    )
+    sp_multimode.add_argument(
         "--band-strategy",
         choices=["default_split_60_40", "kerr_centered_overlap", "coherent_harmonic_band"],
         default="kerr_centered_overlap",
@@ -2063,6 +2083,9 @@ def main() -> int:
             final_mass_msun=args.final_mass_msun,
             redshift=args.redshift,
             t0_shift_ms=args.t0_shift_ms,
+            max_lnq_span_221=args.max_lnq_span_221,
+            mode_221_topology=args.mode_221_topology,
+            min_valid_fraction_221=args.min_valid_fraction_221,
         )
         return rc
 
