@@ -26,6 +26,7 @@ covariance_gate = _MODULE.covariance_gate
 compute_robust_stability = _MODULE.compute_robust_stability
 evaluate_mode = _MODULE.evaluate_mode
 _compute_multimode_summary_blocks = _MODULE._compute_multimode_summary_blocks
+_compute_local_fit_quality = _MODULE._compute_local_fit_quality
 _discover_s2_npz = _MODULE._discover_s2_npz
 _load_signal_from_npz = _MODULE._load_signal_from_npz
 
@@ -948,8 +949,89 @@ def test_compute_robust_stability_quantiles_are_deterministic() -> None:
     assert np.isclose(stability["lnQ_p10"], 2.4)
     assert np.isclose(stability["lnQ_p50"], 4.0)
     assert np.isclose(stability["lnQ_p90"], 5.6)
+    assert np.isclose(stability["lnf_min"], 1.0)
+    assert np.isclose(stability["lnf_max"], 5.0)
+    assert np.isclose(stability["lnf_p01"], 1.04)
+    assert np.isclose(stability["lnf_p05"], 1.2)
+    assert np.isclose(stability["lnf_p95"], 4.8)
+    assert np.isclose(stability["lnf_p99"], 4.96)
+    assert np.isclose(stability["lnQ_min"], 2.0)
+    assert np.isclose(stability["lnQ_max"], 6.0)
+    assert np.isclose(stability["lnQ_p01"], 2.04)
+    assert np.isclose(stability["lnQ_p05"], 2.2)
+    assert np.isclose(stability["lnQ_p95"], 5.8)
+    assert np.isclose(stability["lnQ_p99"], 5.96)
     assert np.isclose(stability["lnf_span"], 3.2)
     assert np.isclose(stability["lnQ_span"], 3.2)
+    assert np.isclose(stability["lnQ_iqr"], 3.2)
+    assert np.isclose(stability["lnQ_mad"], 1.0)
+    assert np.isclose(stability["lnQ_skewness"], 0.0)
+    assert np.isclose(stability["Q_skewness"], 1.12942701, rtol=1e-6)
+    assert np.isclose(stability["lnQ_excess_kurtosis"], -1.3)
+    assert np.isclose(stability["Q_excess_kurtosis"], -0.32737782, rtol=1e-6)
+    assert np.isclose(stability["lnQ_bimodality_coefficient"], 0.58823529, rtol=1e-6)
+
+
+def test_compute_local_fit_quality_reports_strong_match_for_clean_ringdown() -> None:
+    fs = 4096.0
+    t = np.arange(2048, dtype=float) / fs
+    f_hz = 250.0
+    q = 18.0
+    tau_s = q / (np.pi * f_hz)
+    signal = np.exp(-t / tau_s) * np.cos(2.0 * np.pi * f_hz * t)
+
+    quality = _compute_local_fit_quality(signal, fs, ln_f=np.log(f_hz), ln_q=np.log(q))
+
+    assert quality["r2"] is not None
+    assert quality["r2"] > 0.999999
+    assert quality["rms_residual"] is not None
+    assert quality["rms_residual"] < 1e-10
+    assert quality["residual_rms_over_signal_rms"] is not None
+    assert quality["residual_rms_over_signal_rms"] < 1e-10
+
+
+def test_evaluate_mode_embeds_additive_local_fit_quality_and_rich_stability() -> None:
+    signal = np.linspace(-1.0, 1.0, 4096)
+
+    def estimator(_signal: np.ndarray, _fs: float) -> dict[str, float]:
+        return {"f_hz": 220.0, "Q": 12.0, "tau_s": 12.0 / (np.pi * 220.0)}
+
+    rich_samples = np.array(
+        [[np.log(220.0 + 0.2 * idx), np.log(10.0 + 0.7 * idx)] for idx in range(1, 81)],
+        dtype=float,
+    )
+
+    original = _MODULE._bootstrap_mode_log_samples
+    _MODULE._bootstrap_mode_log_samples = lambda *_args, **_kwargs: (rich_samples, 0)
+    try:
+        mode, flags, ok = evaluate_mode(
+            signal,
+            4096.0,
+            label="221",
+            mode=[2, 2, 1],
+            estimator=estimator,
+            n_bootstrap=80,
+            seed=42,
+            min_valid_fraction=0.0,
+            min_point_samples=2,
+            min_point_valid_fraction=0.0,
+            max_lnq_span=2.5,
+        )
+    finally:
+        _MODULE._bootstrap_mode_log_samples = original
+
+    assert ok
+    assert flags == []
+    stability = mode["fit"]["stability"]
+    assert "lnQ_p01" in stability
+    assert "lnQ_p99" in stability
+    assert "lnQ_iqr" in stability
+    assert "lnQ_mad" in stability
+    assert "lnQ_skewness" in stability
+    assert "lnQ_excess_kurtosis" in stability
+    assert "lnQ_bimodality_coefficient" in stability
+    local_quality = mode["fit"]["local_fit_quality"]
+    assert set(local_quality) == {"r2", "rms_residual", "residual_rms_over_signal_rms"}
 
 
 def test_cv_q_high_but_lnq_span_moderate_does_not_invalidate() -> None:
