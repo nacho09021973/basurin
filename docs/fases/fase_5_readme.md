@@ -49,14 +49,15 @@ Definido en `mvp/experiment/base_contract.py`. Todas las alternativas comparten:
 
 ```python
 REQUIRED_CANONICAL_GATES = {
-    "compatible_set": "s4_geometry_filter/compatible_set.json",
-    "stage_summary":  "stage_summary.json",
+    "run_valid":      "RUN_VALID/verdict.json",
+    "compatible_set": "s4_geometry_filter/outputs/compatible_set.json",
+    "stage_summary":  "s4_geometry_filter/stage_summary.json",
     "verdict":        "verdict.json",
     "estimates":      "s3b_multimode_estimates/estimates.json",
 }
 ```
 
-**Invariante primario:** ninguna alternativa puede consumir un `run_id` cuyo `stage_summary.json` no tenga `run_valid: "PASS"`. Violación → excepción `GovernanceViolation`.
+**Invariante primario:** ninguna alternativa puede consumir un `run_id` cuyo `RUN_VALID/verdict.json` no tenga `verdict: "PASS"`. Ese gate global es distinto del `stage_summary.json` contractual y de cualquier `verdict.json` analítico/experimental. Violación → excepción `GovernanceViolation`.
 
 ```python
 from mvp.experiment.base_contract import validate_and_load_run
