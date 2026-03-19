@@ -146,12 +146,14 @@ def run_aggregation(
     anchor = anchor_run_id or sorted(run_ids)[0]
     run_dir, _ = validate_and_load_run(anchor, runs_root)
     out_dir = ensure_experiment_dir(run_dir, EXPERIMENT_NAME)
+    outputs_dir = out_dir / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
 
     # Write outputs
-    _write_json_atomic(out_dir / "population_verdict.json", result)
+    _write_json_atomic(outputs_dir / "population_verdict.json", result)
 
     _write_json_atomic(
-        out_dir / "family_support_rate.json",
+        outputs_dir / "family_support_rate.json",
         result["family_support_rates"],
     )
 
@@ -160,7 +162,22 @@ def run_aggregation(
         family: data["evidence_strength"]
         for family, data in result["family_support_rates"].items()
     }
-    _write_json_atomic(out_dir / "evidence_strength.json", evidence)
+    _write_json_atomic(outputs_dir / "evidence_strength.json", evidence)
+
+    stage_summary = {
+        "schema_version": SCHEMA_VERSION,
+        "experiment": EXPERIMENT_NAME,
+        "status": "PASS",
+        "n_events_aggregated": result["n_events_aggregated"],
+        "verdict_source_only": result["verdict_source_only"],
+        "outputs_dir": str(outputs_dir),
+        "outputs": {
+            "population_verdict": str(outputs_dir / "population_verdict.json"),
+            "family_support_rate": str(outputs_dir / "family_support_rate.json"),
+            "evidence_strength": str(outputs_dir / "evidence_strength.json"),
+        },
+    }
+    _write_json_atomic(out_dir / "stage_summary.json", stage_summary)
 
     # Manifest
     write_manifest(out_dir, result["input_hashes"], extra={
