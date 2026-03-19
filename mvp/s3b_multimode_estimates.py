@@ -1148,11 +1148,6 @@ def build_results_payload(
         source["band_strategy"] = band_strategy
     if residual_strategy is not None:
         source["mode_221_residual"] = residual_strategy
-    if band_strategy is not None or residual_strategy is not None:
-        source["mode_221_strategy"] = {
-            "band_strategy_method": (band_strategy or {}).get("method"),
-            "bootstrap_221_residual_strategy": (residual_strategy or {}).get("bootstrap_221_residual_strategy"),
-        }
 
     return {
         "schema_version": "multimode_estimates_v1",
