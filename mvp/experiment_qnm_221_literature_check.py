@@ -651,7 +651,7 @@ def _decide_verdict(
     extraction_policy: str,
 ) -> tuple[str, str]:
     if f221 is None:
-        if extraction_policy.startswith("upstream_221_"):
+        if extraction_policy.startswith("upstream_"):
             return "INSUFFICIENT_DATA", extraction_policy
         return "INSUFFICIENT_DATA", "missing_221_frequency_measurement"
     if f221 <= 0.0:

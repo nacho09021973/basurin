@@ -96,6 +96,22 @@ def _write_s3b_221_fit(
     )
 
 
+def _write_s3b_mode_221_not_usable(root: Path, run_id: str, *, reason: str) -> None:
+    write_json_atomic(
+        root / run_id / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json",
+        {
+            "schema_version": "multimode_estimates_v1",
+            "mode_221_usable": False,
+            "mode_221_usable_reason": reason,
+            "results": {
+                "verdict": "INSUFFICIENT_DATA",
+                "quality_flags": [],
+            },
+            "modes": [],
+        },
+    )
+
+
 def _write_model_comp(root: Path, run_id: str) -> None:
     write_json_atomic(
         root / run_id / "s3b_multimode_estimates" / "outputs" / "model_comparison.json",
@@ -240,6 +256,37 @@ def test_main_returns_insufficient_data_when_upstream_221_is_flagged(tmp_path: P
     assert stage_summary["verdict"] == "PASS"
     assert stage_summary["results"]["verdict"] == "INSUFFICIENT_DATA"
     assert stage_summary["results"]["verdict_reason"] == reason
+
+
+def test_main_propagates_formal_upstream_mode_221_not_usable_reason(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    run_id = "r_221_not_usable"
+    reason = "221_cv_Q_explosive"
+    expected = f"upstream_mode_221_not_usable:{reason}"
+    _write_run_valid(runs_root, run_id, "PASS")
+    _write_minimal_s3(runs_root, run_id)
+    _write_s3b_mode_221_not_usable(runs_root, run_id, reason=reason)
+    _write_model_comp(runs_root, run_id)
+    _write_remnant(runs_root, run_id)
+
+    def _should_not_predict(_: float, __: float) -> tuple[float, float, dict[str, str]]:
+        raise AssertionError("formally blocked upstream 221 must not reach Gate A Kerr prediction")
+
+    monkeypatch.setattr(mod, "_predict_kerr_221", _should_not_predict)
+    rc = mod.main(["--run-id", run_id])
+    assert rc == 0
+
+    summary = json.loads(
+        (runs_root / run_id / "experiment" / "qnm_221_literature_check" / "outputs" / "summary_221_validation.json").read_text(encoding="utf-8")
+    )
+
+    assert summary["f221_measured"] is None
+    assert summary["tau221_measured"] is None
+    assert summary["extraction_policy"] == expected
+    assert summary["verdict"] == "INSUFFICIENT_DATA"
+    assert summary["verdict_reason"] == expected
 
 
 def test_main_uses_stability_p50_when_upstream_passes_cleanly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
