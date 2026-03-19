@@ -758,14 +758,20 @@ def main(argv: list[str] | None = None) -> int:
         run_dir=run_dir,
         outputs_dir=outputs_dir,
     )
-    verdict, verdict_reason = _decide_verdict(
-        gate_a=gate_a,
-        gate_b=gate_b,
-        gate_c=gate_c,
-        f221=f221_measured,
-        tau221=tau221_measured,
-        extraction_policy=extraction_policy,
+    upstream_221_block_reason = (
+        extraction_policy if extraction_policy.startswith("upstream_221_") else None
     )
+    if upstream_221_block_reason is not None:
+        verdict, verdict_reason = "INSUFFICIENT_DATA", upstream_221_block_reason
+    else:
+        verdict, verdict_reason = _decide_verdict(
+            gate_a=gate_a,
+            gate_b=gate_b,
+            gate_c=gate_c,
+            f221=f221_measured,
+            tau221=tau221_measured,
+            extraction_policy=extraction_policy,
+        )
     if verdict not in ALLOWED_VERDICTS:
         raise RuntimeError(f"invalid verdict: {verdict}")
 
