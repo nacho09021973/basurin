@@ -274,31 +274,172 @@ def _load_s3_selected_t0_offset_ms(path: Path) -> float:
 def compute_robust_stability(samples: list[tuple[float, float]]) -> dict[str, float | None]:
     if not samples:
         return {
+            "lnf_min": None,
+            "lnf_max": None,
+            "lnf_p01": None,
+            "lnf_p05": None,
             "lnf_p10": None,
             "lnf_p50": None,
             "lnf_p90": None,
+            "lnf_p95": None,
+            "lnf_p99": None,
+            "lnQ_min": None,
+            "lnQ_max": None,
+            "lnQ_p01": None,
+            "lnQ_p05": None,
             "lnQ_p10": None,
             "lnQ_p50": None,
             "lnQ_p90": None,
+            "lnQ_p95": None,
+            "lnQ_p99": None,
             "lnf_span": None,
             "lnQ_span": None,
+            "lnQ_iqr": None,
+            "lnQ_mad": None,
+            "lnQ_skewness": None,
+            "Q_skewness": None,
+            "lnQ_excess_kurtosis": None,
+            "Q_excess_kurtosis": None,
+            "lnQ_bimodality_coefficient": None,
         }
 
     arr = np.asarray(samples, dtype=float)
     lnf = arr[:, 0]
     lnq = arr[:, 1]
-    lnf_p10, lnf_p50, lnf_p90 = np.percentile(lnf, [10, 50, 90])
-    lnq_p10, lnq_p50, lnq_p90 = np.percentile(lnq, [10, 50, 90])
+    q_vals = np.exp(lnq)
+
+    lnf_p01, lnf_p05, lnf_p10, lnf_p50, lnf_p90, lnf_p95, lnf_p99 = np.percentile(
+        lnf, [1, 5, 10, 50, 90, 95, 99]
+    )
+    lnq_p01, lnq_p05, lnq_p10, lnq_p50, lnq_p90, lnq_p95, lnq_p99 = np.percentile(
+        lnq, [1, 5, 10, 50, 90, 95, 99]
+    )
+
+    def _central_moment_stats(values: np.ndarray) -> tuple[float | None, float | None]:
+        if values.size < 3:
+            return None, None
+        centered = values - float(np.mean(values))
+        m2 = float(np.mean(centered ** 2))
+        if not math.isfinite(m2) or m2 <= 0.0:
+            return None, None
+        m3 = float(np.mean(centered ** 3))
+        m4 = float(np.mean(centered ** 4))
+        skewness = m3 / (m2 ** 1.5)
+        excess_kurtosis = (m4 / (m2 ** 2)) - 3.0
+        return (
+            float(skewness) if math.isfinite(skewness) else None,
+            float(excess_kurtosis) if math.isfinite(excess_kurtosis) else None,
+        )
+
+    lnq_skewness, lnq_excess_kurtosis = _central_moment_stats(lnq)
+    q_skewness, q_excess_kurtosis = _central_moment_stats(q_vals)
+
+    lnq_mad = float(np.median(np.abs(lnq - lnq_p50)))
+    lnq_iqr = float(lnq_p90 - lnq_p10)
+    lnq_bimodality_coefficient = None
+    if lnq_skewness is not None and lnq_excess_kurtosis is not None:
+        denom = lnq_excess_kurtosis + 3.0
+        if math.isfinite(denom) and denom > 0.0:
+            bc = (lnq_skewness ** 2 + 1.0) / denom
+            if math.isfinite(bc):
+                lnq_bimodality_coefficient = float(bc)
 
     return {
+        "lnf_min": float(np.min(lnf)),
+        "lnf_max": float(np.max(lnf)),
+        "lnf_p01": float(lnf_p01),
+        "lnf_p05": float(lnf_p05),
         "lnf_p10": float(lnf_p10),
         "lnf_p50": float(lnf_p50),
         "lnf_p90": float(lnf_p90),
+        "lnf_p95": float(lnf_p95),
+        "lnf_p99": float(lnf_p99),
+        "lnQ_min": float(np.min(lnq)),
+        "lnQ_max": float(np.max(lnq)),
+        "lnQ_p01": float(lnq_p01),
+        "lnQ_p05": float(lnq_p05),
         "lnQ_p10": float(lnq_p10),
         "lnQ_p50": float(lnq_p50),
         "lnQ_p90": float(lnq_p90),
+        "lnQ_p95": float(lnq_p95),
+        "lnQ_p99": float(lnq_p99),
         "lnf_span": float(lnf_p90 - lnf_p10),
         "lnQ_span": float(lnq_p90 - lnq_p10),
+        "lnQ_iqr": lnq_iqr,
+        "lnQ_mad": lnq_mad,
+        "lnQ_skewness": lnq_skewness,
+        "Q_skewness": q_skewness,
+        "lnQ_excess_kurtosis": lnq_excess_kurtosis,
+        "Q_excess_kurtosis": q_excess_kurtosis,
+        "lnQ_bimodality_coefficient": lnq_bimodality_coefficient,
+    }
+
+
+def _compute_local_fit_quality(
+    signal: np.ndarray,
+    fs: float,
+    *,
+    ln_f: float | None,
+    ln_q: float | None,
+) -> dict[str, float | None]:
+    if (
+        ln_f is None
+        or ln_q is None
+        or not math.isfinite(float(ln_f))
+        or not math.isfinite(float(ln_q))
+        or signal.ndim != 1
+        or signal.size < 2
+        or not np.all(np.isfinite(signal))
+        or not math.isfinite(float(fs))
+        or float(fs) <= 0.0
+    ):
+        return {
+            "r2": None,
+            "rms_residual": None,
+            "residual_rms_over_signal_rms": None,
+        }
+
+    t = np.arange(signal.size, dtype=float) / fs
+    f_hz = math.exp(float(ln_f))
+    q = math.exp(float(ln_q))
+    tau_s = q / (math.pi * f_hz)
+    if not (math.isfinite(f_hz) and f_hz > 0.0 and math.isfinite(tau_s) and tau_s > 0.0):
+        return {
+            "r2": None,
+            "rms_residual": None,
+            "residual_rms_over_signal_rms": None,
+        }
+
+    env = np.exp(-t / tau_s)
+    omega = 2.0 * math.pi * f_hz
+    design = np.vstack([env * np.cos(omega * t), env * np.sin(omega * t)]).T
+    if not np.all(np.isfinite(design)):
+        return {
+            "r2": None,
+            "rms_residual": None,
+            "residual_rms_over_signal_rms": None,
+        }
+
+    coeffs, *_ = np.linalg.lstsq(design, signal, rcond=None)
+    model = design @ coeffs
+    residual = signal - model
+    rss = float(np.dot(residual, residual))
+    tss = float(np.dot(signal - np.mean(signal), signal - np.mean(signal)))
+    rms_residual = float(math.sqrt(np.mean(residual ** 2)))
+    signal_rms = float(math.sqrt(np.mean(signal ** 2)))
+
+    r2 = None
+    if math.isfinite(tss) and tss > 0.0:
+        r2_val = 1.0 - (rss / tss)
+        if math.isfinite(r2_val):
+            r2 = float(r2_val)
+
+    return {
+        "r2": r2,
+        "rms_residual": rms_residual if math.isfinite(rms_residual) else None,
+        "residual_rms_over_signal_rms": (
+            float(rms_residual / signal_rms) if math.isfinite(signal_rms) and signal_rms > 0.0 else None
+        ),
     }
 
 
@@ -934,6 +1075,15 @@ def evaluate_mode(
                 "stability": stability,
             },
         }
+
+    fit_block = mode_payload.get("fit")
+    if isinstance(fit_block, dict):
+        fit_block["local_fit_quality"] = _compute_local_fit_quality(
+            signal,
+            fs,
+            ln_f=ln_f,
+            ln_q=ln_q,
+        )
 
     return mode_payload, sorted(set(flags)), ok
 
