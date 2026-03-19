@@ -56,6 +56,7 @@ S3B_220_Q_REF = 12.0
 S3B_FREQ_FLOOR_HZ = 10.0
 S3B_221_OVERLAP_LOW_PAD_FRAC = 0.1
 S3B_221_OVERLAP_HIGH_PAD_FRAC = 0.2
+BOOTSTRAP_221_RESIDUAL_STRATEGIES = ("refit_220_each_iter", "fixed_220_template")
 
 
 def _resolve_f221_kerr_hz(event_id: str) -> float | None:
@@ -558,15 +559,32 @@ def _estimate_221_spectral_two_pass(signal: np.ndarray, fs: float, *, band_low: 
     return _estimate_spectral_in_band(residual, fs, band=band_221)
 
 
+def _subtract_220_template(
+    signal: np.ndarray,
+    fs: float,
+    *,
+    est220: dict[str, float] | None = None,
+    fixed_template: np.ndarray | None = None,
+) -> np.ndarray:
+    if fixed_template is not None:
+        if fixed_template.shape != signal.shape:
+            raise ValueError("fixed 220 template shape mismatch")
+        return signal - np.asarray(fixed_template, dtype=float)
+    if est220 is None:
+        raise ValueError("est220 or fixed_template required")
+    return signal - _template_220(signal, fs, est220)
+
+
 def _estimate_221_from_signal_in_bands(
     signal: np.ndarray,
     fs: float,
     *,
     band_220: tuple[float, float],
     band_221: tuple[float, float],
+    fixed_template: np.ndarray | None = None,
 ) -> dict[str, float]:
-    est220 = _estimate_observables_in_band(signal, fs, band=band_220)
-    residual = signal - _template_220(signal, fs, est220)
+    est220 = None if fixed_template is not None else _estimate_observables_in_band(signal, fs, band=band_220)
+    residual = _subtract_220_template(signal, fs, est220=est220, fixed_template=fixed_template)
     return _estimate_observables_in_band(residual, fs, band=band_221)
 
 
@@ -576,10 +594,61 @@ def _estimate_221_spectral_two_pass_in_bands(
     *,
     band_220: tuple[float, float],
     band_221: tuple[float, float],
+    fixed_template: np.ndarray | None = None,
 ) -> dict[str, float]:
-    est220 = _estimate_spectral_in_band(signal, fs, band=band_220)
-    residual = signal - _template_220(signal, fs, est220)
+    est220 = None if fixed_template is not None else _estimate_spectral_in_band(signal, fs, band=band_220)
+    residual = _subtract_220_template(signal, fs, est220=est220, fixed_template=fixed_template)
     return _estimate_spectral_in_band(residual, fs, band=band_221)
+
+
+def _build_221_estimator(
+    signal: np.ndarray,
+    fs: float,
+    *,
+    method: str,
+    band_220: tuple[float, float],
+    band_221: tuple[float, float],
+    bootstrap_221_residual_strategy: str,
+) -> tuple[Callable[[np.ndarray, float], dict[str, float]], dict[str, Any]]:
+    if bootstrap_221_residual_strategy not in BOOTSTRAP_221_RESIDUAL_STRATEGIES:
+        raise ValueError(
+            f"unknown bootstrap_221_residual_strategy={bootstrap_221_residual_strategy!r}"
+        )
+
+    base_estimator = _estimate_spectral_in_band if method == "spectral_two_pass" else _estimate_observables_in_band
+    mode_221_estimator = _estimate_221_spectral_two_pass_in_bands if method == "spectral_two_pass" else _estimate_221_from_signal_in_bands
+
+    residual_metadata: dict[str, Any] = {
+        "bootstrap_221_residual_strategy": bootstrap_221_residual_strategy,
+        "mode_220_template_fit_method": "lstsq_amplitudes",
+        "mode_221_method": method,
+        "mode_220_band_hz": [float(band_220[0]), float(band_220[1])],
+        "mode_221_band_hz": [float(band_221[0]), float(band_221[1])],
+    }
+
+    fixed_template: np.ndarray | None = None
+    if bootstrap_221_residual_strategy == "fixed_220_template":
+        est220_point = base_estimator(signal, fs, band=band_220)
+        fixed_template = _template_220(signal, fs, est220_point)
+        residual_metadata["mode_220_template_anchor"] = {
+            "source": "base_signal_point_estimate",
+            "f_hz": float(est220_point["f_hz"]),
+            "Q": float(est220_point["Q"]),
+            "tau_s": float(est220_point["tau_s"]),
+        }
+    else:
+        residual_metadata["mode_220_template_anchor"] = {
+            "source": "refit_per_bootstrap_iteration"
+        }
+
+    estimator = lambda sig, sr: mode_221_estimator(
+        sig,
+        sr,
+        band_220=band_220,
+        band_221=band_221,
+        fixed_template=fixed_template,
+    )
+    return estimator, residual_metadata
 
 
 def _mode_null(
@@ -1052,6 +1121,7 @@ def build_results_payload(
     model_comparison: dict[str, Any] | None = None,
     t0_offset_ms_from_s3: float = 0.0,
     band_strategy: dict[str, Any] | None = None,
+    residual_strategy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     verdict = "OK" if mode_220_ok else "INSUFFICIENT_DATA"
     messages: list[str] = []
@@ -1076,6 +1146,13 @@ def build_results_payload(
         source["t0_offset_ms_from_s3"] = float(t0_offset_ms_from_s3)
     if band_strategy is not None:
         source["band_strategy"] = band_strategy
+    if residual_strategy is not None:
+        source["mode_221_residual"] = residual_strategy
+    if band_strategy is not None or residual_strategy is not None:
+        source["mode_221_strategy"] = {
+            "band_strategy_method": (band_strategy or {}).get("method"),
+            "bootstrap_221_residual_strategy": (residual_strategy or {}).get("bootstrap_221_residual_strategy"),
+        }
 
     return {
         "schema_version": "multimode_estimates_v1",
@@ -1275,6 +1352,15 @@ def main() -> int:
     ap.add_argument("--max-lnf-span-220", type=float, default=1.0)
     ap.add_argument("--max-lnq-span-220", type=float, default=3.0)
     ap.add_argument("--max-lnf-span-221", type=float, default=1.0)
+    ap.add_argument(
+        "--bootstrap-221-residual-strategy",
+        default="refit_220_each_iter",
+        choices=list(BOOTSTRAP_221_RESIDUAL_STRATEGIES),
+        help=(
+            "Residual strategy for mode 221 bootstrap: refit the 220 template on each iteration "
+            "(default) or subtract a template fixed from the base-signal 220 point estimate."
+        ),
+    )
     ap.add_argument("--max-lnq-span-221", type=float, default=1.0)
     ap.add_argument("--min-valid-fraction-221", type=float, default=0.5)
     ap.add_argument(
@@ -1302,6 +1388,7 @@ def main() -> int:
             "max_lnq_span_221": args.max_lnq_span_221,
             "min_valid_fraction_221": args.min_valid_fraction_221,
             "cv_threshold_221": args.cv_threshold_221,
+            "bootstrap_221_residual_strategy": args.bootstrap_221_residual_strategy,
             "psd_path": args.psd_path,
         },
     )
@@ -1358,20 +1445,16 @@ def main() -> int:
 
         if args.method == "spectral_two_pass":
             est_220 = lambda sig, sr: _estimate_spectral_in_band(sig, sr, band=band_220)
-            est_221 = lambda sig, sr: _estimate_221_spectral_two_pass_in_bands(
-                sig,
-                sr,
-                band_220=band_220,
-                band_221=band_221,
-            )
         else:
             est_220 = lambda sig, sr: _estimate_observables_in_band(sig, sr, band=band_220)
-            est_221 = lambda sig, sr: _estimate_221_from_signal_in_bands(
-                sig,
-                sr,
-                band_220=band_220,
-                band_221=band_221,
-            )
+        est_221, residual_strategy = _build_221_estimator(
+            signal,
+            fs,
+            method=args.method,
+            band_220=band_220,
+            band_221=band_221,
+            bootstrap_221_residual_strategy=args.bootstrap_221_residual_strategy,
+        )
 
         mode_220, flags_220, ok_220 = evaluate_mode(
             signal,
@@ -1419,6 +1502,7 @@ def main() -> int:
             model_comparison=model_comparison,
             t0_offset_ms_from_s3=applied_t0_offset_ms,
             band_strategy=band_strategy,
+            residual_strategy=residual_strategy,
         )
 
         out_path = ctx.outputs_dir / "multimode_estimates.json"
