@@ -418,37 +418,12 @@ def _delta_lnL_from_d2(d2: float, d2_min: float) -> float:
     return -0.5 * (float(d2) - float(d2_min))
 
 
-def _resolve_delta_mode_threshold(
-    mode_filter: str | None,
-    atlas: list[dict[str, Any]],
-    *,
-    delta_lnL_220: float,
-    delta_lnL_221: float,
-) -> tuple[float, str]:
-    if mode_filter is not None:
-        normalized_mode = mode_filter.replace(" ", "")
-    else:
-        mode_candidates = {
-            _mode_to_string((entry.get("metadata") or {}).get("mode")).replace(" ", "")
-            for entry in atlas
-            if (entry.get("metadata") or {}).get("mode") is not None
-        }
-        if len(mode_candidates) != 1:
-            raise ValueError(
-                "threshold_mode=delta_lnL requires filtering a single mode (220 or 221); "
-                f"detected modes={sorted(mode_candidates)}"
-            )
-        normalized_mode = next(iter(mode_candidates))
+def _compute_informative(acceptance_fraction: float, informative_threshold: float) -> bool:
+    return float(acceptance_fraction) <= float(informative_threshold)
 
-    if normalized_mode in {"(2,2,0)", "220"}:
-        return float(delta_lnL_220), "delta_lnL_220"
-    if normalized_mode in {"(2,2,1)", "221"}:
-        return float(delta_lnL_221), "delta_lnL_221"
 
-    raise ValueError(
-        "threshold_mode=delta_lnL only supports mode 220/221; "
-        f"mode_filter={mode_filter!r}"
-    )
+def _delta_lnL_from_d2(d2: float, d2_min: float) -> float:
+    return -0.5 * (float(d2) - float(d2_min))
 
 
 def compute_compatible_set(
@@ -508,97 +483,79 @@ def compute_compatible_set(
 
         dist = float(metric_fn(log_f_obs, log_Q_obs, lnf_atlas, lnQ_atlas, **params))
 
-        if metric_name == "mahalanobis_log":
-            d2 = dist * dist
-            results.append(
-                {
-                    "geometry_id": gid,
-                    "distance": dist,
-                    "d2": d2,
-                    "compatible": False,
-                    "f_hz": math.exp(lnf_atlas),
-                    "Q": math.exp(lnQ_atlas),
-                    "metadata": entry.get("metadata"),
-                }
-            )
-        else:
-            results.append(
-                {
-                    "geometry_id": gid,
-                    "distance": dist,
-                    "compatible": False,
-                    "f_hz": math.exp(lnf_atlas),
-                    "Q": math.exp(lnQ_atlas),
-                    "metadata": entry.get("metadata"),
-                }
-            )
+        d2 = dist * dist
+        results.append(
+            {
+                "geometry_id": gid,
+                "distance": dist,
+                "d2": d2,
+                "compatible": False,
+                "f_hz": math.exp(lnf_atlas),
+                "Q": math.exp(lnQ_atlas),
+                "metadata": entry.get("metadata"),
+            }
+        )
 
-    sort_key = "d2" if metric_name == "mahalanobis_log" else "distance"
+    sort_key = "d2"
     results.sort(key=lambda row: row[sort_key])
 
     likelihood_stats: dict[str, Any] | None = None
     valid_likelihood_rows: list[dict[str, Any]] = []
 
-    if metric_name == "mahalanobis_log":
+    for row in results:
+        d2_val = row.get("d2")
+        if d2_val is None:
+            d2_val = row.get("mahalanobis_d2")
+        if d2_val is None:
+            distance_val = row.get("distance")
+            if isinstance(distance_val, (int, float)) and math.isfinite(distance_val):
+                d2_val = float(distance_val) * float(distance_val)
+
+        if isinstance(d2_val, (int, float)) and math.isfinite(d2_val) and d2_val >= 0:
+            d2_float = float(d2_val)
+            row["d2"] = d2_float
+            row["log_likelihood"] = -0.5 * d2_float
+            valid_likelihood_rows.append(row)
+        else:
+            row["log_likelihood"] = None
+
+    if valid_likelihood_rows:
+        max_log_likelihood = max(row["log_likelihood"] for row in valid_likelihood_rows)
+        d2_min = min(row["d2"] for row in valid_likelihood_rows)
         for row in results:
-            d2_val = row.get("d2")
-            if d2_val is None:
-                d2_val = row.get("mahalanobis_d2")
-            if d2_val is None:
-                distance_val = row.get("distance")
-                if isinstance(distance_val, (int, float)) and math.isfinite(distance_val):
-                    d2_val = float(distance_val) * float(distance_val)
-
-            if isinstance(d2_val, (int, float)) and math.isfinite(d2_val) and d2_val >= 0:
-                d2_float = float(d2_val)
-                row["d2"] = d2_float
-                row["log_likelihood"] = -0.5 * d2_float
-                valid_likelihood_rows.append(row)
+            ll = row.get("log_likelihood")
+            row["delta_log_likelihood"] = ll - max_log_likelihood if isinstance(ll, (int, float)) else None
+            if isinstance(row.get("d2"), (int, float)):
+                row["delta_lnL"] = _delta_lnL_from_d2(float(row["d2"]), d2_min)
             else:
-                row["log_likelihood"] = None
+                row["delta_lnL"] = None
 
-        if valid_likelihood_rows:
-            max_log_likelihood = max(row["log_likelihood"] for row in valid_likelihood_rows)
-            d2_min = min(row["d2"] for row in valid_likelihood_rows)
+        if threshold_mode == "delta_lnL":
+            delta_lnL_threshold = threshold_params_out.get("delta_lnL")
+            if delta_lnL_threshold is None:
+                raise ValueError("threshold_mode=delta_lnL requires threshold_params['delta_lnL']")
+            delta_lnL_threshold = float(delta_lnL_threshold)
             for row in results:
-                ll = row.get("log_likelihood")
-                row["delta_log_likelihood"] = ll - max_log_likelihood if isinstance(ll, (int, float)) else None
-                if isinstance(row.get("d2"), (int, float)):
-                    row["delta_lnL"] = _delta_lnL_from_d2(float(row["d2"]), d2_min)
-                else:
-                    row["delta_lnL"] = None
-
-            if threshold_mode == "delta_lnL":
-                delta_lnL_threshold = threshold_params_out.get("delta_lnL")
-                if delta_lnL_threshold is None:
-                    raise ValueError("threshold_mode=delta_lnL requires threshold_params['delta_lnL']")
-                delta_lnL_threshold = float(delta_lnL_threshold)
-                for row in results:
-                    row_delta = row.get("delta_lnL")
-                    row["compatible"] = isinstance(row_delta, (int, float)) and row_delta >= -delta_lnL_threshold
-            else:
-                for row in results:
-                    row["compatible"] = isinstance(row.get("d2"), (int, float)) and float(row["d2"]) <= epsilon
-
-            best_row = min(valid_likelihood_rows, key=lambda row: row["d2"])
-            n_excluded_2sigma = sum(math.sqrt(row["d2"]) > 2.0 for row in valid_likelihood_rows)
-            n_excluded_3sigma = sum(math.sqrt(row["d2"]) > 3.0 for row in valid_likelihood_rows)
-            likelihood_stats = {
-                "metric_type": "gaussian_chi2",
-                "max_log_likelihood": max_log_likelihood,
-                "best_geometry_id": best_row["geometry_id"],
-                "n_excluded_2sigma": n_excluded_2sigma,
-                "n_excluded_3sigma": n_excluded_3sigma,
-            }
+                row_delta = row.get("delta_lnL")
+                row["compatible"] = isinstance(row_delta, (int, float)) and row_delta >= -delta_lnL_threshold
         else:
             for row in results:
-                row["delta_log_likelihood"] = None
-                row["delta_lnL"] = None
+                row["compatible"] = isinstance(row.get("d2"), (int, float)) and float(row["d2"]) <= epsilon
+
+        best_row = min(valid_likelihood_rows, key=lambda row: row["d2"])
+        n_excluded_2sigma = sum(math.sqrt(row["d2"]) > 2.0 for row in valid_likelihood_rows)
+        n_excluded_3sigma = sum(math.sqrt(row["d2"]) > 3.0 for row in valid_likelihood_rows)
+        likelihood_stats = {
+            "metric_type": "gaussian_chi2",
+            "max_log_likelihood": max_log_likelihood,
+            "best_geometry_id": best_row["geometry_id"],
+            "n_excluded_2sigma": n_excluded_2sigma,
+            "n_excluded_3sigma": n_excluded_3sigma,
+        }
     else:
         for row in results:
-            row["log_likelihood"] = None
             row["delta_log_likelihood"] = None
-            row["compatible"] = row["distance"] <= epsilon
+            row["delta_lnL"] = None
 
     compatible = [row for row in results if row["compatible"]]
 
@@ -628,12 +585,12 @@ def compute_compatible_set(
     if include_ranked_all_full:
         out["ranked_all_full"] = [dict(row) for row in results]
 
-    if metric_name == "mahalanobis_log":
-        d2_min = min((row["d2"] for row in results), default=None)
-        distance = None
-        if isinstance(d2_min, (int, float)) and math.isfinite(d2_min) and d2_min >= 0:
-            distance = float(math.sqrt(d2_min))
+    d2_min = min((row["d2"] for row in results), default=None)
+    distance = None
+    if isinstance(d2_min, (int, float)) and math.isfinite(d2_min) and d2_min >= 0:
+        distance = float(math.sqrt(d2_min))
 
+    if metric_name == "mahalanobis_log":
         out["threshold_d2"] = epsilon if threshold_mode == "d2" else None
         out["d2_min"] = d2_min
         out["distance"] = distance
@@ -643,7 +600,11 @@ def compute_compatible_set(
         out["covariance_logspace"] = _coerce_covariance_for_output(params)
         _add_mahalanobis_audit_fields(out, fixed_theta0=fixed_theta0, theta0_source=theta0_source)
     else:
-        out["threshold_value_effective"] = epsilon
+        out["d2_min"] = d2_min
+        out["distance"] = distance
+        out["threshold_value_effective"] = (
+            epsilon if threshold_mode == "d2" else threshold_params_out.get("delta_lnL")
+        )
 
     out["diagnostics"] = _build_diagnostics(
         n_atlas=n_atlas,
@@ -781,8 +742,8 @@ def main() -> int:
                 log_stage_paths(ctx)
                 return 0
 
-        if args.delta_lnL_220 < 0 or args.delta_lnL_221 < 0:
-            abort(ctx, "delta_lnL thresholds must be >= 0 (--delta-lnL-220, --delta-lnL-221)")
+        if args.delta_lnL < 0:
+            abort(ctx, "delta_lnL threshold must be >= 0 (--delta-lnL)")
 
         metric_name = args.metric or ("mahalanobis_log" if has_covariance else "euclidean_log")
         if metric_name == "mahalanobis_log" and not has_covariance:
@@ -810,15 +771,7 @@ def main() -> int:
 
         threshold_params: dict[str, Any] = {}
         if args.threshold_mode == "delta_lnL":
-            if metric_name != "mahalanobis_log":
-                abort(ctx, "threshold_mode=delta_lnL requires metric=mahalanobis_log")
-            delta_value, delta_source = _resolve_delta_mode_threshold(
-                args.mode_filter,
-                atlas,
-                delta_lnL_220=args.delta_lnL_220,
-                delta_lnL_221=args.delta_lnL_221,
-            )
-            threshold_params = {"delta_lnL": delta_value, "source_flag": delta_source}
+            threshold_params = {"delta_lnL": float(args.delta_lnL)}
 
         ctx.params["threshold_params"] = threshold_params
 
@@ -876,10 +829,12 @@ def main() -> int:
                 "bits_excluded": result["bits_excluded"],
                 "metric": result["metric"],
                 "threshold_mode": result.get("threshold_mode"),
+                "delta_lnL_threshold": result.get("threshold_params", {}).get("delta_lnL"),
                 "threshold_params": result.get("threshold_params"),
                 "epsilon": result.get("epsilon"),
                 "threshold_d2": result.get("threshold_d2"),
                 "d2_min": result.get("d2_min"),
+                "d2_at_best": result.get("d2_min"),
                 "informative_status": (result.get("diagnostics") or {}).get("informative_status"),
                 "d2_quantiles": (result.get("diagnostics") or {}).get("d2_quantiles"),
                 "diagnostics": result.get("diagnostics"),
