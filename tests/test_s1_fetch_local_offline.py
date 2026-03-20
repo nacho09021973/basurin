@@ -129,6 +129,84 @@ def test_reuse_if_present_skips_fetch(monkeypatch, tmp_path: Path):
     assert rc == 0
 
 
+def test_default_synthetic_gps_center_fallback_produces_identical_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    def _gps_fail(_event_id: str) -> float:
+        raise RuntimeError("gps unavailable")
+
+    monkeypatch.setattr(s1_fetch_strain, "_fetch_gps_center", _gps_fail)
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "s1_fetch_strain.py",
+            "--run",
+            "run_default",
+            "--event-id",
+            "GW200225",
+            "--detectors",
+            "H1",
+            "--duration-s",
+            "4",
+            "--synthetic",
+        ],
+    )
+    rc = s1_fetch_strain.main()
+    assert rc == 0
+
+    out_default = runs_root / "run_default" / "s1_fetch_strain"
+    provenance_default = json.loads((out_default / "outputs" / "provenance.json").read_text(encoding="utf-8"))
+    summary_default = json.loads((out_default / "stage_summary.json").read_text(encoding="utf-8"))
+
+    assert provenance_default["gps_center"] == pytest.approx(1126259462.4204)
+    assert summary_default["results"]["synthetic_gps_center_fallback"] == pytest.approx(1126259462.4204)
+
+
+def test_synthetic_gps_center_fallback_override_changes_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "runs"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    def _gps_fail(_event_id: str) -> float:
+        raise RuntimeError("gps unavailable")
+
+    monkeypatch.setattr(s1_fetch_strain, "_fetch_gps_center", _gps_fail)
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "s1_fetch_strain.py",
+            "--run",
+            "run_override",
+            "--event-id",
+            "GW200225",
+            "--detectors",
+            "H1",
+            "--duration-s",
+            "4",
+            "--synthetic",
+            "--synthetic-gps-center-fallback",
+            "1000.25",
+        ],
+    )
+    rc = s1_fetch_strain.main()
+    assert rc == 0
+
+    out_override = runs_root / "run_override" / "s1_fetch_strain"
+    provenance_override = json.loads((out_override / "outputs" / "provenance.json").read_text(encoding="utf-8"))
+    summary_override = json.loads((out_override / "stage_summary.json").read_text(encoding="utf-8"))
+
+    assert provenance_override["gps_center"] == pytest.approx(1000.25)
+    assert summary_override["results"]["synthetic_gps_center_fallback"] == pytest.approx(1000.25)
+
+
 def test_sanitize_strain_array_interpolates_small_nonfinite_spans() -> None:
     strain = np.array([0.0, 1.0, np.nan, np.inf, 4.0, 5.0], dtype=np.float64)
 
