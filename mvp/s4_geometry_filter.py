@@ -404,6 +404,16 @@ def _build_diagnostics(
     }
 
 
+def _compute_acceptance_fraction(n_compatible: int, n_atlas: int) -> float:
+    if n_atlas <= 0:
+        return 0.0
+    return float(n_compatible) / float(n_atlas)
+
+
+def _compute_informative(acceptance_fraction: float, informative_threshold: float) -> bool:
+    return float(acceptance_fraction) <= float(informative_threshold)
+
+
 def _delta_lnL_from_d2(d2: float, d2_min: float) -> float:
     return -0.5 * (float(d2) - float(d2_min))
 
@@ -654,6 +664,7 @@ def main() -> int:
     ap.add_argument("--threshold-mode", choices=["d2", "delta_lnL"], default="d2")
     ap.add_argument("--delta-lnL-220", type=float, default=0.0)
     ap.add_argument("--delta-lnL-221", type=float, default=0.0)
+    ap.add_argument("--informative-threshold", type=float, default=0.80)
     ap.add_argument(
         "--mode-filter",
         default=None,
@@ -686,6 +697,7 @@ def main() -> int:
         "threshold_mode": args.threshold_mode,
         "delta_lnL_220": args.delta_lnL_220,
         "delta_lnL_221": args.delta_lnL_221,
+        "informative_threshold": args.informative_threshold,
         "mode_filter": args.mode_filter,
         "estimates_path_override": args.estimates_path,
     })
@@ -824,6 +836,14 @@ def main() -> int:
         result["event_id"] = estimates.get("event_id", "unknown")
         result["run_id"] = args.run
         result["mode_filter"] = args.mode_filter
+        acceptance_fraction = _compute_acceptance_fraction(
+            result["n_compatible"],
+            result["n_atlas"],
+        )
+        informative = _compute_informative(
+            acceptance_fraction,
+            args.informative_threshold,
+        )
 
         _ok, _errs = validate_compatible_set(
             result,
@@ -850,7 +870,9 @@ def main() -> int:
             results={
                 "n_atlas": result["n_atlas"],
                 "n_compatible": result["n_compatible"],
-                "acceptance_fraction": (float(result["n_compatible"]) / float(result["n_atlas"])) if result["n_atlas"] > 0 else 0.0,
+                "acceptance_fraction": acceptance_fraction,
+                "informative": informative,
+                "informative_threshold": float(args.informative_threshold),
                 "bits_excluded": result["bits_excluded"],
                 "metric": result["metric"],
                 "threshold_mode": result.get("threshold_mode"),
