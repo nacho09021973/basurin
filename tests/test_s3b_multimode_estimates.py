@@ -296,6 +296,25 @@ def test_stage_arg_parser_accepts_mode_221_topology_and_default() -> None:
     assert default_args.mode_221_topology == "rigid_spectral_split"
 
 
+def test_stage_arg_parser_accepts_min_point_thresholds_and_defaults() -> None:
+    parser = _MODULE._build_arg_parser()
+
+    args = parser.parse_args([
+        "--run-id",
+        "run_cli",
+        "--min-point-samples",
+        "12",
+        "--min-point-valid-fraction",
+        "0.25",
+    ])
+    default_args = parser.parse_args(["--run-id", "run_default"])
+
+    assert args.min_point_samples == 12
+    assert args.min_point_valid_fraction == 0.25
+    assert default_args.min_point_samples == 50
+    assert default_args.min_point_valid_fraction == 0.5
+
+
 def test_prepare_mode_221_bootstrap_inputs_fixed_template_reuses_fixed_220_residual() -> None:
     signal = np.linspace(-1.0, 1.0, 16)
     calls: list[tuple[str, tuple[float, float], np.ndarray]] = []
@@ -1307,6 +1326,34 @@ def test_cli_psd_path_falls_back_when_detector_missing_in_psd(tmp_path: Path) ->
     summary_path = tmp_runs / run_id / "s3b_multimode_estimates" / "stage_summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary.get("psd_source") == "internal_welch"
+
+
+def test_cli_records_min_point_thresholds_in_stage_summary(tmp_path: Path) -> None:
+    run_id = "subrun_min_point_thresholds"
+    tmp_runs = tmp_path / "subruns_root"
+    _write_minimal_s2_inputs(tmp_runs, run_id)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    cmd = [
+        sys.executable,
+        str(repo_root / "mvp" / "s3b_multimode_estimates.py"),
+        "--runs-root", str(tmp_runs),
+        "--run-id", run_id,
+        "--n-bootstrap", "8",
+        "--seed", "101",
+        "--min-point-samples", "77",
+        "--min-point-valid-fraction", "0.33",
+    ]
+    env = os.environ.copy()
+    env.pop("BASURIN_RUNS_ROOT", None)
+
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+
+    summary_path = tmp_runs / run_id / "s3b_multimode_estimates" / "stage_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["parameters"]["min_point_samples"] == 77
+    assert summary["parameters"]["min_point_valid_fraction"] == 0.33
 
 
 # ── H1 audit regression: mode_221_usable contract in build_results_payload ──
