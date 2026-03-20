@@ -331,6 +331,8 @@ def _filter_geometry(
             "RQ_predicted": None,
             "tension_Rf": None,
             "tension_RQ": None,
+            "compatible_by_ratio": None,
+            "tension_sigma": None,
             "status": "RATIO_NOT_APPLICABLE",
             "metadata": metadata,
         }
@@ -350,8 +352,11 @@ def _filter_geometry(
         "tension_Rf": _tension(rf_pred, float(rf_obs["lo"]), float(rf_obs["hi"]), _to_float(rf_obs.get("sigma"))),
         "tension_RQ": _tension(rq_pred, float(rq_obs["lo"]), float(rq_obs["hi"]), _to_float(rq_obs.get("sigma"))),
         "status": "RATIO_COMPATIBLE" if ratio_ok else "RATIO_EXCLUDED",
+        "compatible_by_ratio": ratio_ok,
         "metadata": metadata,
     }
+    tensions = [value for value in (payload["tension_Rf"], payload["tension_RQ"] if apply_rq else None) if isinstance(value, (int, float))]
+    payload["tension_sigma"] = max(float(value) for value in tensions) if tensions else None
     for key in ("distance", "d2", "f_hz", "Q"):
         if key in row:
             payload[key] = row[key]
@@ -404,6 +409,7 @@ def run_ratio_filter(
     excluded_after_ratio = [row for row in filtered if row["status"] == "RATIO_EXCLUDED"]
     not_applicable = [row for row in filtered if row["status"] == "RATIO_NOT_APPLICABLE"]
     ratio_compatible = [row for row in filtered if row["status"] == "RATIO_COMPATIBLE"]
+    reduction_fraction = (len(excluded_after_ratio) / len(filtered)) if filtered else 0.0
 
     spins_before = sorted(row["spin"] for row in filtered if isinstance(row.get("spin"), float))
     spins_after = sorted(row["spin"] for row in ratio_compatible if isinstance(row.get("spin"), float))
@@ -442,9 +448,16 @@ def run_ratio_filter(
         "parameters": {
             "sigma_Rf": sigma_rf,
             "sigma_RQ": sigma_rq,
+            "sigma_tolerance": sigma_rf,
             "chi_grid_points": chi_grid_points,
             "apply_RQ": apply_rq,
         },
+        "n_input": len(filtered),
+        "n_surviving": len(compatible_after_ratio),
+        "n_excluded": len(excluded_after_ratio),
+        "Rf_observed": float(rf_obs["central"]),
+        "sigma_Rf": float(rf_obs["sigma"]),
+        "Rf_kerr_range": {"min": float(rf_range["min"]), "max": float(rf_range["max"])},
         "observed_ratios": {
             "Rf": observed_ratios["Rf"],
             "RQ": observed_ratios["RQ"],
@@ -469,9 +482,10 @@ def run_ratio_filter(
             "n_ratio_compatible": len(ratio_compatible),
             "n_ratio_excluded": len(excluded_after_ratio),
             "n_ratio_not_applicable": len(not_applicable),
-            "reduction_fraction": (len(excluded_after_ratio) / len(filtered)) if filtered else 0.0,
+            "reduction_fraction": reduction_fraction,
             "compatible_geometries": compatible_after_ratio,
             "excluded_geometries": excluded_after_ratio,
+            "per_geometry": filtered,
         },
         "spin_constraints": {
             "chi_min_compatible": spins_after[0] if spins_after else None,
@@ -482,6 +496,7 @@ def run_ratio_filter(
         },
         "diagnostics": {
             "warning_codes": diagnostics_warnings,
+            "reduction_fraction": reduction_fraction,
             "is_informative": classify_informativity(rf_informativity) != "UNINFORMATIVE",
             "informativity_class": classify_informativity(rf_informativity),
         },
@@ -492,18 +507,27 @@ def run_ratio_filter(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=f"MVP {STAGE}: Kerr ratio filter for multimode runs")
     parser.add_argument("--run-id", required=True)
+    parser.add_argument(
+        "--sigma-tolerance",
+        type=float,
+        default=None,
+        help="Apply the same sigma tolerance to Rf and RQ unless the per-ratio flags override it.",
+    )
     parser.add_argument("--sigma-Rf", type=float, default=2.0)
     parser.add_argument("--sigma-RQ", type=float, default=2.0)
     parser.add_argument("--chi-grid-points", type=int, default=200)
     parser.add_argument("--apply-RQ", action="store_true")
     args = parser.parse_args(argv)
+    sigma_rf = float(args.sigma_tolerance) if args.sigma_tolerance is not None else float(args.sigma_Rf)
+    sigma_rq = float(args.sigma_tolerance) if args.sigma_tolerance is not None else float(args.sigma_RQ)
 
     ctx = init_stage(
         args.run_id,
         STAGE,
         params={
-            "sigma_Rf": args.sigma_Rf,
-            "sigma_RQ": args.sigma_RQ,
+            "sigma_tolerance": args.sigma_tolerance,
+            "sigma_Rf": sigma_rf,
+            "sigma_RQ": sigma_rq,
             "chi_grid_points": args.chi_grid_points,
             "apply_RQ": args.apply_RQ,
         },
@@ -536,8 +560,8 @@ def main(argv: list[str] | None = None) -> int:
             ranked_all_full=ranked_all_full,
             estimates_sha256=sha256_file(multimode_path),
             compatible_set_sha256=sha256_file(compatible_path),
-            sigma_rf=float(args.sigma_Rf),
-            sigma_rq=float(args.sigma_RQ),
+            sigma_rf=sigma_rf,
+            sigma_rq=sigma_rq,
             chi_grid_points=max(int(args.chi_grid_points), 2),
             apply_rq=bool(args.apply_RQ),
         )

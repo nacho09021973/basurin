@@ -1057,8 +1057,8 @@ def run_single_event(
     final_mass_msun: float | None = None,
     redshift: float | None = None,
     threshold_mode: str = "d2",
-    delta_lnl_220: float = 0.0,
-    delta_lnl_221: float = 0.0,
+    delta_lnl: float = 3.0,
+    informative_threshold: float = 0.80,
 ) -> tuple[int, str]:
     """Run full pipeline for a single event. Returns (exit_code, run_id)."""
     event_id = _require_nonempty_event_id(event_id, "--event-id")
@@ -1211,7 +1211,14 @@ def run_single_event(
         _run_optional_experiment_t0_sweep(out_root, run_id, timeline, stage_timeout_s)
 
     # Stage 4: Geometry filter
-    s4_args = ["--run", run_id, "--atlas-path", atlas_path, "--epsilon", str(epsilon)]
+    s4_args = [
+        "--run", run_id,
+        "--atlas-path", atlas_path,
+        "--epsilon", str(epsilon),
+        "--threshold-mode", threshold_mode,
+        "--delta-lnL", str(delta_lnl),
+        "--informative-threshold", str(informative_threshold),
+    ]
     if estimates_path_override is not None:
         s4_args.extend(["--estimates-path", estimates_path_override])
     if threshold_mode != "d2":
@@ -1282,9 +1289,16 @@ def run_multimode_event(
     final_mass_msun: float | None = None,
     redshift: float | None = None,
     t0_shift_ms: float = 0.0,
+    max_lnf_span_220: float = 1.0,
+    max_lnq_span_220: float = 3.0,
+    max_lnf_span_221: float = 1.0,
     max_lnq_span_221: float = 1.0,
     mode_221_topology: str = "rigid_spectral_split",
     min_valid_fraction_221: float = 0.5,
+    cv_threshold_221: float = 1.0,
+    threshold_mode: str = "d2",
+    delta_lnl: float = 3.0,
+    informative_threshold: float = 0.80,
 ) -> tuple[int, str]:
     event_id = _require_nonempty_event_id(event_id, "--event-id")
     dt_start_s, dt_source = _resolve_adaptive_dt_start(event_id, dt_start_s, final_mass_msun, redshift)
@@ -1516,9 +1530,13 @@ def run_multimode_event(
         "--method", s3b_method,
         "--bootstrap-221-residual-strategy", bootstrap_221_residual_strategy,
         "--band-strategy", band_strategy,
+        "--max-lnf-span-220", str(max_lnf_span_220),
+        "--max-lnq-span-220", str(max_lnq_span_220),
+        "--max-lnf-span-221", str(max_lnf_span_221),
         "--max-lnq-span-221", str(max_lnq_span_221),
         "--mode-221-topology", mode_221_topology,
         "--min-valid-fraction-221", str(min_valid_fraction_221),
+        "--cv-threshold-221", str(cv_threshold_221),
     ]
     if psd_path:
         s3b_args.extend(["--psd-path", psd_path])
@@ -1560,7 +1578,14 @@ def run_multimode_event(
             _write_timeline(out_root, run_id, timeline)
             return rc, run_id
 
-    s4_args = ["--run", run_id, "--atlas-path", atlas_path, "--epsilon", str(epsilon)]
+    s4_args = [
+        "--run", run_id,
+        "--atlas-path", atlas_path,
+        "--epsilon", str(epsilon),
+        "--threshold-mode", threshold_mode,
+        "--delta-lnL", str(delta_lnl),
+        "--informative-threshold", str(informative_threshold),
+    ]
     rc = _run_stage("s4_geometry_filter.py", s4_args, "s4_geometry_filter", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
@@ -1883,6 +1908,9 @@ def main() -> int:
         help="Optional GWTC catalog JSON for deviation analysis in s5",
     )
     sp_multi.add_argument("--psd-path", default=None, help="Path to measured_psd.json for spectral whitening")
+    sp_multi.add_argument("--threshold-mode", choices=["d2", "delta_lnL"], default="d2")
+    sp_multi.add_argument("--delta-lnL", type=float, default=3.0)
+    sp_multi.add_argument("--informative-threshold", type=float, default=0.80)
 
     # Single event multimode
     sp_multimode = sub.add_parser("multimode", help="Run single-event multimode pipeline")
@@ -1929,6 +1957,9 @@ def main() -> int:
         choices=["refit_220_each_iter", "fixed_220_template"],
         default="refit_220_each_iter",
     )
+    sp_multimode.add_argument("--max-lnf-span-220", type=float, default=1.0)
+    sp_multimode.add_argument("--max-lnq-span-220", type=float, default=3.0)
+    sp_multimode.add_argument("--max-lnf-span-221", type=float, default=1.0)
     sp_multimode.add_argument(
         "--max-lnq-span-221", type=float, default=1.0,
         help="Max ln(Q) span (P90-P10) for mode 221 usability gate (default: 1.0)",
@@ -1944,11 +1975,18 @@ def main() -> int:
         help="Min bootstrap success fraction for mode 221 (default: 0.5)",
     )
     sp_multimode.add_argument(
+        "--cv-threshold-221", type=float, default=1.0,
+        help="CV threshold for mode 221 flagging (default: 1.0)",
+    )
+    sp_multimode.add_argument(
         "--band-strategy",
         choices=["default_split_60_40", "kerr_centered_overlap", "coherent_harmonic_band"],
         default="kerr_centered_overlap",
         help="Band allocation strategy forwarded to s3b_multimode_estimates",
     )
+    sp_multimode.add_argument("--threshold-mode", choices=["d2", "delta_lnL"], default="d2")
+    sp_multimode.add_argument("--delta-lnL", type=float, default=3.0)
+    sp_multimode.add_argument("--informative-threshold", type=float, default=0.80)
     sp_multimode.add_argument(
         "--local-hdf5",
         action="append",
@@ -1994,6 +2032,9 @@ def main() -> int:
     )
     sp_batch.add_argument("--offline", action="store_true", default=False)
     sp_batch.add_argument("--psd-path", default=None, help="Path to measured_psd.json for spectral whitening")
+    sp_batch.add_argument("--threshold-mode", choices=["d2", "delta_lnL"], default="d2")
+    sp_batch.add_argument("--delta-lnL", type=float, default=3.0)
+    sp_batch.add_argument("--informative-threshold", type=float, default=0.80)
 
     args = parser.parse_args()
 
@@ -2052,6 +2093,9 @@ def main() -> int:
             estimator=args.estimator,
             catalog_path=args.catalog_path,
             psd_path=args.psd_path,
+            threshold_mode=args.threshold_mode,
+            delta_lnl=args.delta_lnL,
+            informative_threshold=args.informative_threshold,
         )
         return rc
 
@@ -2077,6 +2121,9 @@ def main() -> int:
             catalog_path=args.catalog_path,
             abort_on_event_fail=False,
             psd_path=args.psd_path,
+            threshold_mode=args.threshold_mode,
+            delta_lnl=args.delta_lnL,
+            informative_threshold=args.informative_threshold,
         )
         return rc
 
@@ -2109,9 +2156,16 @@ def main() -> int:
             final_mass_msun=args.final_mass_msun,
             redshift=args.redshift,
             t0_shift_ms=args.t0_shift_ms,
+            max_lnf_span_220=args.max_lnf_span_220,
+            max_lnq_span_220=args.max_lnq_span_220,
+            max_lnf_span_221=args.max_lnf_span_221,
             max_lnq_span_221=args.max_lnq_span_221,
             mode_221_topology=args.mode_221_topology,
             min_valid_fraction_221=args.min_valid_fraction_221,
+            cv_threshold_221=args.cv_threshold_221,
+            threshold_mode=args.threshold_mode,
+            delta_lnl=args.delta_lnL,
+            informative_threshold=args.informative_threshold,
         )
         return rc
 
