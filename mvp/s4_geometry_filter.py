@@ -418,6 +418,14 @@ def _delta_lnL_from_d2(d2: float, d2_min: float) -> float:
     return -0.5 * (float(d2) - float(d2_min))
 
 
+def _compute_informative(acceptance_fraction: float, informative_threshold: float) -> bool:
+    return float(acceptance_fraction) <= float(informative_threshold)
+
+
+def _delta_lnL_from_d2(d2: float, d2_min: float) -> float:
+    return -0.5 * (float(d2) - float(d2_min))
+
+
 def compute_compatible_set(
     f_obs: float,
     Q_obs: float,
@@ -615,7 +623,8 @@ def main() -> int:
     ap.add_argument("--atlas-path", required=True)
     ap.add_argument("--epsilon", type=float, default=None)
     ap.add_argument("--threshold-mode", choices=["d2", "delta_lnL"], default="d2")
-    ap.add_argument("--delta-lnL", type=float, default=3.0)
+    ap.add_argument("--delta-lnL-220", type=float, default=0.0)
+    ap.add_argument("--delta-lnL-221", type=float, default=0.0)
     ap.add_argument("--informative-threshold", type=float, default=0.80)
     ap.add_argument(
         "--mode-filter",
@@ -647,7 +656,8 @@ def main() -> int:
         "atlas_path": str(atlas_path),
         "epsilon_cli": args.epsilon,
         "threshold_mode": args.threshold_mode,
-        "delta_lnL": args.delta_lnL,
+        "delta_lnL_220": args.delta_lnL_220,
+        "delta_lnL_221": args.delta_lnL_221,
         "informative_threshold": args.informative_threshold,
         "mode_filter": args.mode_filter,
         "estimates_path_override": args.estimates_path,
