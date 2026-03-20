@@ -985,6 +985,220 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
             )
             self.assertEqual(timeline["multimode_results"]["support_region_n_final"], 2)
 
+    def test_multimode_noninformative_gate_does_not_promote_221_geometry(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runs_root = Path(td) / "runs"
+            mode221_input_seen = {"exists": None}
+
+            def fake_run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s=None):
+                stage_dir = out_root / run_id / label / "outputs"
+                stage_dir.mkdir(parents=True, exist_ok=True)
+
+                if label == "s3_ringdown_estimates":
+                    _write_fake_s3_estimates(out_root, run_id)
+                if label == "s3b_multimode_estimates":
+                    _write_fake_s3b_outputs(
+                        out_root,
+                        run_id,
+                        verdict="INSUFFICIENT_DATA",
+                        viability_class="RINGDOWN_NONINFORMATIVE",
+                        viability_reasons=[
+                            "fundamental posterior too broad for informative multimode inference"
+                        ],
+                    )
+                if label == "s4g_mode220_geometry_filter":
+                    obs = json.loads(
+                        (out_root / run_id / "s4g_mode220_geometry_filter" / "inputs" / "mode220_obs.json").read_text(
+                            encoding="utf-8"
+                        )
+                    )
+                    (stage_dir / "mode220_filter.json").write_text(
+                        json.dumps({"accepted_geometry_ids": ["geo_A", "geo_B"], **obs}),
+                        encoding="utf-8",
+                    )
+                if label == "s4h_mode221_geometry_filter":
+                    obs_path = out_root / run_id / "s4h_mode221_geometry_filter" / "inputs" / "mode221_obs.json"
+                    mode221_input_seen["exists"] = obs_path.exists()
+                    if obs_path.exists():
+                        obs = json.loads(obs_path.read_text(encoding="utf-8"))
+                        (stage_dir / "mode221_filter.json").write_text(
+                            json.dumps({"geometry_ids": ["geo_A"], "verdict": "PASS", **obs}),
+                            encoding="utf-8",
+                        )
+                    else:
+                        (stage_dir / "mode221_filter.json").write_text(
+                            json.dumps({"geometry_ids": [], "verdict": "SKIPPED_221_UNAVAILABLE"}),
+                            encoding="utf-8",
+                        )
+                if label == "s4i_common_geometry_intersection":
+                    use_mode221 = bool(mode221_input_seen["exists"])
+                    common_ids = ["geo_A"] if use_mode221 else ["geo_A", "geo_B"]
+                    (stage_dir / "common_intersection.json").write_text(
+                        json.dumps(
+                            {
+                                "common_geometry_ids": common_ids,
+                                "n_common": len(common_ids),
+                                "mode221_skipped": not use_mode221,
+                                "verdict": "PASS",
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                if label == "s4f_area_observation":
+                    (stage_dir / "area_obs.json").write_text(
+                        json.dumps(
+                            {
+                                "area_data": {
+                                    "geo_A": {"area_final": 2.0, "area_initial": 1.0},
+                                    "geo_B": {"area_final": 2.2, "area_initial": 1.1},
+                                },
+                                "observation_status": "AREA_DATA_AVAILABLE",
+                                "policy": "mass_only_lower_bound_v1",
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                if label == "s4j_hawking_area_filter":
+                    use_mode221 = bool(mode221_input_seen["exists"])
+                    golden_ids = ["geo_A"] if use_mode221 else ["geo_A", "geo_B"]
+                    area_data = {
+                        geometry_id: {"area_final": 2.0 + idx, "area_initial": 1.0 + (idx / 2.0)}
+                        for idx, geometry_id in enumerate(golden_ids)
+                    }
+                    (stage_dir / "hawking_area_filter.json").write_text(
+                        json.dumps(
+                            {
+                                "golden_geometry_ids": golden_ids,
+                                "n_golden": len(golden_ids),
+                                "area_data": area_data,
+                                "area_obs_present": True,
+                                "area_constraint_applied": True,
+                                "verdict": "PASS",
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                if label == "s4c_kerr_consistency":
+                    (stage_dir / "kerr_consistency.json").write_text(
+                        json.dumps(
+                            {
+                                "status": "SKIPPED_MULTIMODE_GATE",
+                                "kerr_consistent": None,
+                                "d2_min": 27.0,
+                                "source": {
+                                    "multimode_viability_class": "RINGDOWN_NONINFORMATIVE",
+                                    "multimode_viability_reasons": [
+                                        "fundamental posterior too broad for informative multimode inference"
+                                    ],
+                                },
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                if label == "s4d_kerr_from_multimode":
+                    (stage_dir / "kerr_from_multimode.json").write_text(
+                        json.dumps(
+                            {
+                                "status": "SKIPPED_MULTIMODE_GATE",
+                                "multimode_viability": {
+                                    "class": "RINGDOWN_NONINFORMATIVE",
+                                    "reasons": [
+                                        "fundamental posterior too broad for informative multimode inference"
+                                    ],
+                                },
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                if label == "s4k_event_support_region":
+                    use_mode221 = bool(mode221_input_seen["exists"])
+                    n_final = 1 if use_mode221 else 2
+                    analysis_path = (
+                        "MULTIMODE_INTERSECTION" if use_mode221 else "MODE220_PLUS_HAWKING"
+                    )
+                    (stage_dir / "event_support_region.json").write_text(
+                        json.dumps(
+                            {
+                                "analysis_path": analysis_path,
+                                "support_region_status": "SUPPORT_REGION_AVAILABLE",
+                                "n_final_geometries": n_final,
+                                "downstream_status": {
+                                    "class": "GEOMETRY_PRESENT_BUT_NONINFORMATIVE",
+                                    "reasons": ["multimode_viability=RINGDOWN_NONINFORMATIVE"],
+                                },
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                if label == "s7_beyond_kerr_deviation_score":
+                    (stage_dir / "beyond_kerr_score.json").write_text(
+                        json.dumps({"verdict": "INCONCLUSIVE", "chi2_kerr_2dof": None}),
+                        encoding="utf-8",
+                    )
+                if label == "s8_family_router":
+                    (stage_dir / "family_router.json").write_text(
+                        json.dumps({"primary_family": "GR_KERR_BH", "families_to_run": ["GR_KERR_BH"]}),
+                        encoding="utf-8",
+                    )
+                if label == "s4e_kerr_ratio_filter":
+                    (stage_dir / "ratio_filter_result.json").write_text(
+                        json.dumps(
+                            {
+                                "kerr_consistency": {"Rf_consistent": None},
+                                "diagnostics": {"informativity_class": "UNINFORMATIVE"},
+                                "filtering": {"n_ratio_compatible": 0},
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                if label == "s8a_family_gr_kerr":
+                    (stage_dir / "gr_kerr_family.json").write_text(
+                        json.dumps({"status": "EVALUATED", "assessment": "INCONCLUSIVE", "reason": "test"}),
+                        encoding="utf-8",
+                    )
+
+                timeline["stages"].append(
+                    {
+                        "stage": label,
+                        "script": script,
+                        "command": [script] + list(args),
+                        "started_utc": "now",
+                        "ended_utc": "now",
+                        "duration_s": 0.0,
+                        "returncode": 0,
+                        "timed_out": False,
+                    }
+                )
+                pipeline._write_timeline(out_root, run_id, timeline)
+                return 0
+
+            with mock.patch.dict("os.environ", {"BASURIN_RUNS_ROOT": str(runs_root)}, clear=False):
+                with mock.patch.object(pipeline, "_run_stage", side_effect=fake_run_stage):
+                    rc, run_id = pipeline.run_multimode_event(
+                        event_id="GW150914",
+                        atlas_path="mvp/test_atlas_fixture.json",
+                        synthetic=True,
+                        duration_s=4.0,
+                        estimator="spectral",
+                    )
+
+            self.assertEqual(rc, 0)
+            self.assertFalse(mode221_input_seen["exists"])
+            timeline = json.loads((runs_root / run_id / "pipeline_timeline.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                timeline["multimode_results"]["multimode_viability_class"],
+                "RINGDOWN_NONINFORMATIVE",
+            )
+            self.assertEqual(
+                timeline["multimode_results"]["downstream_status_class"],
+                "GEOMETRY_PRESENT_BUT_NONINFORMATIVE",
+            )
+            self.assertEqual(
+                timeline["multimode_results"]["support_region_analysis_path"],
+                "MODE220_PLUS_HAWKING",
+            )
+            self.assertEqual(timeline["multimode_results"]["support_region_n_final"], 2)
+
     def test_multimode_with_t0_sweep_reinjects_selected_offset_to_s2(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             runs_root = Path(td) / "runs"

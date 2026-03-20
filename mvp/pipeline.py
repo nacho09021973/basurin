@@ -578,6 +578,22 @@ def _reasons_indicate_221_unavailable(reasons: list[str]) -> bool:
     return "mode_221_ok=false" in reason_blob or "overtone posterior not usable" in reason_blob
 
 
+def _load_multimode_viability(run_dir: Path) -> tuple[str | None, list[str]]:
+    s3b_summary_path = run_dir / "s3b_multimode_estimates" / "stage_summary.json"
+    s3b_summary = _load_json_object(s3b_summary_path)
+    viability = s3b_summary.get("multimode_viability")
+    if not isinstance(viability, dict):
+        return None, []
+
+    viability_class = viability.get("class")
+    if not isinstance(viability_class, str) or not viability_class.strip():
+        viability_class = None
+
+    raw_reasons = viability.get("reasons")
+    reasons = [str(reason) for reason in raw_reasons] if isinstance(raw_reasons, list) else []
+    return viability_class, reasons
+
+
 def _build_mode220_obs_payload(run_dir: Path) -> dict[str, float]:
     estimates_path = run_dir / "s3_ringdown_estimates" / "outputs" / "estimates.json"
     estimates = _load_json_object(estimates_path)
@@ -611,18 +627,12 @@ def _build_mode220_obs_payload(run_dir: Path) -> dict[str, float]:
 
 
 def _build_mode221_obs_payload(run_dir: Path) -> dict[str, float] | None:
-    s3b_summary_path = run_dir / "s3b_multimode_estimates" / "stage_summary.json"
     multimode_path = run_dir / "s3b_multimode_estimates" / "outputs" / "multimode_estimates.json"
 
-    s3b_summary = _load_json_object(s3b_summary_path)
     multimode_payload = _load_json_object(multimode_path)
-
-    viability = s3b_summary.get("multimode_viability")
-    reasons: list[str] = []
-    if isinstance(viability, dict):
-        raw_reasons = viability.get("reasons")
-        if isinstance(raw_reasons, list):
-            reasons = [str(reason) for reason in raw_reasons]
+    viability_class, reasons = _load_multimode_viability(run_dir)
+    if viability_class != "MULTIMODE_OK":
+        return None
     if _reasons_indicate_221_unavailable(reasons):
         return None
 
