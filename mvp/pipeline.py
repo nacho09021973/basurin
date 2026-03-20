@@ -2033,6 +2033,7 @@ def main() -> int:
             redshift=args.redshift,
             threshold_mode=args.threshold_mode,
             delta_lnl=args.delta_lnL,
+            informative_threshold=args.informative_threshold,
             delta_lnl_220=args.delta_lnL_220,
             delta_lnl_221=args.delta_lnL_221,
         )
