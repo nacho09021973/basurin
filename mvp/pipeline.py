@@ -1068,6 +1068,8 @@ def run_single_event(
     redshift: float | None = None,
     threshold_mode: str = "d2",
     delta_lnl: float = 3.0,
+    delta_lnl_220: float = 0.0,
+    delta_lnl_221: float = 0.0,
     informative_threshold: float = 0.80,
 ) -> tuple[int, str]:
     """Run full pipeline for a single event. Returns (exit_code, run_id)."""
@@ -2031,6 +2033,7 @@ def main() -> int:
             final_mass_msun=args.final_mass_msun,
             redshift=args.redshift,
             threshold_mode=args.threshold_mode,
+            delta_lnl=args.delta_lnL,
             delta_lnl_220=args.delta_lnL_220,
             delta_lnl_221=args.delta_lnL_221,
         )
