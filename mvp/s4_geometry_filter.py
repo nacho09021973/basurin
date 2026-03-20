@@ -414,16 +414,12 @@ def _compute_informative(acceptance_fraction: float, informative_threshold: floa
     return float(acceptance_fraction) <= float(informative_threshold)
 
 
-def _compute_filter_status(
-    n_compatible: int,
-    acceptance_fraction: float,
-    informative_threshold: float,
-) -> str:
-    if n_compatible == 0:
-        return "EMPTY"
-    if float(acceptance_fraction) > float(informative_threshold):
-        return "SATURATED"
-    return "OK"
+def _delta_lnL_from_d2(d2: float, d2_min: float) -> float:
+    return -0.5 * (float(d2) - float(d2_min))
+
+
+def _compute_informative(acceptance_fraction: float, informative_threshold: float) -> bool:
+    return float(acceptance_fraction) <= float(informative_threshold)
 
 
 def _delta_lnL_from_d2(d2: float, d2_min: float) -> float:
@@ -627,7 +623,8 @@ def main() -> int:
     ap.add_argument("--atlas-path", required=True)
     ap.add_argument("--epsilon", type=float, default=None)
     ap.add_argument("--threshold-mode", choices=["d2", "delta_lnL"], default="d2")
-    ap.add_argument("--delta-lnL", type=float, default=3.0)
+    ap.add_argument("--delta-lnL-220", type=float, default=0.0)
+    ap.add_argument("--delta-lnL-221", type=float, default=0.0)
     ap.add_argument("--informative-threshold", type=float, default=0.80)
     ap.add_argument(
         "--mode-filter",
@@ -659,7 +656,8 @@ def main() -> int:
         "atlas_path": str(atlas_path),
         "epsilon_cli": args.epsilon,
         "threshold_mode": args.threshold_mode,
-        "delta_lnL": args.delta_lnL,
+        "delta_lnL_220": args.delta_lnL_220,
+        "delta_lnL_221": args.delta_lnL_221,
         "informative_threshold": args.informative_threshold,
         "mode_filter": args.mode_filter,
         "estimates_path_override": args.estimates_path,
@@ -799,11 +797,6 @@ def main() -> int:
             acceptance_fraction,
             args.informative_threshold,
         )
-        filter_status = _compute_filter_status(
-            result["n_compatible"],
-            acceptance_fraction,
-            args.informative_threshold,
-        )
 
         _ok, _errs = validate_compatible_set(
             result,
@@ -833,7 +826,6 @@ def main() -> int:
                 "acceptance_fraction": acceptance_fraction,
                 "informative": informative,
                 "informative_threshold": float(args.informative_threshold),
-                "filter_status": filter_status,
                 "bits_excluded": result["bits_excluded"],
                 "metric": result["metric"],
                 "threshold_mode": result.get("threshold_mode"),
