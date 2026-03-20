@@ -339,7 +339,11 @@ def emulate_family(
     run_dir, _ = validate_and_load_run(run_id, runs_root)
     cs_path = run_dir / REQUIRED_CANONICAL_GATES["compatible_set"]
     if not cs_path.exists():
-        raise FileNotFoundError(f"compatible_set.json missing: {cs_path}")
+        legacy_cs_path = run_dir / "s4_geometry_filter" / "compatible_set.json"
+        if legacy_cs_path.exists():
+            cs_path = legacy_cs_path
+        else:
+            raise FileNotFoundError(f"compatible_set.json missing: {cs_path}")
 
     cs = load_json(cs_path)
 

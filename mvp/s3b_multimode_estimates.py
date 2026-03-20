@@ -660,7 +660,7 @@ def _resolve_mode_bands(
             "mode_221_band_role": "shared_coherent_band",
             "logical_subbands_hz": {
                 "220": [float(band_220[0]), float(band_220[1])],
-                "221": [float(band_221[0]), float(band_221[1])],
+                "221": [float(max(band_220[0], band_221[0])), float(band_221[1])],
             },
             "logical_subbands_within_shared_band": True,
         }
