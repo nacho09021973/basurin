@@ -785,6 +785,12 @@ def main() -> int:
     )
     ap.add_argument("--synthetic", action="store_true")
     ap.add_argument(
+        "--synthetic-gps-center-fallback",
+        type=float,
+        default=1126259462.4204,
+        help="Fallback GPS center used only if --synthetic is active and GPS resolution fails. Default: 1126259462.4204",
+    )
+    ap.add_argument(
         "--local-hdf5",
         action="append",
         default=[],
@@ -876,6 +882,7 @@ def main() -> int:
         "duration_s": args.duration_s, "synthetic": args.synthetic,
         "offline": args.offline,
         "local_hdf5": {det: str(path) for det, path in sorted(local_by_det.items())},
+        "synthetic_gps_center_fallback": args.synthetic_gps_center_fallback,
     })
 
     # --- Reuse check (before any network / generation) ---
@@ -906,7 +913,7 @@ def main() -> int:
             try:
                 gps_center = _fetch_gps_center(args.event_id)
             except Exception:
-                gps_center = 1126259462.4204
+                gps_center = float(args.synthetic_gps_center_fallback)
         else:
             if args.offline:
                 raise RuntimeError(
@@ -1046,6 +1053,7 @@ def main() -> int:
             results={
                 "detectors": detectors,
                 "sample_rate_hz": sample_rate_hz,
+                "synthetic_gps_center_fallback": float(args.synthetic_gps_center_fallback),
                 "strain_sanitization": sanitization_by_det,
                 "local_window_crop": window_crop_by_det if local_mode else {},
             },

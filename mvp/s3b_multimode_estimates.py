@@ -1613,6 +1613,18 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--max-lnq-span-221", type=float, default=1.0)
     ap.add_argument("--min-valid-fraction-221", type=float, default=0.5)
     ap.add_argument(
+        "--min-point-samples",
+        type=int,
+        default=50,
+        help="Minimum successful bootstrap samples required to materialize a point estimate. Default: 50",
+    )
+    ap.add_argument(
+        "--min-point-valid-fraction",
+        type=float,
+        default=0.5,
+        help="Minimum bootstrap valid fraction required to materialize a point estimate. Default: 0.5",
+    )
+    ap.add_argument(
         "--cv-threshold-221",
         type=float,
         default=1.0,
@@ -1644,6 +1656,8 @@ def main() -> int:
             "max_lnf_span_221": args.max_lnf_span_221,
             "max_lnq_span_221": args.max_lnq_span_221,
             "min_valid_fraction_221": args.min_valid_fraction_221,
+            "min_point_samples": args.min_point_samples,
+            "min_point_valid_fraction": args.min_point_valid_fraction,
             "cv_threshold_221": args.cv_threshold_221,
             "psd_path": args.psd_path,
         },
@@ -1725,8 +1739,8 @@ def main() -> int:
             seed=args.seed,
             max_lnf_span=args.max_lnf_span_220,
             max_lnq_span=args.max_lnq_span_220,
-            min_point_samples=50,
-            min_point_valid_fraction=0.5,
+            min_point_samples=args.min_point_samples,
+            min_point_valid_fraction=args.min_point_valid_fraction,
             method=args.method,
         )
         mode_221, flags_221, ok_221 = evaluate_mode(
@@ -1741,8 +1755,8 @@ def main() -> int:
             cv_threshold=args.cv_threshold_221,
             max_lnf_span=args.max_lnf_span_221,
             max_lnq_span=args.max_lnq_span_221,
-            min_point_samples=50,
-            min_point_valid_fraction=0.5,
+            min_point_samples=args.min_point_samples,
+            min_point_valid_fraction=args.min_point_valid_fraction,
             method=args.method,
         )
 
