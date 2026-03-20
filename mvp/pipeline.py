@@ -1132,6 +1132,7 @@ def run_single_event(
     )
     rc = _run_stage("s1_fetch_strain.py", s1_args, "s1_fetch_strain", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
+        _set_run_valid_verdict(out_root, run_id, "FAIL", f"s1_fetch_strain failed: exit={rc}")
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
@@ -1220,6 +1221,12 @@ def run_single_event(
     ]
     if estimates_path_override is not None:
         s4_args.extend(["--estimates-path", estimates_path_override])
+    if threshold_mode != "d2":
+        s4_args.extend(["--threshold-mode", threshold_mode])
+    if delta_lnl_220 != 0.0:
+        s4_args.extend(["--delta-lnL-220", str(delta_lnl_220)])
+    if delta_lnl_221 != 0.0:
+        s4_args.extend(["--delta-lnL-221", str(delta_lnl_221)])
     rc = _run_stage("s4_geometry_filter.py", s4_args, "s4_geometry_filter", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
@@ -1393,6 +1400,7 @@ def run_multimode_event(
     )
     rc = _run_stage("s1_fetch_strain.py", s1_args, "s1_fetch_strain", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
+        _set_run_valid_verdict(out_root, run_id, "FAIL", f"s1_fetch_strain failed: exit={rc}")
         timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
         _write_timeline(out_root, run_id, timeline)
         return rc, run_id
@@ -1846,6 +1854,18 @@ def main() -> int:
         "--psd-path", default=None, metavar="PATH",
         help="Path to measured_psd.json; enables whitening in s3_spectral_estimates and s3b_multimode_estimates",
     )
+    sp_single.add_argument(
+        "--threshold-mode", choices=["d2", "delta_lnL"], default="d2",
+        help="Threshold metric for s4 geometry filter: 'd2' (Mahalanobis, default) or 'delta_lnL'",
+    )
+    sp_single.add_argument(
+        "--delta-lnL-220", type=float, default=0.0,
+        help="Log-likelihood threshold for mode 220 when --threshold-mode=delta_lnL (default: 0.0)",
+    )
+    sp_single.add_argument(
+        "--delta-lnL-221", type=float, default=0.0,
+        help="Log-likelihood threshold for mode 221 when --threshold-mode=delta_lnL (default: 0.0)",
+    )
 
     # Multi event
     sp_multi = sub.add_parser("multi", help="Run pipeline for multiple events + aggregate")
@@ -2045,8 +2065,8 @@ def main() -> int:
             final_mass_msun=args.final_mass_msun,
             redshift=args.redshift,
             threshold_mode=args.threshold_mode,
-            delta_lnl=args.delta_lnL,
-            informative_threshold=args.informative_threshold,
+            delta_lnl_220=args.delta_lnL_220,
+            delta_lnl_221=args.delta_lnL_221,
         )
         return rc
 
