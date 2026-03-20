@@ -172,6 +172,16 @@ def _write_timeline(out_root: Path, run_id: str, timeline: dict[str, Any]) -> No
     write_json_atomic(out_root / run_id / "pipeline_timeline.json", timeline)
 
 
+def _finalize_run_timeline(out_root: Path, run_id: str, timeline: dict[str, Any]) -> None:
+    timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
+    _write_timeline(out_root, run_id, timeline)
+
+
+def _fail_run(out_root: Path, run_id: str, timeline: dict[str, Any], reason: str) -> None:
+    _set_run_valid_verdict(out_root, run_id, "FAIL", reason)
+    _finalize_run_timeline(out_root, run_id, timeline)
+
+
 def _write_run_provenance(
     out_root: Path,
     run_id: str,
@@ -1115,9 +1125,7 @@ def run_single_event(
     )
     rc = _run_stage("s0_oracle_mvp.py", s0_args, "s0_oracle_mvp", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
-        _set_run_valid_verdict(out_root, run_id, "FAIL", "s0_oracle_mvp precheck failed")
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, "s0_oracle_mvp precheck failed")
         return rc, run_id
 
     # Stage 1: Fetch strain
@@ -1132,9 +1140,7 @@ def run_single_event(
     )
     rc = _run_stage("s1_fetch_strain.py", s1_args, "s1_fetch_strain", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
-        _set_run_valid_verdict(out_root, run_id, "FAIL", f"s1_fetch_strain failed: exit={rc}")
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, f"s1_fetch_strain failed: exit={rc}")
         return rc, run_id
 
     # Stage 2: Ringdown window
@@ -1151,9 +1157,7 @@ def run_single_event(
         s2_args.extend(["--window-catalog", str(t0_catalog)])
     rc = _run_stage("s2_ringdown_window.py", s2_args, "s2_ringdown_window", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
-        _set_run_valid_verdict(out_root, run_id, "FAIL", f"s2_ringdown_window failed: exit={rc}")
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, f"s2_ringdown_window failed: exit={rc}")
         return rc, run_id
 
     # Stage 3: Ringdown estimates — select estimator
@@ -1169,8 +1173,7 @@ def run_single_event(
             out_root, run_id, timeline, stage_timeout_s,
         )
         if rc != 0:
-            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-            _write_timeline(out_root, run_id, timeline)
+            _fail_run(out_root, run_id, timeline, f"s3_ringdown_estimates failed: exit={rc}")
             return rc, run_id
 
     elif estimator == "spectral":
@@ -1182,8 +1185,7 @@ def run_single_event(
             out_root, run_id, timeline, stage_timeout_s,
         )
         if rc != 0:
-            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-            _write_timeline(out_root, run_id, timeline)
+            _fail_run(out_root, run_id, timeline, f"s3_ringdown_estimates failed: exit={rc}")
             return rc, run_id
         # estimates_path_override remains None: canonical path is s3_ringdown_estimates
 
@@ -1199,12 +1201,12 @@ def run_single_event(
             psd_path=psd_path,
         )
         if rc != 0:
-            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-            _write_timeline(out_root, run_id, timeline)
+            _fail_run(out_root, run_id, timeline, f"dual estimator bundle failed: exit={rc}")
             return rc, run_id
 
     else:
         print(f"[pipeline] ERROR: unknown estimator '{estimator}'", file=sys.stderr)
+        _fail_run(out_root, run_id, timeline, f"unknown estimator: {estimator}")
         return 2, run_id
 
     if with_t0_sweep:
@@ -1229,16 +1231,13 @@ def run_single_event(
         s4_args.extend(["--delta-lnL-221", str(delta_lnl_221)])
     rc = _run_stage("s4_geometry_filter.py", s4_args, "s4_geometry_filter", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, f"s4_geometry_filter failed: exit={rc}")
         return rc, run_id
 
     s6_args: list[str] = ["--run", run_id]
     rc = _run_stage("s6_information_geometry.py", s6_args, "s6_information_geometry", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
-        _set_run_valid_verdict(out_root, run_id, "FAIL", "s6_information_geometry failed")
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, f"s6_information_geometry failed: exit={rc}")
         return rc, run_id
 
     rc = _run_stage(
@@ -1251,13 +1250,10 @@ def run_single_event(
         stage_timeout_s,
     )
     if rc != 0:
-        _set_run_valid_verdict(out_root, run_id, "FAIL", "s6b_information_geometry_ranked failed")
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, f"s6b_information_geometry_ranked failed: exit={rc}")
         return rc, run_id
 
-    timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-    _write_timeline(out_root, run_id, timeline)
+    _finalize_run_timeline(out_root, run_id, timeline)
 
     print(f"\n[pipeline] Single-event pipeline COMPLETE: run_id={run_id}")
     return 0, run_id
@@ -1384,9 +1380,7 @@ def run_multimode_event(
     )
     rc = _run_stage("s0_oracle_mvp.py", s0_args, "s0_oracle_mvp", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
-        _set_run_valid_verdict(out_root, run_id, "FAIL", "s0_oracle_mvp precheck failed")
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, "s0_oracle_mvp precheck failed")
         return rc, run_id
 
     s1_args = _build_s1_fetch_args(
@@ -1400,9 +1394,7 @@ def run_multimode_event(
     )
     rc = _run_stage("s1_fetch_strain.py", s1_args, "s1_fetch_strain", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
-        _set_run_valid_verdict(out_root, run_id, "FAIL", f"s1_fetch_strain failed: exit={rc}")
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, f"s1_fetch_strain failed: exit={rc}")
         return rc, run_id
 
     s2_args = [
@@ -1415,9 +1407,7 @@ def run_multimode_event(
         s2_args.append("--offline")
     rc = _run_stage("s2_ringdown_window.py", s2_args, "s2_ringdown_window", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
-        _set_run_valid_verdict(out_root, run_id, "FAIL", f"s2_ringdown_window failed: exit={rc}")
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, f"s2_ringdown_window failed: exit={rc}")
         return rc, run_id
 
     # Preflight viability check (Fisher-based, pure computation)
@@ -1460,14 +1450,12 @@ def run_multimode_event(
                 stage_timeout_s,
             )
             if rc != 0:
-                _set_run_valid_verdict(
+                _fail_run(
                     out_root,
                     run_id,
-                    "FAIL",
+                    timeline,
                     f"s2_ringdown_window(selected_t0_ms={selected_t0_ms}) failed: exit={rc}",
                 )
-                timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-                _write_timeline(out_root, run_id, timeline)
                 return rc, run_id
 
     # Stage 3: Ringdown estimates — select estimator
@@ -1482,8 +1470,7 @@ def run_multimode_event(
             out_root, run_id, timeline, stage_timeout_s,
         )
         if rc != 0:
-            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-            _write_timeline(out_root, run_id, timeline)
+            _fail_run(out_root, run_id, timeline, f"s3_ringdown_estimates failed: exit={rc}")
             return rc, run_id
 
     elif estimator == "spectral":
@@ -1494,8 +1481,7 @@ def run_multimode_event(
             out_root, run_id, timeline, stage_timeout_s,
         )
         if rc != 0:
-            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-            _write_timeline(out_root, run_id, timeline)
+            _fail_run(out_root, run_id, timeline, f"s3_ringdown_estimates failed: exit={rc}")
             return rc, run_id
 
     elif estimator == "dual":
@@ -1510,12 +1496,12 @@ def run_multimode_event(
             psd_path=psd_path,
         )
         if rc != 0:
-            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-            _write_timeline(out_root, run_id, timeline)
+            _fail_run(out_root, run_id, timeline, f"dual estimator bundle failed: exit={rc}")
             return rc, run_id
 
     else:
         print(f"[pipeline] ERROR: unknown estimator '{estimator}'", file=sys.stderr)
+        _fail_run(out_root, run_id, timeline, f"unknown estimator: {estimator}")
         return 2, run_id
 
     s3_estimates_relpath = Path(
@@ -1542,26 +1528,18 @@ def run_multimode_event(
         s3b_args.extend(["--psd-path", psd_path])
     rc = _run_stage("s3b_multimode_estimates.py", s3b_args, "s3b_multimode_estimates", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, f"s3b_multimode_estimates failed: exit={rc}")
         return rc, run_id
 
     try:
         _prepare_explicit_support_region_inputs(out_root, run_id)
     except Exception as exc:
-        _set_run_valid_verdict(
-            out_root,
-            run_id,
-            "FAIL",
-            f"explicit support-region input preparation failed: {exc}",
-        )
         print(
             f"[pipeline] ABORT: cannot prepare explicit support-region inputs: {exc}",
             file=sys.stderr,
             flush=True,
         )
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, f"explicit support-region input preparation failed: {exc}")
         return 2, run_id
 
     explicit_stage_specs = [
@@ -1574,8 +1552,7 @@ def run_multimode_event(
     for script, args, label in explicit_stage_specs:
         rc = _run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s)
         if rc != 0:
-            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-            _write_timeline(out_root, run_id, timeline)
+            _fail_run(out_root, run_id, timeline, f"{label} failed: exit={rc}")
             return rc, run_id
 
     s4_args = [
@@ -1588,73 +1565,63 @@ def run_multimode_event(
     ]
     rc = _run_stage("s4_geometry_filter.py", s4_args, "s4_geometry_filter", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, f"s4_geometry_filter failed: exit={rc}")
         return rc, run_id
 
     s4c_args = ["--run-id", run_id, "--atlas-path", atlas_path]
     rc = _run_stage("s4c_kerr_consistency.py", s4c_args, "s4c_kerr_consistency", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, f"s4c_kerr_consistency failed: exit={rc}")
         return rc, run_id
 
     # Phase B: Kerr inference from multimode (canonical; does not replace s4/s4c)
     s4d_args = ["--run-id", run_id]
     rc = _run_stage("s4d_kerr_from_multimode.py", s4d_args, "s4d_kerr_from_multimode", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, f"s4d_kerr_from_multimode failed: exit={rc}")
         return rc, run_id
 
     s4k_args = ["--run-id", run_id]
     rc = _run_stage("s4k_event_support_region.py", s4k_args, "s4k_event_support_region", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, f"s4k_event_support_region failed: exit={rc}")
         return rc, run_id
 
     s7_args = ["--run-id", run_id]
     rc = _run_stage("s7_beyond_kerr_deviation_score.py", s7_args, "s7_beyond_kerr_deviation_score", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, f"s7_beyond_kerr_deviation_score failed: exit={rc}")
         return rc, run_id
 
     s8_router_args = ["--run-id", run_id]
     rc = _run_stage("s8_family_router.py", s8_router_args, "s8_family_router", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, f"s8_family_router failed: exit={rc}")
         return rc, run_id
 
     try:
         families_to_run = _load_family_routes(out_root, run_id)
     except Exception as exc:
         print(f"[pipeline] ABORT: cannot load family routes: {exc}", file=sys.stderr, flush=True)
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, run_id, timeline)
+        _fail_run(out_root, run_id, timeline, f"cannot load family routes: {exc}")
         return 2, run_id
 
     if any(family in KERR_LIKE_FAMILIES for family in families_to_run):
         s4e_args = ["--run-id", run_id]
         rc = _run_stage("s4e_kerr_ratio_filter.py", s4e_args, "s4e_kerr_ratio_filter", out_root, run_id, timeline, stage_timeout_s)
         if rc != 0:
-            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-            _write_timeline(out_root, run_id, timeline)
+            _fail_run(out_root, run_id, timeline, f"s4e_kerr_ratio_filter failed: exit={rc}")
             return rc, run_id
 
     for family in families_to_run:
         script, label = FAMILY_STAGE_MAP[family]
         rc = _run_stage(script, ["--run-id", run_id], label, out_root, run_id, timeline, stage_timeout_s)
         if rc != 0:
-            timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-            _write_timeline(out_root, run_id, timeline)
+            _fail_run(out_root, run_id, timeline, f"{label} failed: exit={rc}")
             return rc, run_id
 
     timeline["multimode_results"] = _parse_multimode_results(out_root, run_id)
-    timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-    _write_timeline(out_root, run_id, timeline)
+    _finalize_run_timeline(out_root, run_id, timeline)
     return 0, run_id
 
 
@@ -1727,8 +1694,7 @@ def run_multi_event(
         if rc != 0:
             if abort_on_event_fail:
                 print(f"[pipeline] ABORT: event {event_id} failed", file=sys.stderr)
-                timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-                _write_timeline(out_root, agg_run_id, timeline)
+                _fail_run(out_root, agg_run_id, timeline, f"event {event_id} failed: exit={rc}")
                 return rc, agg_run_id
             else:
                 print(f"[pipeline] WARNING: event {event_id} failed (exit={rc}), continuing",
@@ -1739,8 +1705,7 @@ def run_multi_event(
 
     if not per_event_runs:
         print("[pipeline] ERROR: no events succeeded", file=sys.stderr)
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, agg_run_id, timeline)
+        _fail_run(out_root, agg_run_id, timeline, "no events succeeded")
         return 2, agg_run_id
 
     if failed_events:
@@ -1758,12 +1723,10 @@ def run_multi_event(
         s5_args.extend(["--catalog-path", catalog_path])
     rc = _run_stage("s5_aggregate.py", s5_args, "s5_aggregate", out_root, agg_run_id, timeline, kwargs.get("stage_timeout_s"))
     if rc != 0:
-        timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-        _write_timeline(out_root, agg_run_id, timeline)
+        _fail_run(out_root, agg_run_id, timeline, f"s5_aggregate failed: exit={rc}")
         return rc, agg_run_id
 
-    timeline["ended_utc"] = datetime.now(timezone.utc).isoformat()
-    _write_timeline(out_root, agg_run_id, timeline)
+    _finalize_run_timeline(out_root, agg_run_id, timeline)
 
     print(f"\n[pipeline] Multi-event pipeline COMPLETE: agg_run={agg_run_id}")
     print(f"[pipeline] Per-event runs: {per_event_runs}")
@@ -1807,6 +1770,9 @@ def main() -> int:
     sp_single.add_argument("--band-low", type=float, default=150.0)
     sp_single.add_argument("--band-high", type=float, default=400.0)
     sp_single.add_argument("--epsilon", type=float, default=0.3)
+    sp_single.add_argument("--threshold-mode", choices=["d2", "delta_lnL"], default="d2")
+    sp_single.add_argument("--delta-lnL", type=float, default=3.0)
+    sp_single.add_argument("--informative-threshold", type=float, default=0.80)
     sp_single.add_argument(
         "--stage-timeout-s", type=float, default=None,
         help="Kill a stage if it exceeds this many seconds (default: no limit)",

@@ -390,6 +390,7 @@ def _build_diagnostics(
 
     return {
         "acceptance_fraction": acceptance_fraction,
+        "filter_status": informative_status,
         "informative_status": informative_status,
         "alpha_max": ALPHA_MAX,
         "d2_quantiles": {
@@ -623,6 +624,7 @@ def main() -> int:
     ap.add_argument("--atlas-path", required=True)
     ap.add_argument("--epsilon", type=float, default=None)
     ap.add_argument("--threshold-mode", choices=["d2", "delta_lnL"], default="d2")
+    ap.add_argument("--delta-lnL", type=float, default=3.0)
     ap.add_argument("--delta-lnL-220", type=float, default=0.0)
     ap.add_argument("--delta-lnL-221", type=float, default=0.0)
     ap.add_argument("--informative-threshold", type=float, default=0.80)
@@ -656,6 +658,7 @@ def main() -> int:
         "atlas_path": str(atlas_path),
         "epsilon_cli": args.epsilon,
         "threshold_mode": args.threshold_mode,
+        "delta_lnL": args.delta_lnL,
         "delta_lnL_220": args.delta_lnL_220,
         "delta_lnL_221": args.delta_lnL_221,
         "informative_threshold": args.informative_threshold,
@@ -835,6 +838,7 @@ def main() -> int:
                 "threshold_d2": result.get("threshold_d2"),
                 "d2_min": result.get("d2_min"),
                 "d2_at_best": result.get("d2_min"),
+                "filter_status": (result.get("diagnostics") or {}).get("filter_status"),
                 "informative_status": (result.get("diagnostics") or {}).get("informative_status"),
                 "d2_quantiles": (result.get("diagnostics") or {}).get("d2_quantiles"),
                 "diagnostics": result.get("diagnostics"),

@@ -443,6 +443,35 @@ def test_run_single_event_marks_run_valid_fail_when_s2_fails(
     assert verdict["reason"] == "s2_ringdown_window failed: exit=2"
 
 
+def test_run_single_event_marks_run_valid_fail_when_s1_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_root = _make_runs_root(tmp_path)
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    def fake_run_stage(
+        script: str,
+        args: list[str],
+        label: str,
+        out_root: Path,
+        run_id: str,
+        timeline: dict[str, Any],
+        stage_timeout_s: float | None = None,
+    ) -> int:
+        if label == "s1_fetch_strain":
+            return 2
+        return 0
+
+    monkeypatch.setattr(pipeline, "_run_stage", fake_run_stage)
+
+    rc, run_id = run_single_event("GW150914", "fake_atlas.json", run_id="s1_fail_run")
+    assert rc == 2
+
+    verdict = json.loads((runs_root / run_id / "RUN_VALID" / "verdict.json").read_text(encoding="utf-8"))
+    assert verdict["verdict"] == "FAIL"
+    assert verdict["reason"] == "s1_fetch_strain failed: exit=2"
+
+
 def test_run_single_event_timeline_has_required_keys_on_success(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -462,6 +491,9 @@ def test_run_single_event_timeline_has_required_keys_on_success(
         assert key in tl, f"Missing key in timeline: {key!r}"
     assert tl["mode"] == "single"
     assert tl["ended_utc"] is not None
+
+    verdict = json.loads((runs_root / run_id / "RUN_VALID" / "verdict.json").read_text(encoding="utf-8"))
+    assert verdict["verdict"] == "PASS"
 
 
 def test_run_single_event_unknown_estimator_returns_error(
@@ -543,6 +575,9 @@ def test_run_multi_event_aborts_on_first_event_failure(
     assert call_log == ["GW150914"], (
         f"Second event should not have been called; got: {call_log}"
     )
+    verdict = json.loads((runs_root / "agg_test" / "RUN_VALID" / "verdict.json").read_text(encoding="utf-8"))
+    assert verdict["verdict"] == "FAIL"
+    assert verdict["reason"] == "event GW150914 failed: exit=1"
 
 
 def test_run_multi_event_continues_when_abort_false(
@@ -689,6 +724,42 @@ def test_pipeline_single_cli_prioritizes_window_catalog_over_t0_catalog(tmp_path
     assert captured["t0_catalog"] == "catalogs/window.json"
 
 
+def test_pipeline_single_cli_forwards_s4_threshold_args(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_root = _make_runs_root(tmp_path)
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    captured: dict[str, Any] = {}
+
+    def fake_run_single_event(*args: Any, **kwargs: Any) -> tuple[int, str]:
+        captured.update(kwargs)
+        return 0, "run_ok"
+
+    monkeypatch.setattr(pipeline, "run_single_event", fake_run_single_event)
+    monkeypatch.setattr(sys, "argv", [
+        "pipeline.py",
+        "single",
+        "--event-id",
+        "GW150914",
+        "--atlas-path",
+        "fake_atlas.json",
+        "--threshold-mode",
+        "delta_lnL",
+        "--delta-lnL",
+        "5.0",
+        "--informative-threshold",
+        "0.7",
+    ])
+
+    rc = pipeline.main()
+
+    assert rc == 0
+    assert captured["threshold_mode"] == "delta_lnL"
+    assert captured["delta_lnl"] == 5.0
+    assert captured["informative_threshold"] == 0.7
+
+
 def test_run_multimode_event_forwards_bootstrap_221_residual_strategy_to_s3b(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -759,6 +830,41 @@ def test_pipeline_multimode_cli_accepts_bootstrap_221_residual_strategy(
 
     assert rc == 0
     assert captured["bootstrap_221_residual_strategy"] == "fixed_220_template"
+
+
+def test_run_multimode_event_marks_run_valid_fail_when_s1_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_root = _make_runs_root(tmp_path)
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    monkeypatch.setattr(pipeline, "_run_preflight_viability", lambda *a, **kw: None)
+
+    def fake_run_stage(
+        script: str,
+        args: list[str],
+        label: str,
+        out_root: Path,
+        run_id: str,
+        timeline: dict[str, Any],
+        stage_timeout_s: float | None = None,
+    ) -> int:
+        if label == "s1_fetch_strain":
+            return 2
+        return 0
+
+    monkeypatch.setattr(pipeline, "_run_stage", fake_run_stage)
+
+    rc, run_id = run_multimode_event(
+        event_id="GW150914",
+        atlas_path="fake_atlas.json",
+        run_id="multimode_s1_fail_run",
+        synthetic=True,
+    )
+
+    assert rc == 2
+    verdict = json.loads((runs_root / run_id / "RUN_VALID" / "verdict.json").read_text(encoding="utf-8"))
+    assert verdict["verdict"] == "FAIL"
+    assert verdict["reason"] == "s1_fetch_strain failed: exit=2"
 
 
 def test_pipeline_multimode_cli_defaults_bootstrap_221_residual_strategy(

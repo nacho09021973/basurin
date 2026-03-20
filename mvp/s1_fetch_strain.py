@@ -1068,7 +1068,6 @@ def main() -> int:
                 args.run,
                 "FAIL",
                 f"s1_fetch_strain exited with code {code}",
-                only_if_missing=True,
             )
         raise
     except Exception as exc:
@@ -1078,7 +1077,6 @@ def main() -> int:
             "FAIL",
             str(exc),
             traceback_short=tb_short,
-            only_if_missing=True,
         )
         abort(ctx, str(exc))
         return 2  # unreachable

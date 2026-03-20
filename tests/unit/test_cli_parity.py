@@ -72,6 +72,13 @@ def test_s4_new_args_in_pipeline() -> None:
     assert "--informative-threshold" in multimode_help
 
 
+def test_single_help_includes_s4_threshold_args() -> None:
+    single_help = _help_text("single", "--help")
+    assert "--threshold-mode" in single_help
+    assert "--delta-lnL" in single_help
+    assert "--informative-threshold" in single_help
+
+
 def test_pipeline_help_includes_all_scientific_knobs() -> None:
     multi_help = _help_text("multi", "--help")
     assert "threshold-mode" in multi_help
