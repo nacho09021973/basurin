@@ -1772,7 +1772,6 @@ def main() -> int:
     sp_single.add_argument("--band-low", type=float, default=150.0)
     sp_single.add_argument("--band-high", type=float, default=400.0)
     sp_single.add_argument("--epsilon", type=float, default=0.3)
-    sp_single.add_argument("--threshold-mode", choices=["d2", "delta_lnL"], default="d2")
     sp_single.add_argument("--delta-lnL", type=float, default=3.0)
     sp_single.add_argument("--informative-threshold", type=float, default=0.80)
     sp_single.add_argument(
