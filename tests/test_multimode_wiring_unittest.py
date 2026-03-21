@@ -789,6 +789,79 @@ class TestMultimodePipelineBehavior(unittest.TestCase):
                 "SUPPORTED",
             )
 
+    def test_multimode_minimal_run_skips_nonessential_221_tail_stages(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runs_root = Path(td) / "runs"
+
+            def fake_run_stage(script, args, label, out_root, run_id, timeline, stage_timeout_s=None):
+                stage_dir = out_root / run_id / label / "outputs"
+                stage_dir.mkdir(parents=True, exist_ok=True)
+
+                if label == "s3_ringdown_estimates":
+                    _write_fake_s3_estimates(out_root, run_id)
+                if label == "s3b_multimode_estimates":
+                    _write_fake_s3b_outputs(out_root, run_id)
+                if label == "s4k_event_support_region":
+                    (stage_dir / "event_support_region.json").write_text(
+                        json.dumps(
+                            {
+                                "analysis_path": "MULTIMODE_INTERSECTION",
+                                "support_region_status": "SUPPORT_REGION_AVAILABLE",
+                                "n_final_geometries": 1,
+                                "downstream_status": {
+                                    "class": "MULTIMODE_USABLE",
+                                    "reasons": ["support_region_status=SUPPORT_REGION_AVAILABLE"],
+                                },
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+
+                timeline["stages"].append(
+                    {
+                        "stage": label,
+                        "script": script,
+                        "command": [script] + list(args),
+                        "started_utc": "now",
+                        "ended_utc": "now",
+                        "duration_s": 0.0,
+                        "returncode": 0,
+                        "timed_out": False,
+                    }
+                )
+                pipeline._write_timeline(out_root, run_id, timeline)
+                return 0
+
+            with mock.patch.dict("os.environ", {"BASURIN_RUNS_ROOT": str(runs_root)}, clear=False):
+                with mock.patch.object(pipeline, "_run_preflight_viability", return_value=None):
+                    with mock.patch.object(pipeline, "_parse_multimode_results", return_value={}):
+                        with mock.patch.object(pipeline, "_run_stage", side_effect=fake_run_stage):
+                            rc, run_id = pipeline.run_multimode_event(
+                                event_id="GW150914",
+                                atlas_path="mvp/test_atlas_fixture.json",
+                                synthetic=True,
+                                duration_s=4.0,
+                                estimator="spectral",
+                                minimal_run=True,
+                            )
+
+            self.assertEqual(rc, 0)
+            timeline = json.loads((runs_root / run_id / "pipeline_timeline.json").read_text(encoding="utf-8"))
+            stages = [entry["stage"] for entry in timeline["stages"]]
+            skipped_labels = {
+                "s4c_kerr_consistency",
+                "s4d_kerr_from_multimode",
+                "s4e_kerr_ratio_filter",
+                "s7_beyond_kerr_deviation_score",
+                "s8_family_router",
+                "s8a_family_gr_kerr",
+                "s8b_family_bns",
+                "s8c_family_low_mass_bh_postmerger",
+            }
+            self.assertTrue(skipped_labels.isdisjoint(stages))
+            self.assertIn("s4_geometry_filter", stages)
+            self.assertIn("s4k_event_support_region", stages)
+
     def test_multimode_degrades_to_mode220_plus_hawking_when_221_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             runs_root = Path(td) / "runs"

@@ -222,6 +222,7 @@ def _execute_event(
                     epsilon=epsilon,
                     estimator=estimator,
                     stage_timeout_s=stage_timeout_s,
+                    minimal_run=True,
                 )
         except Exception as exc:
             return {
