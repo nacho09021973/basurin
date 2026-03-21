@@ -197,6 +197,7 @@ La implementacion canonica usa `contracts.log_stage_paths(ctx)` para ello.
 - Desde la raiz del repo, la ubicacion operativa es `./data/losc/<EVENT_ID>/`.
 - En este checkout concreto, eso resuelve bajo `/home/ignac/work/basurin/data/losc/<EVENT_ID>/`.
 - Si los HDF5 fisicos viven en otra caché local (por ejemplo `gw_events/strain/<EVENT_ID>/`), la politica canónica es exponerlos bajo `data/losc/<EVENT_ID>/` mediante symlink o bind mount. El pipeline no debe apuntar directamente a `gw_events/strain`.
+- Para listar de forma canónica los eventos visibles bajo `data/losc/`, usar `python tools/list_losc_events.py --losc-root data/losc`.
 - Para validar visibilidad/naming antes de correr nada, usar `python tools/losc_precheck.py --event-id <EVENT_ID> --losc-root data/losc`.
 - Para poblar un evento suelto que falta en la caché canónica, usar `python tools/fetch_losc_event.py --event-id <EVENT_ID> --out-root data/losc`.
 - Para completar un lote de eventos rezagados, usar `bash tools/fetch_losc_batch.sh <events_file>`.
@@ -421,7 +422,8 @@ Regla practica:
 
 - `data/losc` es la unica vista canónica que deben consumir `s1_fetch_strain`, `pipeline.py` y `experiment_offline_batch.py`.
 - Si una caché previa existe en `gw_events/strain`, se expone bajo `data/losc` con symlinks por evento; no se cambia el pipeline para leer `gw_events/strain`.
-- Para reparaciones incrementales, no improvisar one-offs: preferir `tools/losc_precheck.py`, `tools/fetch_losc_event.py` y `tools/fetch_losc_batch.sh`.
+- Para saber qué eventos están realmente visibles en la vista canónica, preferir `tools/list_losc_events.py` frente a búsquedas ad hoc.
+- Para reparaciones incrementales, no improvisar one-offs: preferir `tools/list_losc_events.py`, `tools/losc_precheck.py`, `tools/fetch_losc_event.py` y `tools/fetch_losc_batch.sh`.
 
 Pipeline single consumiendo catalogo de `t0` ya auditado (usa `dual` por defecto):
 

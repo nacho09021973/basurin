@@ -126,6 +126,12 @@ En este checkout actual:
 
 `/home/ignac/work/basurin/data/losc/<EVENT_ID>/`
 
+Listado canónico de eventos visibles:
+
+```bash
+python tools/list_losc_events.py --losc-root data/losc
+```
+
 Precheck canónico:
 
 ```bash
@@ -170,6 +176,7 @@ bash tools/fetch_losc_batch.sh /tmp/events_missing.txt
 
 Roles recomendados de los scripts:
 
+- `tools/list_losc_events.py`: listado read-only de los `EVENT_ID` realmente visibles bajo `data/losc/`.
 - `tools/losc_precheck.py`: verificacion read-only de visibilidad y naming.
 - `tools/fetch_losc_event.py`: bootstrap puntual de un evento.
 - `tools/fetch_losc_batch.sh`: completar/cohesionar una cohorte de eventos faltantes o rezagados.
