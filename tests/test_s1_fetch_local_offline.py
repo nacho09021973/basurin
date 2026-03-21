@@ -411,6 +411,169 @@ def test_local_hdf5_legacy_dict_catalog_entry_still_supports_32s_window(
     assert provenance["strain_sanitization"]["L1"]["applied"] is False
 
 
+def test_local_hdf5_event_metadata_fallback_supports_32s_window(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "gw150914_local_event_metadata"
+    run_valid = runs_root / run_id / "RUN_VALID"
+    run_valid.mkdir(parents=True, exist_ok=True)
+    (run_valid / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    reference_catalog = tmp_path / "gwtc_events_t0.json"
+    reference_catalog.write_text(json.dumps({}), encoding="utf-8")
+    monkeypatch.setattr(s1_fetch_strain, "DEFAULT_T0_REFERENCE_CATALOG", reference_catalog)
+
+    metadata_dir = tmp_path / "event_metadata"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    (metadata_dir / "GW150914_metadata.json").write_text(
+        json.dumps({"t0_gps": 1126259462.4204}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(s1_fetch_strain, "DEFAULT_EVENT_METADATA_DIR", metadata_dir)
+
+    sample_rate_hz = 4096.0
+    duration_s = 32.0
+    total_duration_s = 64.0
+    total_n = int(sample_rate_hz * total_duration_s)
+    output_n = int(sample_rate_hz * duration_s)
+    gps_start_target = 1126259462.4204 - duration_s / 2.0
+    gps_start_local = gps_start_target - 16.0
+    i_start = int(round((gps_start_target - gps_start_local) * sample_rate_hz))
+    i_end = i_start + output_n
+
+    h1_values = np.linspace(-1.0, 1.0, total_n, dtype=np.float64)
+    l1_values = np.linspace(2.0, 5.0, total_n, dtype=np.float64)
+
+    h1_path = tmp_path / "H-H1_GWOSC_4KHZ_R1-metadata.hdf5"
+    l1_path = tmp_path / "L-L1_GWOSC_4KHZ_R1-metadata.hdf5"
+    _write_strain_hdf5(h1_path, h1_values, xstart=gps_start_local, sample_rate_hz=sample_rate_hz)
+    _write_strain_hdf5(l1_path, l1_values, xstart=gps_start_local, sample_rate_hz=sample_rate_hz)
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "s1_fetch_strain.py",
+            "--run",
+            run_id,
+            "--event-id",
+            "GW150914",
+            "--detectors",
+            "H1,L1",
+            "--duration-s",
+            "32",
+            "--local-hdf5",
+            f"H1={h1_path}",
+            "--local-hdf5",
+            f"L1={l1_path}",
+            "--offline",
+        ],
+    )
+
+    rc = s1_fetch_strain.main()
+    assert rc == 0
+
+    out = runs_root / run_id / "s1_fetch_strain" / "outputs"
+    payload = np.load(out / "strain.npz")
+    assert float(payload["gps_start"]) == pytest.approx(gps_start_target)
+    assert payload["H1"].tolist() == pytest.approx(h1_values[i_start:i_end].tolist())
+    assert payload["L1"].tolist() == pytest.approx(l1_values[i_start:i_end].tolist())
+
+
+def test_fetch_gps_center_accepts_t_coalescence_gps_event_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(s1_fetch_strain, "DEFAULT_T0_REFERENCE_CATALOG", tmp_path / "missing_gwtc_events_t0.json")
+    monkeypatch.setattr(s1_fetch_strain, "DEFAULT_WINDOW_CATALOG", tmp_path / "missing_window_catalog_v1.json")
+
+    metadata_dir = tmp_path / "event_metadata"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    (metadata_dir / "GW170814_metadata.json").write_text(
+        json.dumps({"event_id": "GW170814", "t_coalescence_gps": 1186741861.0}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(s1_fetch_strain, "DEFAULT_EVENT_METADATA_DIR", metadata_dir)
+
+    gps = s1_fetch_strain._fetch_gps_center("GW170814")
+
+    assert gps == pytest.approx(1186741861.0)
+
+
+def test_local_hdf5_window_catalog_fallback_supports_32s_window(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "gw170814_local_window_catalog"
+    run_valid = runs_root / run_id / "RUN_VALID"
+    run_valid.mkdir(parents=True, exist_ok=True)
+    (run_valid / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    monkeypatch.setattr(s1_fetch_strain, "DEFAULT_T0_REFERENCE_CATALOG", tmp_path / "missing_gwtc_events_t0.json")
+
+    metadata_dir = tmp_path / "event_metadata"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(s1_fetch_strain, "DEFAULT_EVENT_METADATA_DIR", metadata_dir)
+
+    window_catalog = tmp_path / "window_catalog_v1.json"
+    window_catalog.write_text(
+        json.dumps({"GW170814": {"t0_gps": 1186741861.5}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(s1_fetch_strain, "DEFAULT_WINDOW_CATALOG", window_catalog)
+
+    sample_rate_hz = 4096.0
+    duration_s = 32.0
+    total_duration_s = 64.0
+    total_n = int(sample_rate_hz * total_duration_s)
+    output_n = int(sample_rate_hz * duration_s)
+    gps_start_target = 1186741861.5 - duration_s / 2.0
+    gps_start_local = gps_start_target - 16.0
+    i_start = int(round((gps_start_target - gps_start_local) * sample_rate_hz))
+    i_end = i_start + output_n
+
+    h1_values = np.linspace(-1.0, 1.0, total_n, dtype=np.float64)
+    l1_values = np.linspace(2.0, 5.0, total_n, dtype=np.float64)
+
+    h1_path = tmp_path / "H-H1_GWOSC_4KHZ_R1-window.hdf5"
+    l1_path = tmp_path / "L-L1_GWOSC_4KHZ_R1-window.hdf5"
+    _write_strain_hdf5(h1_path, h1_values, xstart=gps_start_local, sample_rate_hz=sample_rate_hz)
+    _write_strain_hdf5(l1_path, l1_values, xstart=gps_start_local, sample_rate_hz=sample_rate_hz)
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "s1_fetch_strain.py",
+            "--run",
+            run_id,
+            "--event-id",
+            "GW170814",
+            "--detectors",
+            "H1,L1",
+            "--duration-s",
+            "32",
+            "--local-hdf5",
+            f"H1={h1_path}",
+            "--local-hdf5",
+            f"L1={l1_path}",
+            "--offline",
+        ],
+    )
+
+    rc = s1_fetch_strain.main()
+    assert rc == 0
+
+    out = runs_root / run_id / "s1_fetch_strain" / "outputs"
+    payload = np.load(out / "strain.npz")
+    assert float(payload["gps_start"]) == pytest.approx(gps_start_target)
+    assert payload["H1"].tolist() == pytest.approx(h1_values[i_start:i_end].tolist())
+    assert payload["L1"].tolist() == pytest.approx(l1_values[i_start:i_end].tolist())
+
+
 def test_reuse_if_present_rejects_cached_nonfinite_and_refetches_local(monkeypatch, tmp_path: Path):
     runs_root = tmp_path / "runs"
     run_id = "reuse_nonfinite"
@@ -575,3 +738,61 @@ def test_local_hdf5_nonfinite_samples_are_sanitized_and_recorded(monkeypatch, tm
     info = provenance["strain_sanitization"]["H1"]
     assert info["applied"] is True
     assert info["nonfinite_count_raw"] == 2
+
+
+def test_local_hdf5_entirely_nonfinite_detector_is_dropped_if_other_detector_valid(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "drop_bad_h1_keep_l1"
+    run_valid = runs_root / run_id / "RUN_VALID"
+    run_valid.mkdir(parents=True, exist_ok=True)
+    (run_valid / "verdict.json").write_text('{"verdict":"PASS"}', encoding="utf-8")
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    h1_path = tmp_path / "H1_all_nan.hdf5"
+    l1_path = tmp_path / "L1_good.hdf5"
+    h1_path.write_bytes(b"placeholder")
+    l1_path.write_bytes(b"placeholder")
+
+    def _fake_load(path: Path):
+        if path.name.startswith("H1"):
+            return np.array([np.nan, np.nan, np.nan, np.nan], dtype=np.float64), 4096.0, 100.0, "stub"
+        return np.array([10.0, 11.0, 12.0, 13.0], dtype=np.float64), 4096.0, 100.0, "stub"
+
+    monkeypatch.setattr(s1_fetch_strain, "_load_local_hdf5", _fake_load)
+    monkeypatch.setattr(s1_fetch_strain, "_fetch_gps_center", lambda *_a, **_k: 102.0)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "s1_fetch_strain.py",
+            "--run",
+            run_id,
+            "--event-id",
+            "GW190910_112807",
+            "--detectors",
+            "H1,L1",
+            "--duration-s",
+            "4",
+            "--local-hdf5",
+            f"H1={h1_path}",
+            "--local-hdf5",
+            f"L1={l1_path}",
+        ],
+    )
+
+    rc = s1_fetch_strain.main()
+    assert rc == 0
+
+    out = runs_root / run_id / "s1_fetch_strain" / "outputs"
+    payload = np.load(out / "strain.npz")
+    assert "H1" not in payload.files
+    assert payload["L1"].tolist() == pytest.approx([10.0, 11.0, 12.0, 13.0])
+
+    provenance = json.loads((out / "provenance.json").read_text(encoding="utf-8"))
+    assert provenance["detectors"] == ["L1"]
+    assert provenance["detectors_requested"] == ["H1", "L1"]
+    assert provenance["detector_rejections"]["H1"]["policy"] == (
+        "drop_entirely_nonfinite_detector_if_others_available"
+    )
