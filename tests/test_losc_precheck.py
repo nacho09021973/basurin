@@ -143,3 +143,47 @@ def test_losc_precheck_keeps_root_level_matching(tmp_path: Path) -> None:
     assert "h5_count=2" in out
     assert "match_count_H1=1" in out
     assert "match_count_L1=1" in out
+
+
+LIST_SCRIPT = REPO_ROOT / "tools" / "list_losc_events.py"
+
+
+def _run_list(args: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return subprocess.run(
+        [sys.executable, str(LIST_SCRIPT), *args],
+        cwd=str(cwd or REPO_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_list_losc_events_returns_sorted_visible_event_dirs(tmp_path: Path) -> None:
+    losc_root = tmp_path / "losc"
+    (losc_root / "GW190412").mkdir(parents=True)
+    (losc_root / "GW150914").mkdir()
+    (losc_root / "README.txt").write_text("not a dir", encoding="utf-8")
+
+    proc = _run_list(["--losc-root", str(losc_root)])
+    out = proc.stdout + proc.stderr
+
+    assert proc.returncode == 0, out
+    assert "LOSC_ROOT_EFFECTIVE=" in out
+    assert "event_dir_count=2" in out
+    assert out.splitlines()[-2:] == ["GW150914", "GW190412"]
+
+
+def test_list_losc_events_check_nonempty_fails_with_actionable_hint(tmp_path: Path) -> None:
+    losc_root = tmp_path / "losc"
+    losc_root.mkdir(parents=True)
+
+    proc = _run_list(["--losc-root", str(losc_root), "--check-nonempty"])
+    out = proc.stdout + proc.stderr
+
+    assert proc.returncode == 2, out
+    assert "event_dir_count=0" in out
+    assert "data/losc/<EVENT_ID>/" in out
+    assert "gw_events/strain/<EVENT_ID>/" in out

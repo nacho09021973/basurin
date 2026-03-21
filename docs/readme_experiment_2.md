@@ -28,9 +28,9 @@ python -V
 Se asume que el cache está en:
 - `data/losc/<EVENT_ID>/...*.h5|*.hdf5`
 
-Comprueba qué eventos tienes:
+Comprueba qué eventos tienes con el helper canónico:
 ```bash
-find data/losc -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
+python tools/list_losc_events.py --losc-root data/losc
 ```
 
 > Recomendación: usar un `GW*` canónico que exista localmente (por ejemplo `GW190924_021846`), para minimizar problemas de metadatos.
