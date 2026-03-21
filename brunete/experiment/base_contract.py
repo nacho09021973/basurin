@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from basurin_io import resolve_out_root, sha256_file
+from basurin_io import resolve_out_root
 
 
 MODE_TO_BATCH_KEY = {
@@ -47,43 +47,12 @@ def assert_stage_pass(stage_dir: str | Path) -> dict[str, Any]:
     return verdict
 
 
-def load_geometry_summary(
-    classify_run_id: str,
-    runs_root: str | Path | None = None,
-) -> tuple[Path, dict[str, Any]]:
+def load_geometry_summary(classify_run_id: str, runs_root: str | Path | None = None) -> tuple[Path, dict[str, Any]]:
     stage_dir = resolve_classify_stage_dir(classify_run_id, runs_root)
     assert_stage_pass(stage_dir)
     summary_path = stage_dir / "outputs" / "geometry_summary.json"
     payload = load_json(summary_path)
     return stage_dir, payload
-
-
-def geometry_summary_input_hashes(
-    classify_run_id: str,
-    runs_root: str | Path | None = None,
-) -> dict[str, str]:
-    stage_dir, payload = load_geometry_summary(classify_run_id, runs_root)
-    hashes = {
-        "geometry_summary": sha256_file(stage_dir / "outputs" / "geometry_summary.json"),
-    }
-    for mode, key in MODE_TO_BATCH_KEY.items():
-        batch_run_id = payload.get(key)
-        if isinstance(batch_run_id, str) and batch_run_id:
-            batch_results = resolve_runs_root(runs_root) / batch_run_id / "run_batch" / "outputs" / "results.json"
-            if batch_results.exists():
-                hashes[f"batch_{mode}_results"] = sha256_file(batch_results)
-    return hashes
-
-
-def geometry_summary_rows(
-    classify_run_id: str,
-    runs_root: str | Path | None = None,
-) -> list[dict[str, Any]]:
-    _stage_dir, payload = load_geometry_summary(classify_run_id, runs_root)
-    rows = payload.get("rows")
-    if not isinstance(rows, list):
-        raise ValueError("geometry_summary.json must contain a list at key 'rows'")
-    return [row for row in rows if isinstance(row, dict)]
 
 
 def get_batch_run_id(classify_run_id: str, mode: str, runs_root: str | Path | None = None) -> str:
@@ -107,12 +76,18 @@ def resolve_event_run_dirs(
         raise ValueError(f"Unsupported mode: {mode!r}")
 
     runs_root_path = resolve_runs_root(runs_root)
-    rows = geometry_summary_rows(classify_run_id, runs_root_path)
+    _stage_dir, summary = load_geometry_summary(classify_run_id, runs_root_path)
     batch_run_id = get_batch_run_id(classify_run_id, mode, runs_root_path)
     event_key = MODE_TO_EVENT_RUN_KEY[mode]
 
+    rows = summary.get("rows")
+    if not isinstance(rows, list):
+        raise ValueError("geometry_summary.json must contain a list at key 'rows'")
+
     resolved: list[dict[str, Any]] = []
     for row in rows:
+        if not isinstance(row, dict):
+            continue
         event_run_id = row.get(event_key)
         if not isinstance(event_run_id, str) or not event_run_id.strip():
             continue
@@ -125,7 +100,6 @@ def resolve_event_run_dirs(
                 "event_run_id": event_run_id,
                 "batch_run_id": batch_run_id,
                 "run_dir": event_stage_dir,
-                "classify_row": row,
             }
         )
 
@@ -149,40 +123,6 @@ def resolve_all_event_run_ids(classify_run_id: str, runs_root: str | Path | None
                 seen.add(run_id)
                 run_ids.append(run_id)
     return run_ids
-
-
-def resolve_joint_support_event_rows(
-    classify_run_id: str,
-    runs_root: str | Path | None = None,
-    *,
-    prefer_mode: str = "220",
-) -> list[dict[str, Any]]:
-    rows = geometry_summary_rows(classify_run_id, runs_root)
-    resolved: list[dict[str, Any]] = []
-    preferred_key = MODE_TO_EVENT_RUN_KEY[prefer_mode]
-    fallback_key = MODE_TO_EVENT_RUN_KEY["221" if prefer_mode == "220" else "220"]
-    preferred_batch = get_batch_run_id(classify_run_id, prefer_mode, runs_root)
-    fallback_mode = "221" if prefer_mode == "220" else "220"
-    fallback_batch = get_batch_run_id(classify_run_id, fallback_mode, runs_root)
-    root = resolve_runs_root(runs_root)
-
-    for row in rows:
-        event_run_id = row.get(preferred_key) or row.get(fallback_key)
-        batch_run_id = preferred_batch if row.get(preferred_key) else fallback_batch
-        if not isinstance(event_run_id, str) or not event_run_id.strip():
-            continue
-        event_stage_dir = root / batch_run_id / "run_batch" / "event_runs" / event_run_id
-        assert_stage_pass(event_stage_dir)
-        resolved.append(
-            {
-                "event_id": row.get("event_id", event_run_id),
-                "event_run_id": event_run_id,
-                "batch_run_id": batch_run_id,
-                "run_dir": event_stage_dir,
-                "classify_row": row,
-            }
-        )
-    return resolved
 
 
 def ensure_experiment_dir(classify_run_id: str, experiment_name: str, runs_root: str | Path | None = None) -> Path:
