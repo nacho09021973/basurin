@@ -11,26 +11,26 @@ Esta fase tiene dos niveles conceptuales distintos y no deben confundirse:
 
 ---
 
-## Estado actual (2026-03-16)
+## Estado actual (actualizado 2026-03-20)
 
 La fase 3 ya no está solo en diagnóstico ad-hoc: existe un **experimento formal reproducible**, ejecutado sobre un **host-run con `RUN_VALID=PASS`**, con artefactos contractuales bajo `runs/<run_id>/experiment/phase3_physkey_common/...`.
 
 ### Host-run canónico usado para la validación real
 
-- `host_phase3_physkey_20260316T001000Z`
+- `mvp_GW150914_221info_20260320T105521Z`
 
 ### Batches validados
 
-- `batch_with_t0_220_eps2500_20260316T081911Z`
-- `batch_with_t0_221_eps2500_20260316T082550Z`
+- `batch_with_t0_220_eps2500_20260320T113433Z`
+- `batch_with_t0_221_eps2500_20260320T114207Z`
 
 ### Entrypoint formal
 
 ```bash
 python -m mvp.experiment_phase3_physkey_common \
-  --run-id host_phase3_physkey_20260316T001000Z \
-  --batch-220 batch_with_t0_220_eps2500_20260316T081911Z \
-  --batch-221 batch_with_t0_221_eps2500_20260316T082550Z
+  --run-id mvp_GW150914_221info_20260320T105521Z \
+  --batch-220 batch_with_t0_220_eps2500_20260320T113433Z \
+  --batch-221 batch_with_t0_221_eps2500_20260320T114207Z
 ```
 
 ---
@@ -87,9 +87,9 @@ Esto evita ambigüedad de parseo.
 
 ### Población válida usada por el análisis
 
-- `n_events_valid_220 = 37`
-- `n_events_valid_221 = 37`
-- `n_common_events = 37`
+- `n_events_valid_220 = 38`
+- `n_events_valid_221 = 38`
+- `n_common_events = 38`
 
 ### Soporte físico global
 
@@ -165,14 +165,18 @@ No debe asumirse que:
 
 ### Artefacto formal reproducible
 
-Bajo el host-run validado:
+Bajo el host-run validado (corrida canónica 2026-03-20):
 
-- `runs/host_phase3_physkey_20260316T001000Z/experiment/phase3_physkey_common/outputs/summary_physkey_common.json`
-- `runs/host_phase3_physkey_20260316T001000Z/experiment/phase3_physkey_common/outputs/per_event_physkey_intersection.csv`
-- `runs/host_phase3_physkey_20260316T001000Z/experiment/phase3_physkey_common/stage_summary.json`
-- `runs/host_phase3_physkey_20260316T001000Z/experiment/phase3_physkey_common/manifest.json`
+- `runs/mvp_GW150914_221info_20260320T105521Z/experiment/phase3_physkey_common/outputs/summary_physkey_common.json`
+- `runs/mvp_GW150914_221info_20260320T105521Z/experiment/phase3_physkey_common/outputs/per_event_physkey_intersection.csv`
+- `runs/mvp_GW150914_221info_20260320T105521Z/experiment/phase3_physkey_common/stage_summary.json`
+- `runs/mvp_GW150914_221info_20260320T105521Z/experiment/phase3_physkey_common/manifest.json`
 
 ### Diagnósticos históricos previos (no canónicos)
+
+#### Corrida canónica anterior (2026-03-16, reemplazada por la de 2026-03-20)
+
+- `runs/host_phase3_physkey_20260316T001000Z/experiment/phase3_physkey_common/outputs/summary_physkey_common.json`
 
 #### Diagnóstico exacto por `geometry_id`
 
@@ -246,7 +250,7 @@ Registrar explícitamente:
 - artefactos exactos emitidos
 - si el análisis es canónico o solo diagnóstico
 
-A fecha 2026-03-16, **la fase 3 es canónica y operativa**.
+A fecha 2026-03-20, **la fase 3 es canónica y operativa** (corrida canónica reemplazada por los batches `eps2500` del 2026-03-20; la corrida anterior de 2026-03-16 queda como referencia histórica).
 
 ---
 

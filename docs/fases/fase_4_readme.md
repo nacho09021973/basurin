@@ -48,7 +48,7 @@ Usar:
 
 ---
 
-## Estado actual (2026-03-16)
+## Estado actual (2026-03-16, referencia histórica)
 
 ### Artefactos históricos obsoletos
 
@@ -61,17 +61,54 @@ Motivo:
 
 - dependían de batch runs antiguos ya retirados a cuarentena
 
-### Veredicto actual
+---
 
-E5 **es rehacible**, porque con los batches nuevos:
+## Estado canónico auditado (2026-03-20)
 
-- `K220_inter_K221 = 800 > 0`
+E5 ha sido ejecutada canónicamente sobre los batches del 2026-03-20.
+
+### Corrida canónica
+
+- **Batch 220:** `batch_with_t0_220_eps2500_20260320T113433Z`
+- **Batch 221:** `batch_with_t0_221_eps2500_20260320T114207Z`
+- **Host run:** `mvp_GW150914_221info_20260320T105521Z`
+
+### Métricas observadas (artefactos auditados)
+
+- `PASS_220 = 38`, `PASS_221 = 38`, `COMMON_PASS = 38`
 - `n_empty_intersection_events = 0`
+- `n_events_with_nonempty_hawking = 38`
+- `n_rows_hawking_fail = 0`
+- Para los 38 eventos: `n_k221 == n_k_common` y `n_k_common == n_k_hawking`
 
-Pero E5 **no debe reinterpretarse con la semántica histórica sin revisión**, porque:
+En términos de soporte:
 
-- la hipótesis antigua `K220 ⊂ K221` ya no se cumple
-- ahora el soporte común parece alinearse con `K221 ⊂ K220`
+```
+K_common = K220 ∩ K221 = K221
+K_hawking = K_common
+```
+
+### Conclusión soportada por los artefactos auditados
+
+En la configuración canónica actual (epsilon=2500, cohorte de 38 eventos):
+
+- El **221 es el discriminante efectivo** del soporte respecto a 220: `K_common = K221 ⊂ K220`.
+- El filtro de Hawking **valida compatibilidad física** del soporte común, pero **no lo reduce adicionalmente**: `K_hawking = K_common`.
+
+### Alcance y limitaciones explícitas
+
+Estas conclusiones son **específicas de la configuración canónica actual** y NO deben generalizarse:
+
+- No implica que "221 nunca discrimina espectralmente" bajo otras configuraciones o valores de epsilon.
+- No implica que "Hawking nunca discrimina" en general.
+- **"Compatible con Hawking"** (ninguna fila falla el test de área) **≠ "discriminado por Hawking"** (Hawking reduce el soporte).
+
+En esta corrida, el soporte `K_common` ya resultante de `220 ∩ 221` es íntegramente compatible con la restricción de Hawking; por eso Hawking no añade recorte. Este resultado depende del epsilon=2500 y de la cohorte offline disponible. Una cohorte más amplia o un epsilon distinto podría producir resultados distintos.
+
+### Artefactos canónicos de la corrida 2026-03-20
+
+- `runs/mvp_GW150914_221info_20260320T105521Z/experiment/phase4_hawking_area_common_support/outputs/hawking_area_summary.json`
+- `runs/mvp_GW150914_221info_20260320T105521Z/experiment/phase4_hawking_area_common_support/outputs/per_event_common_support.csv`
 
 ---
 
@@ -85,7 +122,7 @@ La fase 4 solo puede cerrarse cuando exista una implementación reproducible que
 - escriba artefactos bajo `runs/<analysis_run_id>/experiment/...`
 - documente explícitamente el soporte común usado
 
-A día de hoy, E5 está **habilitada**, pero **todavía no está reruneada canónicamente**.
+A fecha 2026-03-20, E5 **está reruneada canónicamente** sobre los batches `eps2500` del 2026-03-20.
 
 ---
 
