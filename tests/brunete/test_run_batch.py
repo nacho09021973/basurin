@@ -87,8 +87,10 @@ def test_run_batch_mode_221_uses_multimode_engine_and_records_failures(tmp_path,
     atlas.write_text("{}\n", encoding="utf-8")
     losc_root = tmp_path / "data" / "losc"
     losc_root.mkdir(parents=True)
+    captured: dict[str, object] = {}
 
     def fake_run_multimode_event(**kwargs):
+        captured.update(kwargs)
         out_root = Path(os.environ["BASURIN_RUNS_ROOT"])
         run_id = kwargs["run_id"]
         run_dir = out_root / run_id
@@ -126,6 +128,7 @@ def test_run_batch_mode_221_uses_multimode_engine_and_records_failures(tmp_path,
     assert rows[0]["mode"] == "221"
     assert rows[0]["status"] == "FAIL"
     assert "multimode gate failed" in rows[0]["failure_reason"]
+    assert captured["minimal_run"] is True
 
     summary = json.loads((stage_dir / "stage_summary.json").read_text(encoding="utf-8"))
     assert summary["stage"] == "run_batch"

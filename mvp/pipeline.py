@@ -1307,6 +1307,7 @@ def run_multimode_event(
     threshold_mode: str = "d2",
     delta_lnl: float = 3.0,
     informative_threshold: float = 0.80,
+    minimal_run: bool = False,
 ) -> tuple[int, str]:
     event_id = _require_nonempty_event_id(event_id, "--event-id")
     dt_start_s, dt_source = _resolve_adaptive_dt_start(event_id, dt_start_s, final_mass_msun, redshift)
@@ -1383,6 +1384,8 @@ def run_multimode_event(
         },
     }
     _write_timeline(out_root, run_id, timeline)
+    skip_family_branch = minimal_run
+    skip_s4d = minimal_run
 
     s0_args = _build_s0_oracle_args(
         run_id=run_id,
@@ -1580,24 +1583,31 @@ def run_multimode_event(
         _fail_run(out_root, run_id, timeline, f"s4_geometry_filter failed: exit={rc}")
         return rc, run_id
 
-    s4c_args = ["--run-id", run_id, "--atlas-path", atlas_path]
-    rc = _run_stage("s4c_kerr_consistency.py", s4c_args, "s4c_kerr_consistency", out_root, run_id, timeline, stage_timeout_s)
-    if rc != 0:
-        _fail_run(out_root, run_id, timeline, f"s4c_kerr_consistency failed: exit={rc}")
-        return rc, run_id
+    if not skip_family_branch:
+        s4c_args = ["--run-id", run_id, "--atlas-path", atlas_path]
+        rc = _run_stage("s4c_kerr_consistency.py", s4c_args, "s4c_kerr_consistency", out_root, run_id, timeline, stage_timeout_s)
+        if rc != 0:
+            _fail_run(out_root, run_id, timeline, f"s4c_kerr_consistency failed: exit={rc}")
+            return rc, run_id
 
-    # Phase B: Kerr inference from multimode (canonical; does not replace s4/s4c)
-    s4d_args = ["--run-id", run_id]
-    rc = _run_stage("s4d_kerr_from_multimode.py", s4d_args, "s4d_kerr_from_multimode", out_root, run_id, timeline, stage_timeout_s)
-    if rc != 0:
-        _fail_run(out_root, run_id, timeline, f"s4d_kerr_from_multimode failed: exit={rc}")
-        return rc, run_id
+    if not skip_s4d:
+        # Phase B: Kerr inference from multimode (canonical; does not replace s4/s4c)
+        s4d_args = ["--run-id", run_id]
+        rc = _run_stage("s4d_kerr_from_multimode.py", s4d_args, "s4d_kerr_from_multimode", out_root, run_id, timeline, stage_timeout_s)
+        if rc != 0:
+            _fail_run(out_root, run_id, timeline, f"s4d_kerr_from_multimode failed: exit={rc}")
+            return rc, run_id
 
     s4k_args = ["--run-id", run_id]
     rc = _run_stage("s4k_event_support_region.py", s4k_args, "s4k_event_support_region", out_root, run_id, timeline, stage_timeout_s)
     if rc != 0:
         _fail_run(out_root, run_id, timeline, f"s4k_event_support_region failed: exit={rc}")
         return rc, run_id
+
+    if skip_family_branch:
+        timeline["multimode_results"] = _parse_multimode_results(out_root, run_id)
+        _finalize_run_timeline(out_root, run_id, timeline)
+        return 0, run_id
 
     s7_args = ["--run-id", run_id]
     rc = _run_stage("s7_beyond_kerr_deviation_score.py", s7_args, "s7_beyond_kerr_deviation_score", out_root, run_id, timeline, stage_timeout_s)

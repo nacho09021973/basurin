@@ -157,6 +157,112 @@ def test_classify_geometries_fails_when_one_batch_is_not_pass(tmp_path, monkeypa
     assert "not PASS" in summary["error"]
 
 
+def test_classify_geometries_uses_mode_221_support_region_when_n_compatible_is_saturated(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runs_root = tmp_path / "runs_root"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    _write_batch_run(
+        runs_root,
+        run_id="batch_220_sat",
+        mode="220",
+        rows=[
+            {
+                "event_id": "GW150914",
+                "mode": "220",
+                "event_run_id": "brunete_GW150914_m220",
+                "status": "PASS",
+                "n_compatible": 2637,
+            },
+            {
+                "event_id": "GW170814",
+                "mode": "220",
+                "event_run_id": "brunete_GW170814_m220",
+                "status": "PASS",
+                "n_compatible": 2637,
+            },
+            {
+                "event_id": "GW190910_112807",
+                "mode": "220",
+                "event_run_id": "brunete_GW190910_112807_m220",
+                "status": "PASS",
+                "n_compatible": 2637,
+            },
+        ],
+    )
+    _write_batch_run(
+        runs_root,
+        run_id="batch_221_sat",
+        mode="221",
+        rows=[
+            {
+                "event_id": "GW150914",
+                "mode": "221",
+                "event_run_id": "brunete_GW150914_m221",
+                "status": "PASS",
+                "n_compatible": 2637,
+                "support_region_status": "SUPPORT_REGION_AVAILABLE",
+                "support_region_n_final": 5,
+            },
+            {
+                "event_id": "GW170814",
+                "mode": "221",
+                "event_run_id": "brunete_GW170814_m221",
+                "status": "PASS",
+                "n_compatible": 2637,
+                "support_region_status": "SUPPORT_REGION_AVAILABLE",
+                "support_region_n_final": 1,
+            },
+            {
+                "event_id": "GW190910_112807",
+                "mode": "221",
+                "event_run_id": "brunete_GW190910_112807_m221",
+                "status": "PASS",
+                "n_compatible": 2637,
+                "support_region_status": "NO_COMMON_REGION",
+                "support_region_n_final": 0,
+            },
+        ],
+    )
+
+    rc = classify_geometries.main([
+        "--batch-220",
+        "batch_220_sat",
+        "--batch-221",
+        "batch_221_sat",
+        "--run-id",
+        "classify_sat",
+    ])
+
+    assert rc == 0
+
+    payload = json.loads(
+        (runs_root / "classify_sat" / "classify_geometries" / "outputs" / "geometry_summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    rows_by_event = {row["event_id"]: row for row in payload["rows"]}
+
+    assert rows_by_event["GW150914"]["n_compatible_220"] == 2637
+    assert rows_by_event["GW150914"]["n_compatible_221"] == 2637
+    assert rows_by_event["GW150914"]["support_region_n_final_221"] == 5
+    assert rows_by_event["GW150914"]["classification"] == "common_nonempty_both_221_support_multi"
+    assert rows_by_event["GW150914"]["has_joint_support"] is True
+
+    assert rows_by_event["GW170814"]["classification"] == "common_nonempty_both_221_support_singleton"
+    assert rows_by_event["GW170814"]["has_joint_support"] is True
+
+    assert rows_by_event["GW190910_112807"]["classification"] == "common_nonempty_both_221_no_common_region"
+    assert rows_by_event["GW190910_112807"]["has_joint_support"] is False
+
+    assert payload["summary"]["n_joint_support"] == 2
+    assert payload["summary"]["classification_counts"]["common_nonempty_both_221_support_multi"] == 1
+    assert payload["summary"]["classification_counts"]["common_nonempty_both_221_support_singleton"] == 1
+    assert payload["summary"]["classification_counts"]["common_nonempty_both_221_no_common_region"] == 1
+
+
 def _write_batch_run(
     runs_root: Path,
     *,
