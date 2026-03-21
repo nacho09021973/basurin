@@ -39,6 +39,8 @@ from basurin_io import resolve_out_root, write_json_atomic, sha256_file, utc_now
 
 STAGE = "s1_fetch_strain"
 DEFAULT_T0_REFERENCE_CATALOG = Path(__file__).resolve().parents[1] / "gwtc_events_t0.json"
+DEFAULT_WINDOW_CATALOG = Path(__file__).resolve().parent / "assets" / "window_catalog_v1.json"
+DEFAULT_EVENT_METADATA_DIR = Path(__file__).resolve().parents[1] / "docs" / "ringdown" / "event_metadata"
 DEFAULT_MAX_NONFINITE_FRACTION = 1e-5
 DEFAULT_MIN_ALLOWED_NONFINITE_COUNT = 8
 
@@ -135,7 +137,16 @@ def _generate_synthetic_strain(
 
 def _extract_gps_from_catalog_entry(entry: Any) -> float | None:
     if isinstance(entry, dict):
-        for key in ("GPS", "gps", "t0_gps", "event_time_gps", "gpstime", "gps_time"):
+        for key in (
+            "GPS",
+            "gps",
+            "t0_gps",
+            "event_time_gps",
+            "t_coalescence_gps",
+            "t0_ref_gps",
+            "gpstime",
+            "gps_time",
+        ):
             value = entry.get(key)
             if isinstance(value, (int, float)):
                 return float(value)
@@ -166,6 +177,34 @@ def _fetch_gps_center(event_id: str) -> float:
                 gps = _extract_gps_from_catalog_entry(catalog.get(lookup_key))
                 if gps is not None:
                     print(f"[s1_fetch_strain] GPS resolved from canonical catalog: {gps}", flush=True)
+                    return gps
+    if DEFAULT_EVENT_METADATA_DIR.exists():
+        print(
+            f"[s1_fetch_strain] GPS lookup: reading event metadata under {DEFAULT_EVENT_METADATA_DIR}",
+            flush=True,
+        )
+        for lookup_key in lookup_keys:
+            metadata_path = DEFAULT_EVENT_METADATA_DIR / f"{lookup_key}_metadata.json"
+            if not metadata_path.exists():
+                continue
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            gps = _extract_gps_from_catalog_entry(payload)
+            if gps is not None:
+                print(f"[s1_fetch_strain] GPS resolved from event metadata: {gps}", flush=True)
+                return gps
+    if DEFAULT_WINDOW_CATALOG.exists():
+        print(
+            f"[s1_fetch_strain] GPS lookup: reading window catalog {DEFAULT_WINDOW_CATALOG}",
+            flush=True,
+        )
+        with open(DEFAULT_WINDOW_CATALOG, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+        if isinstance(catalog, dict):
+            for lookup_key in lookup_keys:
+                gps = _extract_gps_from_catalog_entry(catalog.get(lookup_key))
+                if gps is not None:
+                    print(f"[s1_fetch_strain] GPS resolved from window catalog: {gps}", flush=True)
                     return gps
     print(f"[s1_fetch_strain] GPS lookup: querying GWOSC API for {event_id} ...", flush=True)
     try:
@@ -589,6 +628,12 @@ def _sanitize_strain_array(
     return sanitized, details
 
 
+def _is_entirely_nonfinite_error(exc: Exception, detector: str) -> bool:
+    return isinstance(exc, ValueError) and (
+        f"{detector} strain is entirely non-finite" in str(exc)
+    )
+
+
 def _try_reuse(
     ctx,
     event_id: str,
@@ -934,6 +979,7 @@ def main() -> int:
         local_inputs_rel: dict[str, str] = {}
         sanitization_by_det: dict[str, dict[str, Any]] = {}
         window_crop_by_det: dict[str, dict[str, Any]] = {}
+        detector_rejections: dict[str, dict[str, Any]] = {}
         max_nonfinite_fraction = _max_nonfinite_fraction()
 
         for i, det in enumerate(detectors, 1):
@@ -983,11 +1029,25 @@ def main() -> int:
                     args.duration_s,
                     timeout_s=args.fetch_timeout_s,
                 )
-            strain, sanitization = _sanitize_strain_array(
-                np.asarray(strain, dtype=np.float64),
-                detector=det,
-                max_nonfinite_fraction=max_nonfinite_fraction,
-            )
+            try:
+                strain, sanitization = _sanitize_strain_array(
+                    np.asarray(strain, dtype=np.float64),
+                    detector=det,
+                    max_nonfinite_fraction=max_nonfinite_fraction,
+                )
+            except Exception as exc:
+                if local_mode and len(detectors) > 1 and _is_entirely_nonfinite_error(exc, det):
+                    detector_rejections[det] = {
+                        "reason": str(exc),
+                        "source": "local_hdf5",
+                        "policy": "drop_entirely_nonfinite_detector_if_others_available",
+                    }
+                    print(
+                        f"[s1_fetch_strain] WARNING: dropping detector {det}: {exc}",
+                        flush=True,
+                    )
+                    continue
+                raise
             sanitization_by_det[det] = sanitization
             if sanitization["applied"]:
                 print(
@@ -1003,6 +1063,16 @@ def main() -> int:
             elif abs(sample_rate_hz - sr) > 1e-6:
                 abort(ctx, f"sample_rate mismatch: {sample_rate_hz} vs {sr}")
 
+        if not strains:
+            if detector_rejections:
+                reasons = "; ".join(
+                    f"{det}: {payload['reason']}" for det, payload in sorted(detector_rejections.items())
+                )
+                abort(ctx, f"no usable detectors after local validation: {reasons}")
+            abort(ctx, "no strain downloaded")
+
+        valid_detectors = list(strains.keys())
+
         if sample_rate_hz is None:
             abort(ctx, "no strain downloaded")
         if gps_start is None:
@@ -1013,7 +1083,7 @@ def main() -> int:
             "gps_start": np.float64(gps_start),
             "duration_s": np.float64(args.duration_s),
         }
-        for det in detectors:
+        for det in valid_detectors:
             npz_payload[det] = strains[det]
         npz_path = ctx.outputs_dir / "strain.npz"
         np.savez(npz_path, **npz_payload)
@@ -1021,7 +1091,9 @@ def main() -> int:
         provenance = {
             "event_id": args.event_id,
             "source": "local_hdf5" if local_mode else ("synthetic" if args.synthetic else "GWOSC"),
-            "detectors": detectors, "gps_center": gps_center,
+            "detectors": valid_detectors,
+            "detectors_requested": detectors,
+            "gps_center": gps_center,
             "gps_start": gps_start, "duration_s": args.duration_s,
             "sample_rate_hz": sample_rate_hz, "library_version": library_version,
             "sha256_per_detector": sha_by_det, "timestamp": utc_now_iso(),
@@ -1035,6 +1107,8 @@ def main() -> int:
                 det: sha256_file(ctx.stage_dir / provenance["local_inputs"][det]) for det in provenance["local_inputs"]
             }
             provenance["local_window_crop"] = window_crop_by_det
+        if detector_rejections:
+            provenance["detector_rejections"] = detector_rejections
         prov_path = ctx.outputs_dir / "provenance.json"
         write_json_atomic(prov_path, provenance)
 
@@ -1051,11 +1125,13 @@ def main() -> int:
             ctx,
             artifacts={"strain_npz": npz_path, "provenance": prov_path},
             results={
-                "detectors": detectors,
+                "detectors": valid_detectors,
+                "detectors_requested": detectors,
                 "sample_rate_hz": sample_rate_hz,
                 "synthetic_gps_center_fallback": float(args.synthetic_gps_center_fallback),
                 "strain_sanitization": sanitization_by_det,
                 "local_window_crop": window_crop_by_det if local_mode else {},
+                "detector_rejections": detector_rejections,
             },
         )
         _write_run_valid_verdict(args.run, "PASS", "s1_fetch_strain completed successfully")
