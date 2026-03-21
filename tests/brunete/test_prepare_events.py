@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import brunete.brunete_audit_cohort_authority as audit_cohort_authority
 import brunete.brunete_list_events as list_events
 import brunete.brunete_prepare_events as prepare_events
 
@@ -170,3 +171,91 @@ def test_list_events_marks_run_valid_fail_when_no_visible_events_are_discovered(
     assert summary["run_id"] == "list_fail"
     assert summary["verdict"] == "FAIL"
     assert "no visible events discovered" in summary["error"]
+
+
+def test_audit_cohort_authority_passes_for_unique_repo_backed_cohort(tmp_path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs_root"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+    monkeypatch.setattr(audit_cohort_authority, "_REPO_ROOT", tmp_path)
+
+    source_file = tmp_path / "events_support_multi.txt"
+    source_file.write_text("GW150914\nGW190412\n", encoding="utf-8")
+    registry_path = tmp_path / "authority_registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "brunete_cohort_authority_v1",
+                "cohorts": {
+                    "support_multi": {
+                        "authority_status": "PASS",
+                        "authority_kind": "repo_file",
+                        "path": source_file.name,
+                        "description": "test registry",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = audit_cohort_authority.main([
+        "--run-id",
+        "audit_pass",
+        "--cohort-key",
+        "support_multi",
+        "--registry-path",
+        str(registry_path),
+    ])
+
+    assert rc == 0
+
+    stage_dir = runs_root / "audit_pass" / "audit_cohort_authority"
+    verdict = json.loads((stage_dir / "RUN_VALID" / "verdict.json").read_text(encoding="utf-8"))
+    assert verdict["verdict"] == "PASS"
+
+    report = json.loads((stage_dir / "outputs" / "authority_report.json").read_text(encoding="utf-8"))
+    assert report["authority_status"] == "PASS"
+    assert report["n_events"] == 2
+
+
+def test_audit_cohort_authority_fails_when_no_unique_authority_exists(tmp_path, monkeypatch) -> None:
+    runs_root = tmp_path / "runs_root"
+    monkeypatch.setenv("BASURIN_RUNS_ROOT", str(runs_root))
+
+    registry_path = tmp_path / "authority_registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "brunete_cohort_authority_v1",
+                "cohorts": {
+                    "visible_losc_events": {
+                        "authority_status": "FAIL",
+                        "authority_kind": "absent",
+                        "description": "test registry",
+                        "reason": "no unique authoritative source exists",
+                        "materializers": ["brunete/brunete_list_events.py"],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = audit_cohort_authority.main([
+        "--run-id",
+        "audit_fail",
+        "--cohort-key",
+        "visible_losc_events",
+        "--registry-path",
+        str(registry_path),
+    ])
+
+    assert rc == 2
+
+    stage_dir = runs_root / "audit_fail" / "audit_cohort_authority"
+    verdict = json.loads((stage_dir / "RUN_VALID" / "verdict.json").read_text(encoding="utf-8"))
+    assert verdict["verdict"] == "FAIL"
+
+    report = json.loads((stage_dir / "outputs" / "authority_report.json").read_text(encoding="utf-8"))
+    assert report["authority_status"] == "FAIL"
+    assert report["materializers"] == ["brunete/brunete_list_events.py"]

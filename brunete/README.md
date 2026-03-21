@@ -1,12 +1,13 @@
 # BRUNETE
 
 BRUNETE es la fachada operativa nueva y mínima sobre este checkout de BASURIN.
-No borra ni renombra código legacy. Expone cuatro entrypoints públicos:
+No borra ni renombra código legacy. Expone cinco entrypoints públicos:
 
 1. `brunete_list_events.py`
-2. `brunete_prepare_events.py`
-3. `brunete_run_batch.py`
-4. `brunete_classify_geometries.py`
+2. `brunete_audit_cohort_authority.py`
+3. `brunete_prepare_events.py`
+4. `brunete_run_batch.py`
+5. `brunete_classify_geometries.py`
 
 ## Contrato Común
 
@@ -32,12 +33,30 @@ El contrato de metadata es homogéneo:
 Materializa una lista canónica y ordenada de los `EVENT_ID` visibles bajo
 `data/losc/<EVENT_ID>/` para no tener que reconstruir la cohorte a mano.
 
+Importante: este output es un *snapshot operativo* de `external input` local;
+no congela por sí solo una autoridad versionada del repo.
+
 Output:
 
 - `runs/<run_id>/list_events/outputs/visible_events.txt`
 - `runs/<run_id>/list_events/outputs/events_catalog.json`
 
-### 2. `prepare_events`
+### 2. `audit_cohort_authority`
+
+Emite un veredicto binario auditable sobre si una cohorte tiene o no una fuente
+única suficiente para declararla canónica sin reinterpretación humana.
+
+Output:
+
+- `runs/<run_id>/audit_cohort_authority/outputs/authority_report.json`
+
+La autoridad declarativa vive en `brunete/cohorts/authority_registry.json`.
+Hoy ese registro fija que `support_multi`, `support_singleton` y
+`no_common_region` tienen autoridad versionada en repo, mientras que
+`visible_losc_events` devuelve `FAIL` porque la vista local de `data/losc/`
+solo puede materializarse como snapshot, no como autoridad única versionada.
+
+### 3. `prepare_events`
 
 Prepara una cohorte local normalizada a partir de:
 
@@ -49,7 +68,7 @@ Output:
 - `runs/<run_id>/prepare_events/external_inputs/events.txt`
 - `runs/<run_id>/prepare_events/outputs/events_catalog.json`
 
-### 3. `run_batch` 220
+### 4. `run_batch` 220
 
 Consume un `prepare_run` válido y ejecuta el batch local para modo `220`.
 
@@ -59,11 +78,11 @@ Output:
 - `runs/<run_id>/run_batch/outputs/results.csv`
 - `runs/<run_id>/run_batch/event_runs/<event_run_id>/...`
 
-### 4. `run_batch` 221
+### 5. `run_batch` 221
 
 Mismo contrato que el batch `220`, pero para modo `221`.
 
-### 5. `classify_geometries`
+### 6. `classify_geometries`
 
 Cruza dos batch runs válidos, uno `220` y otro `221`, y produce un resumen
 geométrico conjunto.
@@ -87,6 +106,10 @@ cd /home/adnac/basurin/work/basurin
 ./brunete/brunete_list_events.py \
   --run-id brunete_list_local \
   --losc-root data/losc
+
+./brunete/brunete_audit_cohort_authority.py \
+  --run-id brunete_audit_visible_losc \
+  --cohort-key visible_losc_events
 
 ./brunete/brunete_run_batch.py \
   --prepare-run brunete_prepare_local \
@@ -122,6 +145,7 @@ inestables como:
 En concreto:
 
 - `list_events` materializa una lista canónica local de `data/losc` bajo `runs/<run_id>/list_events/`
+- `audit_cohort_authority` permite cerrar con PASS/FAIL si una cohorte tiene autoridad única o si esa autoridad no existe todavía
 - `prepare_events` no depende de GWOSC online ni de bootstrap `t0`
 - `run_batch` no depende de un `t0_catalog` externo ni de `losc_quality`
 - `classify_geometries` no depende de los entrypoints públicos de Fase 3/4
