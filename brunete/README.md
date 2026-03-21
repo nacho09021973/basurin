@@ -93,6 +93,26 @@ cd /home/adnac/basurin/work/basurin
   --run-id brunete_classify_local
 ```
 
+## Catálogo B5 experimental
+
+Además de los tres entrypoints públicos, BRUNETE expone una fachada experimental
+en `brunete/experiment/` para los módulos B5. Esa fachada **no** reemplaza a
+`mvp/experiment/`; actúa como puente de entrada desde un run
+`classify_geometries` ya materializado.
+
+Contrato operativo del puente B5:
+
+- entrada gobernante: `runs/<classify_run_id>/classify_geometries/outputs/geometry_summary.json`
+- resolución de batches vía `batch_220_run_id` y `batch_221_run_id`
+- resolución de event runs vía `event_run_id_220` / `event_run_id_221`
+- para métricas de soporte conjunto, B5 consume `has_joint_support`, `classification`,
+  `support_region_status_221` y `support_region_n_final_221` **tal como los calcula BRUNETE**
+- la lógica analítica pesada sigue viviendo en `mvp/experiment/`; el puente B5 solo cambia
+  el punto de entrada y la resolución de inputs
+
+Esto permite ejecutar B5 a partir de un `classify_run_id` sin recalcular la semántica
+de `classify_geometries` aguas abajo.
+
 ## Qué No Depende Ya De BASURIN Legacy
 
 BRUNETE ya no depende, como interfaz pública, de entrypoints legacy rotos o
