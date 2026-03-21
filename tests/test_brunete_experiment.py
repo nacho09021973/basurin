@@ -29,14 +29,46 @@ def _make_classify_run(runs_root: Path):
     g1 = [{"geometry_id": "edgb_001", "family": "edgb", "mahalanobis_d2": 1.0, "delta_lnL": 0.5, "saturation_221": 0.1}]
     g2 = [{"geometry_id": "edgb_001", "family": "edgb", "mahalanobis_d2": 2.0, "delta_lnL": 0.4, "saturation_221": 0.2}]
     g3 = [{"geometry_id": "edgb_001", "family": "edgb", "mahalanobis_d2": 1.5, "delta_lnL": 0.3, "saturation_221": 0.3}]
-    for idx, geoms in enumerate((g1, g2, g3), 1):
-        event_id = f"GW{idx:06d}"
-        ev220 = f"{event_id}_220"
-        ev221 = f"{event_id}_221"
-        _make_event_run(runs_root / batch220, ev220, geoms)
-        _make_event_run(runs_root / batch221, ev221, geoms)
-        rows.append({"event_id": event_id, "event_run_id_220": ev220, "event_run_id_221": ev221})
-    _write(classify_stage / "outputs" / "geometry_summary.json", {"batch_220_run_id": batch220, "batch_221_run_id": batch221, "rows": rows})
+    verdict = {"family_verdicts": {"edgb": {"verdict": "SUPPORTED"}}}
+    classify_rows = [
+        {
+            "event_id": "GW000001",
+            "event_run_id_220": "GW000001_220",
+            "event_run_id_221": "GW000001_221",
+            "classification": "common_nonempty_both_221_support_multi",
+            "has_joint_support": True,
+            "support_region_status_221": "SUPPORT_REGION_AVAILABLE",
+            "support_region_n_final_221": 2,
+        },
+        {
+            "event_id": "GW000002",
+            "event_run_id_220": "GW000002_220",
+            "event_run_id_221": "GW000002_221",
+            "classification": "common_nonempty_both_221_no_common_region",
+            "has_joint_support": False,
+            "support_region_status_221": "NO_COMMON_REGION",
+            "support_region_n_final_221": 0,
+        },
+        {
+            "event_id": "GW000003",
+            "event_run_id_220": "GW000003_220",
+            "event_run_id_221": "GW000003_221",
+            "classification": "common_nonempty_both_221_support_singleton",
+            "has_joint_support": True,
+            "support_region_status_221": "SUPPORT_REGION_AVAILABLE",
+            "support_region_n_final_221": 1,
+        },
+    ]
+    for row, geoms in zip(classify_rows, (g1, g2, g3), strict=True):
+        _make_event_run(runs_root / batch220, row["event_run_id_220"], geoms, verdict=verdict)
+        _make_event_run(runs_root / batch221, row["event_run_id_221"], geoms, verdict=verdict)
+        rows.append(row)
+    _write(
+        classify_stage / "outputs" / "geometry_summary.json",
+        {"batch_220_run_id": batch220, "batch_221_run_id": batch221, "rows": rows},
+    )
+    _write(runs_root / batch220 / "run_batch" / "outputs" / "results.json", {"results": []})
+    _write(runs_root / batch221 / "run_batch" / "outputs" / "results.json", {"results": []})
     return classify_run_id
 
 
@@ -50,15 +82,18 @@ def test_base_contract_resolves_event_runs(tmp_path: Path):
     assert run_ids == ["GW000001_220", "GW000002_220", "GW000003_220"]
 
 
-def test_b5f_aggregates_from_classify_run(tmp_path: Path):
+def test_b5f_uses_classify_has_joint_support_without_recomputing(tmp_path: Path):
     runs_root = tmp_path / "runs"
     classify_run_id = _make_classify_run(runs_root)
 
     from brunete.experiment.b5f import run
 
     result = run(classify_run_id, runs_root=str(runs_root), dry_run=True)
-    assert result["n_events_aggregated"] == 6
-    assert result["family_support_rates"]["edgb"]["rate"] == 1.0
+    assert result["n_events"] == 3
+    assert result["n_joint_support_events"] == 2
+    assert result["family_joint_support_rates"]["edgb"]["joint_support_rate"] == 0.6667
+    assert result["events"][1]["support_region_status_221"] == "NO_COMMON_REGION"
+    assert result["events"][1]["family_verdicts"]["edgb"]["counted_as_joint_support"] is False
 
 
 def test_b5a_and_b5h_use_mode_specific_event_runs(tmp_path: Path):
