@@ -196,6 +196,19 @@ def failed_run(tmp_path):
 # ── Test: Governance gate ───────────────────────────────────────────────────
 
 class TestGovernance:
+    def test_runtime_dependencies_are_materialized_in_requirements(self):
+        """Documented E5-Z runtime deps must be installable from requirements.txt."""
+        repo_root = Path(__file__).resolve().parent.parent
+        requirements = (repo_root / "requirements.txt").read_text().splitlines()
+        pinned = {
+            line.split("==", 1)[0].strip()
+            for line in requirements
+            if line.strip() and not line.lstrip().startswith("#") and "==" in line
+        }
+
+        for dep in ("scikit-learn", "scipy"):
+            assert dep in pinned, f"{dep} must be pinned in requirements.txt for E5-Z"
+
     def test_rejects_invalid_run(self, failed_run):
         runs_root, run_id = failed_run
         from mvp.experiment.base_contract import GovernanceViolation

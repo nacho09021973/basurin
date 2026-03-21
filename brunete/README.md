@@ -1,11 +1,12 @@
 # BRUNETE
 
 BRUNETE es la fachada operativa nueva y mínima sobre este checkout de BASURIN.
-No borra ni renombra código legacy. Expone solo tres entrypoints públicos:
+No borra ni renombra código legacy. Expone cuatro entrypoints públicos:
 
-1. `brunete_prepare_events.py`
-2. `brunete_run_batch.py`
-3. `brunete_classify_geometries.py`
+1. `brunete_list_events.py`
+2. `brunete_prepare_events.py`
+3. `brunete_run_batch.py`
+4. `brunete_classify_geometries.py`
 
 ## Contrato Común
 
@@ -26,7 +27,17 @@ El contrato de metadata es homogéneo:
 
 ## Flujo Exacto
 
-### 1. `prepare_events`
+### 1. `list_events`
+
+Materializa una lista canónica y ordenada de los `EVENT_ID` visibles bajo
+`data/losc/<EVENT_ID>/` para no tener que reconstruir la cohorte a mano.
+
+Output:
+
+- `runs/<run_id>/list_events/outputs/visible_events.txt`
+- `runs/<run_id>/list_events/outputs/events_catalog.json`
+
+### 2. `prepare_events`
 
 Prepara una cohorte local normalizada a partir de:
 
@@ -38,7 +49,7 @@ Output:
 - `runs/<run_id>/prepare_events/external_inputs/events.txt`
 - `runs/<run_id>/prepare_events/outputs/events_catalog.json`
 
-### 2. `run_batch` 220
+### 3. `run_batch` 220
 
 Consume un `prepare_run` válido y ejecuta el batch local para modo `220`.
 
@@ -48,11 +59,11 @@ Output:
 - `runs/<run_id>/run_batch/outputs/results.csv`
 - `runs/<run_id>/run_batch/event_runs/<event_run_id>/...`
 
-### 3. `run_batch` 221
+### 4. `run_batch` 221
 
 Mismo contrato que el batch `220`, pero para modo `221`.
 
-### 4. `classify_geometries`
+### 5. `classify_geometries`
 
 Cruza dos batch runs válidos, uno `220` y otro `221`, y produce un resumen
 geométrico conjunto.
@@ -71,6 +82,10 @@ cd /home/adnac/basurin/work/basurin
 
 ./brunete/brunete_prepare_events.py \
   --run-id brunete_prepare_local \
+  --losc-root data/losc
+
+./brunete/brunete_list_events.py \
+  --run-id brunete_list_local \
   --losc-root data/losc
 
 ./brunete/brunete_run_batch.py \
@@ -106,6 +121,7 @@ inestables como:
 
 En concreto:
 
+- `list_events` materializa una lista canónica local de `data/losc` bajo `runs/<run_id>/list_events/`
 - `prepare_events` no depende de GWOSC online ni de bootstrap `t0`
 - `run_batch` no depende de un `t0_catalog` externo ni de `losc_quality`
 - `classify_geometries` no depende de los entrypoints públicos de Fase 3/4
