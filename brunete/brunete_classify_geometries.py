@@ -9,6 +9,7 @@ The first cut stays intentionally small:
 - cross by ``event_id``
 - mark presence in 220 / 221 / both
 - expose per-mode status and ``n_compatible``
+- refine joint support with mode-221 ``support_region_*`` when available
 - assign a clear, extensible classification label per event
 """
 from __future__ import annotations
@@ -110,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
             artifacts=artifacts,
             notes=[
                 "Classification is intentionally minimal and explicit.",
-                "This stage crosses event_id, per-mode status, and n_compatible only.",
+                "This stage crosses event_id, per-mode status, n_compatible, and mode-221 support_region when present.",
             ],
         )
         return 0
@@ -197,6 +198,8 @@ def _classify_event(
     status_221 = _status_of(row_221)
     n_compatible_220 = _n_compatible_of(row_220)
     n_compatible_221 = _n_compatible_of(row_221)
+    support_region_status_221 = _string_or_none(row_221, "support_region_status")
+    support_region_n_final_221 = _int_or_none(row_221, "support_region_n_final")
 
     classification = _classification_label(
         in_220=in_220,
@@ -205,6 +208,8 @@ def _classify_event(
         status_221=status_221,
         n_compatible_220=n_compatible_220,
         n_compatible_221=n_compatible_221,
+        support_region_status_221=support_region_status_221,
+        support_region_n_final_221=support_region_n_final_221,
     )
 
     return {
@@ -218,14 +223,18 @@ def _classify_event(
         "event_run_id_221": _string_or_none(row_221, "event_run_id"),
         "n_compatible_220": n_compatible_220,
         "n_compatible_221": n_compatible_221,
+        "support_region_status_221": support_region_status_221,
+        "support_region_n_final_221": support_region_n_final_221,
         "classification": classification,
-        "has_joint_support": bool(
-            in_220
-            and in_221
-            and status_220 == "PASS"
-            and status_221 == "PASS"
-            and (n_compatible_220 or 0) > 0
-            and (n_compatible_221 or 0) > 0
+        "has_joint_support": _has_joint_support(
+            in_220=in_220,
+            in_221=in_221,
+            status_220=status_220,
+            status_221=status_221,
+            n_compatible_220=n_compatible_220,
+            n_compatible_221=n_compatible_221,
+            support_region_status_221=support_region_status_221,
+            support_region_n_final_221=support_region_n_final_221,
         ),
     }
 
@@ -238,6 +247,8 @@ def _classification_label(
     status_221: str | None,
     n_compatible_220: int | None,
     n_compatible_221: int | None,
+    support_region_status_221: str | None,
+    support_region_n_final_221: int | None,
 ) -> str:
     if in_220 and not in_221:
         return "only_batch_220"
@@ -256,12 +267,48 @@ def _classification_label(
     n220 = n_compatible_220 or 0
     n221 = n_compatible_221 or 0
     if n220 > 0 and n221 > 0:
+        if support_region_status_221 == "NO_COMMON_REGION" or support_region_n_final_221 == 0:
+            return "common_nonempty_both_221_no_common_region"
+        if support_region_status_221 == "SUPPORT_REGION_AVAILABLE":
+            if support_region_n_final_221 == 1:
+                return "common_nonempty_both_221_support_singleton"
+            if isinstance(support_region_n_final_221, int) and support_region_n_final_221 > 1:
+                return "common_nonempty_both_221_support_multi"
+            return "common_nonempty_both_221_support_available"
         return "common_nonempty_both"
     if n220 > 0 and n221 <= 0:
         return "common_nonempty_220_only"
     if n220 <= 0 and n221 > 0:
         return "common_nonempty_221_only"
     return "common_empty_both"
+
+
+def _has_joint_support(
+    *,
+    in_220: bool,
+    in_221: bool,
+    status_220: str | None,
+    status_221: str | None,
+    n_compatible_220: int | None,
+    n_compatible_221: int | None,
+    support_region_status_221: str | None,
+    support_region_n_final_221: int | None,
+) -> bool:
+    has_nonempty_batches = bool(
+        in_220
+        and in_221
+        and status_220 == "PASS"
+        and status_221 == "PASS"
+        and (n_compatible_220 or 0) > 0
+        and (n_compatible_221 or 0) > 0
+    )
+    if not has_nonempty_batches:
+        return False
+    if support_region_status_221 == "NO_COMMON_REGION":
+        return False
+    if isinstance(support_region_n_final_221, int):
+        return support_region_n_final_221 > 0
+    return True
 
 
 def _status_of(row: dict[str, Any] | None) -> str | None:
@@ -274,9 +321,13 @@ def _status_of(row: dict[str, Any] | None) -> str | None:
 
 
 def _n_compatible_of(row: dict[str, Any] | None) -> int | None:
+    return _int_or_none(row, "n_compatible")
+
+
+def _int_or_none(row: dict[str, Any] | None, key: str) -> int | None:
     if row is None:
         return None
-    value = row.get("n_compatible")
+    value = row.get(key)
     if value in (None, ""):
         return None
     try:
@@ -323,6 +374,8 @@ def _write_summary_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         "event_run_id_221",
         "n_compatible_220",
         "n_compatible_221",
+        "support_region_status_221",
+        "support_region_n_final_221",
         "classification",
         "has_joint_support",
     ]
