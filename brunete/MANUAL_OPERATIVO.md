@@ -36,6 +36,13 @@ Si alguna de esas comprobaciones falla, no sigas con el batch.
 
 ## 3. Estructura pública de BRUNETE
 
+- `brunete/brunete_list_events.py`
+  Materializa bajo `runs/<run_id>/list_events/` un snapshot ordenado de los eventos visibles en `data/losc/`.
+
+- `brunete/brunete_audit_cohort_authority.py`
+  Emite un veredicto binario sobre si una cohorte tiene una fuente única suficiente para declararse canónica.
+  La autoridad declarativa vive en `brunete/cohorts/authority_registry.json`.
+
 - `brunete/brunete_prepare_events.py`
   Normaliza una cohorte bajo `runs/<run_id>/prepare_events/` a partir de `--losc-root` o `--events-file`.
   Si usas `--losc-root`, descubre solo directorios con al menos un `.h5` o `.hdf5`.
@@ -111,6 +118,16 @@ GEOM_RUN=brunete_geom_e2e_${RUN_TS}
 Preparar eventos desde `data/losc`:
 
 ```bash
+./.venv/bin/python brunete/brunete_list_events.py \
+  --run-id brunete_list_local \
+  --losc-root data/losc
+
+cat runs/brunete_list_local/list_events/outputs/visible_events.txt
+
+./.venv/bin/python brunete/brunete_audit_cohort_authority.py \
+  --run-id brunete_audit_visible_losc \
+  --cohort-key visible_losc_events
+
 ./.venv/bin/python brunete/brunete_prepare_events.py \
   --run-id "$PREP_RUN" \
   --losc-root data/losc
@@ -194,6 +211,21 @@ SUPPORT_B221=brunete_batch_221_support_multi_${RUN_TS}
 ```
 
 ## 5. Salidas esperadas
+
+`list_events` escribe en `runs/<run_id>/list_events/`:
+
+- `RUN_VALID/verdict.json`
+- `manifest.json`
+- `stage_summary.json`
+- `outputs/visible_events.txt`
+- `outputs/events_catalog.json`
+
+`audit_cohort_authority` escribe en `runs/<run_id>/audit_cohort_authority/`:
+
+- `RUN_VALID/verdict.json`
+- `manifest.json`
+- `stage_summary.json`
+- `outputs/authority_report.json`
 
 `prepare_events` escribe en `runs/<run_id>/prepare_events/`:
 

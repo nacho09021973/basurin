@@ -1,0 +1,33 @@
+{
+  "schema_version": "brunete_cohort_authority_v1",
+  "cohorts": {
+    "support_multi": {
+      "authority_status": "PASS",
+      "authority_kind": "repo_file",
+      "path": "brunete/cohorts/events_support_multi.txt",
+      "description": "Cohorte robusta principal versionada en repo para repetir análisis estables."
+    },
+    "support_singleton": {
+      "authority_status": "PASS",
+      "authority_kind": "repo_file",
+      "path": "brunete/cohorts/events_support_singleton.txt",
+      "description": "Cohorte frontera versionada en repo."
+    },
+    "no_common_region": {
+      "authority_status": "PASS",
+      "authority_kind": "repo_file",
+      "path": "brunete/cohorts/events_no_common_region.txt",
+      "description": "Cohorte versionada para investigar o excluir según el objetivo."
+    },
+    "visible_losc_events": {
+      "authority_status": "FAIL",
+      "authority_kind": "absent",
+      "description": "No existe en el repo una fuente única versionada que congele la vista mutable y local de data/losc.",
+      "reason": "La lista visible de data/losc depende del estado local de external inputs; hoy solo puede materializarse como snapshot de ejecución, no como autoridad única versionada.",
+      "materializers": [
+        "brunete/brunete_list_events.py",
+        "tools/list_losc_events.py"
+      ]
+    }
+  }
+}
