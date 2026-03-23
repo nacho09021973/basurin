@@ -82,6 +82,27 @@ def test_base_contract_resolves_event_runs(tmp_path: Path):
     assert run_ids == ["GW000001_220", "GW000002_220", "GW000003_220"]
 
 
+def test_base_contract_resolves_event_run_dirs_and_view(tmp_path: Path):
+    runs_root = tmp_path / "runs"
+    classify_run_id = _make_classify_run(runs_root)
+
+    from brunete.experiment.base_contract import materialize_event_run_view, resolve_event_run_dirs
+
+    resolved = resolve_event_run_dirs(classify_run_id, "221", runs_root)
+    assert [row["event_id"] for row in resolved] == ["GW000001", "GW000002", "GW000003"]
+    assert [row["event_run_id"] for row in resolved] == ["GW000001_221", "GW000002_221", "GW000003_221"]
+    assert resolved[0]["event_run_dir"] == runs_root / "batch221_demo" / "run_batch" / "event_runs" / "GW000001_221"
+
+    view_root, run_ids = materialize_event_run_view(classify_run_id, "221", runs_root)
+    assert view_root == runs_root / "batch221_demo" / "run_batch" / "event_runs"
+    assert run_ids == ["GW000001_221", "GW000002_221", "GW000003_221"]
+
+
+def test_b5_modules_import_after_restoring_base_contract_api():
+    import brunete.experiment.b5a
+    import brunete.experiment.b5z
+
+
 def test_b5f_uses_classify_has_joint_support_without_recomputing(tmp_path: Path):
     runs_root = tmp_path / "runs"
     classify_run_id = _make_classify_run(runs_root)

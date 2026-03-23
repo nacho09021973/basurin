@@ -78,8 +78,16 @@ def _write_json_atomic(path: Path, data: Any) -> None:
         raise
 
 
-def ensure_experiment_dir(classify_run_dir: Path, experiment_name: str) -> Path:
-    exp_dir = classify_run_dir / "experiment" / experiment_name
+def ensure_experiment_dir(
+    classify_run_dir: str | Path,
+    experiment_name: str,
+    runs_root: str | Path | None = None,
+) -> Path:
+    if isinstance(classify_run_dir, Path):
+        run_dir = classify_run_dir
+    else:
+        run_dir = resolve_classify_run_dir(classify_run_dir, runs_root)
+    exp_dir = run_dir / "experiment" / experiment_name
     exp_dir.mkdir(parents=True, exist_ok=True)
     return exp_dir
 
@@ -240,3 +248,100 @@ def validate_event_run(event_run_dir: Path) -> dict:
     if fallback.exists():
         return load_json(fallback)
     raise FileNotFoundError(f"stage_summary.json missing: {ss_path}")
+
+
+def resolve_event_run_dirs(
+    classify_run_id: str,
+    mode: str | None = "220",
+    runs_root: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Resolve deterministic per-event run metadata from a classify run.
+
+    For explicit modes ("220"/"221"), rows are resolved through
+    ``enumerate_event_runs`` so BRUNETE keeps the same RUN_VALID gating.
+
+    For ``mode=None``, this returns at most one event run per event, preferring
+    the 221 subrun when present and valid, otherwise falling back to 220.
+    """
+    if mode in {"220", "221"}:
+        event_map = enumerate_event_runs(classify_run_id, mode=mode, runs_root=runs_root)
+        return [
+            {
+                "event_id": event_id,
+                "event_run_id": event_run_dir.name,
+                "event_run_dir": event_run_dir,
+                "mode": mode,
+            }
+            for event_id, event_run_dir in sorted(event_map.items())
+        ]
+
+    if mode is not None:
+        raise ValueError(f"mode must be '220', '221', or None, got {mode!r}")
+
+    rows_221 = {
+        row["event_id"]: row
+        for row in resolve_event_run_dirs(classify_run_id, "221", runs_root)
+    }
+    rows_220 = {
+        row["event_id"]: row
+        for row in resolve_event_run_dirs(classify_run_id, "220", runs_root)
+    }
+
+    resolved: list[dict[str, Any]] = []
+    for event_id in sorted(set(rows_220) | set(rows_221)):
+        chosen = rows_221.get(event_id) or rows_220.get(event_id)
+        if chosen is None:
+            continue
+        resolved.append(chosen)
+    return resolved
+
+
+def resolve_event_run_ids(
+    classify_run_id: str,
+    mode: str | None = "220",
+    runs_root: str | Path | None = None,
+) -> list[str]:
+    return [row["event_run_id"] for row in resolve_event_run_dirs(classify_run_id, mode, runs_root)]
+
+
+def materialize_event_run_view(
+    classify_run_id: str,
+    mode: str | None = "220",
+    runs_root: str | Path | None = None,
+) -> tuple[Path, list[str]]:
+    """Return a runs_root-compatible view for BRUNETE B5 readers.
+
+    When all selected event runs already share the same parent directory, this
+    returns that directory directly and writes nothing.
+
+    If selected runs come from multiple parent directories, create a minimal
+    symlink view under ``runs/<classify_run_id>/experiment/_event_run_views``.
+    """
+    resolved = resolve_event_run_dirs(classify_run_id, mode, runs_root)
+    run_ids = [row["event_run_id"] for row in resolved]
+    if not resolved:
+        raise GovernanceViolation(
+            f"no valid event runs resolved for classify_run_id={classify_run_id!r}, mode={mode!r}"
+        )
+
+    parents = {Path(row["event_run_dir"]).parent.resolve() for row in resolved}
+    if len(parents) == 1:
+        return next(iter(parents)), run_ids
+
+    classify_run_dir, _ = validate_classify_run(classify_run_id, runs_root)
+    view_name = "all" if mode is None else str(mode)
+    view_root = classify_run_dir / "experiment" / "_event_run_views" / view_name / "event_runs"
+    view_root.mkdir(parents=True, exist_ok=True)
+
+    for row in resolved:
+        src = Path(row["event_run_dir"]).resolve()
+        dst = view_root / row["event_run_id"]
+        if dst.exists() or dst.is_symlink():
+            if dst.is_symlink() and dst.resolve() == src:
+                continue
+            raise GovernanceViolation(
+                f"event run view collision at {dst}: existing entry does not match {src}"
+            )
+        dst.symlink_to(src, target_is_directory=True)
+
+    return view_root, run_ids
