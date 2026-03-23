@@ -29,6 +29,9 @@ brunete/experiment/b5z_gpr_emulator.py
 brunete/experiment/base_contract.py
 brunete/experiment/sandbox/ISOLATION_MARKER
 brunete/experiment/sandbox/README.md
+brunete/keep_set.txt
+brunete/legaxy_plan.md
+brunete/move_to_legaxy_candidates.txt
 brunete/runtime.py
 docs/ringdown/atlas/atlas_berti_v2.json
 docs/ringdown/event_metadata/GW150914_metadata.json
