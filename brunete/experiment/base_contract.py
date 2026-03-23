@@ -1,158 +1,242 @@
+"""BRUNETE experiment base contract.
+
+Bridges BRUNETE classify runs to the per-event BASURIN canonical subruns
+stored under runs/<batch_run_id>/run_batch/event_runs/<event_run_id>/.
+
+Key functions
+-------------
+validate_classify_run(classify_run_id, runs_root)
+    Validate a classify_geometries run and return its geometry_summary payload.
+
+enumerate_event_runs(classify_run_id, mode, runs_root)
+    Return {event_id: event_run_dir} for a given mode ("220" or "221").
+    Each event_run_dir is a full BASURIN run with the canonical gate layout.
+
+validate_event_run(event_run_dir)
+    Validate RUN_VALID of a per-event BASURIN subrun.
+
+All E5 utilities (load_json, sha256_file, ensure_experiment_dir, etc.) are
+re-exported here so B5 modules only need a single import.
+
+Governance
+----------
+- No module writes outside runs/<classify_run_id>/experiment/<name>/.
+- No module executes against a classify run whose RUN_VALID verdict is not PASS.
+- Per-event subruns that lack RUN_VALID=PASS are skipped with a warning, not
+  raised as fatal errors (the batch may have had partial failures).
+"""
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import sys
+import tempfile
+import warnings
 from pathlib import Path
 from typing import Any
 
-from basurin_io import resolve_out_root
+# ── Re-export the low-level utilities from BASURIN base_contract ────────────
+_here = Path(__file__).resolve()
+_repo_root = _here.parents[2]
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
 
 
-MODE_TO_BATCH_KEY = {
-    "220": "batch_220_run_id",
-    "221": "batch_221_run_id",
-}
-
-MODE_TO_EVENT_RUN_KEY = {
-    "220": "event_run_id_220",
-    "221": "event_run_id_221",
-}
+class GovernanceViolation(Exception):
+    """Raised when a governance invariant is broken."""
 
 
-class BruneteGovernanceViolation(Exception):
-    """Raised when a BRUNETE classify run or event run breaks governance."""
-
+# ── JSON helpers ─────────────────────────────────────────────────────────────
 
 def load_json(path: str | Path) -> Any:
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"Required artifact missing: {p}")
-    return json.loads(p.read_text(encoding="utf-8"))
+    with open(p) as f:
+        return json.load(f)
 
 
-def resolve_runs_root(runs_root: str | Path | None = None) -> Path:
-    return Path(runs_root) if runs_root else resolve_out_root("runs")
+def sha256_file(path: str | Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 16), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
-def resolve_classify_stage_dir(classify_run_id: str, runs_root: str | Path | None = None) -> Path:
-    return resolve_runs_root(runs_root) / classify_run_id / "classify_geometries"
+def _write_json_atomic(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with open(fd, "w") as f:
+            json.dump(data, f, indent=2, sort_keys=True)
+            f.write("\n")
+        Path(tmp).replace(path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
-def assert_stage_pass(stage_dir: str | Path) -> dict[str, Any]:
-    verdict_path = Path(stage_dir) / "RUN_VALID" / "verdict.json"
-    verdict = load_json(verdict_path)
-    if verdict.get("verdict") != "PASS":
-        raise BruneteGovernanceViolation(
-            f"RUN_VALID={verdict.get('verdict')} in {verdict_path}"
-        )
-    return verdict
+def ensure_experiment_dir(classify_run_dir: Path, experiment_name: str) -> Path:
+    exp_dir = classify_run_dir / "experiment" / experiment_name
+    exp_dir.mkdir(parents=True, exist_ok=True)
+    return exp_dir
 
 
-def load_geometry_summary(classify_run_id: str, runs_root: str | Path | None = None) -> tuple[Path, dict[str, Any]]:
-    stage_dir = resolve_classify_stage_dir(classify_run_id, runs_root)
-    assert_stage_pass(stage_dir)
-    summary_path = stage_dir / "outputs" / "geometry_summary.json"
-    payload = load_json(summary_path)
-    return stage_dir, payload
+def write_manifest(output_dir: Path, input_hashes: dict[str, str], extra: dict | None = None) -> Path:
+    from datetime import datetime, timezone
+    manifest = {
+        "input_hashes": input_hashes,
+        "generated_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    if extra:
+        manifest.update(extra)
+    out = output_dir / "manifest.json"
+    _write_json_atomic(out, manifest)
+    return out
 
 
-def get_batch_run_id(classify_run_id: str, mode: str, runs_root: str | Path | None = None) -> str:
-    if mode not in MODE_TO_BATCH_KEY:
-        raise ValueError(f"Unsupported mode: {mode!r}")
-    _stage_dir, summary = load_geometry_summary(classify_run_id, runs_root)
-    value = summary.get(MODE_TO_BATCH_KEY[mode])
-    if not isinstance(value, str) or not value:
-        raise ValueError(
-            f"geometry_summary.json missing {MODE_TO_BATCH_KEY[mode]!r} for classify_run_id={classify_run_id}"
-        )
-    return value
+# ── BRUNETE canonical gate paths ─────────────────────────────────────────────
+
+# Gates on the classify_geometries run dir
+BRUNETE_CLASSIFY_GATES = {
+    "run_valid":       "classify_geometries/RUN_VALID/verdict.json",
+    "stage_summary":   "classify_geometries/stage_summary.json",
+    "geometry_summary": "classify_geometries/outputs/geometry_summary.json",
+}
+
+# Gates on each per-event BASURIN subrun dir (same layout as BASURIN core)
+EVENT_RUN_GATES = {
+    "run_valid":      "RUN_VALID/verdict.json",
+    "compatible_set": "s4_geometry_filter/outputs/compatible_set.json",
+    "stage_summary":  "s4_geometry_filter/stage_summary.json",
+    "verdict":        "verdict.json",
+    "estimates":      "s3b_multimode_estimates/estimates.json",
+}
 
 
-def resolve_event_run_dirs(
+# ── Run resolution ────────────────────────────────────────────────────────────
+
+def _resolve_runs_root(runs_root: str | Path | None = None) -> Path:
+    if runs_root:
+        return Path(runs_root)
+    env = os.environ.get("BASURIN_RUNS_ROOT")
+    return Path(env) if env else Path.cwd() / "runs"
+
+
+def resolve_classify_run_dir(classify_run_id: str, runs_root: str | Path | None = None) -> Path:
+    return _resolve_runs_root(runs_root) / classify_run_id
+
+
+def validate_classify_run(
     classify_run_id: str,
-    mode: str,
     runs_root: str | Path | None = None,
-) -> list[dict[str, Any]]:
-    if mode not in MODE_TO_EVENT_RUN_KEY:
-        raise ValueError(f"Unsupported mode: {mode!r}")
+) -> tuple[Path, dict]:
+    """Validate a classify_geometries run.
 
-    runs_root_path = resolve_runs_root(runs_root)
-    _stage_dir, summary = load_geometry_summary(classify_run_id, runs_root_path)
-    batch_run_id = get_batch_run_id(classify_run_id, mode, runs_root_path)
-    event_key = MODE_TO_EVENT_RUN_KEY[mode]
+    Returns (classify_run_dir, geometry_summary_payload).
+    Raises GovernanceViolation if RUN_VALID is not PASS.
+    """
+    run_dir = resolve_classify_run_dir(classify_run_id, runs_root)
 
-    rows = summary.get("rows")
-    if not isinstance(rows, list):
-        raise ValueError("geometry_summary.json must contain a list at key 'rows'")
-
-    resolved: list[dict[str, Any]] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        event_run_id = row.get(event_key)
-        if not isinstance(event_run_id, str) or not event_run_id.strip():
-            continue
-        event_id = row.get("event_id", event_run_id)
-        event_stage_dir = runs_root_path / batch_run_id / "run_batch" / "event_runs" / event_run_id
-        assert_stage_pass(event_stage_dir)
-        resolved.append(
-            {
-                "event_id": event_id,
-                "event_run_id": event_run_id,
-                "batch_run_id": batch_run_id,
-                "run_dir": event_stage_dir,
-            }
+    rv_path = run_dir / BRUNETE_CLASSIFY_GATES["run_valid"]
+    if not rv_path.exists():
+        raise FileNotFoundError(f"classify RUN_VALID verdict missing: {rv_path}")
+    rv = load_json(rv_path)
+    if rv.get("verdict") != "PASS":
+        raise GovernanceViolation(
+            f"classify run {classify_run_id!r} RUN_VALID={rv.get('verdict')!r}"
         )
 
-    if not resolved:
-        raise ValueError(
-            f"No valid event_run_id entries found for classify_run_id={classify_run_id!r} mode={mode!r}"
-        )
-    return resolved
+    gs_path = run_dir / BRUNETE_CLASSIFY_GATES["geometry_summary"]
+    if not gs_path.exists():
+        raise FileNotFoundError(f"geometry_summary.json missing: {gs_path}")
+    geometry_summary = load_json(gs_path)
+
+    return run_dir, geometry_summary
 
 
-def resolve_event_run_ids(classify_run_id: str, mode: str, runs_root: str | Path | None = None) -> list[str]:
-    return [row["event_run_id"] for row in resolve_event_run_dirs(classify_run_id, mode, runs_root)]
-
-
-def resolve_all_event_run_ids(classify_run_id: str, runs_root: str | Path | None = None) -> list[str]:
-    run_ids: list[str] = []
-    seen: set[str] = set()
-    for mode in ("220", "221"):
-        for run_id in resolve_event_run_ids(classify_run_id, mode, runs_root):
-            if run_id not in seen:
-                seen.add(run_id)
-                run_ids.append(run_id)
-    return run_ids
-
-
-def ensure_experiment_dir(classify_run_id: str, experiment_name: str, runs_root: str | Path | None = None) -> Path:
-    stage_dir = resolve_classify_stage_dir(classify_run_id, runs_root)
-    out_dir = stage_dir / "experiment" / experiment_name
-    out_dir.mkdir(parents=True, exist_ok=True)
-    return out_dir
-
-
-def materialize_event_run_view(
+def enumerate_event_runs(
     classify_run_id: str,
-    mode: str | None = None,
+    mode: str = "220",
     runs_root: str | Path | None = None,
-) -> tuple[Path, list[str]]:
-    """Create a deterministic local view where event runs appear as top-level runs."""
-    view_root = resolve_classify_stage_dir(classify_run_id, runs_root) / "experiment" / "_resolved_runs"
-    view_root.mkdir(parents=True, exist_ok=True)
+    *,
+    skip_invalid: bool = True,
+) -> dict[str, Path]:
+    """Return {event_id: event_run_dir} for the given mode.
 
-    run_ids = resolve_all_event_run_ids(classify_run_id, runs_root) if mode is None else resolve_event_run_ids(classify_run_id, mode, runs_root)
-    lookup = {}
-    for current_mode in ((mode,) if mode is not None else ("220", "221")):
-        for row in resolve_event_run_dirs(classify_run_id, current_mode, runs_root):
-            lookup[row["event_run_id"]] = row["run_dir"]
+    Navigates from classify_geometries/geometry_summary.json →
+    batch_<mode>_run_id → run_batch/event_runs/<event_run_id>/.
 
-    for run_id in run_ids:
-        link = view_root / run_id
-        target = lookup[run_id]
-        if link.exists() or link.is_symlink():
-            if link.resolve() == target.resolve():
-                continue
-            link.unlink()
-        link.symlink_to(target.resolve(), target_is_directory=True)
-    return view_root, run_ids
+    Events whose per-event RUN_VALID is not PASS are skipped with a warning
+    when skip_invalid=True (default).  Set skip_invalid=False to raise instead.
+    """
+    if mode not in ("220", "221"):
+        raise ValueError(f"mode must be '220' or '221', got {mode!r}")
+
+    run_dir, geometry_summary = validate_classify_run(classify_run_id, runs_root)
+    runs_root_path = _resolve_runs_root(runs_root)
+
+    batch_run_id = geometry_summary.get(f"batch_{mode}_run_id")
+    if not batch_run_id:
+        raise KeyError(
+            f"geometry_summary missing 'batch_{mode}_run_id' in {classify_run_id!r}"
+        )
+
+    batch_event_runs_root = (
+        runs_root_path / batch_run_id / "run_batch" / "event_runs"
+    )
+
+    event_run_id_key = f"event_run_id_{mode}"
+    result: dict[str, Path] = {}
+
+    for row in geometry_summary.get("rows", []):
+        event_id = row.get("event_id")
+        event_run_id = row.get(event_run_id_key)
+        if not event_id or not event_run_id:
+            continue
+
+        event_run_dir = batch_event_runs_root / event_run_id
+        if not event_run_dir.exists():
+            warnings.warn(
+                f"event_run_dir not found for {event_id!r} (mode {mode}): {event_run_dir}",
+                stacklevel=2,
+            )
+            continue
+
+        rv_path = event_run_dir / EVENT_RUN_GATES["run_valid"]
+        if rv_path.exists():
+            rv = load_json(rv_path)
+            if rv.get("verdict") != "PASS":
+                msg = (
+                    f"event {event_id!r} mode {mode} RUN_VALID="
+                    f"{rv.get('verdict')!r} — skipping"
+                )
+                if skip_invalid:
+                    warnings.warn(msg, stacklevel=2)
+                    continue
+                else:
+                    raise GovernanceViolation(msg)
+
+        result[event_id] = event_run_dir
+
+    return result
+
+
+def validate_event_run(event_run_dir: Path) -> dict:
+    """Validate a per-event BASURIN subrun and return its stage_summary."""
+    rv_path = event_run_dir / EVENT_RUN_GATES["run_valid"]
+    if not rv_path.exists():
+        raise FileNotFoundError(f"event RUN_VALID verdict missing: {rv_path}")
+    rv = load_json(rv_path)
+    if rv.get("verdict") != "PASS":
+        raise GovernanceViolation(f"event RUN_VALID={rv.get('verdict')!r} at {event_run_dir}")
+
+    ss_path = event_run_dir / EVENT_RUN_GATES["stage_summary"]
+    if ss_path.exists():
+        return load_json(ss_path)
+    fallback = event_run_dir / "stage_summary.json"
+    if fallback.exists():
+        return load_json(fallback)
+    raise FileNotFoundError(f"stage_summary.json missing: {ss_path}")
