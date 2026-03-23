@@ -33,7 +33,9 @@ import argparse
 import json
 import os
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from collections import defaultdict
 
@@ -80,8 +82,12 @@ PIPELINE_PRIORITY = [
 # Helpers
 # ---------------------------------------------------------------------------
 
+_print_lock = threading.Lock()
+
+
 def log(msg):
-    print(f"[BASURIN] {msg}", flush=True)
+    with _print_lock:
+        print(f"[BASURIN] {msg}", flush=True)
 
 
 def fetch_json(url, retries=3, delay=2.0):
@@ -99,29 +105,36 @@ def fetch_json(url, retries=3, delay=2.0):
                 raise
 
 
-def download_file(url, dest, retries=3):
-    """Download file with progress indicator."""
+def download_file(url, dest, retries=3, label=""):
+    """Download file with progress indicator and exponential backoff."""
+    tmp = Path(str(dest) + ".tmp")
     for attempt in range(retries):
         try:
             r = requests.get(url, stream=True, timeout=120)
             r.raise_for_status()
             total = int(r.headers.get("content-length", 0))
             downloaded = 0
-            with open(dest, "wb") as f:
+            with open(tmp, "wb") as f:
                 for chunk in r.iter_content(chunk_size=1 << 20):
                     f.write(chunk)
                     downloaded += len(chunk)
                     if total > 0:
                         pct = downloaded * 100 // total
-                        print(f"\r  [{pct:3d}%] {downloaded/(1<<20):.1f} MB", end="")
-            print()
+                        with _print_lock:
+                            print(f"\r  {label}[{pct:3d}%] {downloaded/(1<<20):.1f} MB", end="", flush=True)
+            with _print_lock:
+                print(flush=True)
+            tmp.rename(dest)
             return True
         except Exception as e:
+            if tmp.exists():
+                tmp.unlink()
             if attempt < retries - 1:
-                log(f"  Retry {attempt+1}/{retries}: {e}")
-                time.sleep(2)
+                wait = 2 ** (attempt + 1)
+                log(f"  {label}Retry {attempt+1}/{retries}: {e} — waiting {wait}s")
+                time.sleep(wait)
             else:
-                log(f"  FAILED: {e}")
+                log(f"  {label}FAILED after {retries} attempts: {e}")
                 return False
 
 
@@ -385,41 +398,67 @@ def merge_catalogs(new_catalog, existing_path):
 # Step 6: Download strain files
 # ---------------------------------------------------------------------------
 
-def download_strain(catalog, strain_dir):
-    """Download 4 kHz HDF5 strain for all events in catalog."""
+def _download_one_strain(name, url, strain_dir, idx, total):
+    """Download a single strain file. Returns (name, url, status)."""
+    fname = url.split("/")[-1]
+    event_dir = strain_dir / name
+    event_dir.mkdir(exist_ok=True)
+    dest = event_dir / fname
+
+    if dest.exists():
+        return name, url, "skipped"
+
+    label = f"[{idx}/{total}] {name}: {fname} "
+    log(label.strip())
+    ok = download_file(url, dest, label=label)
+    return name, url, "ok" if ok else "failed"
+
+
+def download_strain(catalog, strain_dir, workers=4):
+    """Download 4 kHz HDF5 strain for all events in catalog (parallel)."""
     strain_dir.mkdir(parents=True, exist_ok=True)
 
-    total = sum(1 for ev in catalog.values() if ev.get("strain_urls_4k_hdf5"))
-    done = 0
+    # Build flat list of (name, url) tasks
+    tasks = []
+    for name, ev in sorted(catalog.items()):
+        for url in ev.get("strain_urls_4k_hdf5", []):
+            tasks.append((name, url))
+
+    if not tasks:
+        log("No strain files to download.")
+        return
+
+    total = len(tasks)
+    log(f"Strain download: {total} files, {workers} parallel workers")
+
     skipped = 0
     failed = 0
+    done = 0
 
-    for name, ev in sorted(catalog.items()):
-        urls = ev.get("strain_urls_4k_hdf5", [])
-        if not urls:
-            continue
-
-        event_dir = strain_dir / name
-        event_dir.mkdir(exist_ok=True)
-        done += 1
-
-        for url in urls:
-            fname = url.split("/")[-1]
-            dest = event_dir / fname
-
-            if dest.exists():
-                skipped += 1
-                continue
-
-            log(f"[{done}/{total}] {name}: {fname}")
-            ok = download_file(url, dest)
-            if not ok:
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(_download_one_strain, name, url, strain_dir, i, total): (name, url)
+            for i, (name, url) in enumerate(tasks, 1)
+        }
+        for future in as_completed(futures):
+            name, url = futures[future]
+            try:
+                _, _, status = future.result()
+                if status == "skipped":
+                    skipped += 1
+                elif status == "failed":
+                    failed += 1
+                done += 1
+            except Exception as e:
+                log(f"  [ERR] {name}: {e}")
                 failed += 1
+                done += 1
 
     log(f"\nStrain download complete:")
-    log(f"  Events processed: {done}")
-    log(f"  Files skipped (exist): {skipped}")
-    log(f"  Files failed: {failed}")
+    log(f"  Total files:   {total}")
+    log(f"  Downloaded:    {done - skipped - failed}")
+    log(f"  Skipped (exist): {skipped}")
+    log(f"  Failed:        {failed}")
 
 
 # ---------------------------------------------------------------------------
@@ -441,6 +480,8 @@ def main():
     parser.add_argument("--snr-min", type=float, default=SNR_MIN)
     parser.add_argument("--pastro-min", type=float, default=P_ASTRO_MIN)
     parser.add_argument("--far-max", type=float, default=FAR_MAX)
+    parser.add_argument("--workers", type=int, default=4,
+                        help="Parallel strain downloads (default: 4, use 1 for sequential)")
     args = parser.parse_args()
 
     output_path = Path(args.output) if args.output else OUTPUT_CATALOG
@@ -452,7 +493,7 @@ def main():
             sys.exit(1)
         with open(output_path) as f:
             catalog = json.load(f)
-        download_strain(catalog, STRAIN_DIR)
+        download_strain(catalog, STRAIN_DIR, workers=args.workers)
         return
 
     # --- Build catalog ---
@@ -514,7 +555,7 @@ def main():
         log("\n" + "=" * 60)
         log("Downloading 4 kHz HDF5 strain files...")
         log("=" * 60)
-        download_strain(merged, STRAIN_DIR)
+        download_strain(merged, STRAIN_DIR, workers=args.workers)
     else:
         log("\n(Skipping strain download — use --strain-only later)")
 
