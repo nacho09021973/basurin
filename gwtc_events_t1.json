@@ -1,0 +1,2354 @@
+{
+  "GW250114_082203": {
+    "name": "GW250114_082203",
+    "catalog": "O4_Discovery_Papers",
+    "GPS": 1420878141.2,
+    "SNR": null,
+    "p_astro": null,
+    "FAR_per_yr": null,
+    "m1_source": 33.6,
+    "m2_source": 32.2,
+    "chi_eff": -0.03,
+    "Mf_source": 62.7,
+    "af": null,
+    "af_lower": null,
+    "af_upper": null,
+    "af_source": null,
+    "DL_Mpc": 403.0,
+    "z": 0.09,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4b3Disc_4KHZ_R1/1420820480/H-H1_GWOSC_O4b3Disc_4KHZ_R1-1420877824-4096.hdf5",
+      "https://gwosc.org/archive/data/O4b3Disc_4KHZ_R1/1420820480/L-L1_GWOSC_O4b3Disc_4KHZ_R1-1420877824-4096.hdf5"
+    ],
+    "flags": [
+      "af_pending",
+      "discovery_paper_only"
+    ]
+  },
+  "GW241110_124123": {
+    "name": "GW241110_124123",
+    "catalog": "O4_Discovery_Papers",
+    "GPS": 1415277701.7,
+    "SNR": null,
+    "p_astro": null,
+    "FAR_per_yr": 0.00063,
+    "m1_source": 17.2,
+    "m2_source": 7.7,
+    "chi_eff": -0.28,
+    "Mf_source": null,
+    "af": null,
+    "af_lower": null,
+    "af_upper": null,
+    "af_source": null,
+    "DL_Mpc": 736.0,
+    "z": null,
+    "detectors": [
+      "H1",
+      "L1",
+      "V1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4b2Disc_4KHZ_R1/1414529024/H-H1_GWOSC_O4b2Disc_4KHZ_R1-1415274496-4096.hdf5",
+      "https://gwosc.org/archive/data/O4b2Disc_4KHZ_R1/1414529024/L-L1_GWOSC_O4b2Disc_4KHZ_R1-1415274496-4096.hdf5",
+      "https://gwosc.org/archive/data/O4b2Disc_4KHZ_R1/1414529024/V-V1_GWOSC_O4b2Disc_4KHZ_R1-1415274496-4096.hdf5"
+    ],
+    "flags": [
+      "af_pending",
+      "discovery_paper_only"
+    ]
+  },
+  "GW241011_233834": {
+    "name": "GW241011_233834",
+    "catalog": "O4_Discovery_Papers",
+    "GPS": 1412725132.9,
+    "SNR": null,
+    "p_astro": null,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 19.6,
+    "m2_source": 5.9,
+    "chi_eff": 0.49,
+    "Mf_source": null,
+    "af": null,
+    "af_lower": null,
+    "af_upper": null,
+    "af_source": null,
+    "DL_Mpc": 214.0,
+    "z": null,
+    "detectors": [
+      "H1",
+      "V1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4b1Disc_4KHZ_R1/1412431872/H-H1_GWOSC_O4b1Disc_4KHZ_R1-1412722688-4096.hdf5",
+      "https://gwosc.org/archive/data/O4b1Disc_4KHZ_R1/1412431872/V-V1_GWOSC_O4b1Disc_4KHZ_R1-1412722688-4096.hdf5"
+    ],
+    "flags": [
+      "af_pending",
+      "discovery_paper_only"
+    ]
+  },
+  "GW240109_050431": {
+    "name": "GW240109_050431",
+    "catalog": "GWTC-4.0",
+    "GPS": 1388811889.8,
+    "SNR": 10.4,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.00022999999999999998,
+    "m1_source": 28.8,
+    "m2_source": 18.1,
+    "chi_eff": -0.07,
+    "Mf_source": 45.1,
+    "af": 0.6407815850090385,
+    "af_lower": 0.0907234346450787,
+    "af_upper": 0.08952556389344457,
+    "af_source": "GW240109_050431-C00:Mixed",
+    "DL_Mpc": 1510.0,
+    "z": 0.29,
+    "detectors": [
+      "H1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1388314624/H-H1_GWOSC_O4a_4KHZ_R1-1388810240-4096.hdf5"
+    ]
+  },
+  "GW240107_013215": {
+    "name": "GW240107_013215",
+    "catalog": "GWTC-4.0",
+    "GPS": 1388626353.7,
+    "SNR": 9.6,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.028,
+    "m1_source": 59.0,
+    "m2_source": 32.0,
+    "chi_eff": 0.3,
+    "Mf_source": 87.0,
+    "af": 0.7900613516966797,
+    "af_lower": 0.1869151687576145,
+    "af_upper": 0.10298708384125266,
+    "af_source": "GW240107_013215-C00:Mixed+XO4a",
+    "DL_Mpc": 5800.0,
+    "z": 0.87,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1388314624/H-H1_GWOSC_O4a_4KHZ_R1-1388625920-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1388314624/L-L1_GWOSC_O4a_4KHZ_R1-1388625920-4096.hdf5"
+    ]
+  },
+  "GW240104_164932": {
+    "name": "GW240104_164932",
+    "catalog": "GWTC-4.0",
+    "GPS": 1388422190.6,
+    "SNR": 14.8,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 42.3,
+    "m2_source": 32.1,
+    "chi_eff": 0.09,
+    "Mf_source": 70.6,
+    "af": 0.7253907621000814,
+    "af_lower": 0.08159512053388851,
+    "af_upper": 0.07831683497843578,
+    "af_source": "GW240104_164932-C00:Mixed",
+    "DL_Mpc": 1910.0,
+    "z": 0.35,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1388314624/H-H1_GWOSC_O4a_4KHZ_R1-1388421120-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1388314624/L-L1_GWOSC_O4a_4KHZ_R1-1388421120-4096.hdf5"
+    ]
+  },
+  "GW231231_154016": {
+    "name": "GW231231_154016",
+    "catalog": "GWTC-4.0",
+    "GPS": 1388072434.7,
+    "SNR": 13.4,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 22.5,
+    "m2_source": 17.2,
+    "chi_eff": -0.03,
+    "Mf_source": 38.1,
+    "af": 0.674635363837125,
+    "af_lower": 0.05067438355965892,
+    "af_upper": 0.05534247850822982,
+    "af_source": "GW231231_154016-C00:Mixed",
+    "DL_Mpc": 1070.0,
+    "z": 0.21,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1387266048/H-H1_GWOSC_O4a_4KHZ_R1-1388068864-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1387266048/L-L1_GWOSC_O4a_4KHZ_R1-1388068864-4096.hdf5"
+    ]
+  },
+  "GW231230_170116": {
+    "name": "GW231230_170116",
+    "catalog": "GWTC-4.0",
+    "GPS": 1387990895.0,
+    "SNR": 8.2,
+    "p_astro": 0.96,
+    "FAR_per_yr": 0.42,
+    "m1_source": 54.0,
+    "m2_source": 35.0,
+    "chi_eff": -0.19,
+    "Mf_source": 85.0,
+    "af": 0.6169106094502464,
+    "af_lower": 0.1950953929524944,
+    "af_upper": 0.13419580819289234,
+    "af_source": "GW231230_170116-C00:Mixed",
+    "DL_Mpc": 5700.0,
+    "z": 0.87,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1387266048/H-H1_GWOSC_O4a_4KHZ_R1-1387986944-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1387266048/L-L1_GWOSC_O4a_4KHZ_R1-1387986944-4096.hdf5"
+    ]
+  },
+  "GW231226_101520": {
+    "name": "GW231226_101520",
+    "catalog": "GWTC-4.0",
+    "GPS": 1387620938.3,
+    "SNR": 34.7,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 40.1,
+    "m2_source": 35.0,
+    "chi_eff": -0.09,
+    "Mf_source": 71.4,
+    "af": 0.6680503005535324,
+    "af_lower": 0.0370944874799406,
+    "af_upper": 0.04077408748286826,
+    "af_source": "GW231226_101520-C00:Mixed+XO4a",
+    "DL_Mpc": 1180.0,
+    "z": 0.23,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1387266048/H-H1_GWOSC_O4a_4KHZ_R1-1387618304-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1387266048/L-L1_GWOSC_O4a_4KHZ_R1-1387618304-4096.hdf5"
+    ]
+  },
+  "GW231224_024321": {
+    "name": "GW231224_024321",
+    "catalog": "GWTC-4.0",
+    "GPS": 1387421020.0,
+    "SNR": 14.0,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 9.3,
+    "m2_source": 7.3,
+    "chi_eff": -0.01,
+    "Mf_source": 15.89,
+    "af": 0.6834627781140827,
+    "af_lower": 0.029346683934528328,
+    "af_upper": 0.03654334640722434,
+    "af_source": "GW231224_024321-C00:Mixed",
+    "DL_Mpc": 950.0,
+    "z": 0.19,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1387266048/H-H1_GWOSC_O4a_4KHZ_R1-1387417600-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1387266048/L-L1_GWOSC_O4a_4KHZ_R1-1387417600-4096.hdf5"
+    ]
+  },
+  "GW231223_202619": {
+    "name": "GW231223_202619",
+    "catalog": "GWTC-4.0",
+    "GPS": 1387398397.0,
+    "SNR": 10.0,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.002,
+    "m1_source": 11.1,
+    "m2_source": 8.3,
+    "chi_eff": 0.1,
+    "Mf_source": 18.7,
+    "af": 0.7139864619086742,
+    "af_lower": 0.046614335725367106,
+    "af_upper": 0.05154728436964007,
+    "af_source": "GW231223_202619-C00:Mixed",
+    "DL_Mpc": 890.0,
+    "z": 0.18,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1387266048/H-H1_GWOSC_O4a_4KHZ_R1-1387397120-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1387266048/L-L1_GWOSC_O4a_4KHZ_R1-1387397120-4096.hdf5"
+    ]
+  },
+  "GW231223_075055": {
+    "name": "GW231223_075055",
+    "catalog": "GWTC-4.0",
+    "GPS": 1387353073.3,
+    "SNR": 9.4,
+    "p_astro": 0.98,
+    "FAR_per_yr": 0.55,
+    "m1_source": 11.9,
+    "m2_source": 6.8,
+    "chi_eff": 0.06,
+    "Mf_source": 18.1,
+    "af": 0.6920083361504111,
+    "af_lower": 0.05338379065660048,
+    "af_upper": 0.06433904461581086,
+    "af_source": "GW231223_075055-C00:Mixed+XO4a",
+    "DL_Mpc": 970.0,
+    "z": 0.19,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1387266048/H-H1_GWOSC_O4a_4KHZ_R1-1387352064-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1387266048/L-L1_GWOSC_O4a_4KHZ_R1-1387352064-4096.hdf5"
+    ]
+  },
+  "GW231223_032836": {
+    "name": "GW231223_032836",
+    "catalog": "GWTC-4.0",
+    "GPS": 1387337334.1,
+    "SNR": 10.2,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.00038,
+    "m1_source": 46.0,
+    "m2_source": 31.0,
+    "chi_eff": -0.15,
+    "Mf_source": 73.0,
+    "af": 0.6275225864581386,
+    "af_lower": 0.170808822961798,
+    "af_upper": 0.12613665626488546,
+    "af_source": "GW231223_032836-C00:Mixed",
+    "DL_Mpc": 4200.0,
+    "z": 0.67,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1387266048/H-H1_GWOSC_O4a_4KHZ_R1-1387335680-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1387266048/L-L1_GWOSC_O4a_4KHZ_R1-1387335680-4096.hdf5"
+    ]
+  },
+  "GW231221_135041": {
+    "name": "GW231221_135041",
+    "catalog": "GWTC-4.0",
+    "GPS": 1387201859.3,
+    "SNR": 10.0,
+    "p_astro": 0.96,
+    "FAR_per_yr": 0.54,
+    "m1_source": 47.0,
+    "m2_source": 28.0,
+    "chi_eff": 0.01,
+    "Mf_source": 72.0,
+    "af": 0.6928133870870674,
+    "af_lower": 0.1657225341734292,
+    "af_upper": 0.1458667439931699,
+    "af_source": "GW231221_135041-C00:Mixed+XO4a",
+    "DL_Mpc": 4600.0,
+    "z": 0.73,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1386217472/H-H1_GWOSC_O4a_4KHZ_R1-1387200512-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1386217472/L-L1_GWOSC_O4a_4KHZ_R1-1387200512-4096.hdf5"
+    ]
+  },
+  "GW231213_111417": {
+    "name": "GW231213_111417",
+    "catalog": "GWTC-4.0",
+    "GPS": 1386501275.9,
+    "SNR": 10.4,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 35.5,
+    "m2_source": 27.2,
+    "chi_eff": 0.06,
+    "Mf_source": 59.5,
+    "af": 0.7110211050107533,
+    "af_lower": 0.09442640926313994,
+    "af_upper": 0.089286793875475,
+    "af_source": "GW231213_111417-C00:Mixed",
+    "DL_Mpc": 4000.0,
+    "z": 0.65,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1386217472/H-H1_GWOSC_O4a_4KHZ_R1-1386500096-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1386217472/L-L1_GWOSC_O4a_4KHZ_R1-1386500096-4096.hdf5"
+    ]
+  },
+  "GW231206_233901": {
+    "name": "GW231206_233901",
+    "catalog": "GWTC-4.0",
+    "GPS": 1385941159.5,
+    "SNR": 21.9,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 37.6,
+    "m2_source": 28.4,
+    "chi_eff": -0.05,
+    "Mf_source": 63.1,
+    "af": 0.674709516673987,
+    "af_lower": 0.0692873558346937,
+    "af_upper": 0.06478098634294915,
+    "af_source": "GW231206_233901-C00:Mixed",
+    "DL_Mpc": 1490.0,
+    "z": 0.28,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1385168896/H-H1_GWOSC_O4a_4KHZ_R1-1385938944-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1385168896/L-L1_GWOSC_O4a_4KHZ_R1-1385938944-4096.hdf5"
+    ]
+  },
+  "GW231206_233134": {
+    "name": "GW231206_233134",
+    "catalog": "GWTC-4.0",
+    "GPS": 1385940712.5,
+    "SNR": 12.8,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 35.6,
+    "m2_source": 28.1,
+    "chi_eff": -0.09,
+    "Mf_source": 60.6,
+    "af": 0.6695220992150099,
+    "af_lower": 0.09866968400797937,
+    "af_upper": 0.08773725358521112,
+    "af_source": "GW231206_233134-C00:Mixed",
+    "DL_Mpc": 3200.0,
+    "z": 0.54,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1385168896/H-H1_GWOSC_O4a_4KHZ_R1-1385938944-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1385168896/L-L1_GWOSC_O4a_4KHZ_R1-1385938944-4096.hdf5"
+    ]
+  },
+  "GW231129_081745": {
+    "name": "GW231129_081745",
+    "catalog": "GWTC-4.0",
+    "GPS": 1385281083.6,
+    "SNR": 9.4,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.056,
+    "m1_source": 45.0,
+    "m2_source": 23.8,
+    "chi_eff": 0.02,
+    "Mf_source": 66.0,
+    "af": 0.6680199332735228,
+    "af_lower": 0.15684497710244427,
+    "af_upper": 0.1304157404900791,
+    "af_source": "GW231129_081745-C00:Mixed+XO4a",
+    "DL_Mpc": 3800.0,
+    "z": 0.63,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1385168896/H-H1_GWOSC_O4a_4KHZ_R1-1385279488-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1385168896/L-L1_GWOSC_O4a_4KHZ_R1-1385279488-4096.hdf5"
+    ]
+  },
+  "GW231127_165300": {
+    "name": "GW231127_165300",
+    "catalog": "GWTC-4.0",
+    "GPS": 1385139198.9,
+    "SNR": 9.9,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.01,
+    "m1_source": 45.0,
+    "m2_source": 29.0,
+    "chi_eff": 0.05,
+    "Mf_source": 71.0,
+    "af": 0.6927970570404165,
+    "af_lower": 0.17307764586316232,
+    "af_upper": 0.12234255246996772,
+    "af_source": "GW231127_165300-C00:Mixed",
+    "DL_Mpc": 4500.0,
+    "z": 0.71,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1384120320/H-H1_GWOSC_O4a_4KHZ_R1-1385136128-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1384120320/L-L1_GWOSC_O4a_4KHZ_R1-1385136128-4096.hdf5"
+    ]
+  },
+  "GW231123_135430": {
+    "name": "GW231123_135430",
+    "catalog": "GWTC-4.0",
+    "GPS": 1384782888.7,
+    "SNR": 21.8,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 137.0,
+    "m2_source": 101.0,
+    "chi_eff": 0.31,
+    "Mf_source": 222.0,
+    "af": 0.843442209182123,
+    "af_lower": 0.18999095295487645,
+    "af_upper": 0.0663595773579505,
+    "af_source": "GW231123_135430-C00:Mixed+XO4a",
+    "DL_Mpc": 2200.0,
+    "z": 0.39,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1384120320/H-H1_GWOSC_O4a_4KHZ_R1-1384779776-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1384120320/L-L1_GWOSC_O4a_4KHZ_R1-1384779776-4096.hdf5"
+    ]
+  },
+  "GW231119_075248": {
+    "name": "GW231119_075248",
+    "catalog": "GWTC-4.0",
+    "GPS": 1384415586.1,
+    "SNR": 8.3,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.019,
+    "m1_source": 49.0,
+    "m2_source": 33.0,
+    "chi_eff": null,
+    "Mf_source": 79.0,
+    "af": 0.680517854701905,
+    "af_lower": 0.15899465121767042,
+    "af_upper": 0.1123798025616396,
+    "af_source": "GW231119_075248-C00:Mixed",
+    "DL_Mpc": 6700.0,
+    "z": 0.99,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1384120320/H-H1_GWOSC_O4a_4KHZ_R1-1384415232-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1384120320/L-L1_GWOSC_O4a_4KHZ_R1-1384415232-4096.hdf5"
+    ]
+  },
+  "GW231118_090602": {
+    "name": "GW231118_090602",
+    "catalog": "GWTC-4.0",
+    "GPS": 1384333580.0,
+    "SNR": 11.0,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 13.1,
+    "m2_source": 7.3,
+    "chi_eff": 0.08,
+    "Mf_source": 19.7,
+    "af": 0.6973685377874845,
+    "af_lower": 0.04427714354019863,
+    "af_upper": 0.08205412696510794,
+    "af_source": "GW231118_090602-C00:Mixed",
+    "DL_Mpc": 1350.0,
+    "z": 0.26,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1384120320/H-H1_GWOSC_O4a_4KHZ_R1-1384333312-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1384120320/L-L1_GWOSC_O4a_4KHZ_R1-1384333312-4096.hdf5"
+    ]
+  },
+  "GW231118_071402": {
+    "name": "GW231118_071402",
+    "catalog": "GWTC-4.0",
+    "GPS": 1384326860.2,
+    "SNR": 9.2,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.0028,
+    "m1_source": 43.0,
+    "m2_source": 29.0,
+    "chi_eff": 0.11,
+    "Mf_source": 69.0,
+    "af": 0.7237098764904314,
+    "af_lower": 0.13861118551635354,
+    "af_upper": 0.10781270327996828,
+    "af_source": "GW231118_071402-C00:Mixed+XO4a",
+    "DL_Mpc": 4300.0,
+    "z": 0.69,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1384120320/H-H1_GWOSC_O4a_4KHZ_R1-1384325120-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1384120320/L-L1_GWOSC_O4a_4KHZ_R1-1384325120-4096.hdf5"
+    ]
+  },
+  "GW231118_005626": {
+    "name": "GW231118_005626",
+    "catalog": "GWTC-4.0",
+    "GPS": 1384304204.8,
+    "SNR": 10.7,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 19.8,
+    "m2_source": 10.9,
+    "chi_eff": 0.37,
+    "Mf_source": 29.3,
+    "af": 0.8046184665902597,
+    "af_lower": 0.054029576051662254,
+    "af_upper": 0.06033364628793658,
+    "af_source": "GW231118_005626-C00:Mixed+XO4a",
+    "DL_Mpc": 2190.0,
+    "z": 0.39,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1384120320/H-H1_GWOSC_O4a_4KHZ_R1-1384300544-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1384120320/L-L1_GWOSC_O4a_4KHZ_R1-1384300544-4096.hdf5"
+    ]
+  },
+  "GW231114_043211": {
+    "name": "GW231114_043211",
+    "catalog": "GWTC-4.0",
+    "GPS": 1383971549.2,
+    "SNR": 10.0,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.00013,
+    "m1_source": 22.7,
+    "m2_source": 8.2,
+    "chi_eff": 0.08,
+    "Mf_source": 30.0,
+    "af": 0.6083696358637648,
+    "af_lower": 0.05679497179317705,
+    "af_upper": 0.06475566961492796,
+    "af_source": "GW231114_043211-C00:Mixed+XO4a",
+    "DL_Mpc": 1380.0,
+    "z": 0.26,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1383071744/H-H1_GWOSC_O4a_4KHZ_R1-1383968768-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1383071744/L-L1_GWOSC_O4a_4KHZ_R1-1383968768-4096.hdf5"
+    ]
+  },
+  "GW231113_200417": {
+    "name": "GW231113_200417",
+    "catalog": "GWTC-4.0",
+    "GPS": 1383941075.9,
+    "SNR": 10.5,
+    "p_astro": 0.99,
+    "FAR_per_yr": 3.8e-05,
+    "m1_source": 11.5,
+    "m2_source": 7.4,
+    "chi_eff": 0.13,
+    "Mf_source": 18.3,
+    "af": 0.720014768580894,
+    "af_lower": 0.04146096444969738,
+    "af_upper": 0.05745058562832528,
+    "af_source": "GW231113_200417-C00:Mixed",
+    "DL_Mpc": 1160.0,
+    "z": 0.23,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1383071744/H-H1_GWOSC_O4a_4KHZ_R1-1383940096-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1383071744/L-L1_GWOSC_O4a_4KHZ_R1-1383940096-4096.hdf5"
+    ]
+  },
+  "GW231113_122623": {
+    "name": "GW231113_122623",
+    "catalog": "GWTC-4.0",
+    "GPS": 1383913601.9,
+    "SNR": 8.6,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.28,
+    "m1_source": 39.7,
+    "m2_source": 26.4,
+    "chi_eff": 0.33,
+    "Mf_source": 63.0,
+    "af": 0.805702546918708,
+    "af_lower": 0.15531139493826684,
+    "af_upper": 0.0823116850309008,
+    "af_source": "GW231113_122623-C00:Mixed",
+    "DL_Mpc": 3400.0,
+    "z": 0.57,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1383071744/H-H1_GWOSC_O4a_4KHZ_R1-1383911424-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1383071744/L-L1_GWOSC_O4a_4KHZ_R1-1383911424-4096.hdf5"
+    ]
+  },
+  "GW231110_040320": {
+    "name": "GW231110_040320",
+    "catalog": "GWTC-4.0",
+    "GPS": 1383624218.2,
+    "SNR": 11.5,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 19.5,
+    "m2_source": 12.5,
+    "chi_eff": 0.17,
+    "Mf_source": 30.6,
+    "af": 0.73587378587687,
+    "af_lower": 0.05400469198960334,
+    "af_upper": 0.0611687824475281,
+    "af_source": "GW231110_040320-C00:Mixed",
+    "DL_Mpc": 1890.0,
+    "z": 0.35,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1383071744/H-H1_GWOSC_O4a_4KHZ_R1-1383620608-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1383071744/L-L1_GWOSC_O4a_4KHZ_R1-1383620608-4096.hdf5"
+    ]
+  },
+  "GW231108_125142": {
+    "name": "GW231108_125142",
+    "catalog": "GWTC-4.0",
+    "GPS": 1383483120.5,
+    "SNR": 12.6,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 23.2,
+    "m2_source": 17.4,
+    "chi_eff": -0.08,
+    "Mf_source": 38.8,
+    "af": 0.6593045863090428,
+    "af_lower": 0.054666223292554994,
+    "af_upper": 0.05506947505467641,
+    "af_source": "GW231108_125142-C00:Mixed",
+    "DL_Mpc": 2060.0,
+    "z": 0.37,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1383071744/H-H1_GWOSC_O4a_4KHZ_R1-1383481344-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1383071744/L-L1_GWOSC_O4a_4KHZ_R1-1383481344-4096.hdf5"
+    ]
+  },
+  "GW231104_133418": {
+    "name": "GW231104_133418",
+    "catalog": "GWTC-4.0",
+    "GPS": 1383140076.9,
+    "SNR": 11.8,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 12.3,
+    "m2_source": 8.6,
+    "chi_eff": 0.14,
+    "Mf_source": 20.0,
+    "af": 0.7243419162059985,
+    "af_lower": 0.04157831446875471,
+    "af_upper": 0.04698747630147204,
+    "af_source": "GW231104_133418-C00:Mixed",
+    "DL_Mpc": 1470.0,
+    "z": 0.28,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1383071744/H-H1_GWOSC_O4a_4KHZ_R1-1383137280-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1383071744/L-L1_GWOSC_O4a_4KHZ_R1-1383137280-4096.hdf5"
+    ]
+  },
+  "GW231102_071736": {
+    "name": "GW231102_071736",
+    "catalog": "GWTC-4.0",
+    "GPS": 1382944674.4,
+    "SNR": 15.6,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 61.0,
+    "m2_source": 43.0,
+    "chi_eff": 0.06,
+    "Mf_source": 98.0,
+    "af": 0.7020155283626537,
+    "af_lower": 0.10367857659095192,
+    "af_upper": 0.09409634892181518,
+    "af_source": "GW231102_071736-C00:Mixed+XO4a",
+    "DL_Mpc": 3800.0,
+    "z": 0.63,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1382023168/H-H1_GWOSC_O4a_4KHZ_R1-1382940672-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1382023168/L-L1_GWOSC_O4a_4KHZ_R1-1382940672-4096.hdf5"
+    ]
+  },
+  "GW231029_111508": {
+    "name": "GW231029_111508",
+    "catalog": "GWTC-4.0",
+    "GPS": 1382613326.8,
+    "SNR": 10.8,
+    "p_astro": 0.99,
+    "FAR_per_yr": 5.2000000000000004e-05,
+    "m1_source": 65.0,
+    "m2_source": 42.0,
+    "chi_eff": 0.14,
+    "Mf_source": 101.0,
+    "af": 0.7236732756229038,
+    "af_lower": 0.1521063554444444,
+    "af_upper": 0.09571397384791736,
+    "af_source": "GW231029_111508-C00:Mixed+XO4a",
+    "DL_Mpc": 3100.0,
+    "z": 0.53,
+    "detectors": [
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1382023168/L-L1_GWOSC_O4a_4KHZ_R1-1382612992-4096.hdf5"
+    ]
+  },
+  "GW231028_153006": {
+    "name": "GW231028_153006",
+    "catalog": "GWTC-4.0",
+    "GPS": 1382542224.3,
+    "SNR": 22.4,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 95.0,
+    "m2_source": 58.0,
+    "chi_eff": 0.44,
+    "Mf_source": 144.0,
+    "af": 0.8364179717633037,
+    "af_lower": 0.09534375052895427,
+    "af_upper": 0.05323320126945119,
+    "af_source": "GW231028_153006-C00:Mixed+XO4a",
+    "DL_Mpc": 4100.0,
+    "z": 0.67,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1382023168/H-H1_GWOSC_O4a_4KHZ_R1-1382539264-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1382023168/L-L1_GWOSC_O4a_4KHZ_R1-1382539264-4096.hdf5"
+    ]
+  },
+  "GW231020_142947": {
+    "name": "GW231020_142947",
+    "catalog": "GWTC-4.0",
+    "GPS": 1381847405.6,
+    "SNR": 12.0,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 12.1,
+    "m2_source": 7.3,
+    "chi_eff": 0.15,
+    "Mf_source": 18.9,
+    "af": 0.7153985442321695,
+    "af_lower": 0.043499223417333144,
+    "af_upper": 0.060359628957456835,
+    "af_source": "GW231020_142947-C00:Mixed",
+    "DL_Mpc": 1230.0,
+    "z": 0.24,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1380974592/H-H1_GWOSC_O4a_4KHZ_R1-1381847040-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1380974592/L-L1_GWOSC_O4a_4KHZ_R1-1381847040-4096.hdf5"
+    ]
+  },
+  "GW231018_233037": {
+    "name": "GW231018_233037",
+    "catalog": "GWTC-4.0",
+    "GPS": 1381707055.0,
+    "SNR": 9.1,
+    "p_astro": 0.93,
+    "FAR_per_yr": 0.68,
+    "m1_source": 11.6,
+    "m2_source": 7.2,
+    "chi_eff": 0.01,
+    "Mf_source": 18.2,
+    "af": 0.6686732960560954,
+    "af_lower": 0.06668673795805091,
+    "af_upper": 0.05153191782572264,
+    "af_source": "GW231018_233037-C00:Mixed",
+    "DL_Mpc": 1530.0,
+    "z": 0.29,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1380974592/H-H1_GWOSC_O4a_4KHZ_R1-1381703680-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1380974592/L-L1_GWOSC_O4a_4KHZ_R1-1381703680-4096.hdf5"
+    ]
+  },
+  "GW231014_040532": {
+    "name": "GW231014_040532",
+    "catalog": "GWTC-4.0",
+    "GPS": 1381291551.0,
+    "SNR": 9.0,
+    "p_astro": 0.96,
+    "FAR_per_yr": 0.21,
+    "m1_source": 20.6,
+    "m2_source": 14.7,
+    "chi_eff": 0.17,
+    "Mf_source": 33.8,
+    "af": 0.7474963119031663,
+    "af_lower": 0.11103610767088024,
+    "af_upper": 0.09964154390346458,
+    "af_source": "GW231014_040532-C00:Mixed",
+    "DL_Mpc": 2300.0,
+    "z": 0.42,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1380974592/H-H1_GWOSC_O4a_4KHZ_R1-1381289984-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1380974592/L-L1_GWOSC_O4a_4KHZ_R1-1381289984-4096.hdf5"
+    ]
+  },
+  "GW231008_142521": {
+    "name": "GW231008_142521",
+    "catalog": "GWTC-4.0",
+    "GPS": 1380810339.8,
+    "SNR": 9.3,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.0016,
+    "m1_source": 45.0,
+    "m2_source": 25.5,
+    "chi_eff": -0.01,
+    "Mf_source": 69.0,
+    "af": 0.6626349876114436,
+    "af_lower": 0.19445937630776544,
+    "af_upper": 0.12537602331428443,
+    "af_source": "GW231008_142521-C00:Mixed",
+    "DL_Mpc": 3000.0,
+    "z": 0.51,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1379926016/H-H1_GWOSC_O4a_4KHZ_R1-1380806656-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1379926016/L-L1_GWOSC_O4a_4KHZ_R1-1380806656-4096.hdf5"
+    ]
+  },
+  "GW231005_091549": {
+    "name": "GW231005_091549",
+    "catalog": "GWTC-4.0",
+    "GPS": 1380532567.5,
+    "SNR": 11.0,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.04,
+    "m1_source": 28.8,
+    "m2_source": 21.2,
+    "chi_eff": -0.03,
+    "Mf_source": 48.0,
+    "af": 0.6768530127072685,
+    "af_lower": 0.10874268911135043,
+    "af_upper": 0.09556959576736779,
+    "af_source": "GW231005_091549-C00:Mixed",
+    "DL_Mpc": 3800.0,
+    "z": 0.62,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1379926016/H-H1_GWOSC_O4a_4KHZ_R1-1380532224-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1379926016/L-L1_GWOSC_O4a_4KHZ_R1-1380532224-4096.hdf5"
+    ]
+  },
+  "GW231005_021030": {
+    "name": "GW231005_021030",
+    "catalog": "GWTC-4.0",
+    "GPS": 1380507049.0,
+    "SNR": 10.4,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.01,
+    "m1_source": 83.0,
+    "m2_source": 49.0,
+    "chi_eff": 0.1,
+    "Mf_source": 126.0,
+    "af": 0.7157671276892497,
+    "af_lower": 0.1723078622382136,
+    "af_upper": 0.13808786841720178,
+    "af_source": "GW231005_021030-C00:Mixed+XO4a",
+    "DL_Mpc": 6400.0,
+    "z": 0.95,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1379926016/H-H1_GWOSC_O4a_4KHZ_R1-1380503552-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1379926016/L-L1_GWOSC_O4a_4KHZ_R1-1380503552-4096.hdf5"
+    ]
+  },
+  "GW231004_232346": {
+    "name": "GW231004_232346",
+    "catalog": "GWTC-4.0",
+    "GPS": 1380497044.3,
+    "SNR": 8.9,
+    "p_astro": 0.97,
+    "FAR_per_yr": 0.16,
+    "m1_source": 65.0,
+    "m2_source": 35.0,
+    "chi_eff": -0.05,
+    "Mf_source": 96.0,
+    "af": 0.6377210642618416,
+    "af_lower": 0.18996501419065975,
+    "af_upper": 0.1389992216157515,
+    "af_source": "GW231004_232346-C00:Mixed+XO4a",
+    "DL_Mpc": 4300.0,
+    "z": 0.69,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1379926016/H-H1_GWOSC_O4a_4KHZ_R1-1380495360-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1379926016/L-L1_GWOSC_O4a_4KHZ_R1-1380495360-4096.hdf5"
+    ]
+  },
+  "GW231002_143916": {
+    "name": "GW231002_143916",
+    "catalog": "GWTC-4.0",
+    "GPS": 1380292774.7,
+    "SNR": 9.4,
+    "p_astro": 0.9,
+    "FAR_per_yr": 1.0,
+    "m1_source": null,
+    "m2_source": null,
+    "chi_eff": null,
+    "Mf_source": null,
+    "af": null,
+    "af_lower": null,
+    "af_upper": null,
+    "af_source": null,
+    "DL_Mpc": null,
+    "z": null,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1379926016/H-H1_GWOSC_O4a_4KHZ_R1-1380290560-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1379926016/L-L1_GWOSC_O4a_4KHZ_R1-1380290560-4096.hdf5"
+    ],
+    "flags": [
+      "af_pending",
+      "pe_incomplete"
+    ]
+  },
+  "GW231001_140220": {
+    "name": "GW231001_140220",
+    "catalog": "GWTC-4.0",
+    "GPS": 1380204158.7,
+    "SNR": 11.5,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1.6e-05,
+    "m1_source": 75.0,
+    "m2_source": 40.0,
+    "chi_eff": -0.04,
+    "Mf_source": 111.0,
+    "af": 0.6439371137317839,
+    "af_lower": 0.19710104766916364,
+    "af_upper": 0.14978592854942252,
+    "af_source": "GW231001_140220-C00:Mixed+XO4a",
+    "DL_Mpc": 4400.0,
+    "z": 0.71,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1379926016/H-H1_GWOSC_O4a_4KHZ_R1-1380200448-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1379926016/L-L1_GWOSC_O4a_4KHZ_R1-1380200448-4096.hdf5"
+    ]
+  },
+  "GW230930_110730": {
+    "name": "GW230930_110730",
+    "catalog": "GWTC-4.0",
+    "GPS": 1380107268.4,
+    "SNR": 9.0,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.17,
+    "m1_source": 34.4,
+    "m2_source": 24.4,
+    "chi_eff": 0.03,
+    "Mf_source": 56.3,
+    "af": 0.6906052337704855,
+    "af_lower": 0.12058268022468588,
+    "af_upper": 0.1039086099933687,
+    "af_source": "GW230930_110730-C00:Mixed",
+    "DL_Mpc": 4900.0,
+    "z": 0.77,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1379926016/H-H1_GWOSC_O4a_4KHZ_R1-1380106240-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1379926016/L-L1_GWOSC_O4a_4KHZ_R1-1380106240-4096.hdf5"
+    ]
+  },
+  "GW230928_215827": {
+    "name": "GW230928_215827",
+    "catalog": "GWTC-4.0",
+    "GPS": 1379973525.1,
+    "SNR": 10.5,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1.4999999999999999e-05,
+    "m1_source": 54.0,
+    "m2_source": 29.0,
+    "chi_eff": 0.4,
+    "Mf_source": 79.0,
+    "af": 0.827740111556392,
+    "af_lower": 0.1496462423699768,
+    "af_upper": 0.0665610334054485,
+    "af_source": "GW230928_215827-C00:Mixed",
+    "DL_Mpc": 5000.0,
+    "z": 0.78,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1379926016/H-H1_GWOSC_O4a_4KHZ_R1-1379971072-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1379926016/L-L1_GWOSC_O4a_4KHZ_R1-1379971072-4096.hdf5"
+    ]
+  },
+  "GW230927_153832": {
+    "name": "GW230927_153832",
+    "catalog": "GWTC-4.0",
+    "GPS": 1379864330.9,
+    "SNR": 20.3,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 21.9,
+    "m2_source": 16.5,
+    "chi_eff": 0.03,
+    "Mf_source": 36.5,
+    "af": 0.6913888817283333,
+    "af_lower": 0.03293894955244103,
+    "af_upper": 0.03510332919758097,
+    "af_source": "GW230927_153832-C00:Mixed+XO4a",
+    "DL_Mpc": 1180.0,
+    "z": 0.23,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1378877440/H-H1_GWOSC_O4a_4KHZ_R1-1379860480-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1378877440/L-L1_GWOSC_O4a_4KHZ_R1-1379860480-4096.hdf5"
+    ]
+  },
+  "GW230927_043729": {
+    "name": "GW230927_043729",
+    "catalog": "GWTC-4.0",
+    "GPS": 1379824667.1,
+    "SNR": 12.1,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 34.9,
+    "m2_source": 27.1,
+    "chi_eff": 0.01,
+    "Mf_source": 58.9,
+    "af": 0.6906806151515342,
+    "af_lower": 0.08168193727650297,
+    "af_upper": 0.08062524079592637,
+    "af_source": "GW230927_043729-C00:Mixed",
+    "DL_Mpc": 3300.0,
+    "z": 0.55,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1378877440/H-H1_GWOSC_O4a_4KHZ_R1-1379823616-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1378877440/L-L1_GWOSC_O4a_4KHZ_R1-1379823616-4096.hdf5"
+    ]
+  },
+  "GW230924_124453": {
+    "name": "GW230924_124453",
+    "catalog": "GWTC-4.0",
+    "GPS": 1379594711.8,
+    "SNR": 13.5,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 28.8,
+    "m2_source": 23.1,
+    "chi_eff": 0.02,
+    "Mf_source": 49.3,
+    "af": 0.6971935576867689,
+    "af_lower": 0.06227938132838817,
+    "af_upper": 0.07226277706501794,
+    "af_source": "GW230924_124453-C00:Mixed",
+    "DL_Mpc": 2400.0,
+    "z": 0.42,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1378877440/H-H1_GWOSC_O4a_4KHZ_R1-1379594240-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1378877440/L-L1_GWOSC_O4a_4KHZ_R1-1379594240-4096.hdf5"
+    ]
+  },
+  "GW230922_040658": {
+    "name": "GW230922_040658",
+    "catalog": "GWTC-4.0",
+    "GPS": 1379390836.1,
+    "SNR": 12.5,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 76.0,
+    "m2_source": 51.0,
+    "chi_eff": 0.31,
+    "Mf_source": 119.0,
+    "af": 0.7874842688493207,
+    "af_lower": 0.14342594153951194,
+    "af_upper": 0.08481386583955985,
+    "af_source": "GW230922_040658-C00:Mixed",
+    "DL_Mpc": 6400.0,
+    "z": 0.96,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1378877440/H-H1_GWOSC_O4a_4KHZ_R1-1379389440-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1378877440/L-L1_GWOSC_O4a_4KHZ_R1-1379389440-4096.hdf5"
+    ]
+  },
+  "GW230922_020344": {
+    "name": "GW230922_020344",
+    "catalog": "GWTC-4.0",
+    "GPS": 1379383442.9,
+    "SNR": 13.4,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 39.3,
+    "m2_source": 29.2,
+    "chi_eff": 0.03,
+    "Mf_source": 65.4,
+    "af": 0.6990874370189584,
+    "af_lower": 0.07666660891829535,
+    "af_upper": 0.07607679716062055,
+    "af_source": "GW230922_020344-C00:Mixed",
+    "DL_Mpc": 1640.0,
+    "z": 0.31,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1378877440/H-H1_GWOSC_O4a_4KHZ_R1-1379381248-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1378877440/L-L1_GWOSC_O4a_4KHZ_R1-1379381248-4096.hdf5"
+    ]
+  },
+  "GW230920_071124": {
+    "name": "GW230920_071124",
+    "catalog": "GWTC-4.0",
+    "GPS": 1379229102.7,
+    "SNR": 11.1,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 32.4,
+    "m2_source": 23.8,
+    "chi_eff": null,
+    "Mf_source": 53.9,
+    "af": 0.6886644103957762,
+    "af_lower": 0.10215514509162538,
+    "af_upper": 0.09742087156274482,
+    "af_source": "GW230920_071124-C00:Mixed",
+    "DL_Mpc": 2900.0,
+    "z": 0.5,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1378877440/H-H1_GWOSC_O4a_4KHZ_R1-1379225600-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1378877440/L-L1_GWOSC_O4a_4KHZ_R1-1379225600-4096.hdf5"
+    ]
+  },
+  "GW230919_215712": {
+    "name": "GW230919_215712",
+    "catalog": "GWTC-4.0",
+    "GPS": 1379195850.0,
+    "SNR": 16.8,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 27.3,
+    "m2_source": 21.4,
+    "chi_eff": 0.18,
+    "Mf_source": 46.5,
+    "af": 0.7491208680681095,
+    "af_lower": 0.054845096651285896,
+    "af_upper": 0.058515034991540094,
+    "af_source": "GW230919_215712-C00:Mixed",
+    "DL_Mpc": 1330.0,
+    "z": 0.26,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1378877440/H-H1_GWOSC_O4a_4KHZ_R1-1379192832-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1378877440/L-L1_GWOSC_O4a_4KHZ_R1-1379192832-4096.hdf5"
+    ]
+  },
+  "GW230914_111401": {
+    "name": "GW230914_111401",
+    "catalog": "GWTC-4.0",
+    "GPS": 1378725259.7,
+    "SNR": 17.2,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 59.0,
+    "m2_source": 36.0,
+    "chi_eff": 0.12,
+    "Mf_source": 90.9,
+    "af": 0.7082529796610689,
+    "af_lower": 0.13746461017768918,
+    "af_upper": 0.09204901546098765,
+    "af_source": "GW230914_111401-C00:Mixed+XO4a",
+    "DL_Mpc": 2700.0,
+    "z": 0.47,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1377828864/H-H1_GWOSC_O4a_4KHZ_R1-1378721792-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1377828864/L-L1_GWOSC_O4a_4KHZ_R1-1378721792-4096.hdf5"
+    ]
+  },
+  "GW230911_195324": {
+    "name": "GW230911_195324",
+    "catalog": "GWTC-4.0",
+    "GPS": 1378497222.2,
+    "SNR": 11.1,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.001,
+    "m1_source": 33.6,
+    "m2_source": 21.7,
+    "chi_eff": -0.03,
+    "Mf_source": 53.0,
+    "af": 0.6713284020367795,
+    "af_lower": 0.1051704425323543,
+    "af_upper": 0.09076507562579406,
+    "af_source": "GW230911_195324-C00:Mixed+XO4a",
+    "DL_Mpc": 1370.0,
+    "z": 0.26,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1377828864/H-H1_GWOSC_O4a_4KHZ_R1-1378496512-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1377828864/L-L1_GWOSC_O4a_4KHZ_R1-1378496512-4096.hdf5"
+    ]
+  },
+  "GW230904_051013": {
+    "name": "GW230904_051013",
+    "catalog": "GWTC-4.0",
+    "GPS": 1377839431.1,
+    "SNR": 10.5,
+    "p_astro": 0.99,
+    "FAR_per_yr": 3.9e-05,
+    "m1_source": 10.6,
+    "m2_source": 7.1,
+    "chi_eff": 0.05,
+    "Mf_source": 17.1,
+    "af": 0.6902086179905131,
+    "af_lower": 0.04242672946176462,
+    "af_upper": 0.043834753172424246,
+    "af_source": "GW230904_051013-C00:Mixed",
+    "DL_Mpc": 1010.0,
+    "z": 0.2,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1377828864/H-H1_GWOSC_O4a_4KHZ_R1-1377837056-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1377828864/L-L1_GWOSC_O4a_4KHZ_R1-1377837056-4096.hdf5"
+    ]
+  },
+  "GW230831_015414": {
+    "name": "GW230831_015414",
+    "catalog": "GWTC-4.0",
+    "GPS": 1377482072.1,
+    "SNR": 8.6,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.29,
+    "m1_source": 42.0,
+    "m2_source": 30.0,
+    "chi_eff": 0.03,
+    "Mf_source": 69.0,
+    "af": 0.7065489811004744,
+    "af_lower": 0.12286290760479157,
+    "af_upper": 0.11856249444222877,
+    "af_source": "GW230831_015414-C00:Mixed",
+    "DL_Mpc": 4900.0,
+    "z": 0.77,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1376780288/H-H1_GWOSC_O4a_4KHZ_R1-1377480704-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1376780288/L-L1_GWOSC_O4a_4KHZ_R1-1377480704-4096.hdf5"
+    ]
+  },
+  "GW230825_041334": {
+    "name": "GW230825_041334",
+    "catalog": "GWTC-4.0",
+    "GPS": 1376972032.5,
+    "SNR": 8.8,
+    "p_astro": 0.98,
+    "FAR_per_yr": 0.1,
+    "m1_source": 43.0,
+    "m2_source": 27.3,
+    "chi_eff": 0.28,
+    "Mf_source": 67.0,
+    "af": 0.7925544680112984,
+    "af_lower": 0.15058142909198047,
+    "af_upper": 0.08316269112685226,
+    "af_source": "GW230825_041334-C00:Mixed+XO4a",
+    "DL_Mpc": 4900.0,
+    "z": 0.77,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1376780288/H-H1_GWOSC_O4a_4KHZ_R1-1376968704-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1376780288/L-L1_GWOSC_O4a_4KHZ_R1-1376968704-4096.hdf5"
+    ]
+  },
+  "GW230824_033047": {
+    "name": "GW230824_033047",
+    "catalog": "GWTC-4.0",
+    "GPS": 1376883065.7,
+    "SNR": 11.1,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 53.0,
+    "m2_source": 36.0,
+    "chi_eff": null,
+    "Mf_source": 84.0,
+    "af": 0.6791529138952659,
+    "af_lower": 0.1339610298794598,
+    "af_upper": 0.09845844681193772,
+    "af_source": "GW230824_033047-C00:Mixed",
+    "DL_Mpc": 4700.0,
+    "z": 0.74,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1376780288/H-H1_GWOSC_O4a_4KHZ_R1-1376882688-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1376780288/L-L1_GWOSC_O4a_4KHZ_R1-1376882688-4096.hdf5"
+    ]
+  },
+  "GW230820_212515": {
+    "name": "GW230820_212515",
+    "catalog": "GWTC-4.0",
+    "GPS": 1376601934.0,
+    "SNR": 9.3,
+    "p_astro": 0.97,
+    "FAR_per_yr": 0.24,
+    "m1_source": 62.0,
+    "m2_source": 34.0,
+    "chi_eff": 0.21,
+    "Mf_source": 92.0,
+    "af": 0.7433252336728086,
+    "af_lower": 0.25215256365721556,
+    "af_upper": 0.12324975750704015,
+    "af_source": "GW230820_212515-C00:Mixed",
+    "DL_Mpc": 4000.0,
+    "z": 0.65,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1375731712/H-H1_GWOSC_O4a_4KHZ_R1-1376600064-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1375731712/L-L1_GWOSC_O4a_4KHZ_R1-1376600064-4096.hdf5"
+    ]
+  },
+  "GW230819_171910": {
+    "name": "GW230819_171910",
+    "catalog": "GWTC-4.0",
+    "GPS": 1376500768.4,
+    "SNR": 9.9,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.011,
+    "m1_source": 70.0,
+    "m2_source": 35.0,
+    "chi_eff": -0.04,
+    "Mf_source": 102.0,
+    "af": 0.6422262271928925,
+    "af_lower": 0.25201256500106684,
+    "af_upper": 0.18577088925558372,
+    "af_source": "GW230819_171910-C00:Mixed",
+    "DL_Mpc": 4000.0,
+    "z": 0.65,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1375731712/H-H1_GWOSC_O4a_4KHZ_R1-1376497664-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1375731712/L-L1_GWOSC_O4a_4KHZ_R1-1376497664-4096.hdf5"
+    ]
+  },
+  "GW230814_230901": {
+    "name": "GW230814_230901",
+    "catalog": "GWTC-4.0",
+    "GPS": 1376089759.8,
+    "SNR": 43.0,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 33.6,
+    "m2_source": 28.3,
+    "chi_eff": -0.01,
+    "Mf_source": 58.9,
+    "af": 0.6774564832786649,
+    "af_lower": 0.02893032434608067,
+    "af_upper": 0.020981753377643853,
+    "af_source": "GW230814_230901-C00:Mixed+XO4a",
+    "DL_Mpc": 280.0,
+    "z": 0.06,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1375731712/H-H1_GWOSC_O4a_4KHZ_R1-1376088064-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1375731712/L-L1_GWOSC_O4a_4KHZ_R1-1376088064-4096.hdf5"
+    ]
+  },
+  "GW230814_061920": {
+    "name": "GW230814_061920",
+    "catalog": "GWTC-4.0",
+    "GPS": 1376029178.5,
+    "SNR": 11.2,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.00063,
+    "m1_source": 69.0,
+    "m2_source": 42.0,
+    "chi_eff": 0.05,
+    "Mf_source": 105.0,
+    "af": 0.6903946032542931,
+    "af_lower": 0.14249130222784878,
+    "af_upper": 0.11734717512447457,
+    "af_source": "GW230814_061920-C00:Mixed+XO4a",
+    "DL_Mpc": 4000.0,
+    "z": 0.65,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1375731712/H-H1_GWOSC_O4a_4KHZ_R1-1376026624-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1375731712/L-L1_GWOSC_O4a_4KHZ_R1-1376026624-4096.hdf5"
+    ]
+  },
+  "GW230811_032116": {
+    "name": "GW230811_032116",
+    "catalog": "GWTC-4.0",
+    "GPS": 1375759294.3,
+    "SNR": 13.6,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 35.6,
+    "m2_source": 22.1,
+    "chi_eff": 0.02,
+    "Mf_source": 55.3,
+    "af": 0.6942191522222636,
+    "af_lower": 0.08809649715704326,
+    "af_upper": 0.08789956740230231,
+    "af_source": "GW230811_032116-C00:Mixed",
+    "DL_Mpc": 2100.0,
+    "z": 0.38,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1375731712/H-H1_GWOSC_O4a_4KHZ_R1-1375756288-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1375731712/L-L1_GWOSC_O4a_4KHZ_R1-1375756288-4096.hdf5"
+    ]
+  },
+  "GW230806_204041": {
+    "name": "GW230806_204041",
+    "catalog": "GWTC-4.0",
+    "GPS": 1375389659.9,
+    "SNR": 9.4,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.0037,
+    "m1_source": 51.0,
+    "m2_source": 35.0,
+    "chi_eff": 0.08,
+    "Mf_source": 81.0,
+    "af": 0.7056165261537343,
+    "af_lower": 0.13071500711976625,
+    "af_upper": 0.10853178032251976,
+    "af_source": "GW230806_204041-C00:Mixed",
+    "DL_Mpc": 5500.0,
+    "z": 0.84,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1374683136/H-H1_GWOSC_O4a_4KHZ_R1-1375387648-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1374683136/L-L1_GWOSC_O4a_4KHZ_R1-1375387648-4096.hdf5"
+    ]
+  },
+  "GW230805_034249": {
+    "name": "GW230805_034249",
+    "catalog": "GWTC-4.0",
+    "GPS": 1375242188.0,
+    "SNR": 9.5,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.0037,
+    "m1_source": 32.1,
+    "m2_source": 22.6,
+    "chi_eff": 0.06,
+    "Mf_source": 52.4,
+    "af": 0.7130194166420266,
+    "af_lower": 0.12255104181480991,
+    "af_upper": 0.1095057726364923,
+    "af_source": "GW230805_034249-C00:Mixed",
+    "DL_Mpc": 3500.0,
+    "z": 0.58,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1374683136/H-H1_GWOSC_O4a_4KHZ_R1-1375240192-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1374683136/L-L1_GWOSC_O4a_4KHZ_R1-1375240192-4096.hdf5"
+    ]
+  },
+  "GW230803_033412": {
+    "name": "GW230803_033412",
+    "catalog": "GWTC-4.0",
+    "GPS": 1375068870.4,
+    "SNR": 9.4,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.31,
+    "m1_source": 45.0,
+    "m2_source": 29.0,
+    "chi_eff": 0.06,
+    "Mf_source": 70.0,
+    "af": 0.7056564142039518,
+    "af_lower": 0.14141590279209748,
+    "af_upper": 0.12005833924510356,
+    "af_source": "GW230803_033412-C00:Mixed+XO4a",
+    "DL_Mpc": 4900.0,
+    "z": 0.77,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1374683136/H-H1_GWOSC_O4a_4KHZ_R1-1375068160-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1374683136/L-L1_GWOSC_O4a_4KHZ_R1-1375068160-4096.hdf5"
+    ]
+  },
+  "GW230731_215307": {
+    "name": "GW230731_215307",
+    "catalog": "GWTC-4.0",
+    "GPS": 1374875605.9,
+    "SNR": 12.2,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 10.4,
+    "m2_source": 7.8,
+    "chi_eff": -0.05,
+    "Mf_source": 17.4,
+    "af": 0.6687669224834255,
+    "af_lower": 0.0340658718407405,
+    "af_upper": 0.0354202142250023,
+    "af_source": "GW230731_215307-C00:Mixed",
+    "DL_Mpc": 1110.0,
+    "z": 0.22,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1374683136/H-H1_GWOSC_O4a_4KHZ_R1-1374871552-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1374683136/L-L1_GWOSC_O4a_4KHZ_R1-1374871552-4096.hdf5"
+    ]
+  },
+  "GW230729_082317": {
+    "name": "GW230729_082317",
+    "catalog": "GWTC-4.0",
+    "GPS": 1374654215.2,
+    "SNR": 9.5,
+    "p_astro": 0.95,
+    "FAR_per_yr": 0.18,
+    "m1_source": 12.3,
+    "m2_source": 7.6,
+    "chi_eff": 0.12,
+    "Mf_source": 19.4,
+    "af": 0.7062586008142043,
+    "af_lower": 0.05784226001391024,
+    "af_upper": 0.06360427864657081,
+    "af_source": "GW230729_082317-C00:Mixed",
+    "DL_Mpc": 1630.0,
+    "z": 0.31,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1373634560/H-H1_GWOSC_O4a_4KHZ_R1-1374650368-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1373634560/L-L1_GWOSC_O4a_4KHZ_R1-1374650368-4096.hdf5"
+    ]
+  },
+  "GW230726_002940": {
+    "name": "GW230726_002940",
+    "catalog": "GWTC-4.0",
+    "GPS": 1374366598.1,
+    "SNR": 10.5,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 35.6,
+    "m2_source": 27.9,
+    "chi_eff": -0.02,
+    "Mf_source": 60.6,
+    "af": 0.6854282901949564,
+    "af_lower": 0.08234829029162183,
+    "af_upper": 0.08009782977414559,
+    "af_source": "GW230726_002940-C00:Mixed",
+    "DL_Mpc": 2000.0,
+    "z": 0.37,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1373634560/H-H1_GWOSC_O4a_4KHZ_R1-1374363648-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1373634560/L-L1_GWOSC_O4a_4KHZ_R1-1374363648-4096.hdf5"
+    ]
+  },
+  "GW230723_101834": {
+    "name": "GW230723_101834",
+    "catalog": "GWTC-4.0",
+    "GPS": 1374142732.4,
+    "SNR": 10.1,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.0034,
+    "m1_source": 16.7,
+    "m2_source": 10.6,
+    "chi_eff": -0.18,
+    "Mf_source": 26.4,
+    "af": 0.6078803138345793,
+    "af_lower": 0.07940841845820734,
+    "af_upper": 0.08946404362706972,
+    "af_source": "GW230723_101834-C00:Mixed",
+    "DL_Mpc": 1610.0,
+    "z": 0.3,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1373634560/H-H1_GWOSC_O4a_4KHZ_R1-1374142464-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1373634560/L-L1_GWOSC_O4a_4KHZ_R1-1374142464-4096.hdf5"
+    ]
+  },
+  "GW230712_090405": {
+    "name": "GW230712_090405",
+    "catalog": "GWTC-4.0",
+    "GPS": 1373187863.9,
+    "SNR": 9.5,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.018,
+    "m1_source": 32.0,
+    "m2_source": 13.1,
+    "chi_eff": -0.03,
+    "Mf_source": 45.0,
+    "af": 0.658618040249797,
+    "af_lower": 0.21781524121165585,
+    "af_upper": 0.16910975194122824,
+    "af_source": "GW230712_090405-C00:Mixed+XO4a",
+    "DL_Mpc": 2000.0,
+    "z": 0.37,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1372585984/H-H1_GWOSC_O4a_4KHZ_R1-1373184000-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1372585984/L-L1_GWOSC_O4a_4KHZ_R1-1373184000-4096.hdf5"
+    ]
+  },
+  "GW230709_122727": {
+    "name": "GW230709_122727",
+    "catalog": "GWTC-4.0",
+    "GPS": 1372940865.2,
+    "SNR": 10.2,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.011,
+    "m1_source": 45.0,
+    "m2_source": 30.0,
+    "chi_eff": 0.08,
+    "Mf_source": 71.0,
+    "af": 0.7069936539730458,
+    "af_lower": 0.15294148485700032,
+    "af_upper": 0.11653655585165812,
+    "af_source": "GW230709_122727-C00:Mixed",
+    "DL_Mpc": 4600.0,
+    "z": 0.73,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1372585984/H-H1_GWOSC_O4a_4KHZ_R1-1372938240-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1372585984/L-L1_GWOSC_O4a_4KHZ_R1-1372938240-4096.hdf5"
+    ]
+  },
+  "GW230708_230935": {
+    "name": "GW230708_230935",
+    "catalog": "GWTC-4.0",
+    "GPS": 1372892993.5,
+    "SNR": 10.0,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.0037,
+    "m1_source": 64.0,
+    "m2_source": 39.0,
+    "chi_eff": 0.01,
+    "Mf_source": 99.0,
+    "af": 0.6737267128363177,
+    "af_lower": 0.15721664642264355,
+    "af_upper": 0.1191225225267476,
+    "af_source": "GW230708_230935-C00:Mixed+XO4a",
+    "DL_Mpc": 3500.0,
+    "z": 0.58,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1372585984/H-H1_GWOSC_O4a_4KHZ_R1-1372889088-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1372585984/L-L1_GWOSC_O4a_4KHZ_R1-1372889088-4096.hdf5"
+    ]
+  },
+  "GW230708_053705": {
+    "name": "GW230708_053705",
+    "catalog": "GWTC-4.0",
+    "GPS": 1372829843.1,
+    "SNR": 8.9,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.21999999999999997,
+    "m1_source": 29.1,
+    "m2_source": 22.8,
+    "chi_eff": 0.07,
+    "Mf_source": 49.4,
+    "af": 0.721743168249541,
+    "af_lower": 0.08673049494485652,
+    "af_upper": 0.08849743773350294,
+    "af_source": "GW230708_053705-C00:Mixed",
+    "DL_Mpc": 3300.0,
+    "z": 0.55,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1372585984/H-H1_GWOSC_O4a_4KHZ_R1-1372827648-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1372585984/L-L1_GWOSC_O4a_4KHZ_R1-1372827648-4096.hdf5"
+    ]
+  },
+  "GW230707_124047": {
+    "name": "GW230707_124047",
+    "catalog": "GWTC-4.0",
+    "GPS": 1372768865.3,
+    "SNR": 11.9,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.0011,
+    "m1_source": 46.1,
+    "m2_source": 36.4,
+    "chi_eff": -0.05,
+    "Mf_source": 78.0,
+    "af": 0.6782828469795072,
+    "af_lower": 0.10157091537368423,
+    "af_upper": 0.0915184210110137,
+    "af_source": "GW230707_124047-C00:Mixed",
+    "DL_Mpc": 4500.0,
+    "z": 0.71,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1372585984/H-H1_GWOSC_O4a_4KHZ_R1-1372766208-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1372585984/L-L1_GWOSC_O4a_4KHZ_R1-1372766208-4096.hdf5"
+    ]
+  },
+  "GW230706_104333": {
+    "name": "GW230706_104333",
+    "catalog": "GWTC-4.0",
+    "GPS": 1372675431.2,
+    "SNR": 9.2,
+    "p_astro": 0.98,
+    "FAR_per_yr": 0.23,
+    "m1_source": 16.3,
+    "m2_source": 11.5,
+    "chi_eff": 0.19,
+    "Mf_source": 26.5,
+    "af": 0.7483137885402049,
+    "af_lower": 0.061261147324364496,
+    "af_upper": 0.06905630610408786,
+    "af_source": "GW230706_104333-C00:Mixed",
+    "DL_Mpc": 1930.0,
+    "z": 0.35,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1372585984/H-H1_GWOSC_O4a_4KHZ_R1-1372672000-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1372585984/L-L1_GWOSC_O4a_4KHZ_R1-1372672000-4096.hdf5"
+    ]
+  },
+  "GW230704_212616": {
+    "name": "GW230704_212616",
+    "catalog": "GWTC-4.0",
+    "GPS": 1372541194.7,
+    "SNR": 8.7,
+    "p_astro": 0.93,
+    "FAR_per_yr": 0.51,
+    "m1_source": 89.0,
+    "m2_source": 49.0,
+    "chi_eff": 0.28,
+    "Mf_source": 132.0,
+    "af": 0.7731256829463594,
+    "af_lower": 0.19239109786000175,
+    "af_upper": 0.12347872749889832,
+    "af_source": "GW230704_212616-C00:Mixed+XO4a",
+    "DL_Mpc": 7200.0,
+    "z": 1.05,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1371537408/H-H1_GWOSC_O4a_4KHZ_R1-1372540928-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1371537408/L-L1_GWOSC_O4a_4KHZ_R1-1372540928-4096.hdf5"
+    ]
+  },
+  "GW230704_021211": {
+    "name": "GW230704_021211",
+    "catalog": "GWTC-4.0",
+    "GPS": 1372471949.2,
+    "SNR": 9.4,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.21,
+    "m1_source": 32.4,
+    "m2_source": 19.9,
+    "chi_eff": -0.01,
+    "Mf_source": 50.5,
+    "af": 0.6581604882966392,
+    "af_lower": 0.1333880051290557,
+    "af_upper": 0.09537738338361579,
+    "af_source": "GW230704_021211-C00:Mixed+XO4a",
+    "DL_Mpc": 2700.0,
+    "z": 0.48,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1371537408/H-H1_GWOSC_O4a_4KHZ_R1-1372471296-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1371537408/L-L1_GWOSC_O4a_4KHZ_R1-1372471296-4096.hdf5"
+    ]
+  },
+  "GW230702_185453": {
+    "name": "GW230702_185453",
+    "catalog": "GWTC-4.0",
+    "GPS": 1372359311.7,
+    "SNR": 10.1,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 40.0,
+    "m2_source": 18.0,
+    "chi_eff": 0.05,
+    "Mf_source": 57.0,
+    "af": 0.6395196185749937,
+    "af_lower": 0.15338351040095727,
+    "af_upper": 0.12970954946463897,
+    "af_source": "GW230702_185453-C00:Mixed",
+    "DL_Mpc": 2400.0,
+    "z": 0.43,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1371537408/H-H1_GWOSC_O4a_4KHZ_R1-1372356608-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1371537408/L-L1_GWOSC_O4a_4KHZ_R1-1372356608-4096.hdf5"
+    ]
+  },
+  "GW230630_234532": {
+    "name": "GW230630_234532",
+    "catalog": "GWTC-4.0",
+    "GPS": 1372203950.4,
+    "SNR": 9.9,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.00042,
+    "m1_source": 10.0,
+    "m2_source": 6.6,
+    "chi_eff": -0.04,
+    "Mf_source": 16.1,
+    "af": 0.6574261025273114,
+    "af_lower": 0.04666705631001378,
+    "af_upper": 0.039108657748225695,
+    "af_source": "GW230630_234532-C00:Mixed",
+    "DL_Mpc": 1080.0,
+    "z": 0.21,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1371537408/H-H1_GWOSC_O4a_4KHZ_R1-1372200960-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1371537408/L-L1_GWOSC_O4a_4KHZ_R1-1372200960-4096.hdf5"
+    ]
+  },
+  "GW230630_125806": {
+    "name": "GW230630_125806",
+    "catalog": "GWTC-4.0",
+    "GPS": 1372165104.9,
+    "SNR": 9.0,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.16,
+    "m1_source": 51.0,
+    "m2_source": 33.0,
+    "chi_eff": 0.17,
+    "Mf_source": 80.0,
+    "af": 0.7450272874741364,
+    "af_lower": 0.1564242078867878,
+    "af_upper": 0.1133490908124728,
+    "af_source": "GW230630_125806-C00:Mixed",
+    "DL_Mpc": 5400.0,
+    "z": 0.83,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1371537408/H-H1_GWOSC_O4a_4KHZ_R1-1372164096-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1371537408/L-L1_GWOSC_O4a_4KHZ_R1-1372164096-4096.hdf5"
+    ]
+  },
+  "GW230628_231200": {
+    "name": "GW230628_231200",
+    "catalog": "GWTC-4.0",
+    "GPS": 1372029138.4,
+    "SNR": 16.4,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 32.5,
+    "m2_source": 27.1,
+    "chi_eff": -0.01,
+    "Mf_source": 56.5,
+    "af": 0.6908179387867734,
+    "af_lower": 0.06019068246592696,
+    "af_upper": 0.0750380019308221,
+    "af_source": "GW230628_231200-C00:Mixed",
+    "DL_Mpc": 2250.0,
+    "z": 0.4,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1371537408/H-H1_GWOSC_O4a_4KHZ_R1-1372028928-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1371537408/L-L1_GWOSC_O4a_4KHZ_R1-1372028928-4096.hdf5"
+    ]
+  },
+  "GW230627_015337": {
+    "name": "GW230627_015337",
+    "catalog": "GWTC-4.0",
+    "GPS": 1371866035.8,
+    "SNR": 28.7,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 8.4,
+    "m2_source": 5.79,
+    "chi_eff": 0.02,
+    "Mf_source": 13.54,
+    "af": 0.6773606771668564,
+    "af_lower": 0.02776129348236911,
+    "af_upper": 0.015158040948288098,
+    "af_source": "GW230627_015337-C00:Mixed",
+    "DL_Mpc": 305.0,
+    "z": 0.07,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1371537408/H-H1_GWOSC_O4a_4KHZ_R1-1371865088-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1371537408/L-L1_GWOSC_O4a_4KHZ_R1-1371865088-4096.hdf5"
+    ]
+  },
+  "GW230624_113103": {
+    "name": "GW230624_113103",
+    "catalog": "GWTC-4.0",
+    "GPS": 1371641481.7,
+    "SNR": 11.4,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.00017999999999999998,
+    "m1_source": 27.2,
+    "m2_source": 16.1,
+    "chi_eff": 0.17,
+    "Mf_source": 41.8,
+    "af": 0.7245028332364603,
+    "af_lower": 0.10880418848905882,
+    "af_upper": 0.12455640339749974,
+    "af_source": "GW230624_113103-C00:Mixed",
+    "DL_Mpc": 1940.0,
+    "z": 0.35,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1371537408/H-H1_GWOSC_O4a_4KHZ_R1-1371639808-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1371537408/L-L1_GWOSC_O4a_4KHZ_R1-1371639808-4096.hdf5"
+    ]
+  },
+  "GW230609_064958": {
+    "name": "GW230609_064958",
+    "catalog": "GWTC-4.0",
+    "GPS": 1370328616.3,
+    "SNR": 10.6,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.00014,
+    "m1_source": 35.3,
+    "m2_source": 25.2,
+    "chi_eff": -0.14,
+    "Mf_source": 57.8,
+    "af": 0.6403897643763145,
+    "af_lower": 0.1324166458038607,
+    "af_upper": 0.08660369514954458,
+    "af_source": "GW230609_064958-C00:Mixed",
+    "DL_Mpc": 3400.0,
+    "z": 0.56,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1369440256/H-H1_GWOSC_O4a_4KHZ_R1-1370324992-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1369440256/L-L1_GWOSC_O4a_4KHZ_R1-1370324992-4096.hdf5"
+    ]
+  },
+  "GW230608_205047": {
+    "name": "GW230608_205047",
+    "catalog": "GWTC-4.0",
+    "GPS": 1370292665.2,
+    "SNR": 10.2,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.0012,
+    "m1_source": 48.0,
+    "m2_source": 31.0,
+    "chi_eff": 0.04,
+    "Mf_source": 75.0,
+    "af": 0.691348608924859,
+    "af_lower": 0.13988284800676398,
+    "af_upper": 0.10737884026636102,
+    "af_source": "GW230608_205047-C00:Mixed",
+    "DL_Mpc": 3500.0,
+    "z": 0.58,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1369440256/H-H1_GWOSC_O4a_4KHZ_R1-1370292224-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1369440256/L-L1_GWOSC_O4a_4KHZ_R1-1370292224-4096.hdf5"
+    ]
+  },
+  "GW230606_004305": {
+    "name": "GW230606_004305",
+    "catalog": "GWTC-4.0",
+    "GPS": 1370047403.8,
+    "SNR": 11.1,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.00041,
+    "m1_source": 37.6,
+    "m2_source": 25.8,
+    "chi_eff": -0.11,
+    "Mf_source": 60.7,
+    "af": 0.6440951823794334,
+    "af_lower": 0.14399950755776836,
+    "af_upper": 0.10500708326409869,
+    "af_source": "GW230606_004305-C00:Mixed",
+    "DL_Mpc": 2700.0,
+    "z": 0.48,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1369440256/H-H1_GWOSC_O4a_4KHZ_R1-1370046464-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1369440256/L-L1_GWOSC_O4a_4KHZ_R1-1370046464-4096.hdf5"
+    ]
+  },
+  "GW230605_065343": {
+    "name": "GW230605_065343",
+    "catalog": "GWTC-4.0",
+    "GPS": 1369983241.5,
+    "SNR": 11.4,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 17.2,
+    "m2_source": 11.1,
+    "chi_eff": 0.06,
+    "Mf_source": 27.3,
+    "af": 0.6861365719222715,
+    "af_lower": 0.04985420386524342,
+    "af_upper": 0.05011537725720161,
+    "af_source": "GW230605_065343-C00:Mixed+XO4a",
+    "DL_Mpc": 1060.0,
+    "z": 0.21,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1369440256/H-H1_GWOSC_O4a_4KHZ_R1-1369980928-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1369440256/L-L1_GWOSC_O4a_4KHZ_R1-1369980928-4096.hdf5"
+    ]
+  },
+  "GW230601_224134": {
+    "name": "GW230601_224134",
+    "catalog": "GWTC-4.0",
+    "GPS": 1369694512.1,
+    "SNR": 13.4,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 64.0,
+    "m2_source": 44.0,
+    "chi_eff": -0.03,
+    "Mf_source": 102.0,
+    "af": 0.6660638497047658,
+    "af_lower": 0.12937190469796978,
+    "af_upper": 0.12068087227133184,
+    "af_source": "GW230601_224134-C00:Mixed+XO4a",
+    "DL_Mpc": 3700.0,
+    "z": 0.6,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1369440256/H-H1_GWOSC_O4a_4KHZ_R1-1369694208-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1369440256/L-L1_GWOSC_O4a_4KHZ_R1-1369694208-4096.hdf5"
+    ]
+  },
+  "GW230529_181500": {
+    "name": "GW230529_181500",
+    "catalog": "GWTC-4.0",
+    "GPS": 1369419318.7,
+    "SNR": 11.8,
+    "p_astro": 0.99,
+    "FAR_per_yr": 0.00022,
+    "m1_source": 3.66,
+    "m2_source": 1.42,
+    "chi_eff": -0.1,
+    "Mf_source": null,
+    "af": 0.5292625005259362,
+    "af_lower": 0.01629772988318756,
+    "af_upper": 0.046082297852975906,
+    "af_source": "GW230529_181500-C00:IMRPhenomNSBH",
+    "DL_Mpc": 202.0,
+    "z": 0.04,
+    "detectors": [
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1368391680/L-L1_GWOSC_O4a_4KHZ_R1-1369415680-4096.hdf5"
+    ]
+  },
+  "GW230518_125908": {
+    "name": "GW230518_125908",
+    "catalog": "GWTC-4.0",
+    "GPS": 1368449966.2,
+    "SNR": 14.1,
+    "p_astro": 0.99,
+    "FAR_per_yr": 1e-05,
+    "m1_source": 8.17,
+    "m2_source": 1.45,
+    "chi_eff": -0.01,
+    "Mf_source": null,
+    "af": 0.3823094453470025,
+    "af_lower": 0.021525392783346475,
+    "af_upper": 0.03066910692413649,
+    "af_source": "GW230518_125908-C00:IMRPhenomNSBH:LowSpin",
+    "DL_Mpc": 236.0,
+    "z": 0.05,
+    "detectors": [
+      "H1",
+      "L1"
+    ],
+    "strain_urls_4k_hdf5": [
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1368391680/H-H1_GWOSC_O4a_4KHZ_R1-1368449024-4096.hdf5",
+      "https://gwosc.org/archive/data/O4a_4KHZ_R1/1368391680/L-L1_GWOSC_O4a_4KHZ_R1-1368449024-4096.hdf5"
+    ]
+  }
+}
