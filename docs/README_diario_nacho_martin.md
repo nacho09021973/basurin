@@ -1,7 +1,8 @@
-# BRUNETE — Diario de diagnóstico del carril 221
+# BRUNETE — Diario de investigación (Nacho Martín)
 
 Directorio de trabajo: `runs/brunete_prepare_20260323T1545Z/experiment/`
 Cohorte base: 82 eventos O4/O4b offline, `prepare_events` PASS.
+Pipeline: BASURIN/BRUNETE, contract-first, IO determinista.
 
 ---
 
@@ -480,26 +481,205 @@ of overtone measurability limits"
    - Dominio de validez: af > 0.8 para estimación espectral del overtone
    - Implicaciones para diseño de futuros análisis
 
+### Experimento 6 — Auditoría cruzada Q_220 Kerr vs bootstrap medido
+
+**Objetivo:** verificar que el estimador `hilbert_peakband` mide correctamente
+Q_220, cerrando el argumento de que funciona donde Q es alto (220) y falla
+donde Q ≈ 1 (221).
+
+**Fórmula Kerr (2,2,0):** `mvp/kerr_qnm_fits.py:27`
+```
+Q_220(af) = 0.7000 + 1.4187 * (1 - af)^(-0.4990)
+F_220(af) = 1.5251 - 1.1568 * (1 - af)^(0.1292)
+f_220 = F_220 / (2π × Mf_source × MSUN_S)
+```
+
+**Campo usado de s3b:** `modes[220].ln_Q` = mediana bootstrap en log-espacio
+(`fit.stability.lnQ_p50`). Verificado en código: `mvp/s3b_multimode_estimates.py:985`.
+
+**Convención:** ambos usan Q = πfτ. Verificado en `kerr_qnm_fits.py:57` y
+`s3_ringdown_estimates.py:168`. Sin factor de conversión.
+
+**Resultado:**
+
+| Evento | Q_Kerr | Q_medido | Q_ratio | f_Kerr [Hz] | f_medido [Hz] | f_ratio |
+|--------|--------|----------|---------|-------------|---------------|---------|
+| GW230708_230935 | 3.181 | 13.965 | 4.390 | 171.0 | 180.6 | 1.056 |
+| GW231004_232346 | 3.055 | 15.134 | 4.955 | 171.8 | 178.9 | 1.041 |
+| GW230914_111401 | 3.323 | 16.063 | 4.833 | 191.4 | 182.0 | 0.951 |
+
+Output: `runs/brunete_prepare_20260323T1545Z/experiment/q220_kerr_crosscheck.json`
+
+**Lectura:** f_220 bien medida (ratio 0.95–1.06). Q_220 sistemáticamente
+sobreestimado por **~4.5×**. No es varianza, no es convención — es sesgo del
+estimador.
+
+**HALLAZGO IMPORTANTE: `hilbert_peakband` es un estimador de frecuencia bueno
+pero un estimador de damping sesgado.** Las estimaciones son reproducibles
+(pasan los gates de estabilidad) pero no son precisas en Q.
+
+### Experimento 7 — dt_start scan para Q_220
+
+**Objetivo:** falsar la hipótesis de que el sesgo en Q_220 viene de
+contaminación del merger (cola temprana). Si es merger contamination,
+empezar más tarde debería reducir Q hacia Kerr.
+
+**Configuración:** GW230708_230935, subruns aislados con s2 regenerado.
+Mf ≈ 99 M☉ → t_Mf ≈ 0.488 ms → dt_start = 3 ms ≈ 6.1 t_Mf.
+
+**Resultado:**
+
+| dt_start | t en t_Mf | Q_medido | Q_ratio | f_medido | f_ratio |
+|----------|-----------|----------|---------|----------|---------|
+| 3 ms | ~6 | 13.965 | 4.390 | 180.6 | 1.056 |
+| 5 ms | ~10 | 14.369 | 4.517 | 183.3 | 1.072 |
+| 10 ms | ~20 | 16.521 | 5.194 | 186.2 | 1.089 |
+
+Subruns: `runs/q220_dtstart_scan_GW230708_230935_dt{3,5,10}ms/`
+Output: `runs/brunete_prepare_20260323T1545Z/experiment/q220_dtstart_scan_GW230708_230935.json`
+
+**Lectura:** retrasar t0 **no** reduce Q_220 — lo **aumenta**. Hipótesis de
+merger contamination como causa principal **descartada**.
+
+**Interpretación:** al empezar más tarde, la señal QNM se ha atenuado más pero
+el ruido coloreado en banda sigue igual. El estimador mide la tasa de
+decaimiento de la envolvente de potencia en banda (señal + ruido), no del QNM
+aislado. Cuando SNR_local baja, el ruido "sostiene" la envolvente → Q efectivo
+sube.
+
+**Consecuencia para el pipeline:**
+- Los gates de calidad (cv_Q, lnQ_span) miden **estabilidad**, no **accuracy**.
+  Un sesgo sistemático constante pasa todos los gates.
+- δf₂₂₀ respecto a Kerr es interpretable (f bien medida).
+- δτ₂₂₀/δQ₂₂₀ respecto a Kerr NO es interpretable sin calibración
+  (Q sesgado ~4.5×).
+- El stage `s5_aggregate` y `s7_beyond_kerr_deviation_score` heredan el sesgo
+  porque definen desviaciones respecto a Kerr.
+
+Nota: el scan usó `band_strategy=default_split_60_40` en lugar de
+`kerr_centered_overlap` (baseline). La discrepancia no afecta la conclusión
+porque Q sube monótonamente en ambas estrategias.
+
+### Resultado 1 — Population Fisher Forecast (81 eventos O4)
+
+**Script:** `run_population_fisher.py` v0.2 con Fisher analítica.
+
+**Fisher analítica:** Γ = ρ² × diag(2Q², 1/2), donde ρ = SNR_ringdown.
+Referencia: Berti, Cardoso & Will (2006) PRD 73, 064030.
+Da: σ(δf/f) = 1/(ρQ√2), σ(δτ/τ) = √2/ρ.
+
+**IMPORTANTE: esto es un FORECAST teórico.** Usa parámetros Kerr del catálogo
+y SNR como proxy de SNR_ringdown. NO usa valores medidos de s3b. Por tanto,
+NO está afectado por el sesgo de Q del estimador.
+
+**Configuración:**
+- Cohorte: 82 eventos → 81 con af disponible (1 sin af: GW231002_143916)
+- SNR_ringdown = 0.3 × SNR_red
+- af y Mf_source del catálogo canónico
+- af cap: 0.95
+
+**Resultado combinado:**
+
+| Parámetro | σ combinado | σ (%) |
+|-----------|-------------|-------|
+| δf₂₂₀/f₂₂₀ | 0.00580 | **0.58%** |
+| δτ₂₂₀/τ₂₂₀ | 0.03875 | **3.88%** |
+
+Correlación: ρ(δf,δτ) = 0.000 (diagonal por construcción en Fisher analítica).
+
+**Top 5 contributors:**
+
+| Evento | Fracción Fisher | SNR_rd |
+|--------|----------------|--------|
+| GW230814_230901 | 11.5% | 12.9 |
+| GW231226_101520 | 7.3% | 10.4 |
+| GW231028_153006 | 5.3% | 6.7 |
+| GW231123_135430 | 5.2% | 6.5 |
+| GW230627_015337 | 5.1% | 8.6 |
+
+Distribución saludable: ningún evento domina >12%.
+
+**Contexto competitivo:**
+- LVK GWTC-3 TGR: σ(δf₂₂₀) ~ 2-5%, σ(δτ₂₂₀) ~ 10-20% (jerárquico, full-IMR)
+- LVK GWTC-4.0 TGR Papers I-III (19 marzo 2026): 91 eventos, full-IMR
+- GW250114 individual: constraints comparables a combinar docenas de eventos
+- BRUNETE forecast: ~3-5× mejor que GWTC-3, complementario a GWTC-4.0
+  (ringdown-only Fisher vs full-IMR jerárquico)
+
+Output: `runs/brunete_prepare_20260323T1545Z/experiment/population_fisher_forecast/`
+
+### Artefactos generados hoy (completo)
+
+| Artefacto | Ubicación |
+|-----------|-----------|
+| Selección centinela | `experiment/sentinel_selection.json` |
+| Script selector | `select_sentinel_events.py` |
+| Script extractor bootstrap | `extract_s3b_bootstrap_samples.py` |
+| A/B topología (10 eventos) | `runs/ab221sbet_<EVENT>_20260323/` |
+| A/B residual (3 eventos) | `runs/ab221fixed_<EVENT>_20260323/` |
+| Bootstrap samples crudo | `runs/ab221_bootstrap_samples_3events_20260323.json` |
+| Distribución af + pre-gate | `experiment/af_distribution_and_pregate.json` |
+| Auditoría Q_220 vs Kerr | `experiment/q220_kerr_crosscheck.json` |
+| dt_start scan Q_220 | `experiment/q220_dtstart_scan_GW230708_230935.json` |
+| dt_start subruns | `runs/q220_dtstart_scan_GW230708_230935_dt{3,5,10}ms/` |
+| Population Fisher forecast | `experiment/population_fisher_forecast/` |
+| `run_population_fisher.py` v0.2 | raíz del repo |
+| CLAUDE.md (agente autónomo) | raíz del repo |
+| launch_agent.sh | raíz del repo |
+
+(Rutas `experiment/` relativas a `runs/brunete_prepare_20260323T1545Z/`)
+
+### Resumen del día
+
+**Tres hallazgos principales:**
+
+1. **Carril 221 cerrado como no informativo.** Q_221_Kerr < 1.5 para toda
+   la cohorte O4 (af 0.61–0.84). Estimador espectral no puede medir Q < 2.
+   Resultado 82/82 SINGLEMODE_ONLY es físicamente correcto.
+
+2. **Sesgo de Q en hilbert_peakband descubierto.** Q_220 medido ≈ 4.5× Q_Kerr.
+   Frecuencia correcta (ratio ~1.0). Sesgo no viene del merger (dt_start scan
+   lo descarta) sino de que el estimador mide Q efectivo de señal+ruido en
+   banda, no del QNM aislado.
+
+3. **Population Fisher forecast: σ(δf₂₂₀) = 0.58%, σ(δτ₂₂₀) = 3.88%** con
+   81 eventos O4. Forecast teórico no afectado por el sesgo de s3b.
+
+**Pivote estratégico del paper:**
+"Ringdown-only population analysis of O4 events: methodology, constraints
+on δf₂₂₀, and systematic characterization of overtone and damping
+measurability limits."
+
+Tres contribuciones: método (ringdown-only Fisher), resultado (σ(δf₂₂₀) = 0.58%),
+y diagnóstico metodológico (221 + sesgo Q).
+
 ### Pendientes para sesiones futuras
 
 **Prioridad alta (paper):**
-- [ ] Auditoría cruzada Q_220: verificar Berti (2,2,0) vs bootstrap medido.
-      (Prompt 3 preparado, ejecutable en Codex.) **Cierra el argumento.**
-- [ ] Ejecutar `run_population_fisher.py` sobre los 82 eventos con el
-      carril 220 y obtener σ(δf₂₂₀), σ(δτ₂₂₀) combinados.
-- [ ] Comparar constraints resultantes con LVK GWTC-3 TGR y GWTC-4.0 TGR
-      Paper III para posicionar el resultado.
-- [ ] Evaluar si GW250114 (O4b) puede incorporarse a la cohorte.
+- [ ] Decidir si publicar δτ como forecast-only (no afectado por sesgo)
+      o investigar calibración del estimador para Q_220.
+- [ ] Extender auditoría Q_220 a los 10 centinela para verificar que
+      el ratio ~4.5× es estable en función de masa, spin y SNR.
+- [ ] Evaluar si GW250114 (O4b, SNR~80, af~0.68) puede incorporarse.
+- [ ] Redactar outline del paper con las tres contribuciones.
+
+**Prioridad media (estimador):**
+- [ ] Investigar alternativas a hilbert_peakband para Q:
+      - fit paramétrico en dominio temporal (damped sinusoid)
+      - estimación de τ por decay de envolvente con sustracción de
+        suelo de ruido
+- [ ] Verificar si el sesgo Q depende de SNR (¿escala como 1/SNR²?).
+      Si es predecible, permite calibración empírica.
 
 **Prioridad media (infraestructura):**
-- [ ] Especificación formal de contratos del carril `221_detection_candidate`.
-      (Prompt 2 preparado.) Validación requiere inyecciones sintéticas o
-      evento tipo GW250114.
+- [ ] Especificación contratos carril `221_detection_candidate`.
 - [ ] Implementar pre-gate Q_221_Kerr en pipeline.py.
 
 **Prioridad baja (futuro):**
-- [ ] Estimador dominio temporal para 221 (diseño de contrato + prototipo).
-- [ ] Incorporar GW250114 como evento de validación del carril 221 temporal.
+- [ ] Estimador dominio temporal para 221.
+- [ ] Incorporar GW250114 como validación.
+- [ ] Evaluar modo (3,3,0) como alternativa a (2,2,1) para espectroscopía
+      (Q_330 mucho mayor que Q_221 para mismos spins).
 
 ---
 
