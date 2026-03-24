@@ -258,6 +258,73 @@ son la causa dominante.
 | C (gating) | 0.11 | 0.10 | 0.10 | 0.05 |
 | E (detector) | 0.02 | 0.02 | 0.02 | 0.02 |
 
+---
+
+## 2026-03-24 — Extensión de auditoría Q_220 a 10 eventos centinela
+
+### Objetivo
+
+Extender el cruce `Q_220` medido vs `Q_220_Kerr` desde el muestreo bootstrap de
+3 eventos a los 10 eventos centinela seleccionados en
+`experiment/sentinel_selection.json`.
+
+Fuente de medición usada:
+- batch baseline 221:
+  `runs/brunete_batch_221_20260323T1605Z/run_batch/event_runs/brunete_<EVENT>_m221/s3b_multimode_estimates/outputs/multimode_estimates.json`
+- campo leído para 220:
+  `modes[].ln_Q` / `modes[].ln_f` del objeto con `label == "220"`
+- esos campos coinciden con la mediana bootstrap en log-espacio
+  (`fit.stability.lnQ_p50`, `fit.stability.lnf_p50`)
+
+Referencia Kerr usada:
+- `mvp/kerr_qnm_fits.py`
+- `Q_220(af) = 0.7000 + 1.4187 * (1 - af)^(-0.4990)`
+- `F_220(af) = 1.5251 - 1.1568 * (1 - af)^(0.1292)`
+- `f_220 = F_220 / (2π × Mf_source × MSUN_S)`
+
+### Artefacto generado
+
+- `runs/brunete_prepare_20260323T1545Z/experiment/q220_kerr_crosscheck_10sentinela.json`
+
+### Resultados observados
+
+Tabla resumida:
+
+| Evento | Bloque | Q_Kerr | Q_medido | Ratio Q | Ratio f |
+|--------|--------|--------|----------|---------|---------|
+| GW230814_230901 | A_top_snr | 3.195 | 17.399 | 5.445 | 0.670 |
+| GW231226_101520 | A_top_snr | 3.160 | 20.856 | 6.601 | 0.817 |
+| GW230627_015337 | A_top_snr | 3.195 | 9.741 | 3.049 | 0.161 |
+| GW231028_153006 | A_top_snr | 4.201 | 14.926 | 3.553 | 1.345 |
+| GW230904_051013 | B_q3_mf_diverse | 3.246 | 12.669 | 3.903 | 0.196 |
+| GW230911_195324 | B_q3_mf_diverse | 3.172 | 14.459 | 4.558 | 0.616 |
+| GW230922_040658 | B_q3_mf_diverse | 3.773 | 9.470 | 2.510 | 1.252 |
+| GW230928_215827 | C_q2_control | 4.112 | 7.961 | 1.936 | 0.780 |
+| GW230702_185453 | C_q2_control | 3.061 | 14.647 | 4.786 | 0.679 |
+| GW230630_234532 | C_q2_control | 3.121 | 26.048 | 8.345 | 0.200 |
+
+Resumen factual del artefacto:
+- todos los eventos centinela muestran sesgo positivo en `Q_220`
+- rango de ratios `Q_medido / Q_Kerr`: 1.936 → 8.345
+- la mediana de ratios `Q_medido / Q_Kerr` en estos 10 eventos es 4.173
+- los ratios `f_medido / f_Kerr` no permanecen cercanos a 1 en esta muestra
+  completa; rango observado: 0.161 → 1.345
+
+### Hechos que quedan asentados
+
+1. El sesgo positivo en `Q_220` no desaparece al ampliar de 3 a 10 eventos.
+2. En la muestra centinela de 10 eventos, el sesgo en `Q_220` no es constante;
+   varía sustancialmente entre eventos.
+3. La extensión a 10 centinela no reproduce la conclusión inicial de que
+   `f_220` esté universalmente bien medida; en esta muestra aparecen desvíos
+   grandes en `f_220`.
+
+### Implicación operativa inmediata
+
+La tarea siguiente ya no es “asumir un factor fijo ~4.5×”, sino caracterizar
+dependencia del sesgo frente a variables del evento (SNR, Mf_source, af) y
+entender por qué algunos centinela muestran también desvíos grandes en `f_220`.
+
 ### Veredicto operativo
 
 El resultado 82/82 SINGLEMODE_ONLY es el resultado correcto. Los gates de calidad
