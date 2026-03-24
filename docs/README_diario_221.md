@@ -299,14 +299,207 @@ informativo.
 | A/B residual (3 eventos) | `runs/ab221fixed_<EVENT>_20260323/` |
 | Bootstrap samples crudo | `runs/ab221_bootstrap_samples_3events_20260323.json` |
 
+### Experimento 5 — Dimensionamiento del pre-gate: distribución de af y Q_221_Kerr
+
+**Objetivo:** antes de especificar los contratos del nuevo carril
+`221_detection_candidate`, determinar cuántos eventos de la cohorte entrarían en
+el dominio detectable.
+
+**Script ejecutado por Codex** (Prompt 1). Output:
+`runs/brunete_prepare_20260323T1545Z/experiment/af_distribution_and_pregate.json`
+
+**Distribución de af (81 eventos con af disponible, 1 sin af):**
+
+| Stat | af |
+|------|----|
+| min | 0.608 |
+| p10 | 0.644 |
+| p25 | 0.670 |
+| median | 0.691 |
+| p75 | 0.720 |
+| p90 | 0.773 |
+| max | 0.843 |
+
+**Q_221_Kerr resultante:**
+
+| Stat | Q_221_Kerr |
+|------|------------|
+| min | 0.947 |
+| p10 | 0.986 |
+| median | 1.048 |
+| p90 | — |
+| max | 1.407 |
+
+**Pre-gate counts:**
+
+| Umbral Q_221_Kerr | Eventos que pasan |
+|--------------------|-------------------|
+| > 1.5 | 0 |
+| > 2.0 | 0 |
+| > 2.5 | 0 |
+| > 3.0 | 0 |
+
+Evento con mayor spin: GW231123_135430 (af=0.843, Q_221_Kerr=1.407).
+Para Q_221_Kerr > 2.0 se requiere af > ~0.929 — muy por encima del máximo
+observado.
+
+**Lectura:** la cohorte O4/O4b entera está fuera del dominio de detectabilidad
+del modo (2,2,1) por factor de calidad sub-ciclo. El nuevo carril
+`221_detection_candidate` tendría 0 candidatos reales en esta cohorte con
+cualquier umbral razonable de Q_221_Kerr.
+
+### Implicaciones para la estrategia del carril 221
+
+Este resultado convierte lo que parecía un problema de pipeline en un **hecho
+físico de la cohorte**: los remanentes O4/O4b tienen spins insuficientes para
+que el overtone (2,2,1) sea una oscilación resoluble.
+
+**Decisiones de diseño que esto fuerza:**
+
+1. **El carril conservador actual (`s3b` → `SINGLEMODE_ONLY`) está produciendo
+   el resultado correcto.** No necesita fix. La documentación debe reflejar que
+   82/82 SINGLEMODE_ONLY es esperado, no un fallo.
+
+2. **El nuevo carril `221_detection_candidate` no tiene sobre qué correr en O4.**
+   Su especificación sigue siendo válida como contrato, pero la validación
+   requiere:
+   - Inyecciones sintéticas con af > 0.85 para testear sensibilidad, o
+   - Esperar a eventos O5/future con spins más altos, o
+   - Evaluar si un estimador en dominio temporal podría operar con Q < 2
+     (expandiendo el dominio de aplicabilidad).
+
+3. **El pre-gate (Contrato 1) es trivial de implementar y tiene valor inmediato:**
+   evita que el pipeline gaste cómputo en 82 extracciones de 221 que van a fallar.
+   Reducción de cómputo sin pérdida de información.
+
+### Estado consolidado del diagnóstico
+
+La cadena causal completa, verificada paso a paso:
+
+```
+af cohorte O4 ≈ 0.61–0.84
+        ↓ (Berti fit para 2,2,1)
+Q_221_Kerr ≈ 0.95–1.41  (sub-ciclo en toda la cohorte)
+        ↓
+221 no tiene suficientes ciclos para ser medible espectralmente
+        ↓
+hilbert_peakband bootstrap encuentra artefacto espectral del residuo (Q ≈ 9–11)
+        ↓
+lnQ_span y cv_Q explotan (porque mide ruido, no señal)
+        ↓
+mode_221_ok = false → SINGLEMODE_ONLY (gate correcto)
+        ↓
+82/82 SINGLEMODE_ONLY = resultado físicamente esperado
+```
+
+### Artefactos generados hoy (actualizado)
+
+| Artefacto | Ubicación |
+|-----------|-----------|
+| Selección centinela | `runs/brunete_prepare_20260323T1545Z/experiment/sentinel_selection.json` |
+| Script selector | `select_sentinel_events.py` |
+| Script extractor bootstrap | `extract_s3b_bootstrap_samples.py` |
+| A/B topología (10 eventos) | `runs/ab221sbet_<EVENT>_20260323/` |
+| A/B residual (3 eventos) | `runs/ab221fixed_<EVENT>_20260323/` |
+| Bootstrap samples crudo | `runs/ab221_bootstrap_samples_3events_20260323.json` |
+| Distribución af + pre-gate | `runs/brunete_prepare_20260323T1545Z/experiment/af_distribution_and_pregate.json` |
+
+### Análisis del panorama competitivo (investigación web)
+
+**Publicaciones clave recientes:**
+
+1. **LVK GWTC-4.0 TGR trilogy (arXiv 2603.19019/19020/19021, 19 marzo 2026)**
+   - Tres papers publicados hace 5 días.
+   - Paper III (Tests of the Remnants): 7 tests del remanente, 3 de ringdown,
+     sobre 91 señales (42 de O4a + runs anteriores).
+   - Método: pSEOBNRv5PHM — parametrización full IMR con (δf₂₂₀, δτ₂₂₀).
+   - Resultado: consistencia con GR. Un análisis encuentra GR en la frontera
+     del 98.6% credible region al combinar jerárquicamente, pero baja a 92.2%
+     al incluir GW250114. Sin evidencia fuerte de desviación.
+   - **Implicación para BRUNETE:** constraints poblacionales en (δf₂₂₀, δτ₂₂₀)
+     con O4a ya publicadas. BRUNETE no puede ser primicia en el resultado.
+
+2. **GW250114 BH Spectroscopy (arXiv 2509.08099, PRL 136:041403, enero 2026)**
+   - Evento más ruidoso detectado hasta la fecha: SNR ~77-80.
+   - Primera detección del overtone (2,2,1) con significancia 4.1σ.
+   - Spin del remanente: af ≈ 0.68 — mismo rango que la cohorte O4 de BRUNETE.
+   - Constraints de un solo evento comparables o 2-3× más estrictas que
+     combinar docenas de eventos del catálogo.
+   - Usa análisis en dominio temporal (pyRing, QNMRF), no espectral.
+   - **Implicación para BRUNETE:** confirma que a af ≈ 0.68, 221 es detectable
+     pero requiere SNR ~80 y métodos temporales. Valida el diagnóstico de hoy:
+     el estimador espectral no puede con Q_221 < 2.
+
+3. **Debate overtone activo en la literatura**
+   - Grupos como Isi et al. afirman evidencia de overtones; Cotesta, Carullo
+     et al. argumentan que la señal es sub-ruido y no se puede identificar
+     de forma robusta.
+   - GW250114 es el primer caso con significancia alta, pero es excepcional.
+
+4. **pSEOBNRv5PHM (arXiv 2504.10130, junio 2025)**
+   - Waveform model con parámetros de desviación ringdown integrados en
+     full IMR precessing.
+   - Reanaliza 12 eventos GWTC-3 con combinación jerárquica.
+   - Muestra que ignorar precesión puede producir falsas detecciones de
+     desviaciones de GR.
+
+**Lo que NO existe en la literatura:**
+
+- Análisis ringdown-only poblacional con Fisher y extracción explícita de QNM
+  sobre O4. La LVK usa full-IMR; un análisis puramente ringdown es
+  metodológicamente distinto.
+- Caracterización sistemática del dominio de aplicabilidad del overtone:
+  por qué 221 no es medible espectralmente en cohortes de spin moderado.
+  Nadie ha publicado el argumento completo (Q_Kerr sub-ciclo → estimador
+  espectral sesgado → artefacto post-sustracción).
+- GW250114 no está en la cohorte O4a de BRUNETE (es O4b, enero 2025).
+
+### Pivote estratégico del paper
+
+**Framing anterior (descartado):**
+"Multimode spectroscopy with O4"
+
+**Framing actualizado:**
+"Ringdown-only population analysis of O4 events with explicit QNM extraction:
+methodology, constraints on (δf₂₂₀, δτ₂₂₀), and systematic characterization
+of overtone measurability limits"
+
+**Tres contribuciones diferenciadas:**
+
+1. **Método.** Ringdown-only Fisher vs full-IMR (complementario a LVK).
+   Pipeline contract-first, reproducible, auditado.
+
+2. **Resultado.** Verificación independiente del carril 220 con 82 eventos.
+   Constraints en (δf₂₂₀, δτ₂₂₀) comparables o mejores que GWTC-3 TGR
+   (la LVK usó ~49 eventos de O1-O3 en ringdown; BRUNETE tendría 82 O4).
+
+3. **Diagnóstico del overtone.** Sección o apéndice técnico documentando:
+   - Q_221_Kerr < 1.5 para toda la cohorte O4 (af ≈ 0.61–0.84)
+   - Estimador espectral sesgado a Q ≈ 10 (artefacto, no señal)
+   - A/B controlados descartando topología y residual strategy como causas
+   - Dominio de validez: af > 0.8 para estimación espectral del overtone
+   - Implicaciones para diseño de futuros análisis
+
 ### Pendientes para sesiones futuras
 
-- [ ] Implementar pre-gate de af (o Q_221_Kerr) en pipeline.py o s3b.
-- [ ] Evaluar si algún evento O4 tiene af > 0.8 en la cohorte.
-- [ ] Si se decide explorar estimador temporal para 221: diseñar contrato y
-      prototipo mínimo.
-- [ ] Auditoría cruzada: verificar que la fórmula de Berti para (2,2,0) sí
-      produce Q_220 consistente con lo que s3b mide exitosamente en el carril 220.
+**Prioridad alta (paper):**
+- [ ] Auditoría cruzada Q_220: verificar Berti (2,2,0) vs bootstrap medido.
+      (Prompt 3 preparado, ejecutable en Codex.) **Cierra el argumento.**
+- [ ] Ejecutar `run_population_fisher.py` sobre los 82 eventos con el
+      carril 220 y obtener σ(δf₂₂₀), σ(δτ₂₂₀) combinados.
+- [ ] Comparar constraints resultantes con LVK GWTC-3 TGR y GWTC-4.0 TGR
+      Paper III para posicionar el resultado.
+- [ ] Evaluar si GW250114 (O4b) puede incorporarse a la cohorte.
+
+**Prioridad media (infraestructura):**
+- [ ] Especificación formal de contratos del carril `221_detection_candidate`.
+      (Prompt 2 preparado.) Validación requiere inyecciones sintéticas o
+      evento tipo GW250114.
+- [ ] Implementar pre-gate Q_221_Kerr en pipeline.py.
+
+**Prioridad baja (futuro):**
+- [ ] Estimador dominio temporal para 221 (diseño de contrato + prototipo).
+- [ ] Incorporar GW250114 como evento de validación del carril 221 temporal.
 
 ---
 
